@@ -77,7 +77,7 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
             color: kEkGreen,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(12),
           ),
           child: Text('E',
               style: GoogleFonts.inter(
@@ -258,10 +258,10 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
               onTap: () => _goToOrderForm(null, serviceHint: a['label'] as String),
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
                   color: kEkCard,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(16),
                   boxShadow: const [
                     BoxShadow(
                         color: Color(0x0A000000),

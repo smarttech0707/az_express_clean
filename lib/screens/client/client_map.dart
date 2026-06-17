@@ -252,7 +252,7 @@ class _ClientMapState extends State<ClientMap>
             style: ElevatedButton.styleFrom(
               backgroundColor: _primary,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(16)),
             ),
             child: const Text('Activer', style: TextStyle(color: Colors.white)),
           ),
@@ -405,7 +405,7 @@ class _DriversBadge extends StatelessWidget {
                     : context.tr('no_driver'),
             style: GoogleFonts.inter(
               fontWeight: FontWeight.w600,
-              fontSize:   12.5,
+              fontSize:   13,
               color:      Colors.black87,
             ),
           ),
@@ -460,7 +460,7 @@ class _PermissionBanner extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color:        Colors.orange.shade50,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           border:       Border.all(color: Colors.orange.shade300),
           boxShadow: [
             BoxShadow(
@@ -504,7 +504,7 @@ class _SearchBar extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 50,
+        height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -524,19 +524,19 @@ class _SearchBar extends StatelessWidget {
             child: Text(
               'Où allez-vous ?',
               style: GoogleFonts.inter(
-                fontSize:   15,
+                fontSize:   16,
                 color:      Colors.grey.shade500,
                 fontWeight: FontWeight.w400,
               ),
             ),
           ),
           Container(
-            width: 32, height: 32,
+            width: 40, height: 40,
             decoration: BoxDecoration(
               color:  const Color(0xFFFF6D00).withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.mic_rounded, color: Color(0xFFFF6D00), size: 18),
+            child: const Icon(Icons.mic_rounded, color: Color(0xFFFF6D00), size: 20),
           ),
         ]),
       ),
@@ -893,12 +893,12 @@ class _ServiceCardState extends State<_ServiceCard> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Container(
-                  width: 36, height: 36,
+                  width: 40, height: 40,
                   decoration: BoxDecoration(
                     color: widget.color.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(widget.icon, color: widget.color, size: 18),
+                  child: Icon(widget.icon, color: widget.color, size: 20),
                 ),
                 const SizedBox(width: 9),
                 Flexible(
@@ -907,7 +907,7 @@ class _ServiceCardState extends State<_ServiceCard> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.inter(
-                      fontSize:   11.5,
+                      fontSize:   12,
                       fontWeight: FontWeight.w600,
                       color:      Colors.black87,
                       height:     1.3,
@@ -1010,10 +1010,10 @@ class _PlusCardState extends State<_PlusCard> {
           width: cardWidth,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 100),
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
             decoration: BoxDecoration(
               color:        widget.color.withValues(alpha: _pressed ? 0.15 : 0.07),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(20),
               border:       Border.all(
                   color: widget.color.withValues(alpha: 0.22), width: 1.5),
             ),
@@ -1021,12 +1021,12 @@ class _PlusCardState extends State<_PlusCard> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  width: 42, height: 42,
+                  width: 44, height: 44,
                   decoration: BoxDecoration(
                     color: widget.color.withValues(alpha: 0.14),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(widget.icon, color: widget.color, size: 21),
+                  child: Icon(widget.icon, color: widget.color, size: 22),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -1035,7 +1035,7 @@ class _PlusCardState extends State<_PlusCard> {
                   maxLines:  2,
                   overflow:  TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
-                    fontSize:   10,
+                    fontSize:   12,
                     fontWeight: FontWeight.w600,
                     color:      Colors.black87,
                     height:     1.3,

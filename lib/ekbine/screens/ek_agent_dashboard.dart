@@ -242,7 +242,7 @@ class _StatChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Column(children: [
@@ -250,7 +250,7 @@ class _StatChip extends StatelessWidget {
               style: GoogleFonts.inter(
                   fontSize: 14, fontWeight: FontWeight.w800, color: color)),
           Text(label,
-              style: GoogleFonts.inter(fontSize: 9, color: Colors.white70)),
+              style: GoogleFonts.inter(fontSize: 11, color: Colors.white70)),
         ]),
       ),
     );
@@ -394,8 +394,8 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
                 foregroundColor: kEkMuted,
                 side: const BorderSide(color: kEkDivider),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(vertical: 10),
+                    borderRadius: BorderRadius.circular(14)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: Text('Voir détails',
                   style: GoogleFonts.inter(fontSize: 13,
@@ -410,8 +410,8 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
                 backgroundColor: kEkGreen,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(vertical: 10),
+                    borderRadius: BorderRadius.circular(14)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 elevation: 0,
               ),
               child: _accepting

@@ -435,13 +435,13 @@ class _StepBeneficiary extends StatelessWidget {
             filled: true,
             fillColor: Colors.white,
             border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(18),
                 borderSide: const BorderSide(color: kEkDivider)),
             enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(18),
                 borderSide: const BorderSide(color: kEkDivider)),
             focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(18),
                 borderSide: const BorderSide(color: kEkGreen, width: 2)),
           ),
         ),
@@ -464,13 +464,13 @@ class _StepBeneficiary extends StatelessWidget {
             filled: true,
             fillColor: Colors.white,
             border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(18),
                 borderSide: const BorderSide(color: kEkDivider)),
             enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(18),
                 borderSide: const BorderSide(color: kEkDivider)),
             focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(18),
                 borderSide: const BorderSide(color: kEkGreen, width: 2)),
           ),
         ),
@@ -507,7 +507,7 @@ class _StepBeneficiary extends StatelessWidget {
               backgroundColor: kEkGreen,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
+                  borderRadius: BorderRadius.circular(20)),
               elevation: 0,
             ),
             child: Text('Continuer',

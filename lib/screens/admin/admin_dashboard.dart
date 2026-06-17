@@ -169,7 +169,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             title: Text(
               isSuper ? 'Admin AZ Express' : 'Tableau de bord',
               style: const TextStyle(
-                  color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+                  color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
             ),
             centerTitle: true,
             foregroundColor: Colors.white,
@@ -191,7 +191,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       const Text(
                         'Gestion',
                         style: TextStyle(
-                          fontSize:   19,
+                          fontSize:   20,
                           fontWeight: FontWeight.w700,
                           color:      AppColors.text,
                           letterSpacing: -0.2,
@@ -491,13 +491,13 @@ class _StatChip extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width:  36,
-                height: 36,
+                width:  40,
+                height: 40,
                 decoration: BoxDecoration(
                   color:        color.withValues(alpha: 0.10),
                   borderRadius: AppRadius.mdR,
                 ),
-                child: Icon(icon, color: color, size: 20),
+                child: Icon(icon, color: color, size: 22),
               ),
               const SizedBox(height: 8),
               Text(
@@ -512,7 +512,7 @@ class _StatChip extends StatelessWidget {
               Text(
                 label,
                 style: const TextStyle(
-                    color: AppColors.textMuted, fontSize: 10,
+                    color: AppColors.textMuted, fontSize: 11,
                     fontWeight: FontWeight.w500),
               ),
             ],
@@ -569,7 +569,7 @@ class _MenuCard extends StatelessWidget {
           children: [
             // Icône dans un carré semi-transparent
             Container(
-              padding: const EdgeInsets.all(9),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color:        Colors.white.withValues(alpha: 0.2),
                 borderRadius: AppRadius.mdR,
@@ -597,7 +597,7 @@ class _MenuCard extends StatelessWidget {
                   subtitle,
                   style: TextStyle(
                     color:    Colors.white.withValues(alpha: 0.72),
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.w400,
                   ),
                   maxLines: 1,

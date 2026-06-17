@@ -899,7 +899,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
             Text(
               title,
               style: GoogleFonts.inter(
-                  color: AppColors.textMuted, fontSize: 10,
+                  color: AppColors.textMuted, fontSize: 11,
                   fontWeight: FontWeight.w500),
               textAlign: TextAlign.center,
             ),
@@ -1092,7 +1092,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF167DB7),
                               shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
+                                  borderRadius: BorderRadius.circular(12)),
                             ),
                             onPressed: () {
                               Navigator.push(

@@ -455,7 +455,7 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
 
   // ── Barre de recherche ─────────────────────────────────────────────────────
   Widget _buildSearchBar() => Container(
-    height: 46,
+    height: 52,
     decoration: BoxDecoration(
       color:        Colors.white,
       borderRadius: BorderRadius.circular(24),
@@ -498,10 +498,10 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
 
   // ── Suggestions ────────────────────────────────────────────────────────────
   Widget _buildSuggestions() => Material(
-    borderRadius: BorderRadius.circular(14),
+    borderRadius: BorderRadius.circular(16),
     elevation:    6,
     child: ClipRRect(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: _suggestions.map((s) => InkWell(
@@ -697,17 +697,17 @@ class _DeliveredOverlay extends StatelessWidget {
             onTap: onClose,
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   colors: [Color(0xFFE65100), AppColors.primary, Color(0xFFFF8C42)],
                   begin: Alignment.topLeft, end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.all(Radius.circular(14)),
+                borderRadius: BorderRadius.all(Radius.circular(20)),
                 boxShadow: [BoxShadow(color: AppColors.primary35, blurRadius: 12, offset: Offset(0, 4))],
               ),
               child: Text('Retour', textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
+                style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
             ),
           ),
         ]),
