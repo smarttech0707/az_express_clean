@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>AZ Express — Bilan Complet des Fonctionnalités</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #1a1a2e; background: #fff; }
+
+  /* PAGE BREAKS */
+  .page-break { page-break-before: always; }
+
+  /* COVER */
+  .cover {
+    background: linear-gradient(135deg, #1565C0, #1E88E5, #42A5F5);
+    color: white;
+    text-align: center;
+    padding: 80px 40px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .cover h1 { font-size: 48px; font-weight: 900; letter-spacing: 3px; margin-bottom: 10px; }
+  .cover .subtitle { font-size: 20px; font-weight: 300; opacity: 0.9; margin-bottom: 40px; }
+  .cover .divider { width: 80px; height: 4px; background: #FFD700; border-radius: 2px; margin: 20px auto; }
+  .cover .meta { font-size: 14px; opacity: 0.75; margin-top: 40px; }
+  .cover .badge {
+    background: rgba(255,255,255,0.15);
+    border: 2px solid rgba(255,255,255,0.3);
+    border-radius: 30px;
+    padding: 10px 28px;
+    font-size: 16px;
+    margin: 8px;
+    display: inline-block;
+  }
+  .cover .badges { margin-top: 30px; }
+
+  /* HEADER */
+  .section-header {
+    background: linear-gradient(135deg, #1565C0, #1E88E5);
+    color: white;
+    padding: 14px 24px;
+    font-size: 18px;
+    font-weight: 700;
+    border-radius: 10px;
+    margin: 24px 0 16px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sub-header {
+    background: #E3F2FD;
+    color: #1565C0;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 700;
+    border-left: 4px solid #1565C0;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0 10px 0;
+  }
+
+  /* CONTENT */
+  .container { max-width: 900px; margin: 0 auto; padding: 20px 30px 40px; }
+
+  /* ROLE CARD */
+  .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+  .role-card {
+    border-radius: 12px;
+    padding: 16px;
+    border: 1.5px solid #e0e0e0;
+  }
+  .role-card h3 { font-size: 14px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .role-card ul { padding-left: 16px; }
+  .role-card li { margin: 3px 0; font-size: 12px; color: #444; }
+
+  .rc-client { border-color: #1565C0; background: #f0f6ff; }
+  .rc-client h3 { color: #1565C0; }
+  .rc-driver { border-color: #2E7D32; background: #f0fff3; }
+  .rc-driver h3 { color: #2E7D32; }
+  .rc-seller { border-color: #E65100; background: #fff7f0; }
+  .rc-seller h3 { color: #E65100; }
+  .rc-admin { border-color: #6A1B9A; background: #f7f0ff; }
+  .rc-admin h3 { color: #6A1B9A; }
+  .rc-artisan { border-color: #00838F; background: #f0fffe; }
+  .rc-artisan h3 { color: #00838F; }
+  .rc-fleet { border-color: #AD1457; background: #fff0f5; }
+  .rc-fleet h3 { color: #AD1457; }
+
+  /* FEATURE TABLE */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 12px; }
+  th {
+    background: #1565C0;
+    color: white;
+    padding: 9px 12px;
+    text-align: left;
+    font-weight: 600;
+  }
+  td { padding: 8px 12px; border-bottom: 1px solid #e8e8e8; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8f9ff; }
+  tr:hover td { background: #e8f0fe; }
+
+  /* BADGE */
+  .badge-ok { background: #E8F5E9; color: #2E7D32; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge-warn { background: #FFF8E1; color: #F57F17; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge-new { background: #E3F2FD; color: #1565C0; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+
+  /* STAT GRID */
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+  .stat-box {
+    background: linear-gradient(135deg, #1565C0, #1E88E5);
+    color: white;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+  }
+  .stat-box .num { font-size: 28px; font-weight: 900; }
+  .stat-box .lbl { font-size: 11px; opacity: 0.85; margin-top: 4px; }
+
+  /* FIRESTORE */
+  .collection-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 12px 0; }
+  .collection-box {
+    background: #F3E5F5;
+    border: 1px solid #CE93D8;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+  }
+  .collection-box strong { color: #6A1B9A; display: block; margin-bottom: 4px; }
+  .collection-box span { color: #666; font-size: 11px; }
+
+  /* FLOW */
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .flow-step {
+    background: #E3F2FD;
+    border: 1px solid #90CAF9;
+    color: #1565C0;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .flow-arrow { color: #90CAF9; font-size: 16px; font-weight: bold; }
+
+  /* INFO BOX */
+  .info-box {
+    background: #E8F5E9;
+    border-left: 4px solid #4CAF50;
+    border-radius: 0 8px 8px 0;
+    padding: 10px 16px;
+    margin: 10px 0;
+    font-size: 12px;
+    color: #1B5E20;
+  }
+  .warn-box {
+    background: #FFF3E0;
+    border-left: 4px solid #FF9800;
+    border-radius: 0 8px 8px 0;
+    padding: 10px 16px;
+    margin: 10px 0;
+    font-size: 12px;
+    color: #E65100;
+  }
+
+  p { margin: 8px 0; line-height: 1.6; font-size: 13px; }
+  ul { padding-left: 20px; margin: 6px 0; }
+  li { margin: 4px 0; line-height: 1.5; }
+  .icon { font-size: 18px; }
+
+  /* FOOTER */
+  footer {
+    background: #1a1a2e;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+    padding: 20px;
+    font-size: 11px;
+    margin-top: 40px;
+  }
+
+  @media print {
+    .cover { min-height: auto; padding: 40px; }
+    body { font-size: 12px; }
+    .stat-grid { grid-template-columns: repeat(4,1fr); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== PAGE DE GARDE ===== -->
+<div class="cover">
+  <h1>🚀 AZ EXPRESS</h1>
+  <div class="divider"></div>
+  <div class="subtitle">Bilan Complet des Fonctionnalités</div>
+  <p style="opacity:0.8; font-size:15px; max-width:600px; margin:20px auto;">
+    Application mobile de livraison et de services à domicile<br>
+    Abengourou, Côte d'Ivoire
+  </p>
+  <div class="badges">
+    <span class="badge">📱 Flutter</span>
+    <span class="badge">🔥 Firebase</span>
+    <span class="badge">🗺️ Google Maps</span>
+    <span class="badge">🔔 Notifications</span>
+  </div>
+  <div class="meta" style="margin-top:50px;">
+    Document généré le 26 mai 2026 &nbsp;·&nbsp; Version 1.0.0
+  </div>
+</div>
+
+<!-- ===== PRÉSENTATION GÉNÉRALE ===== -->
+<div class="container page-break">
+  <div class="section-header"><span class="icon">📋</span> Présentation Générale</div>
+
+  <p><strong>AZ Express</strong> est une application mobile multiplateforme (Android / iOS) développée en Flutter, conçue pour la ville d'<strong>Abengourou (Côte d'Ivoire)</strong>. Elle connecte en temps réel les clients, les livreurs, les commerçants, les restaurants, les boulangeries, les pharmacies, les artisans et les administrateurs au sein d'un écosystème unifié de livraison et de services.</p>
+
+  <div class="stat-grid" style="margin-top:24px;">
+    <div class="stat-box"><div class="num">8</div><div class="lbl">Rôles utilisateurs</div></div>
+    <div class="stat-box"><div class="num">30+</div><div class="lbl">Écrans</div></div>
+    <div class="stat-box"><div class="num">10+</div><div class="lbl">Types de commande</div></div>
+    <div class="stat-box"><div class="num">20+</div><div class="lbl">Collections Firestore</div></div>
+  </div>
+
+  <div class="sub-header">🏗️ Architecture Technique</div>
+  <table>
+    <tr><th>Composant</th><th>Technologie</th><th>Usage</th></tr>
+    <tr><td>Framework</td><td>Flutter 3.x (Dart)</td><td>Interface mobile Android / iOS</td></tr>
+    <tr><td>Backend</td><td>Firebase (Firestore, Auth, Storage)</td><td>Base de données temps réel, authentification, fichiers</td></tr>
+    <tr><td>Cartographie</td><td>Google Maps Flutter + Geolocator</td><td>Suivi GPS, cartes interactives, calcul d'itinéraires</td></tr>
+    <tr><td>Notifications</td><td>Firebase Messaging (FCM)</td><td>Alertes push pour commandes, livraisons</td></tr>
+    <tr><td>Audio</td><td>audioplayers + flutter_sound + record</td><td>Messages vocaux, alertes sonores nouvelles commandes</td></tr>
+    <tr><td>Paiement</td><td>Portefeuille interne + Paiement comptant</td><td>Wallet numérique en FCFA</td></tr>
+    <tr><td>Analytiques</td><td>Firebase Analytics + Crashlytics</td><td>Suivi d'usage, rapport de plantages</td></tr>
+    <tr><td>État (State)</td><td>Provider pattern</td><td>Gestion globale de l'état (marketplace, e-kbine)</td></tr>
+    <tr><td>Navigation</td><td>go_router + Navigator</td><td>Routage déclaratif web + mobile</td></tr>
+    <tr><td>Site web</td><td>Flutter Web + Firebase Hosting</td><td>Vitrine publique (9 pages)</td></tr>
+  </table>
+
+  <div class="sub-header">👥 Les 8 Rôles Utilisateurs</div>
+  <div class="role-grid">
+    <div class="role-card rc-client">
+      <h3>👤 Client</h3>
+      <ul>
+        <li>Passer des commandes (livraison, courses, colis…)</li>
+        <li>Suivre en temps réel son livreur sur la carte</li>
+        <li>Payer via portefeuille ou espèces</li>
+        <li>Chatter avec son livreur</li>
+        <li>Noter livreurs et prestataires</li>
+        <li>Accéder aux services (artisans, locations…)</li>
+      </ul>
+    </div>
+    <div class="role-card rc-driver">
+      <h3>🏍️ Livreur</h3>
+      <ul>
+        <li>Recevoir et accepter des courses</li>
+        <li>Navigation GPS en temps réel</li>
+        <li>Statut en ligne / hors ligne</li>
+        <li>Portefeuille et suivi des gains</li>
+        <li>Photo de preuve de livraison</li>
+        <li>Message vocal au client</li>
+      </ul>
+    </div>
+    <div class="role-card rc-seller">
+      <h3>🏪 Vendeur / Restaurant / Boulangerie / Pharmacie</h3>
+      <ul>
+        <li>Gérer son menu ou catalogue produits</li>
+        <li>Recevoir des commandes (alerte sonore + haptique)</li>
+        <li>Tableau de bord analytique (revenus 7 jours)</li>
+        <li>Gestion des stocks</li>
+        <li>Portefeuille et abonnement</li>
+        <li>Avis clients (note moyenne)</li>
+      </ul>
+    </div>
+    <div class="role-card rc-admin">
+      <h3>🛡️ Administrateur</h3>
+      <ul>
+        <li>Supervision complète de la plateforme</li>
+        <li>Gestion des livreurs et partenaires</li>
+        <li>Carte temps réel de tous les livreurs</li>
+        <li>Classement des livreurs</li>
+        <li>Rechargement des portefeuilles</li>
+        <li>Purge et maintenance des données</li>
+      </ul>
+    </div>
+    <div class="role-card rc-artisan">
+      <h3>🔧 Artisan / Prestataire</h3>
+      <ul>
+        <li>Profil avec portfolio photos (8 max)</li>
+        <li>Catégories métier (maçon, plombier, électricien…)</li>
+        <li>Contactable directement par les clients</li>
+      </ul>
+    </div>
+    <div class="role-card rc-fleet">
+      <h3>🚛 Propriétaire de Flotte</h3>
+      <ul>
+        <li>Création de comptes livreurs</li>
+        <li>Suivi temps réel de sa flotte</li>
+        <li>Suivi des gains par livreur</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ===== FONCTIONNALITÉS CLIENT ===== -->
+<div class="container page-break">
+  <div class="section-header"><span class="icon">📦</span> Fonctionnalités Client — Services de Livraison</div>
+
+  <div class="sub-header">🛒 1. Création de Commande (Courses / Shopping)</div>
+  <table>
+    <tr><th>Fonctionnalité</th><th>Détail</th></tr>
+    <tr><td>Liste de courses</td><td>Saisie texte libre multi-lignes + liste d'articles</td></tr>
+    <tr><td>Message vocal</td><td>Enregistrement micro style WhatsApp, lecture/pause/suppression, upload Firebase Storage</td></tr>
+    <tr><td>Budget courses</td><td>Montant estimé des articles (FCFA)</td></tr>
+    <tr><td>Localisation de retrait</td><td>Texte + sélecteur Google Maps interactif (plein écran)</td></tr>
+    <tr><td>Calcul du prix</td><td>Distance en km + ETA, tarif jour / nuit, carte récapitulative dynamique</td></tr>
+    <tr><td>Paiement</td><td>Espèces (COD) ou Portefeuille — avec détection fraude (désactivation COD)</td></tr>
+    <tr><td>Validation</td><td>Vérification solde wallet, confirmation avant envoi</td></tr>
+  </table>
+
+  <div class="sub-header">📍 2. Suivi de Commande en Temps Réel</div>
+  <table>
+    <tr><th>Fonctionnalité</th><th>Détail</th></tr>
+    <tr><td>Stepper de statut</td><td>En attente → Assigné → Accepté → Récupéré → Livré</td></tr>
+    <tr><td>Carte de suivi</td><td>Position GPS du livreur mise à jour en continu</td></tr>
+    <tr><td>Fiche livreur</td><td>Photo, nom, téléphone, badge vérifié (✓ identité)</td></tr>
+    <tr><td>Vérification identité</td><td>Comparaison photo d'inscription vs selfie d'acceptation côte à côte</td></tr>
+    <tr><td>Actions</td><td>Appeler le livreur, chatter, annuler (si en attente)</td></tr>
+    <tr><td>Photo de livraison</td><td>Preuve photographique visible par le client</td></tr>
+    <tr><td>Paiement post-livraison</td><td>Règlement wallet avec saisie montant médicaments (pharmacie)</td></tr>
+    <tr><td>Note livreur</td><td>1 à 5 étoiles obligatoires avant paiement wallet</td></tr>
+    <tr><td>Note prestataire</td><td>1 à 5 étoiles + commentaire optionnel (restaurant / vendeur / boulangerie)</td></tr>
+  </table>
+
+  <div class="sub-header">🏪 3. Boutique (Marketplace Produits)</div>
+  <table>
+    <tr><th>Fonctionnalité</th><th>Détail</th></tr>
+    <tr><td>Catalogue produits</td><td>Grille avec recherche, filtre catégorie, badge VIP vendeur</td></tr>
+    <tr><td>Fiche produit</td><td>Description, prix unitaire, stock, sélecteur quantité ±, mode de paiement</td></tr>
+    <tr><td>Suivi commande boutique</td><td>Statuts : en attente → préparation → expédié → livré</td></tr>
+    <tr><td>Remboursement auto 48h</td><td>Si non livré en 48h → crédit automatique sur wallet + log transaction</td></tr>
+    <tr><td>Remboursement manuel</td><td>Bouton remboursement si délai dépassé</td></tr>
+    <tr><td>Tri vendeurs</td><td>Vendeurs VIP (👑) affichés en premier, vendeurs suspendus masqués</td></tr>
+  </table>
+
+  <div class="sub-header">🍽️ 4. Restaurants</div>
+  <table>
+    <tr><th>Fonctionnalité</th><th>Détail</th></tr>
+    <tr><td>Liste restaurants</td><td>Recherche, badge Ouvert/Fermé, badge VIP, note moyenne ★</td></tr>
+    <tr><td>Menu</td><td>Catégories, articles avec prix, sélecteur quantité, total dynamique</td></tr>
+    <tr><td>Commande</td><td>Adresse de livraison, paiement wallet ou espèces</td></tr>
+    <tr><td>Avis clients</td><td>Étoiles affichées sur la carte restaurant (note + nombre d'avis)</td></tr>
+  </table>
+
+  <div class="sub-header">🥐 5. Boulangerie</div>
+  <table>
+    <tr><th>Fonctionnalité</th><th>Détail</th></tr>
+    <tr><td>Menu standard</td><td>Pains, Viennoiseries, Gâteaux, Boissons, Formules avec emojis catégories</td></tr>
+    <tr><td>Heure de livraison</td><td>"Maintenant" ou créneaux de 30 min (06h30 → 12h00)</td></tr>
+    <tr><td>Gâteau personnalisé</td><td>Description + budget + date souhaitée (calendrier)</td></tr>
+    <tr><td>Barre récapitulative</td><td>Compteur articles + total + bouton confirmation flottant</td></tr>
+  </table>
+
+  <div class="sub-header">💊 6. Pharmacie de Garde</div>
+  <ul>
+    <li>Deux onglets : toutes les pharmacies / pharmacies de garde uniquement</li>
+    <li>Carte avec statut de garde (point rouge), horaires, téléphone</li>
+    <li>Bouton Appeler, Carte (Google Maps), Commander la livraison</li>
+    <li>Commande de livraison : frais fixes 500 FCFA, wallet ou espèces, GPS automatique</li>
+    <li>Vérification identité livreur avant remise des médicaments (bannière d'alerte)</li>
+  </ul>
+
+  <div class="sub-header">📦 7. Livraison de Colis</div>
+  <ul>
+    <li>Types de colis : Standard (500F) / Cadeau emballé (700F) / Document (300F) / Grand colis (1000F)</li>
+    <li>Option "Fragile" (+200 FCFA)</li>
+    <li>Infos expéditeur (optionnel) + destinataire (obligatoire : nom, téléphone, adresse)</li>
+    <li>Description du contenu, estimation de prix affichée</li>
+  </ul>
+
+  <div class="sub-header">🛵 8. Courses Libres</div>
+  <ul>
+    <li>Formulaire simple : description + budget + géolocalisation automatique</li>
+    <li>Pour toute demande non standard (ex : aller chercher un colis chez quelqu'un)</li>
+  </ul>
+
+  <div class="sub-header">👕 9. Blanchisserie</div>
+  <ul>
+    <li>Types de service : Laver + Repasser / Laver seulement / Repasser seulement / Pressing</li>
+    <li>Quantité en kg avec boutons ±, calcul du prix (1000 FCFA/kg)</li>
+    <li>Adresse + instructions spéciales (vêtements délicats, séparation couleurs…)</li>
+  </ul>
+
+  <div class="sub-header">💧 10. Eau & Boissons</div>
+  <ul>
+    <li>Catalogue : Eaux (50cl, 1,5L, casier 12×), Sodas, Jus, Lait, Boissons énergisantes</li>
+    <li>Panier avec compteur articles et total dynamique en bas d'écran</li>
+    <li>Frais de livraison : 500 FCFA</li>
+  </ul>
+</div>
+
+<!-- ===== SERVICES & MARKETPLACE ===== -->
+<div class="container page-break">
+  <div class="section-header"><span class="icon">🏬</span> Services Additionnels & Marketplace</div>
+
+  <div class="sub-header">🔧 Hub de Services (Artisans & Professionnels)</div>
+  <table>
+    <tr><th>Catégorie</th><th>Sous-catégories disponibles</th></tr>
+    <tr><td>🏠 Immobilier</td><td>Location, Vente maison, Local commercial, Terrain</td></tr>
+    <tr><td>🔨 Artisans</td><td>Maçon, Plombier, Électricien, Forgeron, Menuisier, Carreleur, Peintre, Vitrier, Répar. TV, Caméra, Décoration, Répar. téléphone</td></tr>
+    <tr><td>🔧 Mécaniciens</td><td>Auto, Moto, Électricien auto, Carrossier</td></tr>
+    <tr><td>🧱 Matériaux</td><td>Packs d'eau, Ciment / briques</td></tr>
+    <tr><td>📱 Téléphonie</td><td>Téléphones, Accessoires</td></tr>
+    <tr><td>🍷 Boissons</td><td>Vins, Bières, Boissons sans alcool</td></tr>
+  </table>
+
+  <div class="sub-header">🏠 Locations Immobilières</div>
+  <ul>
+    <li>Recherche textuelle (titre + adresse) avec filtre temps réel</li>
+    <li>Fiche : photos, nombre de pièces, prix mensuel, description</li>
+    <li>Bouton Appeler le propriétaire directement</li>
+  </ul>
+
+  <div class="sub-header">🛋️ Résidences Meublées</div>
+  <ul>
+    <li>Filtres par type : Studio / 1 pièce / 2 pièces / 3 pièces / Villa</li>
+    <li>Prix par nuit ET par mois, liste des commodités avec icônes (WiFi, Clim, TV, Cuisine, Parking, Eau, Électricité, Sécurité, Piscine)</li>
+    <li>Fiche détaillée en bas de page (draggable sheet), bouton contact</li>
+  </ul>
+
+  <div class="sub-header">📲 E-Kbine (Crédit, Internet, Mobile Money)</div>
+  <ul>
+    <li>Rechargement de crédit téléphonique par opérateur</li>
+    <li>Achat de forfaits internet</li>
+    <li>Transfert Mobile Money</li>
+    <li>Inscription agent E-Kbine</li>
+    <li>Historique des commandes E-Kbine, solde wallet intégré</li>
+  </ul>
+
+  <div class="sub-header">🛍️ Marketplace Occasion (Petites Annonces)</div>
+  <ul>
+    <li>Produits d'occasion triés par état : Neufs / Quasi neufs / Bonnes affaires</li>
+    <li>Recherche produits, filtres catégories, favoris sauvegardés</li>
+    <li>Profil vendeur avec ses annonces, chat intégré</li>
+    <li>Ajout d'annonce avec photos Firebase Storage</li>
+  </ul>
+
+  <div class="section-header" style="margin-top:32px;"><span class="icon">💬</span> Communication & Alertes</div>
+
+  <div class="sub-header">💬 Messagerie Intégrée</div>
+  <ul>
+    <li>Chat temps réel entre client et livreur (par commande)</li>
+    <li>Liste de conversations filtrée sur les commandes actives</li>
+    <li>Messages vocaux : enregistrement, envoi, lecture dans le chat</li>
+    <li>Chat marketplace entre acheteur et vendeur</li>
+  </ul>
+
+  <div class="sub-header">🔔 Notifications Push (FCM)</div>
+  <ul>
+    <li>Alerte lors de l'acceptation d'une commande par un livreur</li>
+    <li>Alerte à la livraison</li>
+    <li>Notifications nouvelles commandes pour vendeurs / restaurants / boulangeries</li>
+    <li>Notification de rechargement de portefeuille</li>
+  </ul>
+
+  <div class="sub-header">🆘 Système SOS</div>
+  <ul>
+    <li>Bouton urgence sur l'écran d'accueil</li>
+    <li>Capture automatique de la position GPS</li>
+    <li>Envoi d'une alerte dans la collection <em>sos_alerts</em> Firestore</li>
+    <li>Cooldown 30 secondes entre deux alertes</li>
+    <li>Gestion des alertes SOS dans le dashboard Admin</li>
+  </ul>
+</div>
+
+<!-- ===== TABLEAUX DE BORD PROFESSIONNELS ===== -->
+<div class="container page-break">
+  <div class="section-header"><span class="icon">📊</span> Tableaux de Bord Professionnels</div>
+
+  <div class="sub-header">🍽️ Restaurant — Dashboard Propriétaire</div>
+  <table>
+    <tr><th>Onglet</th><th>Fonctionnalités</th></tr>
+    <tr><td>Menu</td><td>Ajout / modification / suppression d'articles (nom, prix, catégorie, disponibilité, <strong>stock</strong>). Badge orange "Stock: X" si stock ≤ 5.</td></tr>
+    <tr><td>Commandes</td><td>Liste temps réel des commandes avec statuts, acceptation, mise à jour progression</td></tr>
+    <tr><td>Portefeuille</td><td>Solde en temps réel, historique des transactions</td></tr>
+    <tr><td>Analytique 📊</td><td>Revenus 7 derniers jours : 3 cartes (total, nb commandes, panier moyen) + graphique barres animé par jour</td></tr>
+  </table>
+  <div class="info-box">Alerte nouvelle commande : vibration haptique immédiate + son audio + dialog "Nouvelle commande !" avec bouton "Voir maintenant"</div>
+
+  <div class="sub-header">🏪 Vendeur Boutique — Dashboard</div>
+  <table>
+    <tr><th>Onglet</th><th>Fonctionnalités</th></tr>
+    <tr><td>Commandes</td><td>Commandes en attente et en cours, acceptation, suivi statuts</td></tr>
+    <tr><td>Produits</td><td>Catalogue complet avec stock. Badges : vert (stock > 5), orange (1–5), rouge "Épuisé" (0). Ajout / modification / suppression via dialog.</td></tr>
+    <tr><td>Portefeuille</td><td>Solde, transactions, rechargement</td></tr>
+    <tr><td>Analytique 📊</td><td>Revenus 7 jours : total, nombre de ventes, panier moyen + graphique barres animé</td></tr>
+  </table>
+  <div class="info-box">Même système d'alerte sonore + haptique que le restaurant</div>
+
+  <div class="sub-header">🥐 Boulangerie — Dashboard</div>
+  <ul>
+    <li>Ouverture / fermeture du commerce (toggle)</li>
+    <li>Gestion du menu (articles, catégories, prix)</li>
+    <li>Suivi des commandes standards et gâteaux personnalisés</li>
+    <li>Alertes nouvelles commandes (audio + haptique)</li>
+    <li>Portefeuille et historique des gains</li>
+  </ul>
+
+  <div class="sub-header">💊 Pharmacie — Dashboard</div>
+  <ul>
+    <li>Toggle "Pharmacie de garde" (mis à jour dans Firestore en temps réel)</li>
+    <li>Liste des commandes de livraison entrantes</li>
+    <li>Mise à jour du statut des commandes</li>
+    <li>Vérification de l'identité du livreur avant remise</li>
+  </ul>
+
+  <div class="sub-header">🏍️ Livreur — Dashboard</div>
+  <table>
+    <tr><th>Fonctionnalité</th><th>Détail</th></tr>
+    <tr><td>Statut en ligne</td><td>Toggle visible / invisible pour les nouvelles courses</td></tr>
+    <tr><td>Carte en direct</td><td>Position GPS du livreur transmise toutes les X secondes</td></tr>
+    <tr><td>Acceptation course</td><td>Dialog d'acceptation/refus avec détails commande</td></tr>
+    <tr><td>Navigation GPS</td><td>Lien vers app GPS externe (Google Maps / Waze)</td></tr>
+    <tr><td>Selfie d'acceptation</td><td>Photo prise au moment de l'acceptation (vérification identité)</td></tr>
+    <tr><td>Photo de livraison</td><td>Preuve photographique envoyée à Firebase Storage</td></tr>
+    <tr><td>Message vocal</td><td>Lecture du message vocal du client</td></tr>
+    <tr><td>Portefeuille</td><td>Solde, commissions, recharges, historique</td></tr>
+    <tr><td>Note & classement</td><td>Note moyenne sur 5, compteur de livraisons</td></tr>
+  </table>
+
+  <div class="sub-header">🛡️ Administrateur — Dashboard Complet</div>
+  <div class="role-grid">
+    <div class="role-card rc-admin">
+      <h3>📍 Surveillance</h3>
+      <ul>
+        <li>Carte temps réel tous livreurs</li>
+        <li>Alertes SOS</li>
+        <li>Commandes en cours</li>
+      </ul>
+    </div>
+    <div class="role-card rc-admin">
+      <h3>👥 Gestion Livreurs</h3>
+      <ul>
+        <li>Demandes d'inscription</li>
+        <li>Liste et profils</li>
+        <li>Classement performance</li>
+        <li>Flotte de véhicules</li>
+      </ul>
+    </div>
+    <div class="role-card rc-admin">
+      <h3>🏪 Gestion Partenaires</h3>
+      <ul>
+        <li>Restaurants (demandes + liste)</li>
+        <li>Pharmacies</li>
+        <li>Boutiques / Vendeurs</li>
+        <li>Boulangeries</li>
+      </ul>
+    </div>
+    <div class="role-card rc-admin">
+      <h3>💰 Finances</h3>
+      <ul>
+        <li>Gains plateforme</li>
+        <li>Rechargements wallets</li>
+        <li>Paiements comptant (COD)</li>
+        <li>Purge des données</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PORTEFEUILLE & PAIEMENTS ===== -->
+<div class="container page-break">
+  <div class="section-header"><span class="icon">💳</span> Système de Portefeuille & Paiements</div>
+
+  <div class="sub-header">💰 Portefeuille Client</div>
+  <table>
+    <tr><th>Opération</th><th>Détail</th></tr>
+    <tr><td>Solde</td><td>Affiché en temps réel (FCFA), mis à jour via Firestore stream</td></tr>
+    <tr><td>Rechargement</td><td>Par l'administrateur (interface dédiée) ou agent E-Kbine</td></tr>
+    <tr><td>Paiement commande</td><td>Déduction automatique au moment de la validation</td></tr>
+    <tr><td>Remboursement auto</td><td>Crédit wallet si livraison boutique non effectuée en 48h</td></tr>
+    <tr><td>Retrait</td><td>Demande de retrait via WalletActionSheet</td></tr>
+    <tr><td>Historique</td><td>50 dernières transactions (type, montant, description, date)</td></tr>
+  </table>
+
+  <div class="sub-header">🔄 Flux de Paiement</div>
+  <div class="flow">
+    <div class="flow-step">Client choisit</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Wallet ou Espèces</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Vérification solde</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Déduction wallet</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Log transaction</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">Commande créée</div>
+  </div>
+
+  <div class="warn-box">⚠️ <strong>Sécurité COD :</strong> Si un client génère 3 fausses commandes en paiement comptant, le paiement espèces est automatiquement désactivé pour son compte (flag <code>cashOnDeliveryEnabled = false</code>).</div>
+
+  <div class="sub-header">📊 Système d'Abonnement Vendeurs</div>
+  <ul>
+    <li>Statut d'abonnement : actif / suspendu / expiré</li>
+    <li>Les vendeurs suspendus sont masqués de la liste boutique</li>
+    <li>Statut VIP (👑) : vendeurs VIP affichés en priorité + badge visible</li>
+    <li>Gestion des abonnements depuis le dashboard Admin</li>
+  </ul>
+
+  <div class="section-header" style="margin-top:32px;"><span class="icon">⭐</span> Système d'Avis & Notations</div>
+
+  <table>
+    <tr><th>Qui est noté</th><th>Qui note</th><th>Quand</th><th>Stockage</th></tr>
+    <tr><td>Livreur ★</td><td>Client</td><td>Après livraison (obligatoire avant paiement wallet)</td><td>Champ <code>rating</code> dans la commande + calcul <code>avgRating</code> livreur</td></tr>
+    <tr><td>Restaurant ★</td><td>Client</td><td>Après livraison restaurant (si pas encore noté)</td><td>Transaction Firestore : <code>avgRating</code> + <code>ratingCount</code> sur le restaurant</td></tr>
+    <tr><td>Vendeur boutique ★</td><td>Client</td><td>Après livraison boutique</td><td>Idem sur la collection <code>sellers</code></td></tr>
+    <tr><td>Boulangerie ★</td><td>Client</td><td>Après livraison boulangerie</td><td>Idem sur la collection <code>boulangeries</code></td></tr>
+  </table>
+
+  <div class="info-box">Les notes s'affichent en étoiles (★) sur les cartes restaurants / vendeurs avec la note moyenne et le nombre d'avis. Un avis détaillé est aussi stocké dans la collection <code>reviews</code>.</div>
+
+  <div class="section-header" style="margin-top:32px;"><span class="icon">📦</span> Gestion des Stocks</div>
+  <table>
+    <tr><th>Module</th><th>Comportement</th></tr>
+    <tr><td>Restaurant (menu)</td><td>Champ stock modifiable par le propriétaire. Badge orange si stock ≤ 5. Décompte à chaque commande.</td></tr>
+    <tr><td>Boutique (produits)</td><td>Onglet Produits dédié. Badges : <span class="badge-ok">En stock</span> <span class="badge-warn">Stock: 3</span> <span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">Épuisé</span>. Produit épuisé → automatiquement indisponible.</td></tr>
+  </table>
+</div>
+
+<!-- ===== ARCHITECTURE FIRESTORE ===== -->
+<div class="container page-break">
+  <div class="section-header"><span class="icon">🔥</span> Architecture Firestore — Collections Principales</div>
+
+  <div class="collection-grid">
+    <div class="collection-box"><strong>orders</strong><span>Toutes les commandes (shopping, restaurant, pharmacie, colis, boulangerie…)</span></div>
+    <div class="collection-box"><strong>clients</strong><span>Profils clients, wallet, transactions, préférences</span></div>
+    <div class="collection-box"><strong>livreurs</strong><span>Profils livreurs, position GPS, wallet, statut en ligne</span></div>
+    <div class="collection-box"><strong>restaurants</strong><span>Infos restaurant, menu, avgRating, statut VIP</span></div>
+    <div class="collection-box"><strong>boulangeries</strong><span>Profil boulangerie, menu items, statut ouvert</span></div>
+    <div class="collection-box"><strong>pharmacies</strong><span>Pharmacies, statut de garde, coordonnées</span></div>
+    <div class="collection-box"><strong>sellers</strong><span>Vendeurs boutique, statut abonnement, avgRating</span></div>
+    <div class="collection-box"><strong>boutique_products</strong><span>Produits avec stock, prix, catégorie, images</span></div>
+    <div class="collection-box"><strong>boutique_orders</strong><span>Commandes boutique avec remboursement auto 48h</span></div>
+    <div class="collection-box"><strong>reviews</strong><span>Avis clients avec note, commentaire, type prestataire</span></div>
+    <div class="collection-box"><strong>locations</strong><span>Annonces immobilières (location)</span></div>
+    <div class="collection-box"><strong>residences</strong><span>Résidences meublées avec commodités</span></div>
+    <div class="collection-box"><strong>service_providers</strong><span>Artisans et prestataires avec portfolio photos</span></div>
+    <div class="collection-box"><strong>sos_alerts</strong><span>Alertes SOS avec GPS et statut</span></div>
+    <div class="collection-box"><strong>fleet_owners</strong><span>Propriétaires de flotte et leurs livreurs</span></div>
+    <div class="collection-box"><strong>mp_products</strong><span>Produits marketplace occasion</span></div>
+    <div class="collection-box"><strong>ek_orders</strong><span>Commandes E-Kbine (crédit, internet, mobile money)</span></div>
+    <div class="collection-box"><strong>artisans</strong><span>Profils artisans inscrits</span></div>
+    <div class="collection-box"><strong>conversations</strong><span>Messages temps réel client ↔ livreur</span></div>
+    <div class="collection-box"><strong>notifications</strong><span>Historique notifications push FCM</span></div>
+  </div>
+
+  <div class="sub-header">🔑 Modèle OrderModel — Champs Clés</div>
+  <table>
+    <tr><th>Champ</th><th>Type</th><th>Description</th></tr>
+    <tr><td>id</td><td>String</td><td>Identifiant unique UUID</td></tr>
+    <tr><td>type</td><td>String</td><td>shopping / pharmacie / boutique / restaurant / boulangerie / colis / blanchisserie / eau_boissons</td></tr>
+    <tr><td>status</td><td>String</td><td>pending → assigned → accepted → picked_up → delivered / cancelled</td></tr>
+    <tr><td>paymentMethod</td><td>String</td><td>cash / wallet</td></tr>
+    <tr><td>budget</td><td>int</td><td>Frais de livraison (FCFA)</td></tr>
+    <tr><td>shoppingBudget</td><td>int</td><td>Montant estimé des articles</td></tr>
+    <tr><td>voiceMessage</td><td>String?</td><td>URL Firebase Storage du message vocal</td></tr>
+    <tr><td>deliveryPhoto</td><td>String?</td><td>URL photo de preuve de livraison</td></tr>
+    <tr><td>driverAcceptanceSelfie</td><td>String?</td><td>URL selfie du livreur à l'acceptation</td></tr>
+    <tr><td>rating</td><td>int?</td><td>Note livreur (1–5)</td></tr>
+    <tr><td>sellerRating</td><td>int?</td><td>Note prestataire (1–5)</td></tr>
+    <tr><td>isPaid</td><td>bool</td><td>Paiement wallet effectué après livraison</td></tr>
+    <tr><td>sellerId / sellerType</td><td>String?</td><td>Référence prestataire + type (restaurant, seller, boulangerie)</td></tr>
+  </table>
+</div>
+
+<!-- ===== SITE WEB & RÉCAPITULATIF ===== -->
+<div class="container page-break">
+  <div class="section-header"><span class="icon">🌐</span> Site Web Vitrine (Flutter Web)</div>
+
+  <p>En parallèle de l'application mobile, AZ Express dispose d'un <strong>site web public</strong> hébergé sur Firebase Hosting, développé également en Flutter Web.</p>
+
+  <table>
+    <tr><th>Page</th><th>Contenu</th></tr>
+    <tr><td>Accueil</td><td>Présentation de l'application, hero section, appel à l'action téléchargement</td></tr>
+    <tr><td>Services</td><td>Description de tous les services disponibles (livraison, restaurants, pharmacie…)</td></tr>
+    <tr><td>Comment ça marche</td><td>Explication du processus en étapes illustrées</td></tr>
+    <tr><td>Marchands</td><td>Page d'information pour les commerçants souhaitant rejoindre la plateforme</td></tr>
+    <tr><td>Livreurs</td><td>Recrutement de livreurs, conditions, avantages</td></tr>
+    <tr><td>À propos</td><td>Histoire et mission d'AZ Express</td></tr>
+    <tr><td>Contact</td><td>Formulaire de contact, coordonnées</td></tr>
+    <tr><td>CGU</td><td>Conditions Générales d'Utilisation</td></tr>
+    <tr><td>Politique de confidentialité</td><td>Traitement des données personnelles (RGPD)</td></tr>
+  </table>
+  <div class="info-box">Le site web inclut aussi un <strong>dashboard Admin Web</strong> (interface d'administration accessible depuis un navigateur, protégé par mot de passe).</div>
+
+  <div class="section-header" style="margin-top:32px;"><span class="icon">✅</span> Récapitulatif des Fonctionnalités</div>
+
+  <table>
+    <tr><th>Fonctionnalité</th><th>Statut</th><th>Module</th></tr>
+    <tr><td>Commande de courses / livraison standard</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Suivi GPS temps réel du livreur</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Livreur</td></tr>
+    <tr><td>Message vocal dans la commande</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Livreur</td></tr>
+    <tr><td>Messagerie chat temps réel</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Livreur</td></tr>
+    <tr><td>Commande restaurant avec menu</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Restaurant</td></tr>
+    <tr><td>Commande boulangerie + gâteau perso</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Boulangerie</td></tr>
+    <tr><td>Pharmacie de garde + livraison médicaments</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Pharmacie</td></tr>
+    <tr><td>Marketplace boutique produits</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Vendeur</td></tr>
+    <tr><td>Livraison de colis</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Blanchisserie</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Eau & Boissons</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Locations immobilières</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Résidences meublées</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Hub artisans & services</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>E-Kbine (crédit / internet / mobile money)</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Marketplace occasion</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Portefeuille numérique (wallet)</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Livreur</td></tr>
+    <tr><td>Paiement comptant avec anti-fraude</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Remboursement automatique 48h boutique</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Vendeur</td></tr>
+    <tr><td>Notation livreur (étoiles)</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Notation prestataire / restaurant</td><td><span class="badge-new">✓ Nouveau</span></td><td>Client</td></tr>
+    <tr><td>Vérification identité livreur (comparaison photos)</td><td><span class="badge-ok">✓ Actif</span></td><td>Client</td></tr>
+    <tr><td>Preuve de livraison (photo)</td><td><span class="badge-ok">✓ Actif</span></td><td>Livreur</td></tr>
+    <tr><td>Alerte sonore + haptique nouvelles commandes</td><td><span class="badge-new">✓ Nouveau</span></td><td>Vendeur / Restaurant</td></tr>
+    <tr><td>Gestion des stocks (menu + boutique)</td><td><span class="badge-new">✓ Nouveau</span></td><td>Vendeur / Restaurant</td></tr>
+    <tr><td>Tableau de bord analytique 7 jours</td><td><span class="badge-new">✓ Nouveau</span></td><td>Vendeur / Restaurant</td></tr>
+    <tr><td>Notifications push FCM</td><td><span class="badge-ok">✓ Actif</span></td><td>Tous</td></tr>
+    <tr><td>Alerte SOS avec GPS</td><td><span class="badge-ok">✓ Actif</span></td><td>Client / Admin</td></tr>
+    <tr><td>Dashboard admin complet</td><td><span class="badge-ok">✓ Actif</span></td><td>Admin</td></tr>
+    <tr><td>Gestion flotte de livreurs</td><td><span class="badge-ok">✓ Actif</span></td><td>Fleet owner</td></tr>
+    <tr><td>Site web public (9 pages)</td><td><span class="badge-ok">✓ Actif</span></td><td>Web</td></tr>
+    <tr><td>Dashboard admin web</td><td><span class="badge-ok">✓ Actif</span></td><td>Web / Admin</td></tr>
+    <tr><td>Multi-langue FR / EN</td><td><span class="badge-ok">✓ Actif</span></td><td>Tous</td></tr>
+  </table>
+
+  <div class="info-box" style="margin-top:20px;">
+    <strong>Légende :</strong>
+    &nbsp; <span class="badge-ok">✓ Actif</span> = Fonctionnalité existante
+    &nbsp; <span class="badge-new">✓ Nouveau</span> = Fonctionnalité ajoutée récemment (session actuelle)
+  </div>
+</div>
+
+<footer>
+  <p>AZ Express — Application de Livraison et de Services · Abengourou, Côte d'Ivoire</p>
+  <p style="margin-top:6px;">Document généré le 26 mai 2026 · Pour imprimer en PDF : Ctrl+P → "Enregistrer en PDF" · Orientation Portrait recommandée</p>
+</footer>
+
+</body>
+</html>

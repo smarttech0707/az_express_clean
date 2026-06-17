@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+  <!-- SEO Primary -->
+  <title>AZ Express – Livraison Express en Côte d'Ivoire</title>
+  <meta name="description" content="AZ Express, l'application N°1 de livraison express en Côte d'Ivoire. Commandez vos repas, courses, médicaments et bien plus. Livraison rapide à Abengourou et partout en CI.">
+  <meta name="keywords" content="livraison Abengourou, livraison Côte d'Ivoire, commande en ligne CI, livraison rapide, AZ Express, restaurant livraison Abengourou">
+  <meta name="author" content="AZ Express">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://az-express.ci/">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://az-express.ci/">
+  <meta property="og:title" content="AZ Express – Livraison Express en Côte d'Ivoire">
+  <meta property="og:description" content="Commandez repas, courses et services en quelques clics. Livraison rapide à Abengourou et en Côte d'Ivoire.">
+  <meta property="og:image" content="https://az-express.ci/icons/og-image.png">
+  <meta property="og:locale" content="fr_CI">
+  <meta property="og:site_name" content="AZ Express">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="https://az-express.ci/">
+  <meta name="twitter:title" content="AZ Express – Livraison Express en Côte d'Ivoire">
+  <meta name="twitter:description" content="Commandez repas, courses et services en quelques clics. Livraison rapide à Abengourou.">
+  <meta name="twitter:image" content="https://az-express.ci/icons/og-image.png">
+
+  <!-- PWA -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AZ Express">
+  <meta name="application-name" content="AZ Express">
+  <meta name="msapplication-TileColor" content="#0A1628">
+  <meta name="theme-color" content="#0A1628">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Preconnect -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <!-- Schema.org structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "AZ Express",
+    "url": "https://az-express.ci",
+    "logo": "https://az-express.ci/icons/Icon-512.png",
+    "description": "Plateforme de livraison express en Côte d'Ivoire",
+    "address": {
+      "@type": "PostalAddress",
+      "addressLocality": "Abengourou",
+      "addressCountry": "CI"
+    },
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "contactType": "customer service",
+      "availableLanguage": "French"
+    }
+  }
+  </script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; background-color: #0A1628; }
+    #splash-overlay {
+      position: fixed; inset: 0;
+      background: #0A1628;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.5s ease;
+    }
+    #splash-overlay.fade-out { opacity: 0; pointer-events: none; }
+    .splash-logo {
+      display: flex; flex-direction: column; align-items: center; gap: 24px;
+    }
+    .splash-logo img { width: 100px; height: 100px; border-radius: 24px; }
+    .splash-title {
+      color: #FF6B00; font-size: 32px; font-weight: 800;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      letter-spacing: -0.5px;
+    }
+    .splash-loader {
+      width: 40px; height: 3px; background: rgba(255,255,255,0.15);
+      border-radius: 2px; overflow: hidden;
+    }
+    .splash-loader-bar {
+      height: 100%; width: 40%; background: #FF6B00;
+      border-radius: 2px;
+      animation: loader 1.4s ease-in-out infinite;
+    }
+    @keyframes loader {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+    .center {
+      margin: 0; position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .contain { display:block; width:100%; height:100%; object-fit:contain; }
+  </style>
+</head>
+<body>
+  <!-- Custom branded splash -->
+  <div id="splash-overlay">
+    <div class="splash-logo">
+      <img src="icons/Icon-192.png" alt="AZ Express" onerror="this.style.display='none'">
+      <div class="splash-title">AZ Express</div>
+      <div class="splash-loader"><div class="splash-loader-bar"></div></div>
+    </div>
+  </div>
+
+  <script src="flutter_bootstrap.js" async="" onload="
+    const overlay = document.getElementById('splash-overlay');
+    if(overlay) {
+      setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => overlay.remove(), 500);
+      }, 800);
+    }
+  "></script>
+</body>
+</html>

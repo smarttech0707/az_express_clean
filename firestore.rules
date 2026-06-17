@@ -1,0 +1,591 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() {
+      return request.auth != null;
+    }
+    function uid() {
+      return request.auth.uid;
+    }
+    function isAdmin() {
+      return isAuth() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function isOwner(userId) {
+      return isAuth() && uid() == userId;
+    }
+    function isRealUser() {
+      return isAuth() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+    function unchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+    function notPresent(field) {
+      return !(field in request.resource.data);
+    }
+
+    // Vérifie que la session courante correspond à la pharmacie propriétaire de la commande.
+    // Nécessite que pharmacies/{id}.currentUid soit sauvegardé par l'app Flutter après connexion.
+    function isPharmacieOwnerOfOrder() {
+      return isAuth()
+        && 'pharmacieId' in resource.data
+        && exists(/databases/$(database)/documents/pharmacies/$(resource.data.pharmacieId))
+        && get(/databases/$(database)/documents/pharmacies/$(resource.data.pharmacieId)).data.currentUid == uid();
+    }
+
+    match /admins/{adminId} {
+      allow read:  if isOwner(adminId) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /clients/{clientId} {
+      allow read:   if isOwner(clientId) || isAdmin();
+      allow create: if isOwner(clientId);
+      allow update: if isAdmin() ||
+        (isOwner(clientId) && unchanged('wallet') && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled'));
+      allow delete: if isAdmin();
+      match /wallet_transactions/{txId} {
+        allow read:   if isOwner(clientId) || isAdmin();
+        allow create: if isAdmin()
+          || (isOwner(clientId)
+            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt','provider','txId'])
+            && request.resource.data.amount is int);
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /livreurs/{livreurId} {
+      // Lecture par tous les authentifiés (anonymes inclus pour la carte client)
+      allow read:   if isAuth();
+      allow create: if isAdmin();
+      // Le livreur peut mettre à jour son propre doc :
+      // - sans toucher au wallet (GPS, isOnline, token…)
+      // - OU en diminuant son wallet (déduction commission à l'acceptation)
+      allow update: if isAdmin()
+        || (isOwner(livreurId) && unchanged('wallet'))
+        || (isOwner(livreurId)
+            && request.resource.data.wallet is int
+            && request.resource.data.wallet >= 0
+            && request.resource.data.wallet < resource.data.wallet);
+      allow delete: if isAdmin();
+      match /wallet_transactions/{txId} {
+        allow read:   if isOwner(livreurId) || isAdmin();
+        allow create: if isAdmin()
+          || (isOwner(livreurId)
+            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt','provider','txId'])
+            && request.resource.data.amount is int);
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /driver_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /sellers/{sellerId} {
+      allow read:   if isOwner(sellerId) || isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isOwner(sellerId) && unchanged('wallet'));
+      allow delete: if isAdmin();
+      match /wallet_transactions/{txId} {
+        allow read:   if isOwner(sellerId) || isAdmin();
+        allow create: if isAdmin()
+          || (isOwner(sellerId)
+            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt'])
+            && request.resource.data.amount is int);
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /seller_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /restaurants/{restaurantId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+      match /menus/{menuId} {
+        allow read:  if isAuth();
+        allow write: if isAdmin();
+      }
+    }
+
+    match /restaurant_owners/{ownerId} {
+      allow read:  if isOwner(ownerId) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /restaurant_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /boulangeries/{boulangerieId} {
+      allow read:   if isAuth();
+      allow create: if isAdmin();
+      // Le propriétaire peut mettre à jour son profil, mais pas les champs financiers
+      allow update: if isAdmin() ||
+        (isOwner(boulangerieId)
+          && unchanged('wallet')
+          && unchanged('subscriptionStatus')
+          && unchanged('subscriptionExpiresAt')
+          && unchanged('vipStatus')
+          && unchanged('vipExpiresAt')
+          && unchanged('vipStartedAt'));
+      allow delete: if isAdmin();
+      match /menu_items/{itemId} {
+        allow read:  if isAuth();
+        allow write: if isAdmin() || isOwner(boulangerieId);
+      }
+    }
+
+    match /boulangerie_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /pharmacies/{pharmacieId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+      // La pharmacie peut sauvegarder son UID de session pour l'accès aux commandes.
+      // Seul le champ currentUid est modifiable, et uniquement avec l'UID de la session active.
+      allow update: if isAuth()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentUid'])
+        && request.resource.data.currentUid == uid();
+    }
+
+    match /pharmacie_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /fleet_owners/{fleetId} {
+      allow read:   if isOwner(fleetId) || isAdmin();
+      allow create: if isRealUser() && uid() == fleetId;
+      // Le propriétaire peut mettre à jour son profil, mais pas les champs financiers
+      allow update: if isAdmin() ||
+        (isOwner(fleetId)
+          && unchanged('wallet')
+          && unchanged('subscriptionStatus')
+          && unchanged('subscriptionExpiresAt')
+          && unchanged('vipStatus')
+          && unchanged('vipExpiresAt'));
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuth() && (
+        resource.data.clientId  == uid() ||
+        resource.data.driverId  == uid() ||
+        resource.data.sellerId  == uid() ||
+        isPharmacieOwnerOfOrder()         ||
+        isAdmin()
+      );
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.budget is int
+        && request.resource.data.budget >= 500
+        && notPresent('driverId')
+        && request.resource.data.isPaid == false
+        && request.resource.data.status == 'pending';
+      allow update: if isAdmin() ||
+        (isAuth() && resource.data.driverId == uid()
+          && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
+          && unchanged('paymentMethod') && unchanged('driverId')
+          && (
+            (resource.data.status == 'assigned'    && request.resource.data.status == 'accepted')
+            || (resource.data.status == 'accepted' && request.resource.data.status == 'picked_up')
+            // À la livraison espèces : isPaid peut passer à true
+            || (resource.data.status == 'picked_up' && request.resource.data.status == 'delivered'
+                && (unchanged('isPaid') || request.resource.data.isPaid == true))
+            || (resource.data.status == request.resource.data.status)
+          )
+        ) ||
+        (isAuth() && resource.data.sellerId == uid()
+          && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
+          && unchanged('paymentMethod') && unchanged('driverId')) ||
+        // Client annule sa commande en attente
+        (isOwner(resource.data.clientId)
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'cancelled'
+          && unchanged('budget') && unchanged('driverId') && unchanged('isPaid')) ||
+        // Système côté client assigne automatiquement le livreur le plus proche
+        (isOwner(resource.data.clientId)
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'assigned'
+          && unchanged('budget') && unchanged('clientId')
+          && unchanged('isPaid') && unchanged('paymentMethod')) ||
+        // Client peut noter le livreur ou le vendeur après livraison
+        (isOwner(resource.data.clientId)
+          && resource.data.status == 'delivered'
+          && unchanged('status') && unchanged('budget') && unchanged('driverId')
+          && unchanged('isPaid') && unchanged('paymentMethod')
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['rating', 'sellerRating']));
+      allow delete: if isAdmin();
+    }
+
+    // ── Commissions AZ Express — lecture admin uniquement ────────────────────
+    match /commissions/{commissionId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    match /wallet_transactions/{txId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || resource.data.uid == uid() || isAdmin());
+      // Log E-Kbine uniquement (uid doit correspondre)
+      allow create: if isAuth() && request.resource.data.uid == uid();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /withdrawal_requests/{reqId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.amount is int
+        && request.resource.data.amount >= 500;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /recharge_requests/{reqId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.amount is int
+        && request.resource.data.amount >= 100;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /ekbine_orders/{orderId} {
+      allow read: if isAuth() && (
+        resource.data.clientId == uid() || resource.data.agentId == uid() || isAdmin()
+      );
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && notPresent('agentId')
+        && request.resource.data.amount is int
+        && request.resource.data.amount >= 100;
+      allow update: if isAdmin() ||
+        (isAuth() && (
+          (resource.data.status == 'pending'
+            && request.resource.data.status in ['assigned', 'awaiting_deposit']
+            && request.resource.data.agentId == uid()
+            && unchanged('clientId') && unchanged('amount') && unchanged('fee')
+            && unchanged('totalPaid') && unchanged('paymentMethod')) ||
+          (resource.data.status == 'assigned' && resource.data.agentId == uid()
+            && request.resource.data.status == 'in_progress'
+            && unchanged('clientId') && unchanged('agentId')) ||
+          (resource.data.status == 'awaiting_deposit' && resource.data.agentId == uid()
+            && request.resource.data.status == 'in_progress'
+            && unchanged('clientId') && unchanged('agentId') && unchanged('amount')) ||
+          (resource.data.status == 'in_progress' && resource.data.agentId == uid()
+            && request.resource.data.status == 'proof_sent'
+            && unchanged('clientId') && unchanged('agentId') && unchanged('amount'))
+        )) ||
+        (isAuth() && resource.data.clientId == uid() && (
+          (resource.data.status == 'proof_sent'
+            && request.resource.data.status == 'completed'
+            && unchanged('agentId') && unchanged('amount') && unchanged('agentEarning')) ||
+          ((resource.data.status == 'pending' || resource.data.status == 'awaiting_deposit')
+            && request.resource.data.status == 'cancelled'
+            && unchanged('agentId') && unchanged('amount')) ||
+          (resource.data.status == 'awaiting_deposit'
+            && request.resource.data.status == 'awaiting_deposit'
+            && unchanged('agentId') && unchanged('amount') && unchanged('agentEarning')) ||
+          (resource.data.status == 'proof_sent'
+            && request.resource.data.status == 'disputed'
+            && unchanged('agentId') && unchanged('amount'))
+        ));
+      allow delete: if isAdmin();
+    }
+
+    match /ekbine_agents/{agentId} {
+      allow read: if isAuth();
+      allow create: if isRealUser() && uid() == agentId
+        && request.resource.data.isVerified  == false
+        && request.resource.data.isSuspended == false
+        && request.resource.data.walletBalance  == 0
+        && request.resource.data.totalCompleted == 0;
+      allow update: if isAdmin() ||
+        (isOwner(agentId) && unchanged('walletBalance') && unchanged('isVerified')
+          && unchanged('isSuspended') && unchanged('rating') && unchanged('ratingCount')
+          && unchanged('totalCompleted')) ||
+        // Client confirme la commande (transaction atomique) → crédite walletBalance
+        // La transaction clientConfirmOrder n'écrit que walletBalance et totalCompleted
+        (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['walletBalance', 'totalCompleted'])
+          && request.resource.data.walletBalance is int
+          && request.resource.data.walletBalance > resource.data.walletBalance
+          && request.resource.data.totalCompleted == resource.data.totalCompleted + 1) ||
+        // Client note l'agent après service — lié à une commande completed de cet agent
+        (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['rating', 'ratingCount'])
+          && request.resource.data.ratingCount == resource.data.ratingCount + 1
+          && 'lastOrderId' in resource.data
+          && exists(/databases/$(database)/documents/ekbine_orders/$(resource.data.lastOrderId))
+          && get(/databases/$(database)/documents/ekbine_orders/$(resource.data.lastOrderId)).data.clientId == uid()
+          && get(/databases/$(database)/documents/ekbine_orders/$(resource.data.lastOrderId)).data.agentId == agentId
+          && get(/databases/$(database)/documents/ekbine_orders/$(resource.data.lastOrderId)).data.status == 'completed');
+      allow delete: if isAdmin();
+    }
+
+    match /ekbine_chats/{orderId} {
+      function ekOrderParticipant() {
+        let order = get(/databases/$(database)/documents/ekbine_orders/$(orderId)).data;
+        return uid() == order.clientId || uid() == order.agentId;
+      }
+      allow read, write: if isAdmin() || (isAuth() && ekOrderParticipant());
+      match /messages/{msgId} {
+        allow read:   if isAdmin() || (isAuth() && ekOrderParticipant());
+        allow create: if isAuth() && ekOrderParticipant()
+          && request.resource.data.senderId == uid()
+          && request.resource.data.keys().hasAll(['senderId','senderRole','type'])
+          && request.resource.data.type in ['text','audio'];
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // ── Zones de livraison géographiques ─────────────────────────────────────
+    match /zones_livraison/{zoneId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /marketplace_products/{productId} {
+      allow read: if isAuth();
+      allow create: if isRealUser()
+        && request.resource.data.sellerId == uid()
+        && request.resource.data.status in ['active', 'hidden']
+        && request.resource.data.price is int && request.resource.data.price > 0;
+      allow update: if isAdmin() ||
+        (isRealUser() && resource.data.sellerId == uid()
+          && unchanged('sellerId') && unchanged('views') && unchanged('favoritesCount'));
+      allow delete: if isAdmin() || (isRealUser() && resource.data.sellerId == uid());
+    }
+
+    match /marketplace_favorites/{userId} {
+      allow read, write: if isOwner(userId);
+      match /items/{itemId} { allow read, write: if isOwner(userId); }
+    }
+
+    match /marketplace_chats/{chatId} {
+      allow read, write: if isAdmin() || (isAuth() && (
+        chatId.matches('mp_[^_]+_' + uid())
+        || (resource != null && resource.data.sellerId == uid())
+        || (request.resource != null && request.resource.data.sellerId == uid())
+      ));
+      match /messages/{msgId} {
+        allow read: if isAuth() && (isAdmin()
+          || chatId.matches('mp_[^_]+_' + uid())
+          || get(/databases/$(database)/documents/marketplace_chats/$(chatId)).data.sellerId == uid());
+        allow create: if isAuth()
+          && request.resource.data.senderId == uid()
+          && request.resource.data.keys().hasAll(['senderId','type'])
+          && request.resource.data.type in ['text','audio'];
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /marketplace_reports/{reportId} {
+      allow create: if isRealUser()
+        && request.resource.data.reportedBy == uid()
+        && request.resource.data.keys().hasAll(['productId','reportedBy','reason']);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /sos_alerts/{alertId} {
+      allow read:   if isAdmin();
+      // Le livreur envoie driverId (pas clientId)
+      allow create: if isAuth()
+        && request.resource.data.status == 'active'
+        && (request.resource.data.keys().hasAll(['clientId','lat','lng','timestamp','status'])
+          || request.resource.data.keys().hasAll(['driverId','lat','lng','timestamp','status']));
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /delivery_reports/{reportId} {
+      allow read:   if isAdmin();
+      allow create: if isAuth()
+        && request.resource.data.driverId == uid()
+        && request.resource.data.keys().hasAll(['orderId','driverId','difficulty','createdAt']);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /reviews/{reviewId} {
+      allow read:   if isAuth();
+      // Note obligatoirement entre 1 et 5
+      allow create: if isRealUser()
+        && request.resource.data.keys().hasAll(['sellerId','rating','createdAt'])
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /chats/{chatId} {
+      allow create: if isAuth();
+      allow read, write: if isAuth() && (uid() in resource.data.participants || isAdmin());
+      match /messages/{messageId} {
+        allow read: if isAuth() && (
+          uid() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants || isAdmin()
+        );
+        allow create: if isAuth()
+          && uid() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && request.resource.data.senderId == uid();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /boutique_orders/{orderId} {
+      allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
+      allow create: if isAuth() && request.resource.data.clientId == uid();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /boutique_products/{productId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /services/{serviceId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /service_providers/{providerId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+      allow update: if isRealUser() && !('artisanUid' in resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['artisanUid'])
+        && request.resource.data.artisanUid == uid();
+      allow update: if isRealUser() && 'artisanUid' in resource.data
+        && resource.data.artisanUid == uid()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photos']);
+    }
+
+    match /locations/{locationId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /residences/{residenceId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /blanchisserie_orders/{orderId} {
+      allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
+      allow create: if isAuth() && request.resource.data.clientId == uid();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /eau_boissons_orders/{orderId} {
+      allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
+      allow create: if isAuth() && request.resource.data.clientId == uid();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /clients/{clientId}/favorite_providers/{providerId} {
+      allow read, write: if isOwner(clientId);
+    }
+
+    // ── Base de lieux locale AZ Express ───────────────────────────────────────
+    match /places/{placeId} {
+      allow read:   if isAuth();
+      allow create: if isAdmin() || (isAuth()
+        && request.resource.data.keys().hasAll(['name','latitude','longitude'])
+        && request.resource.data.latitude is number
+        && request.resource.data.longitude is number);
+      allow update: if isAdmin()
+        || (isAuth() && request.resource.data.diff(resource.data)
+              .affectedKeys().hasOnly(['searchCount', 'updatedAt', 'latitude', 'longitude']));
+      allow delete: if isAdmin();
+    }
+
+    match /service_reviews/{reviewId} {
+      allow read: if isAuth();
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && request.resource.data.keys().hasAll(['providerId','clientId','rating','createdAt']);
+      allow update, delete: if isAdmin();
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
+      allow create: if isAdmin();
+      allow update: if isAuth() && resource.data.userId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read','readAt']);
+      allow delete: if isAdmin() || (isAuth() && resource.data.userId == uid());
+    }
+
+    match /support_tickets/{ticketId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'open';
+      allow update: if isAdmin() ||
+        (isOwner(resource.data.userId) && unchanged('status')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['messages']));
+      allow delete: if isAdmin();
+    }
+
+    // ── Formulaire contact web ───────────────────────────────────────────────
+    match /contact_messages/{msgId} {
+      allow create: if isAuth()
+        && request.resource.data.keys().hasAll(['email', 'message'])
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 2000
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 200;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ── Config app (publique : couleurs, textes UI — pas de données financières) ─
+    match /config/{configId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ── Config business (commissions, seuils) — réservée aux admins ─────────
+    match /app_config/{configId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /driver_rankings/{driverId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+  }
+}

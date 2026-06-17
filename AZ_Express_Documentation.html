@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AZ Express — Documentation Fonctionnelle</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 13px;
+    color: #1a1a1a;
+    background: #fff;
+    line-height: 1.6;
+  }
+
+  /* ── COVER PAGE ── */
+  .cover {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #FF6D00, #FF8F00, #FFB300);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 60px 40px;
+    page-break-after: always;
+  }
+  .cover-logo {
+    width: 120px; height: 120px;
+    background: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 56px;
+    margin-bottom: 32px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.2);
+  }
+  .cover h1 {
+    font-size: 48px;
+    font-weight: 900;
+    color: white;
+    letter-spacing: 4px;
+    margin-bottom: 12px;
+  }
+  .cover h2 {
+    font-size: 20px;
+    color: rgba(255,255,255,0.9);
+    font-weight: 400;
+    margin-bottom: 40px;
+  }
+  .cover-badge {
+    background: rgba(255,255,255,0.2);
+    border: 2px solid rgba(255,255,255,0.4);
+    color: white;
+    padding: 10px 28px;
+    border-radius: 30px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: inline-block;
+  }
+  .cover-date {
+    color: rgba(255,255,255,0.7);
+    font-size: 13px;
+    margin-top: 48px;
+  }
+
+  /* ── CONTENT ── */
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 48px;
+  }
+
+  /* ── SECTION HEADERS ── */
+  .section-title {
+    font-size: 22px;
+    font-weight: 800;
+    color: #FF6D00;
+    margin: 40px 0 20px;
+    padding-bottom: 10px;
+    border-bottom: 3px solid #FF6D00;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title .emoji { font-size: 26px; }
+
+  .sub-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #333;
+    margin: 24px 0 12px;
+    padding-left: 12px;
+    border-left: 4px solid #FF8F00;
+  }
+
+  /* ── TABLE ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 12.5px;
+  }
+  th {
+    background: #FF6D00;
+    color: white;
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  th:first-child { border-radius: 8px 0 0 0; }
+  th:last-child { border-radius: 0 8px 0 0; }
+  td {
+    padding: 9px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #fafafa; }
+  tr:hover td { background: #fff5e6; }
+
+  /* ── CARDS ── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin: 16px 0 24px;
+  }
+  .card {
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid #eee;
+  }
+  .card-icon { font-size: 28px; margin-bottom: 8px; }
+  .card-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .card-desc { font-size: 11.5px; color: #666; line-height: 1.5; }
+
+  /* ── BADGE ── */
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .badge-green { background: #e8f5e9; color: #2e7d32; }
+  .badge-orange { background: #fff3e0; color: #e65100; }
+  .badge-red { background: #ffebee; color: #c62828; }
+  .badge-blue { background: #e3f2fd; color: #1565c0; }
+  .badge-brown { background: #efebe9; color: #4e342e; }
+
+  /* ── FLOW ── */
+  .flow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 12px 0 20px;
+    padding: 16px;
+    background: #fff8f0;
+    border-radius: 10px;
+    border: 1px solid #ffe0b2;
+  }
+  .flow-step {
+    background: #FF6D00;
+    color: white;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .flow-arrow { color: #FF6D00; font-weight: 900; font-size: 16px; }
+
+  /* ── ALERT BOX ── */
+  .alert {
+    padding: 14px 18px;
+    border-radius: 10px;
+    margin: 16px 0;
+    font-size: 12.5px;
+    border-left: 4px solid;
+  }
+  .alert-orange { background: #fff8f0; border-color: #FF6D00; }
+  .alert-green  { background: #f0faf0; border-color: #2e7d32; }
+  .alert-red    { background: #fff5f5; border-color: #c62828; }
+
+  /* ── LIST ── */
+  ul { padding-left: 20px; margin: 8px 0; }
+  li { margin-bottom: 5px; }
+  li::marker { color: #FF6D00; }
+
+  /* ── PAGE BREAK ── */
+  .page-break { page-break-before: always; }
+
+  /* ── FOOTER ── */
+  .footer {
+    text-align: center;
+    padding: 24px;
+    color: #999;
+    font-size: 11px;
+    border-top: 1px solid #eee;
+    margin-top: 40px;
+  }
+
+  /* ── PRINT ── */
+  @media print {
+    body { font-size: 11px; }
+    .cover { min-height: auto; padding: 80px 40px; }
+    .page { padding: 24px 36px; }
+    .card-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════ COVER ══════════════════════════════════════ -->
+<div class="cover">
+  <div class="cover-logo">🚀</div>
+  <h1>AZ EXPRESS</h1>
+  <h2>Documentation Fonctionnelle Complète</h2>
+  <div class="cover-badge">Super-App de Livraison — Abengourou, Côte d'Ivoire</div>
+  <br>
+  <div class="cover-badge">Version 1.0 — Flutter & Firebase</div>
+  <div class="cover-date">Généré le 19 mai 2026</div>
+</div>
+
+<!-- ══════════════════════════════════════ PAGE 1 ══════════════════════════════════════ -->
+<div class="page">
+
+  <!-- PRÉSENTATION -->
+  <div class="section-title"><span class="emoji">📱</span> Présentation de l'application</div>
+
+  <p>AZ Express est une <strong>super-application mobile</strong> de livraison à domicile développée avec Flutter et Firebase, destinée à la ville d'Abengourou et ses environs (Côte d'Ivoire). Elle regroupe en une seule plateforme la livraison de colis, la commande de repas, le petit-déjeuner, les produits de boutique, les médicaments, et bien d'autres services locaux.</p>
+
+  <div class="alert alert-orange">
+    <strong>Technologies utilisées :</strong> Flutter 3 (Dart 3) · Firebase Auth · Cloud Firestore · Firebase Cloud Messaging (FCM) · Firebase Storage · CinetPay (Wave, Orange Money, MTN, Moov) · Google Maps · Geolocator
+  </div>
+
+  <!-- UTILISATEURS -->
+  <div class="section-title"><span class="emoji">👥</span> Types d'utilisateurs</div>
+
+  <table>
+    <tr>
+      <th>Rôle</th>
+      <th>Accès</th>
+      <th>Authentification</th>
+      <th>Wallet</th>
+    </tr>
+    <tr>
+      <td><strong>🛍️ Client</strong></td>
+      <td>Passer des commandes, utiliser tous les services</td>
+      <td>Téléphone + mot de passe (Firebase Auth)</td>
+      <td><span class="badge badge-green">Oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>🛵 Livreur</strong></td>
+      <td>Accepter des courses, naviguer, gérer ses gains</td>
+      <td>Téléphone + mot de passe (Firebase Auth)</td>
+      <td><span class="badge badge-green">Oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>🏪 Vendeur / Boutique</strong></td>
+      <td>Gérer ses produits, voir ses commandes</td>
+      <td>phone@az-seller.ci (Firebase Auth)</td>
+      <td><span class="badge badge-green">Oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>🍽️ Restaurant</strong></td>
+      <td>Gérer son menu, voir ses commandes</td>
+      <td>phone@az-restaurant.ci (Firebase Auth)</td>
+      <td><span class="badge badge-orange">Non</span></td>
+    </tr>
+    <tr>
+      <td><strong>🥐 Boulangerie / Café</strong></td>
+      <td>Gérer son menu, voir ses commandes, wallet</td>
+      <td>phone@az-boulangerie.ci (Firebase Auth)</td>
+      <td><span class="badge badge-green">Oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>💊 Pharmacie</strong></td>
+      <td>Statut de garde, wallet, commandes</td>
+      <td>Numéro + mot de passe (Firestore uniquement)</td>
+      <td><span class="badge badge-green">Oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>🏍️ Patron de flotte</strong></td>
+      <td>Gérer ses livreurs, voir les gains collectifs</td>
+      <td>Téléphone + mot de passe (Firebase Auth)</td>
+      <td><span class="badge badge-green">Oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>⚙️ Administrateur</strong></td>
+      <td>Gérer toute la plateforme</td>
+      <td>Accès secret (5 taps logo)</td>
+      <td><span class="badge badge-orange">N/A</span></td>
+    </tr>
+  </table>
+
+  <!-- SERVICES CLIENT -->
+  <div class="section-title"><span class="emoji">🗺️</span> Services disponibles pour les clients</div>
+
+  <div class="card-grid">
+    <div class="card" style="border-top: 4px solid #FF6D00;">
+      <div class="card-icon">🛵</div>
+      <div class="card-title">Livraison Express</div>
+      <div class="card-desc">Envoi de colis, courses entre particuliers, suivi GPS en temps réel, chat avec le livreur</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #e53935;">
+      <div class="card-icon">🍽️</div>
+      <div class="card-title">Restaurants</div>
+      <div class="card-desc">Commande de repas depuis les restaurants partenaires, paiement wallet ou cash</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #5D4037;">
+      <div class="card-icon">🥐</div>
+      <div class="card-title">Boulangerie & Café</div>
+      <div class="card-desc">Petit-déjeuner, viennoiseries, cafés livrés à domicile. Créneaux horaires programmables</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #e65100;">
+      <div class="card-icon">🛍️</div>
+      <div class="card-title">Boutique</div>
+      <div class="card-desc">Produits variés disponibles en ligne, paiement par wallet ou cash à la livraison</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #c62828;">
+      <div class="card-icon">💊</div>
+      <div class="card-title">Pharmacie de garde</div>
+      <div class="card-desc">Livraison de médicaments depuis les pharmacies de garde, disponible la nuit</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #1565c0;">
+      <div class="card-icon">👕</div>
+      <div class="card-title">Blanchisserie</div>
+      <div class="card-desc">Dépôt et retrait de linge, service de lavage et repassage à domicile</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #00695c;">
+      <div class="card-icon">💧</div>
+      <div class="card-title">Eau & Boissons</div>
+      <div class="card-desc">Livraison de bouteilles d'eau, boissons et rafraîchissements</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #FF8F00;">
+      <div class="card-icon">📦</div>
+      <div class="card-title">Colis & Cadeaux</div>
+      <div class="card-desc">Envoi de colis entre particuliers, emballage cadeau, livraison sécurisée</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #0d47a1;">
+      <div class="card-icon">🔧</div>
+      <div class="card-title">Services Locaux</div>
+      <div class="card-desc">Artisans, électriciens, plombiers, immobilier, construction, téléphonie</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #004d40;">
+      <div class="card-icon">🏠</div>
+      <div class="card-title">Maisons à louer</div>
+      <div class="card-desc">Annonces de locations immobilières à Abengourou et environs</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #4a148c;">
+      <div class="card-icon">🏢</div>
+      <div class="card-title">Résidences Meublées</div>
+      <div class="card-desc">Studios, appartements et villas meublées disponibles à la location</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #880e4f;">
+      <div class="card-icon">🍷</div>
+      <div class="card-title">Cave & Boissons</div>
+      <div class="card-desc">Livraison de vins, alcools et boissons depuis les cavistes partenaires</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #6d4c41;">
+      <div class="card-icon">🛺</div>
+      <div class="card-title">Location Tricycle</div>
+      <div class="card-desc">Réservation de tricycles disponibles à Abengourou pour le transport</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #37474f;">
+      <div class="card-icon">🚕</div>
+      <div class="card-title">Taxi de nuit</div>
+      <div class="card-desc">Taxis disponibles la nuit pour les déplacements nocturnes en ville</div>
+    </div>
+  </div>
+
+</div><!-- end page -->
+
+<!-- ══════════════════════════════════════ PAGE 2 ══════════════════════════════════════ -->
+<div class="page page-break">
+
+  <!-- SYSTÈME WALLET & PAIEMENTS -->
+  <div class="section-title"><span class="emoji">💰</span> Système Wallet & Paiements</div>
+
+  <div class="sub-title">Fonctionnement du wallet</div>
+  <p>Chaque utilisateur dispose d'un wallet en <strong>FCFA</strong> stocké dans Firestore. Les transactions sont sécurisées via des transactions atomiques Firestore pour éviter les incohérences.</p>
+
+  <table>
+    <tr>
+      <th>Opération</th>
+      <th>Description</th>
+      <th>Sécurité</th>
+    </tr>
+    <tr>
+      <td><strong>Recharge</strong></td>
+      <td>Via CinetPay (Wave CI, Orange Money, MTN CI, Moov CI). L'utilisateur est redirigé vers la page de paiement CinetPay.</td>
+      <td>Webhook sécurisé en 6 étapes + re-vérification CinetPay</td>
+    </tr>
+    <tr>
+      <td><strong>Paiement commande</strong></td>
+      <td>Déduction automatique du wallet lors du passage d'une commande</td>
+      <td>Transaction Firestore atomique</td>
+    </tr>
+    <tr>
+      <td><strong>Retrait</strong></td>
+      <td>Virement automatique vers numéro mobile money via CinetPay Transfer. En cas d'échec, traitement manuel.</td>
+      <td>Solde déduit avant l'envoi, remboursé si échec</td>
+    </tr>
+    <tr>
+      <td><strong>Cash à la livraison</strong></td>
+      <td>Paiement en espèces au moment de la livraison</td>
+      <td>Bloqué après 3 fausses commandes (anti-fraude)</td>
+    </tr>
+    <tr>
+      <td><strong>Recharge manuelle admin</strong></td>
+      <td>L'administrateur peut créditer n'importe quel wallet directement</td>
+      <td>Accès admin uniquement</td>
+    </tr>
+  </table>
+
+  <div class="sub-title">Opérateurs de paiement supportés</div>
+  <div style="display:flex; gap:12px; flex-wrap:wrap; margin: 8px 0 20px;">
+    <span class="badge badge-blue" style="padding:6px 16px; font-size:13px;">📱 Wave CI</span>
+    <span class="badge badge-orange" style="padding:6px 16px; font-size:13px;">🟠 Orange Money</span>
+    <span class="badge badge-red" style="padding:6px 16px; font-size:13px;">🔴 MTN MoMo CI</span>
+    <span class="badge badge-blue" style="padding:6px 16px; font-size:13px;">🔵 Moov Money CI</span>
+  </div>
+
+  <!-- FLUX COMMANDE -->
+  <div class="section-title"><span class="emoji">🔄</span> Flux des commandes</div>
+
+  <div class="sub-title">Livraison Express (course libre)</div>
+  <div class="flow">
+    <span class="flow-step">Client crée la course</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Livreurs notifiés (FCM)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Livreur accepte</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">En route (GPS)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Colis récupéré</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Livré ✅</span>
+  </div>
+
+  <div class="sub-title">Boulangerie & Café</div>
+  <div class="flow">
+    <span class="flow-step">Client choisit articles + créneau</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Boulangerie notifiée (FCM + son)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">En préparation</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Prête</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Livreur assigné</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Livré ✅</span>
+  </div>
+
+  <div class="sub-title">Restaurant</div>
+  <div class="flow">
+    <span class="flow-step">Client commande depuis le menu</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Restaurant notifié (FCM)</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Préparation</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Livreur récupère</span>
+    <span class="flow-arrow">→</span>
+    <span class="flow-step">Livré ✅</span>
+  </div>
+
+  <!-- NOTIFICATIONS -->
+  <div class="section-title"><span class="emoji">🔔</span> Système de notifications push (FCM)</div>
+
+  <table>
+    <tr>
+      <th>Événement</th>
+      <th>Destinataire</th>
+      <th>Message</th>
+    </tr>
+    <tr>
+      <td>Nouvelle course disponible</td>
+      <td>Tous les livreurs en ligne</td>
+      <td>🛵 Nouvelle course — montant FCFA</td>
+    </tr>
+    <tr>
+      <td>Nouvelle commande boulangerie</td>
+      <td>La boulangerie concernée</td>
+      <td>🥐 Nouvelle commande — articles + créneau</td>
+    </tr>
+    <tr>
+      <td>Livreur accepté la course</td>
+      <td>Client</td>
+      <td>🛵 Livreur en route !</td>
+    </tr>
+    <tr>
+      <td>Colis récupéré</td>
+      <td>Client</td>
+      <td>📦 Votre livreur est en route vers vous</td>
+    </tr>
+    <tr>
+      <td>Commande livrée</td>
+      <td>Client</td>
+      <td>✅ Commande livrée avec succès</td>
+    </tr>
+    <tr>
+      <td>Commande annulée</td>
+      <td>Client</td>
+      <td>❌ Commande annulée</td>
+    </tr>
+    <tr>
+      <td>Solde livreur faible</td>
+      <td>Livreur (solde &lt; 500 FCFA)</td>
+      <td>⚠️ Crédit bas — rechargez</td>
+    </tr>
+    <tr>
+      <td>Recharge confirmée</td>
+      <td>Client</td>
+      <td>💰 Wallet crédité</td>
+    </tr>
+  </table>
+
+  <div class="alert alert-green">
+    <strong>Bannière in-app :</strong> Quand l'application est ouverte, les notifications apparaissent sous forme de bannière animée en haut de l'écran (slide-in + auto-dismiss après 5 secondes).
+  </div>
+
+</div><!-- end page -->
+
+<!-- ══════════════════════════════════════ PAGE 3 ══════════════════════════════════════ -->
+<div class="page page-break">
+
+  <!-- ESPACE LIVREUR -->
+  <div class="section-title"><span class="emoji">🛵</span> Espace Livreur</div>
+
+  <table>
+    <tr>
+      <th>Fonctionnalité</th>
+      <th>Description</th>
+    </tr>
+    <tr>
+      <td><strong>Inscription</strong></td>
+      <td>Formulaire complet avec photo, numéro de téléphone, type de véhicule. Validation par l'administrateur.</td>
+    </tr>
+    <tr>
+      <td><strong>Statut En ligne / Hors ligne</strong></td>
+      <td>Toggle dans le dashboard. Visible uniquement si en ligne pour recevoir des courses.</td>
+    </tr>
+    <tr>
+      <td><strong>Courses disponibles</strong></td>
+      <td>Liste en temps réel des courses disponibles avec montant, adresse et bouton Accepter/Voir sur carte.</td>
+    </tr>
+    <tr>
+      <td><strong>Navigation GPS</strong></td>
+      <td>Intégration Google Maps. Suivi de position en temps réel visible par le client.</td>
+    </tr>
+    <tr>
+      <td><strong>Historique des courses</strong></td>
+      <td>Toutes les courses passées avec statut, montant et date.</td>
+    </tr>
+    <tr>
+      <td><strong>Wallet & retraits</strong></td>
+      <td>Consultation du solde, recharge CinetPay, demande de retrait vers mobile money.</td>
+    </tr>
+    <tr>
+      <td><strong>Alertes SOS</strong></td>
+      <td>Bouton d'urgence dans le dashboard. L'administrateur est notifié immédiatement avec la position GPS.</td>
+    </tr>
+    <tr>
+      <td><strong>Chat</strong></td>
+      <td>Messagerie en temps réel avec le client pendant la course.</td>
+    </tr>
+    <tr>
+      <td><strong>Classement</strong></td>
+      <td>Top 10 des livreurs les plus actifs, visible par tous.</td>
+    </tr>
+  </table>
+
+  <!-- ESPACE BOULANGERIE -->
+  <div class="section-title"><span class="emoji">🥐</span> Espace Boulangerie / Café</div>
+
+  <table>
+    <tr>
+      <th>Fonctionnalité</th>
+      <th>Description</th>
+    </tr>
+    <tr>
+      <td><strong>Connexion sécurisée</strong></td>
+      <td>Identifiants créés par l'admin. Authentification Firebase (phone@az-boulangerie.ci).</td>
+    </tr>
+    <tr>
+      <td><strong>Ouverture / Fermeture</strong></td>
+      <td>Toggle dans le header du dashboard. Masque la boulangerie des résultats clients si fermée.</td>
+    </tr>
+    <tr>
+      <td><strong>Onglet Nouvelles commandes</strong></td>
+      <td>Commandes en attente ou assignées à un livreur, non encore en préparation. Son d'alerte à chaque nouvelle commande.</td>
+    </tr>
+    <tr>
+      <td><strong>Onglet En préparation</strong></td>
+      <td>Commandes marquées "en préparation" par la boulangerie.</td>
+    </tr>
+    <tr>
+      <td><strong>Onglet Prêtes</strong></td>
+      <td>Commandes prêtes à être récupérées par le livreur.</td>
+    </tr>
+    <tr>
+      <td><strong>Onglet Livrées</strong></td>
+      <td>Historique des commandes livrées ou récupérées.</td>
+    </tr>
+    <tr>
+      <td><strong>Détail commande</strong></td>
+      <td>Liste des articles, montant, adresse client, info livreur en temps réel, mode de paiement.</td>
+    </tr>
+    <tr>
+      <td><strong>Wallet boulangerie</strong></td>
+      <td>Affichage du solde en temps réel. Recharge et retrait via WalletActionSheet.</td>
+    </tr>
+  </table>
+
+  <!-- ESPACE RESTAURANT -->
+  <div class="section-title"><span class="emoji">🍽️</span> Espace Restaurant</div>
+
+  <table>
+    <tr>
+      <th>Fonctionnalité</th>
+      <th>Description</th>
+    </tr>
+    <tr>
+      <td><strong>Inscription demande</strong></td>
+      <td>Le propriétaire soumet une demande avec informations du restaurant. Validation par l'admin.</td>
+    </tr>
+    <tr>
+      <td><strong>Gestion du menu</strong></td>
+      <td>Ajouter/modifier/supprimer des plats avec nom, prix, description, catégorie, disponibilité.</td>
+    </tr>
+    <tr>
+      <td><strong>Suivi des commandes</strong></td>
+      <td>Liste des commandes en cours avec détails client, articles commandés et statut.</td>
+    </tr>
+    <tr>
+      <td><strong>Statut ouvert/fermé</strong></td>
+      <td>Le restaurant peut activer ou désactiver sa visibilité en temps réel.</td>
+    </tr>
+  </table>
+
+</div><!-- end page -->
+
+<!-- ══════════════════════════════════════ PAGE 4 ══════════════════════════════════════ -->
+<div class="page page-break">
+
+  <!-- ESPACE VENDEUR -->
+  <div class="section-title"><span class="emoji">🏪</span> Espace Vendeur / Boutique</div>
+
+  <table>
+    <tr>
+      <th>Fonctionnalité</th>
+      <th>Description</th>
+    </tr>
+    <tr>
+      <td><strong>Connexion</strong></td>
+      <td>Compte créé par l'admin. Firebase Auth avec email phone@az-seller.ci.</td>
+    </tr>
+    <tr>
+      <td><strong>Gestion des produits</strong></td>
+      <td>Ajouter, modifier, supprimer des produits avec photo (Firebase Storage), prix, stock, catégorie.</td>
+    </tr>
+    <tr>
+      <td><strong>Commandes reçues</strong></td>
+      <td>Tableau de bord des commandes avec statut, détail des articles, info client.</td>
+    </tr>
+    <tr>
+      <td><strong>Wallet vendeur</strong></td>
+      <td>Les ventes sont créditées automatiquement. Retrait via mobile money possible.</td>
+    </tr>
+  </table>
+
+  <!-- ESPACE PHARMACIE -->
+  <div class="section-title"><span class="emoji">💊</span> Espace Pharmacie</div>
+
+  <table>
+    <tr>
+      <th>Fonctionnalité</th>
+      <th>Description</th>
+    </tr>
+    <tr>
+      <td><strong>Connexion Firestore</strong></td>
+      <td>Authentification par numéro + mot de passe stocké dans Firestore (pas Firebase Auth). Changement de mot de passe forcé à la première connexion.</td>
+    </tr>
+    <tr>
+      <td><strong>Statut de garde</strong></td>
+      <td>Toggle "En garde" / "Hors garde". Visible pour les clients à la recherche de pharmacie de nuit.</td>
+    </tr>
+    <tr>
+      <td><strong>Horaires</strong></td>
+      <td>Configuration des horaires d'ouverture et de fermeture affichés aux clients.</td>
+    </tr>
+    <tr>
+      <td><strong>Commandes médicaments</strong></td>
+      <td>Réception et gestion des commandes de médicaments avec livraison à domicile.</td>
+    </tr>
+    <tr>
+      <td><strong>Wallet pharmacie</strong></td>
+      <td>Crédit automatique des commandes, consultation du solde et retrait.</td>
+    </tr>
+  </table>
+
+  <!-- PATRON DE FLOTTE -->
+  <div class="section-title"><span class="emoji">🏍️</span> Espace Patron de Flotte</div>
+
+  <table>
+    <tr>
+      <th>Fonctionnalité</th>
+      <th>Description</th>
+    </tr>
+    <tr>
+      <td><strong>Inscription flotte</strong></td>
+      <td>Le patron soumet une demande avec ses informations. Validation par l'admin.</td>
+    </tr>
+    <tr>
+      <td><strong>Gestion des livreurs</strong></td>
+      <td>Ajouter des livreurs à sa flotte, créer leurs comptes, gérer leur statut actif/inactif.</td>
+    </tr>
+    <tr>
+      <td><strong>Tableau de gains</strong></td>
+      <td>Vue consolidée des gains de tous les livreurs de la flotte par période.</td>
+    </tr>
+    <tr>
+      <td><strong>Wallet flotte</strong></td>
+      <td>Système de commission sur les gains des livreurs affiliés.</td>
+    </tr>
+  </table>
+
+  <!-- ESPACE ADMIN -->
+  <div class="section-title"><span class="emoji">⚙️</span> Espace Administrateur</div>
+
+  <div class="card-grid">
+    <div class="card" style="border-top: 4px solid #1565c0;">
+      <div class="card-title">👤 Livreurs</div>
+      <div class="card-desc">Voir, activer/désactiver, recharger les wallets, visualiser les stats de chaque livreur</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #e65100;">
+      <div class="card-title">📋 Commandes</div>
+      <div class="card-desc">Historique complet de toutes les commandes avec filtres par statut et date</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #1b5e20;">
+      <div class="card-title">📊 Gains</div>
+      <div class="card-desc">Statistiques de revenus par période, par service, par livreur</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #4a148c;">
+      <div class="card-title">🏆 Classement</div>
+      <div class="card-desc">Top livreurs par nombre de courses et montants</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #00695c;">
+      <div class="card-title">🗺️ Carte live</div>
+      <div class="card-desc">Position en temps réel de tous les livreurs actifs sur la carte</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #bf360c;">
+      <div class="card-title">✅ Demandes</div>
+      <div class="card-desc">Valider les inscriptions de nouveaux livreurs et restaurants</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #1565c0;">
+      <div class="card-title">🍽️ Restaurants</div>
+      <div class="card-desc">Gérer les comptes restaurants, menus, statuts</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #b71c1c;">
+      <div class="card-title">💊 Pharmacies</div>
+      <div class="card-desc">Créer et gérer les comptes pharmacies, horaires et gardes</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #e65100;">
+      <div class="card-title">🛍️ Boutique</div>
+      <div class="card-desc">Gérer les comptes vendeurs, produits et commandes boutique</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #5D4037;">
+      <div class="card-title">🥐 Boulangeries</div>
+      <div class="card-desc">Créer boulangeries, gérer menus, activer/désactiver</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #1b5e20;">
+      <div class="card-title">💳 Recharges</div>
+      <div class="card-desc">Créditer manuellement n'importe quel wallet de la plateforme</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #4a148c;">
+      <div class="card-title">🏍️ Flottes</div>
+      <div class="card-desc">Valider les demandes de patrons de flotte</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #004d40;">
+      <div class="card-title">🏠 Locations</div>
+      <div class="card-desc">Gérer les annonces de maisons et résidences meublées</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #0d47a1;">
+      <div class="card-title">🔧 Services</div>
+      <div class="card-desc">Gérer les artisans, services locaux et annuaires</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #b71c1c;">
+      <div class="card-title">🆘 Alertes SOS</div>
+      <div class="card-desc">Gérer les urgences signalées par les livreurs avec position GPS</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #bf360c;">
+      <div class="card-title">🛡️ Anti-fraude</div>
+      <div class="card-desc">Liste des clients bloqués pour fausses commandes cash, gestion des sanctions</div>
+    </div>
+    <div class="card" style="border-top: 4px solid #37474f;">
+      <div class="card-title">🗑️ Purge</div>
+      <div class="card-desc">Vider les données de test avant la mise en production</div>
+    </div>
+  </div>
+
+</div><!-- end page -->
+
+<!-- ══════════════════════════════════════ PAGE 5 ══════════════════════════════════════ -->
+<div class="page page-break">
+
+  <!-- SÉCURITÉ -->
+  <div class="section-title"><span class="emoji">🔒</span> Sécurité</div>
+
+  <div class="sub-title">Règles Firestore</div>
+  <table>
+    <tr>
+      <th>Collection</th>
+      <th>Protection</th>
+    </tr>
+    <tr>
+      <td><strong>clients</strong></td>
+      <td>Un client ne peut pas modifier son wallet, son compteur de fausses commandes, ni son statut cash à la livraison</td>
+    </tr>
+    <tr>
+      <td><strong>livreurs</strong></td>
+      <td>Un livreur ne peut pas modifier son wallet. Création de compte : admin uniquement</td>
+    </tr>
+    <tr>
+      <td><strong>sellers</strong></td>
+      <td>Un vendeur ne peut pas modifier son wallet. Compte créé par l'admin uniquement</td>
+    </tr>
+    <tr>
+      <td><strong>boulangeries</strong></td>
+      <td>La boulangerie peut modifier son profil. Menu items : lecture publique, écriture propriétaire ou admin</td>
+    </tr>
+    <tr>
+      <td><strong>orders</strong></td>
+      <td>Budget minimum 500 FCFA. Livreur et vendeur ne peuvent pas modifier les champs financiers (budget, isPaid, clientId)</td>
+    </tr>
+    <tr>
+      <td><strong>wallet_transactions</strong></td>
+      <td>Création uniquement par Cloud Functions. Lecture par le propriétaire uniquement</td>
+    </tr>
+  </table>
+
+  <div class="sub-title">Sécurité des webhooks CinetPay (6 couches)</div>
+  <table>
+    <tr>
+      <th>#</th>
+      <th>Vérification</th>
+      <th>Protection contre</th>
+    </tr>
+    <tr><td>1</td><td>Token secret dans l'URL (WEBHOOK_SECRET)</td><td>Appels forgés de tiers</td></tr>
+    <tr><td>2</td><td>Vérification du site_id CinetPay</td><td>Usurpation d'identité marchande</td></tr>
+    <tr><td>3</td><td>Re-vérification directe auprès de l'API CinetPay</td><td>Falsification du statut de paiement</td></tr>
+    <tr><td>4</td><td>Lookup session Firestore + contrôle d'idempotence</td><td>Double crédit d'un même paiement</td></tr>
+    <tr><td>5</td><td>Statut ACCEPTED obligatoire</td><td>Tentative avec paiement refusé</td></tr>
+    <tr><td>6</td><td>Vérification du montant</td><td>Manipulation du montant côté client</td></tr>
+  </table>
+
+  <div class="sub-title">Anti-fraude COD (Cash On Delivery)</div>
+  <p>Après un nombre configurable de fausses commandes avec paiement en espèces, le client est automatiquement bloqué pour le mode COD. L'administrateur peut débloquer depuis la page Anti-fraude.</p>
+
+  <!-- ARCHITECTURE TECHNIQUE -->
+  <div class="section-title"><span class="emoji">🏗️</span> Architecture technique</div>
+
+  <table>
+    <tr>
+      <th>Composant</th>
+      <th>Technologie</th>
+      <th>Rôle</th>
+    </tr>
+    <tr>
+      <td><strong>Application mobile</strong></td>
+      <td>Flutter 3 / Dart 3</td>
+      <td>iOS + Android depuis un seul codebase</td>
+    </tr>
+    <tr>
+      <td><strong>Base de données</strong></td>
+      <td>Cloud Firestore</td>
+      <td>Toutes les données en temps réel, sans backend REST</td>
+    </tr>
+    <tr>
+      <td><strong>Authentification</strong></td>
+      <td>Firebase Auth</td>
+      <td>Clients, livreurs, pros (vendeurs, restaurants, boulangeries)</td>
+    </tr>
+    <tr>
+      <td><strong>Notifications push</strong></td>
+      <td>Firebase Cloud Messaging</td>
+      <td>Notifications temps réel pour toutes les parties</td>
+    </tr>
+    <tr>
+      <td><strong>Stockage fichiers</strong></td>
+      <td>Firebase Storage</td>
+      <td>Photos de profil, produits, menus</td>
+    </tr>
+    <tr>
+      <td><strong>Fonctions serveur</strong></td>
+      <td>Firebase Cloud Functions (Node.js)</td>
+      <td>Paiements CinetPay, webhooks sécurisés, notifications automatiques</td>
+    </tr>
+    <tr>
+      <td><strong>Paiements</strong></td>
+      <td>CinetPay API v2</td>
+      <td>Recharges wallet + transferts de retrait mobile money</td>
+    </tr>
+    <tr>
+      <td><strong>Cartographie</strong></td>
+      <td>Google Maps + Geolocator</td>
+      <td>Carte live, GPS livreur, calcul de distance/tarif</td>
+    </tr>
+    <tr>
+      <td><strong>Surveillance</strong></td>
+      <td>Firebase Crashlytics</td>
+      <td>Détection automatique des crashs en production</td>
+    </tr>
+    <tr>
+      <td><strong>Internationalisation</strong></td>
+      <td>Système custom app_text.dart</td>
+      <td>Français et Anglais (140+ clés traduites)</td>
+    </tr>
+  </table>
+
+  <!-- COLLECTIONS FIRESTORE -->
+  <div class="section-title"><span class="emoji">🗄️</span> Collections Firestore principales</div>
+
+  <table>
+    <tr>
+      <th>Collection</th>
+      <th>Contenu</th>
+    </tr>
+    <tr><td><strong>clients</strong></td><td>Profils clients, wallet, token FCM, statut COD</td></tr>
+    <tr><td><strong>livreurs</strong></td><td>Profils livreurs, position GPS, wallet, statut en ligne</td></tr>
+    <tr><td><strong>orders</strong></td><td>Toutes les commandes de tous les services</td></tr>
+    <tr><td><strong>sellers</strong></td><td>Comptes vendeurs, produits, wallet</td></tr>
+    <tr><td><strong>restaurants</strong></td><td>Infos restaurant, menu, statut ouvert/fermé</td></tr>
+    <tr><td><strong>boulangeries</strong></td><td>Infos boulangerie, wallet, statut, + sous-collection menu_items</td></tr>
+    <tr><td><strong>pharmacies</strong></td><td>Infos pharmacie, wallet, statut de garde, horaires</td></tr>
+    <tr><td><strong>flottes</strong></td><td>Patrons de flotte et leurs livreurs affiliés</td></tr>
+    <tr><td><strong>payment_sessions</strong></td><td>Sessions de paiement CinetPay en cours</td></tr>
+    <tr><td><strong>withdrawal_requests</strong></td><td>Demandes de retrait vers mobile money</td></tr>
+    <tr><td><strong>recharge_requests</strong></td><td>Recharges manuelles validées par l'admin</td></tr>
+    <tr><td><strong>locations / residences</strong></td><td>Annonces immobilières</td></tr>
+    <tr><td><strong>services</strong></td><td>Artisans et services locaux référencés</td></tr>
+    <tr><td><strong>sos_alerts</strong></td><td>Alertes d'urgence des livreurs avec coordonnées GPS</td></tr>
+    <tr><td><strong>conversations / messages</strong></td><td>Messagerie client-livreur pendant les courses</td></tr>
+  </table>
+
+  <div class="footer">
+    AZ Express — Documentation générée automatiquement le 19 mai 2026 · Confidentiel
+  </div>
+
+</div><!-- end page -->
+
+</body>
+</html>

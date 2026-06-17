@@ -1,0 +1,49 @@
+{
+    "name": "AZ Express – Livraison Express en Côte d'Ivoire",
+    "short_name": "AZ Express",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0A1628",
+    "theme_color": "#FF6B00",
+    "description": "Livraison express, courses, restaurants et services en Côte d'Ivoire. Rapide, fiable, partout à Abidjan.",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "lang": "fr-CI",
+    "categories": ["shopping", "food", "lifestyle"],
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Commander",
+            "url": "/",
+            "description": "Passer une commande"
+        },
+        {
+            "name": "Devenir livreur",
+            "url": "/livreurs",
+            "description": "Rejoindre la flotte"
+        }
+    ]
+}

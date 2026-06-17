@@ -1,0 +1,109 @@
+name: az_express
+description: AZ Express - Livraison express et services de proximité à Abengourou
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # UI
+  cupertino_icons: ^1.0.2
+  google_fonts: ^6.1.0
+  provider: ^6.1.2
+  flutter_screenutil: ^5.9.3
+
+  # Web routing & animations
+  go_router: ^14.0.0
+  flutter_animate: ^4.5.0
+  visibility_detector: ^0.4.0+2
+
+  # GPS + ForegroundService (maintient le GPS actif quand l'écran est verrouillé)
+  geolocator: ^14.0.2
+  flutter_foreground_task: ^8.14.0
+
+  # Google Maps
+  google_maps_flutter: ^2.9.0
+  flutter_polyline_points: ^2.0.0
+
+  # Firebase
+  firebase_core: ^4.9.0
+  cloud_firestore: ^6.4.1
+  firebase_auth: ^6.5.1
+  firebase_messaging: ^16.2.2
+  firebase_storage: ^13.4.1
+  cloud_functions: ^6.3.1
+  firebase_crashlytics: ^5.2.2
+  firebase_analytics: ^12.4.1
+  geoflutterfire_plus: ^0.0.34
+
+  # Navigation GPS externe
+  url_launcher: ^6.3.0
+
+  # Utilitaires
+  uuid: ^4.3.3
+  http: ^1.2.0
+  intl: ^0.20.2
+  shared_preferences: ^2.3.2
+  connectivity_plus: ^6.0.3
+  cached_network_image: ^3.3.1
+
+  # AUDIO / MESSAGE VOCAL
+  flutter_sound: ^9.2.13
+  record: ^6.2.1
+  permission_handler: ^11.3.1
+  audioplayers: ^6.0.0
+  path_provider: ^2.1.2
+
+  # PHOTO (preuve de livraison)
+  image_picker: ^1.1.0
+
+  # SAISIE VOCALE — commandes courses
+  speech_to_text: ^7.0.0
+
+  # Icône application
+  flutter_launcher_icons: ^0.13.1
+
+  # Splash screen
+  flutter_native_splash: ^2.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo.png
+    - assets/motorbike.png
+    - assets/payment/
+
+
+# ------------------------------
+# Configuration icône application
+# ------------------------------
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/logo.png
+
+
+# ------------------------------
+# Configuration splash screen
+# ------------------------------
+flutter_native_splash:
+  color: "#ffffff"
+  image: assets/logo.png
+  android: true
+  ios: true
+  fullscreen: true
+  android_12:
+    image: assets/logo.png
+    icon_background_color: "#ffffff"

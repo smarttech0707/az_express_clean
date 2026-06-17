@@ -1,0 +1,1163 @@
+﻿import 'package:flutter/material.dart';
+import '../../widgets/scale_button.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../l10n/app_text.dart';
+import '../../models/order_model.dart';
+import '../../services/firestore_service.dart';
+import 'client_wallet_page.dart';
+
+class BoutiquePage extends StatefulWidget {
+  const BoutiquePage({super.key});
+
+  @override
+  State<BoutiquePage> createState() => _BoutiquePageState();
+}
+
+class _BoutiquePageState extends State<BoutiquePage>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabCtrl;
+  String _selectedCategory = "Tout";
+  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
+    _checkAutoRefunds();
+  }
+
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    super.dispose();
+  }
+
+  // ── REMBOURSEMENT AUTOMATIQUE 48H ─────────────────────────────
+  Future<void> _checkAutoRefunds() async {
+    if (_uid == null) return;
+    final now = DateTime.now();
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection("boutique_orders")
+          .where("clientId", isEqualTo: _uid)
+          .where("status", isEqualTo: "paid")
+          .get();
+
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final deadline =
+            (data["deliveryDeadline"] as Timestamp?)?.toDate();
+        if (deadline != null && now.isAfter(deadline)) {
+          await _processRefund(
+              doc.id, _uid!, (data["totalPrice"] as num? ?? 0).toInt(),
+              productName: data["productName"] ?? "produit");
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _processRefund(
+      String orderId, String clientId, int amount,
+      {String productName = ""}) async {
+    final clientRef =
+        FirebaseFirestore.instance.collection("clients").doc(clientId);
+    final orderRef = FirebaseFirestore.instance
+        .collection("boutique_orders")
+        .doc(orderId);
+
+    await FirebaseFirestore.instance.runTransaction((tx) async {
+      final snap = await tx.get(clientRef);
+      final wallet = (snap.data()?["wallet"] ?? 0) as int;
+      tx.update(clientRef, {"wallet": wallet + amount});
+      tx.update(orderRef, {
+        "status": "refunded",
+        "refundedAt": Timestamp.now(),
+        "refundReason": "Non livré dans les 48h"
+      });
+    });
+
+    await FirebaseFirestore.instance
+        .collection("clients")
+        .doc(clientId)
+        .collection("wallet_transactions")
+        .add({
+      "type": "refund",
+      "amount": amount,
+      "description": "Remboursement automatique : $productName (48h dépassées)",
+      "orderId": orderId,
+      "createdAt": Timestamp.now(),
+    });
+  }
+
+  // ── ACHAT ─────────────────────────────────────────────────────
+  Future<void> _buyProduct(
+      Map<String, dynamic> product, int qty, String payMethod) async {
+    if (_uid == null) return;
+
+    final totalPrice = (product["price"] as num? ?? 0).toInt() * qty;
+
+    // Stock check
+    if ((product["stock"] as int? ?? 0) < qty) {
+      _snack(context.tr('insufficient_stock'), Colors.red);
+      return;
+    }
+
+    final orderId = const Uuid().v4();
+    final deadline = DateTime.now().add(const Duration(hours: 48));
+
+    // ── Chercher le vendeur boutique ─────────────────────────
+    String? sellerId;
+    String? sellerName;
+    try {
+      final sellerSnap = await FirebaseFirestore.instance
+          .collection('sellers')
+          .where('type', isEqualTo: 'boutique')
+          .limit(1)
+          .get();
+      if (sellerSnap.docs.isNotEmpty) {
+        sellerId = sellerSnap.docs.first.id;
+        sellerName = sellerSnap.docs.first.data()['name'] as String?;
+      }
+    } catch (_) {}
+
+    try {
+      if (payMethod == 'wallet') {
+        // ── Paiement wallet ───────────────────────────────────
+        final clientRef =
+            FirebaseFirestore.instance.collection("clients").doc(_uid);
+
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final productRef = FirebaseFirestore.instance
+              .collection("boutique_products")
+              .doc(product["id"]);
+          final productSnap = await tx.get(productRef);
+          final currentStock = (productSnap.data()?["stock"] ?? 0) as int;
+          if (currentStock < qty) throw Exception("STOCK_EPUISE");
+
+          final walletSnap = await tx.get(clientRef);
+          final currentWallet = (walletSnap.data()?["wallet"] ?? 0) as int;
+          if (currentWallet < totalPrice) throw Exception("SOLDE_INSUFFISANT");
+
+          tx.update(clientRef, {"wallet": currentWallet - totalPrice});
+          tx.update(productRef, {"stock": currentStock - qty});
+          tx.set(
+            FirebaseFirestore.instance
+                .collection("boutique_orders")
+                .doc(orderId),
+            {
+              "id": orderId,
+              "clientId": _uid,
+              "sellerId": sellerId,
+              "productId": product["id"],
+              "productName": product["name"],
+              "productCategory": product["category"],
+              "qty": qty,
+              "unitPrice": product["price"],
+              "totalPrice": totalPrice,
+              "paymentMethod": "wallet",
+              "status": "paid",
+              "deliveryDeadline": Timestamp.fromDate(deadline),
+              "createdAt": Timestamp.now(),
+            },
+          );
+        });
+
+        // Log wallet client
+        await FirebaseFirestore.instance
+            .collection("clients")
+            .doc(_uid)
+            .collection("wallet_transactions")
+            .add({
+          "type": "purchase",
+          "amount": totalPrice,
+          "description": "Achat : ${product['name']} ×$qty",
+          "orderId": orderId,
+          "createdAt": Timestamp.now(),
+        });
+
+        // Créditer le wallet vendeur
+        if (sellerId != null) {
+          await FirestoreService().creditSellerWallet(
+            sellerId,
+            totalPrice,
+            "Vente wallet : ${product['name']} ×$qty",
+            orderId: orderId,
+          );
+        }
+      } else {
+        // ── Paiement cash à la livraison ──────────────────────
+        final productRef = FirebaseFirestore.instance
+            .collection("boutique_products")
+            .doc(product["id"]);
+        final productSnap = await productRef.get();
+        final currentStock = (productSnap.data()?["stock"] ?? 0) as int;
+        if (currentStock < qty) {
+          if (!mounted) return;
+          _snack(context.tr('out_of_stock_label'), Colors.red);
+          return;
+        }
+        await productRef.update({"stock": currentStock - qty});
+
+        await FirebaseFirestore.instance
+            .collection("boutique_orders")
+            .doc(orderId)
+            .set({
+          "id": orderId,
+          "clientId": _uid,
+          "sellerId": sellerId,
+          "productId": product["id"],
+          "productName": product["name"],
+          "productCategory": product["category"],
+          "qty": qty,
+          "unitPrice": product["price"],
+          "totalPrice": totalPrice,
+          "paymentMethod": "cash",
+          "status": "pending_payment",
+          "deliveryDeadline": Timestamp.fromDate(deadline),
+          "createdAt": Timestamp.now(),
+        });
+      }
+
+      // ── Course de livraison ───────────────────────────────────
+      try {
+        double clientLat = 0, clientLng = 0;
+        try {
+          final pos = await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 5),
+            ),
+          );
+          clientLat = pos.latitude;
+          clientLng = pos.longitude;
+        } catch (_) {}
+
+        final deliveryOrder = OrderModel(
+          id: const Uuid().v4(),
+          description: "🛍️ Boutique AZ : ${product['name']} ×$qty",
+          budget: 500,
+          status: "pending",
+          latitude: clientLat,
+          longitude: clientLng,
+          type: "boutique",
+          clientId: _uid,
+          sellerId: sellerId,
+          sellerName: sellerName,
+          sellerType: "boutique",
+          paymentMethod: payMethod,
+          linkedBoutiqueOrderId: orderId,
+        );
+        await FirestoreService().createOrder(deliveryOrder);
+      } catch (_) {}
+
+      if (!mounted) return;
+      Navigator.pop(context);
+      _snack(
+        payMethod == 'wallet'
+            ? context.tr('order_confirmed')
+            : "Commande envoyée ! Paiement à la livraison",
+        Colors.green,
+      );
+      _tabCtrl.animateTo(1);
+    } catch (e) {
+      final msg = e.toString();
+      if (!mounted) return;
+      if (msg.contains("STOCK_EPUISE")) {
+        _snack(context.tr('out_of_stock_label'), Colors.red);
+      } else if (msg.contains("SOLDE_INSUFFISANT")) {
+        _snack(context.tr('insufficient_balance'), Colors.red);
+      } else {
+        _snack("${context.tr('error')} : $msg", Colors.red);
+      }
+    }
+  }
+
+  Future<void> _showProductDetail(Map<String, dynamic> product) async {
+    // Vérifier si le COD est activé pour ce client
+    bool codEnabled = true;
+    int walletBalance = 0;
+    if (_uid != null) {
+      try {
+        codEnabled = await FirestoreService().isClientCodEnabled(_uid!);
+        final snap = await FirebaseFirestore.instance
+            .collection("clients")
+            .doc(_uid)
+            .get();
+        walletBalance = (snap.data()?["wallet"] ?? 0) as int;
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    int qty = 1;
+    String payMethod = 'wallet';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) {
+          final stock = product["stock"] as int? ?? 0;
+          final total = (product["price"] as num? ?? 0).toInt() * qty;
+          final hasWallet = walletBalance >= total;
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 24,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  children: [
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6D00).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.shopping_bag,
+                          color: Color(0xFFFF6D00), size: 30),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(product["name"],
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 17)),
+                          Text(product["category"] ?? "",
+                              style: const TextStyle(
+                                  color: Colors.grey, fontSize: 13)),
+                          Text(
+                            "${product['price']} ${ctx.tr('per_unit')}",
+                            style: const TextStyle(
+                                color: Color(0xFFFF6D00),
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                if ((product["description"] ?? "").isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(product["description"],
+                      style: const TextStyle(
+                          color: Colors.black87, fontSize: 13, height: 1.5)),
+                ],
+
+                const SizedBox(height: 16),
+
+                // Stock
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: stock > 0
+                        ? Colors.green.shade50
+                        : Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    stock > 0
+                        ? ctx.tr('stock_label').replaceAll('{n}', '$stock')
+                        : ctx.tr('out_of_stock_label'),
+                    style: TextStyle(
+                        color: stock > 0 ? Colors.green : Colors.red,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Quantité
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      onPressed: qty > 1
+                          ? () => setS(() => qty--)
+                          : null,
+                      icon: const Icon(Icons.remove_circle_outline),
+                      color: const Color(0xFFFF6D00),
+                      iconSize: 30,
+                    ),
+                    const SizedBox(width: 16),
+                    Column(
+                      children: [
+                        Text("$qty",
+                            style: const TextStyle(
+                                fontSize: 30,
+                                fontWeight: FontWeight.bold)),
+                        Text(ctx.tr('qty_label'),
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 12)),
+                      ],
+                    ),
+                    const SizedBox(width: 16),
+                    IconButton(
+                      onPressed: qty < stock
+                          ? () => setS(() => qty++)
+                          : null,
+                      icon: const Icon(Icons.add_circle_outline),
+                      color: const Color(0xFFFF6D00),
+                      iconSize: 30,
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                // Garantie 48h
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.shield_outlined,
+                          size: 16, color: Colors.blue.shade700),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          ctx.tr('auto_refund'),
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.blueGrey),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Sélecteur de paiement
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5F5F5),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(12, 10, 12, 6),
+                        child: Text("Mode de paiement",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                      // Option Wallet
+                      _PayOption(
+                        icon: Icons.account_balance_wallet_rounded,
+                        title: "Payer par wallet",
+                        subtitle: hasWallet
+                            ? "Solde : $walletBalance FCFA"
+                            : "Solde insuffisant ($walletBalance FCFA)",
+                        color: hasWallet
+                            ? const Color(0xFF1565C0)
+                            : Colors.red,
+                        selected: payMethod == 'wallet',
+                        enabled: hasWallet,
+                        onTap: hasWallet
+                            ? () => setS(() => payMethod = 'wallet')
+                            : null,
+                      ),
+                      const Divider(height: 1, indent: 12, endIndent: 12),
+                      // Option Cash
+                      _PayOption(
+                        icon: Icons.money_rounded,
+                        title: "Cash à la livraison",
+                        subtitle: codEnabled
+                            ? "Payer le livreur à la livraison"
+                            : "Désactivé — 3 fausses commandes",
+                        color: codEnabled
+                            ? const Color(0xFF2E7D32)
+                            : Colors.grey,
+                        selected: payMethod == 'cash',
+                        enabled: codEnabled,
+                        onTap: codEnabled
+                            ? () => setS(() => payMethod = 'cash')
+                            : null,
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ScaleButton(
+                    onPressed: stock == 0 ||
+                            (payMethod == 'wallet' && !hasWallet) ||
+                            (payMethod == 'cash' && !codEnabled)
+                        ? null
+                        : () => _buyProduct(product, qty, payMethod),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6D00),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: Text(
+                      payMethod == 'wallet'
+                          ? ctx.tr('pay_btn').replaceAll('{amount}', '$total')
+                          : "Commander (cash : $total FCFA)",
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _snack(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: color),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F5F5),
+      body: NestedScrollView(
+        headerSliverBuilder: (context, _) => [
+          SliverAppBar(
+            expandedHeight: (MediaQuery.of(context).size.height * 0.22).clamp(160.0, 240.0),
+            pinned: true,
+            backgroundColor: const Color(0xFFFF6D00),
+            foregroundColor: Colors.white,
+            actions: [
+              // Wallet button
+              StreamBuilder<DocumentSnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection("clients")
+                    .doc(_uid)
+                    .snapshots(),
+                builder: (context, snap) {
+                  final wallet =
+                      (snap.data?.data() as Map?)?["wallet"] ?? 0;
+                  return GestureDetector(
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const ClientWalletPage())),
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.account_balance_wallet,
+                              size: 14, color: Colors.white),
+                          const SizedBox(width: 4),
+                          Text("$wallet FCFA",
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+            flexibleSpace: FlexibleSpaceBar(
+              background: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFFE65100), Color(0xFFFF8F00)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 20, bottom: 48),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.storefront, color: Colors.white, size: 40),
+                        const SizedBox(height: 10),
+                        Text(context.tr('shop_title'),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            title: Text(context.tr('boutique')),
+            centerTitle: true,
+            bottom: TabBar(
+              controller: _tabCtrl,
+              indicatorColor: Colors.white,
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white70,
+              tabs: [
+                Tab(icon: const Icon(Icons.grid_view, size: 18), text: context.tr('products_tab')),
+                Tab(icon: const Icon(Icons.receipt_long, size: 18), text: context.tr('my_orders_tab')),
+              ],
+            ),
+          ),
+        ],
+        body: TabBarView(
+          controller: _tabCtrl,
+          children: [
+            _ProductsTab(
+              selectedCategory: _selectedCategory,
+              onCategoryChanged: (c) =>
+                  setState(() => _selectedCategory = c),
+              onProductTap: _showProductDetail,
+            ),
+            _MyOrdersTab(
+              uid: _uid,
+              onRefund: (orderId, amount, name) =>
+                  _processRefund(orderId, _uid!, amount,
+                      productName: name),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── ONGLET PRODUITS ───────────────────────────────────────────────
+
+class _ProductsTab extends StatelessWidget {
+  final String selectedCategory;
+  final ValueChanged<String> onCategoryChanged;
+  final ValueChanged<Map<String, dynamic>> onProductTap;
+
+  const _ProductsTab({
+    required this.selectedCategory,
+    required this.onCategoryChanged,
+    required this.onProductTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection("boutique_products")
+          .where("isAvailable", isEqualTo: true)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final allDocs = snap.data?.docs ?? [];
+        if (allDocs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.storefront_outlined,
+                    size: 64, color: Colors.grey),
+                const SizedBox(height: 12),
+                Text(context.tr('no_products'),
+                    style: const TextStyle(color: Colors.grey, fontSize: 15)),
+              ],
+            ),
+          );
+        }
+
+        // Filter out suspended sellers
+        final activeDocs = allDocs.where((d) {
+          final data = d.data() as Map<String, dynamic>;
+          return data['sellerSubscriptionStatus'] != 'suspended';
+        }).toList();
+
+        // Sort: VIP first
+        activeDocs.sort((a, b) {
+          final aVip = (a.data() as Map)['sellerVipActive'] == true;
+          final bVip = (b.data() as Map)['sellerVipActive'] == true;
+          if (aVip && !bVip) return -1;
+          if (!aVip && bVip) return 1;
+          return 0;
+        });
+
+        // Catégories
+        final categories = {"Tout"};
+        for (final d in activeDocs) {
+          categories.add(
+              ((d.data() as Map)["category"] ?? "Autre") as String);
+        }
+
+        final filtered = selectedCategory == "Tout"
+            ? activeDocs
+            : activeDocs
+                .where((d) =>
+                    ((d.data() as Map)["category"]) ==
+                    selectedCategory)
+                .toList();
+
+        return Column(
+          children: [
+            // Filtres catégories
+            SizedBox(
+              height: 50,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
+                children: categories
+                    .map((cat) => GestureDetector(
+                          onTap: () => onCategoryChanged(cat),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: selectedCategory == cat
+                                  ? const Color(0xFFFF6D00)
+                                  : Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: selectedCategory == cat
+                                    ? const Color(0xFFFF6D00)
+                                    : Colors.grey.shade300,
+                              ),
+                            ),
+                            child: Text(
+                              cat,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: selectedCategory == cat
+                                    ? Colors.white
+                                    : Colors.black87,
+                              ),
+                            ),
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ),
+
+            // Grille produits
+            Expanded(
+              child: GridView.builder(
+                padding: const EdgeInsets.all(16),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: MediaQuery.of(context).size.width > 900
+                      ? 4
+                      : MediaQuery.of(context).size.width > 600
+                          ? 3
+                          : 2,
+                  mainAxisExtent: 230,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                ),
+                itemCount: filtered.length,
+                itemBuilder: (context, i) {
+                  final data =
+                      filtered[i].data() as Map<String, dynamic>;
+                  data["id"] = filtered[i].id;
+                  final stock = data["stock"] as int? ?? 0;
+                  return GestureDetector(
+                    onTap: () => onProductTap(data),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.06),
+                              blurRadius: 8)
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Image placeholder with VIP badge
+                          Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(16)),
+                                child: (data["imageUrl"] ?? "").isNotEmpty
+                                    ? Image.network(
+                                        data["imageUrl"],
+                                        height: 120,
+                                        width: double.infinity,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) =>
+                                            _placeholder(),
+                                      )
+                                    : _placeholder(),
+                              ),
+                              if (data['sellerVipActive'] == true)
+                                Positioned(
+                                  top: 6, left: 6,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFD700),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Text('👑 VIP',
+                                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.black87)),
+                                  ),
+                                ),
+                            ],
+                          ),
+
+                          Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Text(data["name"],
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13)),
+                                const SizedBox(height: 4),
+                                Text("${data['price']} FCFA",
+                                    style: const TextStyle(
+                                        color: Color(0xFFFF6D00),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14)),
+                                const SizedBox(height: 4),
+                                Text(
+                                  stock > 0
+                                      ? "${context.tr('in_stock')} $stock"
+                                      : context.tr('out_of_stock'),
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: stock > 0
+                                          ? Colors.green
+                                          : Colors.red),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _placeholder() => Container(
+        height: 120,
+        color: const Color(0xFFFF6D00).withValues(alpha: 0.08),
+        child: const Center(
+          child: Icon(Icons.shopping_bag_outlined,
+              size: 40, color: Color(0xFFFF6D00)),
+        ),
+      );
+}
+
+// ── ONGLET MES COMMANDES ──────────────────────────────────────────
+
+class _MyOrdersTab extends StatelessWidget {
+  final String? uid;
+  final Future<void> Function(String orderId, int amount, String name)
+      onRefund;
+
+  const _MyOrdersTab({required this.uid, required this.onRefund});
+
+  @override
+  Widget build(BuildContext context) {
+    if (uid == null) {
+      return Center(child: Text(context.tr('conn_required')));
+    }
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection("boutique_orders")
+          .where("clientId", isEqualTo: uid)
+          .orderBy("createdAt", descending: true)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snap.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.receipt_long_outlined,
+                    size: 56, color: Colors.grey),
+                const SizedBox(height: 12),
+                Text(context.tr('no_orders'),
+                    style: const TextStyle(color: Colors.grey)),
+              ],
+            ),
+          );
+        }
+        return ListView.builder(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          itemCount: docs.length,
+          itemBuilder: (context, i) {
+            final data = docs[i].data() as Map<String, dynamic>;
+            final status = data["status"] ?? "paid";
+            final deadline =
+                (data["deliveryDeadline"] as Timestamp?)?.toDate();
+            final now = DateTime.now();
+            final isExpired = deadline != null &&
+                now.isAfter(deadline) &&
+                status == "paid";
+
+            Color statusColor;
+            String statusLabel;
+            IconData statusIcon;
+            switch (status) {
+              case "pending_payment":
+                statusColor = Colors.deepOrange;
+                statusLabel = "Cash à la livraison";
+                statusIcon = Icons.money_rounded;
+                break;
+              case "paid":
+                statusColor = Colors.orange;
+                statusLabel = context.tr('status_pending');
+                statusIcon = Icons.hourglass_top;
+                break;
+              case "preparing":
+                statusColor = Colors.blue;
+                statusLabel = context.tr('status_preparing');
+                statusIcon = Icons.inventory;
+                break;
+              case "shipped":
+                statusColor = const Color(0xFF1565C0);
+                statusLabel = context.tr('status_shipping');
+                statusIcon = Icons.local_shipping;
+                break;
+              case "delivered":
+                statusColor = Colors.green;
+                statusLabel = context.tr('status_delivered');
+                statusIcon = Icons.check_circle;
+                break;
+              case "refunded":
+                statusColor = Colors.purple;
+                statusLabel = context.tr('status_refunded');
+                statusIcon = Icons.refresh;
+                break;
+              default:
+                statusColor = Colors.grey;
+                statusLabel = status;
+                statusIcon = Icons.circle;
+            }
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: isExpired
+                    ? Border.all(color: Colors.orange.shade300)
+                    : null,
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 8)
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(data["productName"] ?? "—",
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15)),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(statusIcon,
+                                  size: 12, color: statusColor),
+                              const SizedBox(width: 4),
+                              Text(statusLabel,
+                                  style: TextStyle(
+                                      color: statusColor,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Qté : ${data['qty']}  •  ${data['totalPrice']} FCFA",
+                      style: const TextStyle(
+                          color: Colors.grey, fontSize: 13),
+                    ),
+                    if (deadline != null && status == "paid") ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(
+                            isExpired
+                                ? Icons.warning_amber
+                                : Icons.timer_outlined,
+                            size: 14,
+                            color: isExpired
+                                ? Colors.red
+                                : Colors.orange,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isExpired
+                                ? context.tr('deadline_exceeded')
+                                : context.tr('delivery_before').replaceAll('{date}', _fmt(deadline)),
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: isExpired
+                                    ? Colors.red
+                                    : Colors.orange),
+                          ),
+                        ],
+                      ),
+                    ],
+                    if (status == "refunded")
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                            data["refundReason"] ?? context.tr('status_refunded'),
+                            style: const TextStyle(
+                                color: Colors.purple, fontSize: 11)),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _fmt(DateTime d) =>
+      "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} "
+      "${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";
+}
+
+// ── OPTION DE PAIEMENT (boutique) ─────────────────────────────
+
+class _PayOption extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  const _PayOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.selected,
+    required this.enabled,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: selected ? 0.18 : 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: enabled ? Colors.black87 : Colors.grey)),
+                  Text(subtitle,
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: enabled ? Colors.grey : Colors.red.shade300)),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check_circle_rounded, color: color, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
