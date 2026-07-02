@@ -47,7 +47,8 @@ class RealtimeTrackingService extends ChangeNotifier {
   double   _headingTo   = 0;
   DateTime _animStart = DateTime.now();
   static const _animDurationMs   = 1600;
-  static const _recalcThresholdM = 80.0;
+  // Seuil déviation itinéraire relevé de 80m→200m pour limiter les appels Directions API
+  static const _recalcThresholdM = 200.0;
   static const _minMoveMeters    = 5.0;
   DateTime _lastRouteCalc = DateTime(2000);
 
@@ -142,8 +143,8 @@ class RealtimeTrackingService extends ChangeNotifier {
     final now = DateTime.now();
     final secsSinceCalc = now.difference(_lastRouteCalc).inSeconds;
 
-    // Recalcule si 1ère fois, ou toutes les 30s, ou déviation importante
-    final shouldRecalc = !hasDriver || secsSinceCalc >= 30 ||
+    // Recalcule si 1ère fois, ou toutes les 120s, ou déviation importante (>200m)
+    final shouldRecalc = !hasDriver || secsSinceCalc >= 120 ||
         _isOffRoute(newLoc.latLng);
 
     if (shouldRecalc && !_routeLoading) {

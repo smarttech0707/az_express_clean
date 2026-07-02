@@ -3,6 +3,7 @@ import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/notification_service.dart';
+import '../../services/auth_service.dart';
 import 'fleet_dashboard.dart';
 import '../auth/generic_forgot_password_page.dart';
 
@@ -74,6 +75,7 @@ class _FleetLoginState extends State<FleetLogin> {
       final ownerName = (data['name'] as String?) ?? 'Patron';
 
       NotificationService().saveToken(uid, 'fleet_owners');
+      AuthService().logAuthEvent('login', 'fleet_owner');
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(

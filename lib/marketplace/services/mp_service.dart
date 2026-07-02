@@ -157,7 +157,7 @@ class MpService {
       String productId, String reporterId, String reason) =>
       _db.collection('marketplace_reports').add({
         'productId': productId,
-        'reporterId': reporterId,
+        'reportedBy': reporterId,
         'reason': reason,
         'createdAt': FieldValue.serverTimestamp(),
         'status': 'pending',

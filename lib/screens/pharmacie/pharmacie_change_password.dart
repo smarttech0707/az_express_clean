@@ -1,6 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'pharmacie_dashboard.dart';
@@ -53,20 +53,23 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
 
     setState(() => _loading = true);
     try {
-      await FirebaseFirestore.instance
-          .collection('pharmacies')
-          .doc(widget.pharmacieId)
-          .update({'password': newPass, 'mustChangePassword': false});
+      final fn = FirebaseFunctions.instanceFor(region: 'europe-west1');
+      await fn.httpsCallable('setPharmaciePassword').call({
+        'pharmacieId': widget.pharmacieId,
+        'newPassword': newPass,
+      });
 
       if (!mounted) return;
+      final cleanData = Map<String, dynamic>.from(widget.pharmacieData)
+        ..remove('password')
+        ..remove('accessCode');
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => PharmacieDashboard(
             pharmacieId: widget.pharmacieId,
             pharmacieData: {
-              ...widget.pharmacieData,
-              'password': newPass,
+              ...cleanData,
               'mustChangePassword': false,
             },
           ),

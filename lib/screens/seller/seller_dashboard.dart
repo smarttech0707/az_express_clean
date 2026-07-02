@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
 import '../home/home_screen.dart';
 
@@ -214,6 +215,7 @@ class _SellerDashboardState extends State<SellerDashboard>
   }
 
   Future<void> _logout() async {
+    AuthService().logAuthEvent('logout', 'seller');
     await FirebaseAuth.instance.signOut();
     try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
     if (!mounted) return;

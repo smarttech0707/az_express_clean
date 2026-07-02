@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/auth_service.dart';
 
 class AdminAuthService extends ChangeNotifier {
   static final instance = AdminAuthService._();
@@ -38,6 +39,7 @@ class AdminAuthService extends ChangeNotifier {
         return 'Accès refusé. Ce compte n\'est pas administrateur.';
       }
       _isAdmin = true;
+      AuthService().logAuthEvent('login', 'admin');
       notifyListeners();
       return null;
     } on FirebaseAuthException catch (e) {
@@ -57,6 +59,7 @@ class AdminAuthService extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    AuthService().logAuthEvent('logout', 'admin');
     await FirebaseAuth.instance.signOut();
     _isAdmin = false;
     notifyListeners();

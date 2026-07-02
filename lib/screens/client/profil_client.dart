@@ -731,6 +731,7 @@ class _ProfilClientState extends State<ProfilClient> {
                 foregroundColor: Colors.white),
             onPressed: () async {
               Navigator.pop(ctx);
+              AuthService().logAuthEvent('logout', 'client');
               await FirebaseAuth.instance.signOut();
               try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
               if (context.mounted) {

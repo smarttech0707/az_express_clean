@@ -253,7 +253,7 @@ class _NotifCard extends StatelessWidget {
             onTap: () {
               final orderId = data['orderId'] as String?;
               final status  = data['status']  as String?;
-              NotificationService._tapCallback?.call(type, orderId, status);
+              NotificationService.triggerTap(type, orderId, status);
             },
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),

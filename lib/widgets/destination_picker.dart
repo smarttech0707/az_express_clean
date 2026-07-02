@@ -5,11 +5,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../services/google_routes_service.dart';
 import '../services/places_service.dart';
-import '../services/route_service.dart';
 import '../theme/app_theme.dart';
-
-const String _mapsKey = 'AIzaSyCjWt989YSIBblhRE9WNVOWXvOsXHIQ1DE';
 
 class DestinationResult {
   final LatLng position;
@@ -202,12 +200,12 @@ class _DestinationPickerScreenState
     double totalDist = 0;
 
     if (_driverPos != null) {
-      // Segment 1 : livreur → client
-      final route1 = await RouteService.getRoute(
-        _driverPos!.latitude, _driverPos!.longitude,
-        widget.clientPosition.latitude, widget.clientPosition.longitude,
-        _mapsKey,
+      // Segment 1 : livreur → client — GoogleRoutesService (cache 5 min)
+      final model1 = await GoogleRoutesService.getRouteModel(
+        origin:      _driverPos!,
+        destination: widget.clientPosition,
       );
+      final route1 = model1.points;
       if (route1.isNotEmpty) {
         polylines.add(Polyline(
           polylineId: const PolylineId('driver_to_client'),
@@ -222,12 +220,12 @@ class _DestinationPickerScreenState
       }
     }
 
-    // Segment 2 : client → destination
-    final route2 = await RouteService.getRoute(
-      widget.clientPosition.latitude, widget.clientPosition.longitude,
-      pos.latitude, pos.longitude,
-      _mapsKey,
+    // Segment 2 : client → destination — GoogleRoutesService (cache 5 min)
+    final model2 = await GoogleRoutesService.getRouteModel(
+      origin:      widget.clientPosition,
+      destination: pos,
     );
+    final route2 = model2.points;
     if (route2.isNotEmpty) {
       polylines.add(Polyline(
         polylineId: const PolylineId('client_to_dest'),

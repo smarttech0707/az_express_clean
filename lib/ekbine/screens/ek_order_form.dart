@@ -575,7 +575,7 @@ class _StepPayment extends StatelessWidget {
             const Icon(Icons.info_outline_rounded, color: kEkGreen, size: 18),
             const SizedBox(width: 10),
             Expanded(
-              child: Text('Total à payer : ${_fmt(totalPaid)} (frais : ${_fmt(fee)})',
+              child: Text('Total à payer : ${_fmt(totalPaid)}',
                   style: GoogleFonts.inter(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: kEkGreen)),
@@ -790,7 +790,6 @@ class _SummaryCard extends StatelessWidget {
         _Row('Service',    service?['label'] ?? ''),
         _Row('Bénéficiaire', beneficiary),
         _Row('Montant',    _fmt(amount)),
-        _Row('Frais',      _fmt(fee)),
         const Divider(height: 20),
         _Row('Total',      _fmt(total), isTotal: true, opColor: opColor),
         _Row('Paiement',   _payLabel(paymentMethod)),

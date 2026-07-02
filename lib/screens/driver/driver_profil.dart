@@ -315,6 +315,7 @@ class _DriverProfilState extends State<DriverProfil> {
                   .collection("livreurs")
                   .doc(widget.driverId)
                   .update({"isOnline": false});
+              AuthService().logAuthEvent('logout', 'livreur');
               await FirebaseAuth.instance.signOut();
               if (ctx.mounted) {
                 Navigator.of(ctx).popUntil((route) => route.isFirst);

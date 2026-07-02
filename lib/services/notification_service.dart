@@ -34,6 +34,10 @@ class NotificationService {
 
   static void unregisterTapHandler() => _tapCallback = null;
 
+  static void triggerTap(String type, String? orderId, String? status) {
+    _tapCallback?.call(type, orderId, status);
+  }
+
   // Utilisateur connecté (pour mise à jour du token lors du refresh)
   String? _userId;
   String? _userCollection;

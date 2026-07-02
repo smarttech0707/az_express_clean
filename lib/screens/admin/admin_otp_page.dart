@@ -123,6 +123,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
       await FirebaseAuth.instance.currentUser
           ?.reauthenticateWithCredential(cred);
       NotificationService().saveToken(widget.adminUid, 'admins');
+      AuthService().logAuthEvent('login', 'admin');
       if (!mounted) return;
       Navigator.pushReplacement(
         context,

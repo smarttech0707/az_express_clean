@@ -45,6 +45,9 @@ dependencies:
   # Navigation GPS externe
   url_launcher: ^6.3.0
 
+  # Cryptographie
+  crypto: ^3.0.3
+
   # Utilitaires
   uuid: ^4.3.3
   http: ^1.2.0
@@ -63,8 +66,10 @@ dependencies:
   # PHOTO (preuve de livraison)
   image_picker: ^1.1.0
 
-  # SAISIE VOCALE — commandes courses
+  # SAISIE VOCALE — commandes courses + AZ IA (M7)
   speech_to_text: ^7.0.0
+  # SYNTHÈSE VOCALE — réponses parlées d'AZ IA (M7)
+  flutter_tts: ^4.2.0
 
   # Icône application
   flutter_launcher_icons: ^0.13.1

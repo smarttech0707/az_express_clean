@@ -378,10 +378,14 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
             Text(_fmt(order.amount),
                 style: GoogleFonts.inter(
                     fontSize: 15, fontWeight: FontWeight.w800, color: kEkText)),
-            Text('+${_fmt(order.agentEarning)}',
-                style: GoogleFonts.inter(
-                    fontSize: 11, fontWeight: FontWeight.w700,
-                    color: kEkGreen)),
+            Text(
+              order.agentEarning > 0
+                  ? '+${_fmt(order.agentEarning)}'
+                  : 'Paiement direct',
+              style: GoogleFonts.inter(
+                  fontSize: 11, fontWeight: FontWeight.w700,
+                  color: order.agentEarning > 0 ? kEkGreen : kEkMuted),
+            ),
           ]),
         ]),
         const SizedBox(height: 12),
@@ -419,7 +423,10 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
                       width: 18, height: 18,
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
-                  : Text('Accepter +${_fmt(order.agentEarning)}',
+                  : Text(
+                      order.agentEarning > 0
+                          ? 'Accepter +${_fmt(order.agentEarning)}'
+                          : 'Accepter',
                       style: GoogleFonts.inter(
                           fontSize: 12, fontWeight: FontWeight.w800)),
             ),
@@ -835,7 +842,8 @@ class _AgentHistoryTab extends StatelessWidget {
                 ),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Text(o.status == 'completed'
-                      ? '+${_fmt(o.agentEarning)}' : _fmt(o.totalPaid),
+                      ? (o.agentEarning > 0 ? '+${_fmt(o.agentEarning)}' : _fmt(o.totalPaid))
+                      : _fmt(o.totalPaid),
                       style: GoogleFonts.inter(
                           fontSize: 13, fontWeight: FontWeight.w800,
                           color: o.status == 'completed'

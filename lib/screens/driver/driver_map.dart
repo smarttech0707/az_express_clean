@@ -10,10 +10,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../models/order_model.dart';
-import '../../services/route_service.dart';
+import '../../services/google_routes_service.dart';
 import '../../theme/app_theme.dart';
-
-const String _mapsKey = 'AIzaSyCjWt989YSIBblhRE9WNVOWXvOsXHIQ1DE';
 
 /// Carte du livreur — suivi GPS temps réel, itinéraire, ETA.
 class DriverMap extends StatefulWidget {
@@ -167,7 +165,7 @@ class _DriverMapState extends State<DriverMap>
     final shouldRefresh = _lastRoutePos == null ||
         Geolocator.distanceBetween(
           _lastRoutePos!.latitude, _lastRoutePos!.longitude,
-          latlng.latitude, latlng.longitude) >= 30;
+          latlng.latitude, latlng.longitude) >= 200;
 
     if (shouldRefresh && !_loadingRoute) {
       _lastRoutePos = latlng;
@@ -177,16 +175,15 @@ class _DriverMapState extends State<DriverMap>
 
   Future<void> _calcRoutes(LatLng from) async {
     setState(() => _loadingRoute = true);
-    final r1 = await RouteService.getRoute(
-      from.latitude, from.longitude,
-      _clientPos.latitude, _clientPos.longitude, _mapsKey);
-    _routeToClient = r1.isNotEmpty ? r1 : [from, _clientPos];
+    // GoogleRoutesService : cache 5 min grille 100m — évite appels répétitifs
+    final model1 = await GoogleRoutesService.getRouteModel(
+        origin: from, destination: _clientPos);
+    _routeToClient = model1.points.isNotEmpty ? model1.points : [from, _clientPos];
 
     if (_destPos != null) {
-      final r2 = await RouteService.getRoute(
-        _clientPos.latitude, _clientPos.longitude,
-        _destPos!.latitude, _destPos!.longitude, _mapsKey);
-      _routeToDest = r2;
+      final model2 = await GoogleRoutesService.getRouteModel(
+          origin: _clientPos, destination: _destPos!);
+      _routeToDest = model2.points;
     }
     if (mounted) {
       setState(() => _loadingRoute = false);

@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../services/auth_service.dart';
 
 class ArtisanDashboard extends StatefulWidget {
   final String docId;
@@ -214,6 +215,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
   }
 
   Future<void> _logout() async {
+    AuthService().logAuthEvent('logout', 'artisan');
     await FirebaseAuth.instance.signOut();
     if (mounted) Navigator.pop(context);
   }

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'shopping_item.dart';
 
 class OrderModel {
   final String id;
@@ -48,6 +49,7 @@ class OrderModel {
   final double? deliveredLat;       // GPS final au moment de la livraison
   final double? deliveredLng;
   final DateTime? deliveredAt;      // horodatage de livraison effective
+  final List<ShoppingItem>? items;  // liste d'articles courses (ex. AZ IA) — nullable, additif
 
   OrderModel({
     required this.id,
@@ -95,6 +97,7 @@ class OrderModel {
     this.deliveredLat,
     this.deliveredLng,
     this.deliveredAt,
+    this.items,
   });
 
   factory OrderModel.fromMap(String id, Map<String, dynamic> data) {
@@ -148,6 +151,9 @@ class OrderModel {
       deliveredAt:   data['deliveredAt'] != null
           ? (data['deliveredAt'] as Timestamp).toDate()
           : null,
+      items: (data['items'] as List?)
+          ?.map((e) => ShoppingItem.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList(),
     );
   }
 
@@ -204,6 +210,7 @@ class OrderModel {
       if (deliveredLat       != null) 'deliveredLat':       deliveredLat,
       if (deliveredLng       != null) 'deliveredLng':       deliveredLng,
       if (deliveredAt        != null) 'deliveredAt':        Timestamp.fromDate(deliveredAt!),
+      if (items != null) 'items': items!.map((e) => e.toMap()).toList(),
     };
   }
 }

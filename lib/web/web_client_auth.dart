@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/auth_service.dart';
 
 /// Gestion de l'authentification client sur le web.
 /// Singleton ChangeNotifier pour que go_router réagisse aux changements.
@@ -52,6 +53,7 @@ class WebClientAuth extends ChangeNotifier {
       final email = '${phone.replaceAll(' ', '')}@azexpress.ci';
       await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email, password: password);
+      AuthService().logAuthEvent('login', 'client');
       return null;
     } on FirebaseAuthException catch (e) {
       switch (e.code) {
@@ -88,6 +90,7 @@ class WebClientAuth extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    AuthService().logAuthEvent('logout', 'client');
     await FirebaseAuth.instance.signOut();
     _isClient   = false;
     _clientName = null;

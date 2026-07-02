@@ -23,6 +23,7 @@ import 'simple_service_page.dart';
 import 'residences_page.dart';
 import 'client_wallet_page.dart';
 import 'boulangeries_list.dart';
+import '../immobilier/immobilier_home_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTES
@@ -655,6 +656,7 @@ class _BottomPanelState extends State<_BottomPanel> {
                       _PlusCard(icon: Icons.water_drop_rounded,           routeKey: 'water',          color: Colors.teal),
                       _PlusCard(icon: Icons.home_rounded,                 routeKey: 'houses',         color: Color(0xFF00695C)),
                       _PlusCard(icon: Icons.apartment_rounded,            routeKey: 'furnished',      color: Color(0xFF4A148C)),
+                      _PlusCard(icon: Icons.villa_rounded,                routeKey: 'real_estate',    color: Color(0xFF00838F)),
                       _PlusCard(icon: Icons.construction_rounded,         routeKey: 'local_services', color: Color(0xFF1565C0)),
                       _PlusCard(icon: Icons.wine_bar_rounded,             routeKey: 'cave',           color: Color(0xFF880E4F)),
                       _PlusCard(icon: Icons.electric_rickshaw_rounded,    routeKey: 'tricycle',       color: Color(0xFF6D4C41)),
@@ -958,6 +960,7 @@ class _PlusCardState extends State<_PlusCard> {
       case 'water':          page = const EauBoissonsPage();    break;
       case 'houses':         page = const LocationsPage();      break;
       case 'furnished':      page = const ResidencesPage();     break;
+      case 'real_estate':    page = const ImmobilierHomeScreen(); break;
       case 'local_services': page = const ServicesHubPage();    break;
       case 'cave':
         page = SimpleServicePage(

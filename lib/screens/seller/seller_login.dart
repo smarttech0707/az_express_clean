@@ -8,6 +8,7 @@ import 'seller_dashboard.dart';
 import 'seller_register.dart';
 import '../../services/notification_service.dart';
 import '../../services/subscription_service.dart';
+import '../../services/auth_service.dart';
 
 class SellerLogin extends StatefulWidget {
   const SellerLogin({super.key});
@@ -85,6 +86,7 @@ class _SellerLoginState extends State<SellerLogin> {
 
       final sellerData = doc.data()!;
       NotificationService().saveToken(uid, 'sellers');
+      AuthService().logAuthEvent('login', 'seller');
       if (!mounted) return;
       await SubscriptionService.checkAndRenew('sellers', uid);
       if (!mounted) return;

@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -8,6 +9,7 @@ import 'pharmacie_change_password.dart';
 import 'pharmacie_dashboard.dart';
 import 'pharmacie_register.dart';
 import '../../services/notification_service.dart';
+import '../../services/auth_service.dart';
 import '../auth/generic_forgot_password_page.dart';
 
 class PharmacieLogin extends StatefulWidget {
@@ -73,23 +75,23 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
       final doc  = snap.docs.first;
       final data = doc.data();
 
-      // Support new 'password' field and legacy 'accessCode'
-      final stored = ((data['password'] as String?) ?? '').isNotEmpty
-          ? data['password'] as String
-          : (data['accessCode'] as String?) ?? '';
+      // Vérification côté serveur (mot de passe haché, jamais comparé en
+      // clair côté client) — migre automatiquement les anciens comptes.
+      final fn = FirebaseFunctions.instanceFor(region: 'europe-west1');
+      final result = await fn.httpsCallable('pharmacieLogin').call({
+        'pharmacieId': doc.id,
+        'password':    pass,
+      });
+      final loginData = Map<String, dynamic>.from(result.data as Map);
 
-      if (stored.isEmpty) {
-        _snack('Aucun mot de passe défini. Contactez l\'administrateur.',
-            Colors.orange);
-        return;
-      }
-
-      if (stored != pass) {
+      if (loginData['success'] != true) {
         _snack('Mot de passe incorrect.', Colors.red);
         return;
       }
+      final mustChangePassword = loginData['mustChangePassword'] == true;
 
       NotificationService().saveToken(doc.id, 'pharmacies');
+      AuthService().logAuthEvent('login', 'pharmacie');
       // Lie l'UID Firebase anonyme au document pharmacie pour isPharmacieOwnerOfOrder()
       final fbUser = FirebaseAuth.instance.currentUser;
       if (fbUser != null) {
@@ -99,7 +101,7 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
       }
       if (!mounted) return;
 
-      if (data['mustChangePassword'] == true) {
+      if (mustChangePassword) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(

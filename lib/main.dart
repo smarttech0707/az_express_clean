@@ -22,6 +22,7 @@ import 'web/web_app.dart';
 import 'marketplace/providers/mp_provider.dart';
 import 'marketplace/providers/mp_favorites_provider.dart';
 import 'ekbine/providers/ek_provider.dart';
+import 'providers/az_ia_provider.dart';
 
 // ignore: unused_element
 final _analytics = FirebaseAnalytics.instance;
@@ -78,6 +79,7 @@ void main() async {
             ChangeNotifierProvider(create: (_) => MpProvider()),
             ChangeNotifierProvider(create: (_) => MpFavoritesProvider()),
             ChangeNotifierProvider(create: (_) => EkProvider()),
+            ChangeNotifierProvider(create: (_) => AzIaProvider()),
           ],
           child: const AZExpressApp(),
         ));

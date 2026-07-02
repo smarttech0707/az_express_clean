@@ -27,6 +27,31 @@ service firebase.storage {
       return request.auth.uid == uid;
     }
 
+    function isAdmin() {
+      return isAuth()
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+    }
+
+    // Vérifie que l'utilisateur est client ou livreur d'une commande orders/
+    function isOrderParticipant(orderId) {
+      let order = firestore.get(/databases/(default)/documents/orders/$(orderId)).data;
+      return order.clientId == request.auth.uid
+          || order.driverId == request.auth.uid;
+    }
+
+    // Vérifie que l'utilisateur est acheteur ou vendeur d'un chat marketplace
+    function isMpChatParticipant(chatId) {
+      return chatId.matches('mp_[^_]+_' + request.auth.uid)
+        || firestore.get(/databases/(default)/documents/marketplace_chats/$(chatId)).data.sellerId == request.auth.uid;
+    }
+
+    // Vérifie que l'utilisateur est client ou agent d'une commande Ekbine
+    function isEkChatParticipant(orderId) {
+      let order = firestore.get(/databases/(default)/documents/ekbine_orders/$(orderId)).data;
+      return order.clientId == request.auth.uid
+          || order.agentId == request.auth.uid;
+    }
+
     // ── PHOTOS DE PROFIL CLIENT ────────────────────────────────────────────
     match /client_photos/{uid}/{file} {
       allow read:  if isAuth();
@@ -66,7 +91,8 @@ service firebase.storage {
     // ── SELFIES ACCEPTATION LIVRAISON ──────────────────────────────────────
     match /acceptance_selfies/{orderId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(5);
+      allow write: if isRealUser() && isImage() && maxSize(5)
+        && firestore.get(/databases/(default)/documents/orders/$(orderId)).data.driverId == request.auth.uid;
     }
 
     // ── PHOTOS PREUVES LIVRAISON ───────────────────────────────────────────
@@ -76,118 +102,125 @@ service firebase.storage {
     }
 
     // ── MESSAGES VOCAUX COMMANDES ──────────────────────────────────────────
+    // Lecture : participant à la commande ou admin
+    // Écriture : participant à la commande uniquement
     match /voice_messages/{orderId}/{file} {
-      allow read:  if isAuth();
-      allow write: if isAuth() && isAudio() && maxSize(10);
+      allow read:  if isAuth() && (isAdmin() || isOrderParticipant(orderId));
+      allow write: if isRealUser() && isAudio() && maxSize(10)
+        && isOrderParticipant(orderId);
     }
 
     // ── AUDIO CHAT LIVRAISON ───────────────────────────────────────────────
     match /chat_audio/{orderId}/{file} {
-      allow read:  if isAuth();
-      allow write: if isAuth() && isAudio() && maxSize(10);
+      allow read:  if isAuth() && (isAdmin() || isOrderParticipant(orderId));
+      allow write: if isRealUser() && isAudio() && maxSize(10)
+        && isOrderParticipant(orderId);
     }
 
     // ── MARKETPLACE : PHOTOS PRODUITS ──────────────────────────────────────
     match /marketplace/{productId}/{file} {
       allow read:  if isAuth();
-      // Seul l'auteur du document produit peut uploader des images
       allow write: if isRealUser() && isImage() && maxSize(10)
         && firestore.get(/databases/(default)/documents/marketplace_products/$(productId)).data.sellerId == request.auth.uid;
     }
 
     // ── MARKETPLACE : AUDIO CHAT ───────────────────────────────────────────
     match /mp_chat_audio/{chatId}/{file} {
-      allow read:  if isAuth();
-      allow write: if isRealUser() && isAudio() && maxSize(10);
+      allow read:  if isAuth() && (isAdmin() || isMpChatParticipant(chatId));
+      allow write: if isRealUser() && isAudio() && maxSize(10)
+        && isMpChatParticipant(chatId);
     }
 
     // ── E-KBINE : PREUVES PAIEMENT ─────────────────────────────────────────
     match /ekbine_proofs/{orderId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10);
+      allow write: if isRealUser() && isImage() && maxSize(10)
+        && (firestore.get(/databases/(default)/documents/ekbine_orders/$(orderId)).data.agentId == request.auth.uid
+          || firestore.get(/databases/(default)/documents/ekbine_orders/$(orderId)).data.clientId == request.auth.uid);
     }
 
     // ── E-KBINE : AUDIO CHAT ───────────────────────────────────────────────
+    // chatId = orderId dans l'architecture ekbine_chats/{orderId}
     match /ekbine_chat_audio/{chatId}/{file} {
-      allow read:  if isAuth();
-      allow write: if isRealUser() && isAudio() && maxSize(10);
+      allow read:  if isAuth() && (isAdmin() || isEkChatParticipant(chatId));
+      allow write: if isRealUser() && isAudio() && maxSize(10)
+        && isEkChatParticipant(chatId);
     }
 
     // ── LOGOS RESTAURANTS / BOULANGERIES ───────────────────────────────────
     match /restaurant_logos/{restaurantId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(5);
+      allow write: if isRealUser() && isImage() && maxSize(5)
+        && (isAdmin()
+          || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid)).data.get('restaurantId', '') == restaurantId);
     }
 
     match /boulangerie_logos/{boulangerieId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(5);
+      allow write: if isRealUser() && isImage() && maxSize(5)
+        && (isAdmin()
+          || firestore.get(/databases/(default)/documents/boulangeries/$(boulangerieId)).data.get('ownerId', '') == request.auth.uid);
     }
 
-    // ── PHOTOS RÉSIDENCES / LOCATIONS ──────────────────────────────────────
+    // ── PHOTOS RÉSIDENCES / LOCATIONS (admin uniquement) ──────────────────
     match /residence_photos/{residenceId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10);
+      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
     }
 
     match /location_photos/{locationId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10);
+      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
     }
 
-    // ── ASSETS PUBLICS (logos, bannières) ─────────────────────────────────
+    // ── ASSETS PUBLICS (logos app, bannières) — admin uniquement ──────────
     match /public/{file} {
-      allow read:  if isAuth();
-      allow write: if isRealUser() && maxSize(10);
+      allow read:  if true;
+      allow write: if isRealUser() && isImage() && maxSize(5) && isAdmin();
     }
 
     // ── PRESTATAIRES DE SERVICES (artisan + admin) ────────────────────────
     match /service_providers/{docId}/{file} {
       allow read:  if isAuth();
       allow write: if isRealUser() && isImage() && maxSize(10)
-        && (firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data != null
+        && (isAdmin()
           || firestore.get(/databases/(default)/documents/service_providers/$(docId)).data.artisanUid == request.auth.uid);
     }
 
     // ── PRODUITS BOUTIQUE (admin uniquement) ──────────────────────────────
     match /boutique_products/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10)
-        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
     }
 
     // ── RESTAURANTS MENUS (admin uniquement) ──────────────────────────────
     match /restaurant_menus/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10)
-        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data != null;
+      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
     }
 
     // ── LOCATIONS (admin) ─────────────────────────────────────────────────
     match /locations/{docId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10)
-        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data != null;
+      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
     }
 
     // ── RÉSIDENCES (admin) ────────────────────────────────────────────────
     match /residences/{docId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10)
-        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data != null;
+      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
     }
 
     // ── SERVICES SIMPLES (admin) ──────────────────────────────────────────
     match /simple_services/{docId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10)
-        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data != null;
+      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
     }
 
     // ── CAPTURES D'ÉCRAN SUPPORT ─────────────────────────────────────────
     match /support_screenshots/{uid}/{file} {
-      allow read:  if isAuth();
-      allow write: if isAuth() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow read:  if isRealUser() && isOwnerPath(uid);
+      allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
     }
 
     // ── TOUT LE RESTE : REFUSÉ ─────────────────────────────────────────────

@@ -158,6 +158,20 @@ class AppConfig {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// GOOGLE MAPS — clé partagée
+// Centralisée ici pour éviter la duplication (était recopiée telle quelle
+// dans 3 fichiers de services Maps) — ne change pas la posture de sécurité
+// (la clé reste embarquée côté client, comme l'exige le SDK Maps) : la
+// restreindre par domaine/app/API se fait côté Google Cloud Console, hors
+// du code (voir mémoire projet `project_maps_cost_audit`).
+// ═══════════════════════════════════════════════════════════════════════════
+class MapsConfig {
+  MapsConfig._();
+
+  static const apiKey = 'AIzaSyCjWt989YSIBblhRE9WNVOWXvOsXHIQ1DE';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CHEMINS FIREBASE STORAGE
 // ═══════════════════════════════════════════════════════════════════════════
 class StoragePaths {

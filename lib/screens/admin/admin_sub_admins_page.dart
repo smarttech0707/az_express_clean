@@ -2,6 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+/// Journalise un changement de rôle/permission dans `audit_logs` via le CF
+/// `logAdminAuditEvent` — best-effort, ne doit jamais bloquer l'action admin
+/// déjà effectuée (écriture Firestore directe) si la journalisation échoue.
+Future<void> _logAdminAuditEvent(String action, String targetId, [Map<String, dynamic>? metadata]) async {
+  try {
+    await FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('logAdminAuditEvent')
+        .call({'action': action, 'targetId': targetId, if (metadata != null) 'metadata': metadata});
+  } catch (_) {
+    // Non-bloquant.
+  }
+}
+
 // Toutes les sections disponibles avec leur libellé et icône
 const _kSections = [
   ('livreurs',             'Livreurs',             Icons.delivery_dining_rounded),
@@ -290,11 +303,13 @@ class _SubAdminCard extends StatelessWidget {
             .collection('admins')
             .doc(doc.id)
             .update({'isActive': false});
+        _logAdminAuditEvent('admin_deactivated', doc.id);
       case 'activate':
         await FirebaseFirestore.instance
             .collection('admins')
             .doc(doc.id)
             .update({'isActive': true});
+        _logAdminAuditEvent('admin_activated', doc.id);
       case 'delete':
         final confirm = await showDialog<bool>(
           context: context,
@@ -586,6 +601,7 @@ class _EditPermissionsDialogState extends State<_EditPermissionsDialog> {
           .collection('admins')
           .doc(widget.docId)
           .update({'permissions': _selected.toList()});
+      _logAdminAuditEvent('permissions_changed', widget.docId, {'permissions': _selected.toList()});
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../models/ek_order.dart';
 import '../models/ek_agent.dart';
 import '../ek_constants.dart';
@@ -105,25 +106,11 @@ class EkService {
         'proofUrl': proofUrl,
       });
 
-  // Transaction atomique : confirme la commande ET crédite l'agent en une seule opération.
-  // Vérifie que le statut est bien 'proof_sent' avant de valider (idempotent).
+  // Confirmation via Cloud Function sécurisée (interdit l'injection directe de walletBalance)
   static Future<void> clientConfirmOrder(String orderId, EkOrder order) async {
-    await _db.runTransaction((tx) async {
-      final orderRef = _orders.doc(orderId);
-      final snap = await tx.get(orderRef);
-      if (!snap.exists) return;
-      // Vérifie que la commande est toujours en attente de confirmation
-      if (snap.data()?['status'] != 'proof_sent') return;
-
-      tx.update(orderRef, {
-        'status':      'completed',
-        'completedAt': FieldValue.serverTimestamp(),
-      });
-      tx.update(_agents.doc(order.agentId!), {
-        'walletBalance':  FieldValue.increment(order.agentEarning),
-        'totalCompleted': FieldValue.increment(1),
-      });
-    });
+    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('ekClientConfirmOrder');
+    await callable.call({'orderId': orderId});
   }
 
   static Future<void> cancelOrder(String orderId, String reason) =>

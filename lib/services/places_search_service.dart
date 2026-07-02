@@ -3,10 +3,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../constants/app_constants.dart';
 import '../models/local_place.dart';
 
-const _mapsKey      = 'AIzaSyCjWt989YSIBblhRE9WNVOWXvOsXHIQ1DE';
-const _googleBase   = 'https://maps.googleapis.com/maps/api';
+const _mapsKey       = MapsConfig.apiKey;
+const _googleBase    = 'https://maps.googleapis.com/maps/api';
 const _nominatimBase = 'https://nominatim.openstreetmap.org';
 // Zone Abengourou (~100 km)
 const _nominatimViewbox = '-4.2,6.0,-2.8,7.6';
@@ -18,13 +19,17 @@ const _nominatimViewbox = '-4.2,6.0,-2.8,7.6';
 class PlacesSearchService {
   static final _db = FirebaseFirestore.instance;
 
+  // ── Cache Nominatim (requête → résultats, TTL 5 min) ─────────────────────
+  static final Map<String, _NominatimCache> _nominatimCache = {};
+  static const _nominatimTtl = Duration(minutes: 5);
+
   // ═══════════════════════════════════════════════════════════════════════
   // RECHERCHE PRINCIPALE
   // ═══════════════════════════════════════════════════════════════════════
 
   static Future<List<LocalPlace>> search(String query) async {
     final q = LocalPlace.normalize(query.trim());
-    if (q.length < 2) return [];
+    if (q.length < 3) return [];
 
     // 1. Firestore local (prioritaire)
     final local = await _searchFirestore(q);
@@ -105,6 +110,13 @@ class PlacesSearchService {
   // ═══════════════════════════════════════════════════════════════════════
 
   static Future<List<LocalPlace>> _searchNominatim(String query) async {
+    // Vérifier le cache avant l'appel réseau
+    final cacheKey = query.toLowerCase().trim();
+    final cached = _nominatimCache[cacheKey];
+    if (cached != null && !cached.isExpired(_nominatimTtl)) {
+      return cached.results;
+    }
+
     try {
       final q = query.contains('abengourou') ? query : '$query, Abengourou';
       final uri = Uri.parse('$_nominatimBase/search').replace(
@@ -127,7 +139,7 @@ class PlacesSearchService {
       if (resp.statusCode != 200) return [];
       final list = jsonDecode(resp.body) as List? ?? [];
 
-      return list.map((item) {
+      final result = list.map((item) {
         final name    = (item['name'] as String?)?.trim() ?? '';
         final display = (item['display_name'] as String?)?.trim() ?? '';
         final lat     = double.tryParse(item['lat'] as String? ?? '') ?? 0;
@@ -153,6 +165,13 @@ class PlacesSearchService {
           source:    'osm',
         );
       }).where((p) => p.name.isNotEmpty && p.hasCoords).toList();
+
+      // Mettre en cache
+      _nominatimCache[cacheKey] = _NominatimCache(result);
+      if (_nominatimCache.length > 100) {
+        _nominatimCache.removeWhere((_, v) => v.isExpired(_nominatimTtl));
+      }
+      return result;
     } catch (e) {
       debugPrint('[PlacesSearch] Nominatim error: $e');
       return [];
@@ -354,4 +373,13 @@ class PlacesSearchService {
     final a = dLat * dLat + dLng * dLng;
     return r * (a < 0 ? 0 : a < 1 ? a : 1);
   }
+}
+
+// ── Cache Nominatim interne ────────────────────────────────────────────────
+
+class _NominatimCache {
+  final List<LocalPlace> results;
+  final DateTime         createdAt;
+  _NominatimCache(this.results) : createdAt = DateTime.now();
+  bool isExpired(Duration ttl) => DateTime.now().difference(createdAt) > ttl;
 }

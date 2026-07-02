@@ -8,6 +8,7 @@ import 'boulangerie_dashboard.dart';
 import 'boulangerie_register.dart';
 import '../../services/notification_service.dart';
 import '../../services/subscription_service.dart';
+import '../../services/auth_service.dart';
 import '../auth/generic_forgot_password_page.dart';
 
 class BoulangerieLogin extends StatefulWidget {
@@ -80,6 +81,7 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
       }
 
       NotificationService().saveToken(uid, 'boulangeries');
+      AuthService().logAuthEvent('login', 'boulangerie');
       if (!mounted) return;
       await SubscriptionService.checkAndRenew('boulangeries', uid);
       if (!mounted) return;

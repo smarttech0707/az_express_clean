@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/notification_service.dart';
+import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
 
 class BoulangerieDashboard extends StatefulWidget {
@@ -71,6 +72,7 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
   }
 
   Future<void> _logout() async {
+    AuthService().logAuthEvent('logout', 'boulangerie');
     await FirebaseAuth.instance.signOut();
     try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
     if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);

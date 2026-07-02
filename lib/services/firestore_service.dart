@@ -1,6 +1,5 @@
 ﻿import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../models/order_model.dart';
 import '../models/driver_earnings_summary.dart';
 
@@ -11,9 +10,6 @@ class FirestoreService {
   // ==============================
   // COMMISSIONS
   // ==============================
-
-  // Commission fixe prélevée à chaque livraison terminée
-  static const int _kCommissionAmount = 100;
 
   // Commission tiered : 100 FCFA pour 500-1000 FCFA, 200 FCFA au-delà
   static int _commissionBasic    = 100; // courses 500–1000 FCFA
@@ -140,88 +136,32 @@ class FirestoreService {
   }
 
   // ==============================
-  // TROUVER LIVREUR LE PLUS PROCHE (GeoHash — scalable)
+  // TROUVER LIVREUR LE PLUS PROCHE
   // ==============================
 
-  /// Cherche dans [radiusKm] km les livreurs disponibles.
-  /// — Filtre : isOnline, isOnDelivery=false, GPS actif (<3 min), wallet ≥ commission.
-  /// — Top 5 par distance : 1 seul → assignation directe ; 2+ → broadcast multi-livreurs.
-  /// — Retourne true si au moins un livreur a été notifié.
+  /// Délègue la recherche/assignation au Cloud Function `dispatchOrderToDriver`.
+  /// La logique (filtre isOnline/isOnDelivery/wallet≥commission/GPS<3min, tri
+  /// par distance, top 5, assignation directe ou broadcast) tourne désormais
+  /// côté serveur (Admin SDK) — plus jamais côté client, qui ne peut plus lire
+  /// le champ `wallet` des autres livreurs (voir FIRESTORE_RULES.md, §5). Le
+  /// CF relit lat/longitude/budget depuis `orders/{orderId}` lui-même : les
+  /// paramètres [clientLat]/[clientLng]/[budget] sont conservés dans la
+  /// signature pour ne pas casser les appelants existants, mais ignorés côté
+  /// serveur (l'appelant doit avoir déjà écrit ces champs sur la commande).
   Future<bool> findNearestDriver(
       double clientLat, double clientLng, String orderId,
       {int budget = 0, double radiusKm = 2.0}) async {
-    final center     = GeoFirePoint(GeoPoint(clientLat, clientLng));
-    final commission = calculateCommission(budget);
-    final geoRef     = GeoCollectionReference<Map<String, dynamic>>(db.collection("livreurs"));
-    final stale      = DateTime.now().subtract(const Duration(minutes: 3));
-
-    final results = await geoRef.fetchWithin(
-      center:       center,
-      radiusInKm:   radiusKm,
-      field:        'position',
-      geopointFrom: (data) {
-        try {
-          return (data['position']?['geopoint'] as GeoPoint?) ?? const GeoPoint(0, 0);
-        } catch (_) { return const GeoPoint(0, 0); }
-      },
-      strictMode: true,
-    );
-
-    final nearby = results.where((doc) {
-      final d = doc.data();
-      if (d == null)               return false;
-      if (d['isOnline']     != true)  return false;
-      if (d['isOnDelivery'] == true)  return false;
-      if (d['isAvailable']  == false) return false; // absent = disponible par défaut
-      if (d['isSuspended']  == true)  return false; // absent = non suspendu par défaut
-      // Ne pas re-notifier un livreur déjà dans ce broadcast
-      if (d['pendingOrderId'] == orderId) return false;
-      final wallet = (d['wallet'] as num? ?? 0).toInt();
-      if (wallet < commission)      return false;
-      // GPS actif : updatedAt < 3 min
-      final ua = d['updatedAt'];
-      if (ua is Timestamp && ua.toDate().isBefore(stale)) return false;
-      return true;
-    }).toList();
-
-    if (nearby.isEmpty) return false;
-
-    // Tri par distance, top 5
-    final withDist = nearby.map((doc) {
-      final d   = doc.data()!;
-      final lat = (d['lat'] ?? 0).toDouble();
-      final lng = (d['lng'] ?? 0).toDouble();
-      final dist = (lat == 0 || lng == 0)
-          ? double.infinity
-          : Geolocator.distanceBetween(clientLat, clientLng, lat, lng);
-      return (doc: doc, dist: dist);
-    }).toList()
-      ..sort((a, b) => a.dist.compareTo(b.dist));
-
-    final top5 = withDist.where((r) => r.dist.isFinite).take(5).toList();
-    if (top5.isEmpty) return false;
-
-    final ids = top5.map((r) => r.doc.id).toList();
-
-    if (ids.length == 1) {
-      // Un seul livreur → assignation directe (flow existant inchangé)
-      await db.collection("orders").doc(orderId).update({
-        "driverId": ids.first,
-        "status":   "assigned",
-      });
-    } else {
-      // Plusieurs → broadcast : status="broadcast" + notifiedDriverIds + pendingOrderId
-      await db.collection("orders").doc(orderId).update({
-        "status":            "broadcast",
-        "notifiedDriverIds": FieldValue.arrayUnion(ids),
-      });
-      final batch = db.batch();
-      for (final id in ids) {
-        batch.update(db.collection("livreurs").doc(id), {"pendingOrderId": orderId});
-      }
-      await batch.commit();
-    }
-    return true;
+    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable(
+          'dispatchOrderToDriver',
+          options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+        );
+    final result = await callable.call(<String, dynamic>{
+      'orderId':  orderId,
+      'radiusKm': radiusKm,
+    });
+    final data = Map<String, dynamic>.from(result.data as Map);
+    return data['dispatched'] == true;
   }
 
   // ==============================
@@ -372,10 +312,14 @@ class FirestoreService {
   // PAIEMENT WALLET CLIENT
   // ==============================
 
-  /// Transfère de façon atomique :
-  /// - deliveryAmount  : client → livreur
-  /// - medicineAmount  : client → pharmacie (si pharmacieId non null)
-  /// Marque la commande isPaid:true + paymentMethod:'wallet'.
+  /// Délègue au Cloud Function `payOrderFromWalletCF` : le crédit du wallet
+  /// livreur (et pharmacie) est une écriture cross-user que le client ne peut
+  /// plus faire directement (voir firestore.rules, `livreurs/{id}` n'autorise
+  /// que l'admin ou le propriétaire diminuant son propre solde). Le CF relit
+  /// driverId/pharmacieId/deliveryAmount depuis la commande elle-même — les
+  /// paramètres [clientId]/[driverId]/[deliveryAmount] restent dans la
+  /// signature pour ne pas casser l'appelant (suivi_commande.dart), mais sont
+  /// ignorés côté serveur.
   Future<void> payOrderFromWallet({
     required String orderId,
     required String clientId,
@@ -384,156 +328,27 @@ class FirestoreService {
     String? pharmacieId,
     int medicineAmount = 0,
   }) async {
-    final total = deliveryAmount + medicineAmount;
-
-    final clientRef  = db.collection('clients').doc(clientId);
-    final driverRef  = db.collection('livreurs').doc(driverId);
-    final orderRef   = db.collection('orders').doc(orderId);
-    final pharmacieRef = pharmacieId != null
-        ? db.collection('pharmacies').doc(pharmacieId)
-        : null;
-
-    await db.runTransaction((tx) async {
-      final clientSnap = await tx.get(clientRef);
-      final driverSnap = await tx.get(driverRef);
-
-      final clientWallet = (clientSnap.data()?['wallet'] as num? ?? 0).toInt();
-      if (clientWallet < total) {
-        throw Exception('SOLDE_INSUFFISANT:$clientWallet:$total');
-      }
-
-      // Débit client
-      tx.update(clientRef, {'wallet': clientWallet - total});
-
-      // Crédit livreur
-      final driverWallet = (driverSnap.data()?['wallet'] as num? ?? 0).toInt();
-      tx.update(driverRef, {'wallet': driverWallet + deliveryAmount});
-
-      // Crédit pharmacie
-      if (pharmacieRef != null && medicineAmount > 0) {
-        final pharmSnap = await tx.get(pharmacieRef);
-        final pharmWallet = (pharmSnap.data()?['wallet'] as num? ?? 0).toInt();
-        tx.update(pharmacieRef, {'wallet': pharmWallet + medicineAmount});
-      }
-
-      // Marquer commande payée
-      tx.update(orderRef, {
-        'isPaid': true,
-        'paymentMethod': 'wallet',
-        if (medicineAmount > 0) 'medicineAmount': medicineAmount,
-      });
-    });
-
-    // Logs hors transaction
-    final now = Timestamp.now();
-
-    await clientRef.collection('wallet_transactions').add({
-      'type': 'payment',
-      'amount': total,
-      'description': 'Paiement commande — livraison $deliveryAmount FCFA'
-          '${medicineAmount > 0 ? ' + médicaments $medicineAmount FCFA' : ''}',
+    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('payOrderFromWalletCF');
+    await callable.call(<String, dynamic>{
       'orderId': orderId,
-      'createdAt': now,
+      'medicineAmount': medicineAmount,
     });
-
-    await driverRef.collection('wallet_transactions').add({
-      'type': 'earning',
-      'amount': deliveryAmount,
-      'description': 'Paiement client (wallet) — livraison',
-      'orderId': orderId,
-      'createdAt': now,
-    });
-
-    if (pharmacieRef != null && medicineAmount > 0) {
-      await pharmacieRef.collection('wallet_transactions').add({
-        'type': 'earning',
-        'amount': medicineAmount,
-        'description': 'Paiement client — médicaments',
-        'orderId': orderId,
-        'createdAt': now,
-      });
-    }
   }
 
   // ==============================
   // ACTIONS SUR COMMANDE
   // ==============================
 
+  /// Délègue au Cloud Function `cancelOrderCF` : le remboursement de la
+  /// commission au livreur est une écriture cross-user (client → livreur) que
+  /// le client ne peut plus faire directement (voir firestore.rules). Le CF
+  /// relit budget/paymentMethod/driverId depuis la commande elle-même et
+  /// vérifie que l'appelant est bien le client propriétaire.
   Future<void> cancelOrder(String orderId) async {
-    final orderRef = db.collection("orders").doc(orderId);
-    String? clientId;
-    String? driverId;
-    int refundAmount     = 0;
-    int commissionRefund = 0;
-
-    await db.runTransaction((tx) async {
-      final orderSnap = await tx.get(orderRef);
-      if (!orderSnap.exists) return;
-      final data = orderSnap.data()!;
-
-      // Lire les données utiles depuis le snapshot original
-      final originalStatus  = data['status'] as String? ?? '';
-      final paymentMethod   = data['paymentMethod'] as String?;
-      final budget          = (data['budget'] as num? ?? 0).toInt();
-      final shoppingBudget  = (data['shoppingBudget'] as num? ?? 0).toInt();
-      final cid             = data['clientId'] as String?;
-      final did             = data['driverId'] as String?;
-      final needsClientRefund = paymentMethod == 'wallet' && cid != null;
-      final needsDriverRefund = ['accepted', 'picked_up'].contains(originalStatus) && did != null;
-
-      // Toutes les lectures AVANT les écritures
-      DocumentSnapshot? clientSnap;
-      DocumentSnapshot? driverSnap;
-      if (needsClientRefund) {
-        clientSnap = await tx.get(db.collection('clients').doc(cid));
-      }
-      if (needsDriverRefund) {
-        driverSnap = await tx.get(db.collection('livreurs').doc(did));
-      }
-
-      // Écriture statut
-      tx.update(orderRef, {"status": "cancelled"});
-
-      // Remboursement wallet client
-      if (needsClientRefund) {
-        clientId     = cid;
-        refundAmount = budget + shoppingBudget;
-        if (refundAmount > 0 && clientSnap != null && clientSnap.exists) {
-          final d = clientSnap.data() as Map<String, dynamic>?;
-          final w = (d?['wallet'] as num? ?? 0).toInt();
-          tx.update(db.collection('clients').doc(cid), {'wallet': w + refundAmount});
-        }
-      }
-
-      // Remboursement commission livreur si commande déjà acceptée
-      if (needsDriverRefund) {
-        driverId         = did;
-        commissionRefund = calculateCommission(budget);
-        if (driverSnap != null && driverSnap.exists) {
-          final d = driverSnap.data() as Map<String, dynamic>?;
-          final w = (d?['wallet'] as num? ?? 0).toInt();
-          tx.update(db.collection('livreurs').doc(did), {'wallet': w + commissionRefund});
-        }
-      }
-    });
-
-    final now = Timestamp.now();
-
-    if (clientId != null && refundAmount > 0) {
-      await db.collection('clients').doc(clientId!)
-          .collection('wallet_transactions').add({
-        'type': 'refund',
-        'amount': refundAmount,
-        'description': 'Remboursement annulation commande',
-        'orderId': orderId,
-        'createdAt': now,
-      });
-    }
-
-    if (driverId != null && commissionRefund > 0) {
-      await _logTransaction(driverId!, 'refund', commissionRefund,
-          'Remboursement commission — commande annulée', orderId: orderId);
-    }
+    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('cancelOrderCF');
+    await callable.call(<String, dynamic>{'orderId': orderId});
   }
 
   Future<void> pickUpOrder(String orderId) async {
@@ -549,166 +364,29 @@ class FirestoreService {
     });
   }
 
+  /// Délègue au Cloud Function `deliverOrderCF` : le crédit du wallet livreur
+  /// (paiement wallet direct, augmentation de son propre solde) et le crédit
+  /// du partenaire (restaurant/pharmacie/boutique) sont tous deux des
+  /// écritures que le livreur/client ne peut plus faire directement (voir
+  /// firestore.rules — le propriétaire ne peut que diminuer son wallet). Le
+  /// CF relit price/sellerId/paymentMethod depuis la commande elle-même et
+  /// vérifie que l'appelant est bien le livreur assigné ; [driverId]/[price]
+  /// restent dans la signature pour ne pas casser l'appelant
+  /// (driver_dashboard.dart) mais sont ignorés côté serveur.
   Future<void> deliverOrder(
       String orderId, String driverId, int price,
       {bool markCashPaid = false,
        double? deliveredLat,
        double? deliveredLng,
        String? deliveryPhotoUrl}) async {
-    final orderRef = db.collection("orders").doc(orderId);
-    String? walletTarget; // 'driver' or 'partner'
-    String? partnerId;
-    String? partnerCol;
-    int creditAmount  = 0;
-    int deliveryFee   = 0;
-    String payMethod  = '';
-
-    await db.runTransaction((tx) async {
-      final orderSnap = await tx.get(orderRef);
-      if (!orderSnap.exists) return;
-      final data = orderSnap.data()!;
-
-      final sid            = data['sellerId'] as String?;
-      final sType          = data['sellerType'] as String? ?? 'seller';
-      final budget         = (data['budget'] as num? ?? 0).toInt();
-      final shoppingBudget = (data['shoppingBudget'] as num? ?? 0).toInt();
-      deliveryFee = budget;
-      payMethod   = data['paymentMethod'] as String? ?? '';
-
-      // Lire le wallet livreur dans tous les cas (wallet OU cash)
-      final driverRef  = db.collection("livreurs").doc(driverId);
-      final driverSnap = await tx.get(driverRef);
-
-      DocumentSnapshot? partnerSnap;
-      if (payMethod == 'wallet' && sid != null && sid.isNotEmpty) {
-        final col = _partnerCollection(sType);
-        partnerSnap = await tx.get(db.collection(col).doc(sid));
-      }
-
-      // Statut livraison
-      tx.update(orderRef, {
-        "status":      "delivered",
-        "deliveredAt": FieldValue.serverTimestamp(),
-        if (markCashPaid) "isPaid": true,
-        if (deliveredLat      != null) "deliveredLat":      deliveredLat,
-        if (deliveredLng      != null) "deliveredLng":      deliveredLng,
-        if (deliveryPhotoUrl  != null) "deliveryPhoto":     deliveryPhotoUrl,
-      });
-
-      final driverData   = driverSnap.exists ? (driverSnap.data() as Map?) : null;
-      final driverWallet = (driverData?['wallet'] as num? ?? 0).toInt();
-
-      if (payMethod == 'wallet') {
-        if (sid != null && sid.isNotEmpty) {
-          // Partenaire (restaurant / pharmacie / boutique)
-          partnerId    = sid;
-          partnerCol   = _partnerCollection(sType);
-          walletTarget = 'partner';
-          creditAmount = (budget - _kCommissionAmount).clamp(0, 9999999);
-          if (partnerSnap != null && partnerSnap.exists) {
-            final pd = partnerSnap.data() as Map<String, dynamic>?;
-            final w  = (pd?['wallet'] as num? ?? 0).toInt();
-            tx.update(db.collection(partnerCol!).doc(partnerId!),
-                {'wallet': w + creditAmount});
-          }
-          // Libérer le livreur (pas de wallet update ici, juste le flag)
-          tx.update(driverRef, {'isOnDelivery': false});
-        } else {
-          // Livraison directe : créditer le livreur net de commission + libérer
-          walletTarget = 'driver';
-          creditAmount = (budget + shoppingBudget - _kCommissionAmount).clamp(0, 9999999);
-          tx.update(driverRef, {
-            'wallet':       driverWallet + creditAmount,
-            'isOnDelivery': false,
-          });
-        }
-      } else {
-        // Cash : commission prélevée sur wallet + libérer le livreur
-        walletTarget = 'cash';
-        final newWallet = driverWallet - _kCommissionAmount;
-        tx.update(driverRef, {
-          'wallet':       newWallet,
-          'isOnDelivery': false,
-        });
-      }
-    });
-
-    // Incrémenter le compteur de livraisons du livreur
-    await db.collection("livreurs").doc(driverId).update({
-      "deliveries": FieldValue.increment(1),
-    });
-
-    // ── Wallet AZ Express : +100 FCFA par livraison ─────────────────────────
-    await db.collection('config').doc('az_wallet').set({
-      'totalCommissions': FieldValue.increment(_kCommissionAmount),
-      'totalDeliveries':  FieldValue.increment(1),
-      'updatedAt':        FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    // ── Journal commissions (collection dédiée) ──────────────────────────────
-    await _logCommission(
-      orderId:       orderId,
-      driverId:      driverId,
-      deliveryFee:   deliveryFee,
-      driverGain:    deliveryFee - _kCommissionAmount,
-      paymentMethod: payMethod,
-    );
-
-    // ── Transactions wallet ──────────────────────────────────────────────────
-    if (walletTarget == 'driver' && creditAmount > 0) {
-      // Paiement wallet : on crédite le gain net du livreur
-      await _logTransaction(
-        driverId, 'earning', creditAmount,
-        'Gain livraison — $deliveryFee FCFA (commission AZ: $_kCommissionAmount FCFA)',
-        orderId: orderId,
-      );
-    } else if (walletTarget == 'cash') {
-      // Paiement espèces : on prélève la commission sur le wallet du livreur
-      await _logTransaction(
-        driverId, 'commission', _kCommissionAmount,
-        'Commission AZ Express — espèces $deliveryFee FCFA',
-        orderId: orderId,
-      );
-    } else if (walletTarget == 'partner' &&
-        partnerId != null &&
-        partnerCol != null &&
-        creditAmount > 0) {
-      await db
-          .collection(partnerCol!)
-          .doc(partnerId!)
-          .collection('wallet_transactions')
-          .add({
-        'type':        'earning',
-        'amount':      creditAmount,
-        'description': 'Commande livrée — commission AZ: $_kCommissionAmount FCFA',
-        'orderId':     orderId,
-        'createdAt':   Timestamp.now(),
-      });
-    }
-  }
-
-  Future<void> _logCommission({
-    required String orderId,
-    required String driverId,
-    required int deliveryFee,
-    required int driverGain,
-    required String paymentMethod,
-  }) async {
-    String driverName = '';
-    try {
-      final snap = await db.collection('livreurs').doc(driverId).get();
-      driverName = snap.data()?['name'] as String? ?? '';
-    } catch (_) {}
-
-    await db.collection('commissions').add({
-      'orderId':       orderId,
-      'driverId':      driverId,
-      'driverName':    driverName,
-      'amount':        _kCommissionAmount,
-      'deliveryFee':   deliveryFee,
-      'driverGain':    driverGain,
-      'paymentMethod': paymentMethod,
-      'createdAt':     Timestamp.now(),
+    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('deliverOrderCF');
+    await callable.call(<String, dynamic>{
+      'orderId': orderId,
+      'markCashPaid': markCashPaid,
+      if (deliveredLat != null) 'deliveredLat': deliveredLat,
+      if (deliveredLng != null) 'deliveredLng': deliveredLng,
+      if (deliveryPhotoUrl != null) 'deliveryPhotoUrl': deliveryPhotoUrl,
     });
   }
 
@@ -823,29 +501,6 @@ class FirestoreService {
   // ==============================
   // WALLET VENDEURS
   // ==============================
-
-  Future<void> creditSellerWallet(
-      String sellerId, int amount, String description,
-      {String? orderId}) async {
-    final ref = db.collection('sellers').doc(sellerId);
-    await db.runTransaction((tx) async {
-      final snap = await tx.get(ref);
-      if (!snap.exists) return;
-      final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
-      tx.update(ref, {'wallet': wallet + amount});
-    });
-    await db
-        .collection('sellers')
-        .doc(sellerId)
-        .collection('wallet_transactions')
-        .add({
-      'type': 'credit',
-      'amount': amount,
-      'description': description,
-      'orderId': orderId,
-      'createdAt': Timestamp.now(),
-    });
-  }
 
   Stream<int> sellerWallet(String sellerId) {
     return db.collection('sellers').doc(sellerId).snapshots().map(
@@ -1007,16 +662,6 @@ class FirestoreService {
       case 'driver': return 'livreurs';
       case 'seller': return 'sellers';
       default: return 'clients';
-    }
-  }
-
-  // Retourne la collection Firestore correspondant au type de partenaire
-  String _partnerCollection(String sellerType) {
-    switch (sellerType) {
-      case 'restaurant':   return 'restaurants';
-      case 'boulangerie':  return 'boulangeries';
-      case 'pharmacie':    return 'pharmacies';
-      default:             return 'sellers';
     }
   }
 

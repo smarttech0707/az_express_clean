@@ -77,33 +77,8 @@ const ekServices = {
   ],
 };
 
-// ── Frais de service ───────────────────────────────────────────────────────────
-// Retourne les frais pour un service donné + montant
-int ekCalculateFee(String serviceId, int amount) {
-  switch (serviceId) {
-    case 'credit':
-    case 'mix':
-    case 'internet':
-      // 5% min 50 max 500
-      return (amount * 0.05).round().clamp(50, 500);
-    case 'transfer':
-      // 3% min 100 max 1000
-      return (amount * 0.03).round().clamp(100, 1000);
-    case 'momo_deposit':
-      // 2% min 100 max 2000
-      return (amount * 0.02).round().clamp(100, 2000);
-    case 'momo_withdrawal':
-      // 3% min 150 max 3000
-      return (amount * 0.03).round().clamp(150, 3000);
-    default:
-      return (amount * 0.05).round().clamp(50, 500);
-  }
-}
-
-// Commission AZ Express = 25% des frais
-// Agent earning = 75% des frais
-int ekAzCommission(int fee) => (fee * 0.25).round();
-int ekAgentEarning(int fee) => fee - ekAzCommission(fee);
+// Pas de frais sur les commandes Ekbine — l'agent gagne sur sa marge opérateur
+int ekCalculateFee(String serviceId, int amount) => 0;
 
 // ── Order statuses ─────────────────────────────────────────────────────────────
 const ekStatusLabels = {

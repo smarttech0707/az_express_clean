@@ -153,8 +153,63 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
         if (status == 'delivered') {
           setState(() => _isDelivered = true);
         }
+        if (status == 'cancelled') {
+          _searchTimer30?.cancel();
+          _searchTimer60?.cancel();
+          if (mounted) _showNoCancelledDialog();
+        }
       }
     }, onError: (_) {});
+  }
+
+  void _showNoCancelledDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        contentPadding:
+            const EdgeInsets.fromLTRB(24, 28, 24, 8),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('😔', style: TextStyle(fontSize: 48)),
+            SizedBox(height: 16),
+            Text(
+              'Aucun livreur disponible',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Nous n\'avons trouvé aucun livreur disponible pour le moment. Vous pouvez réessayer dans quelques minutes.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: Color(0xFF757575)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pop();
+            },
+            child: const Text('Réessayer'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context)
+                  .popUntil((route) => route.isFirst);
+            },
+            child: const Text('Retour accueil'),
+          ),
+        ],
+      ),
+    );
   }
 
   // P6 — Lance les timers d'expansion du rayon de recherche.

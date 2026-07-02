@@ -4,6 +4,7 @@ import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:geolocator/geolocator.dart';
 
 class AdminPharmaciesPage extends StatelessWidget {
@@ -257,6 +258,9 @@ class AdminPharmaciesPage extends StatelessWidget {
               onPressed: () async {
                 if (nameCtrl.text.trim().isEmpty) return;
                 final newPass = passCtrl.text.trim();
+                // Le mot de passe ne transite plus jamais par une écriture
+                // Firestore directe — uniquement via setPharmaciePassword()
+                // (Cloud Function, hachage côté serveur).
                 final payload = <String, dynamic>{
                   'name':     nameCtrl.text.trim(),
                   'address':  addressCtrl.text.trim(),
@@ -266,24 +270,32 @@ class AdminPharmaciesPage extends StatelessWidget {
                   'lat': double.tryParse(latCtrl.text.trim()) ?? 0.0,
                   'lng': double.tryParse(lngCtrl.text.trim()) ?? 0.0,
                 };
+
+                String pharmacieId;
                 if (existing != null) {
-                  // Edit: only update password fields if a new one is provided
-                  if (newPass.isNotEmpty) {
-                    payload['password']           = newPass;
-                    payload['mustChangePassword'] = true;
-                  }
+                  pharmacieId = existing.id;
                   await existing.reference.update(payload);
                 } else {
-                  // Create: always include password + force change on first login
-                  payload['password']           = newPass.isNotEmpty
-                      ? newPass
-                      : _generatePassword();
-                  payload['mustChangePassword'] = true;
-                  payload['createdAt']          = FieldValue.serverTimestamp();
-                  await FirebaseFirestore.instance
+                  payload['createdAt'] = FieldValue.serverTimestamp();
+                  final ref = await FirebaseFirestore.instance
                       .collection('pharmacies')
                       .add(payload);
+                  pharmacieId = ref.id;
                 }
+
+                // Création : toujours définir un mot de passe (fourni ou généré).
+                // Édition : uniquement si un nouveau mot de passe est saisi.
+                final passwordToSet = existing == null
+                    ? (newPass.isNotEmpty ? newPass : _generatePassword())
+                    : (newPass.isNotEmpty ? newPass : null);
+                if (passwordToSet != null) {
+                  final fn = FirebaseFunctions.instanceFor(region: 'europe-west1');
+                  await fn.httpsCallable('setPharmaciePassword').call({
+                    'pharmacieId': pharmacieId,
+                    'newPassword': passwordToSet,
+                  });
+                }
+
                 if (ctx.mounted) Navigator.pop(ctx);
               },
               child: const Text('Enregistrer'),
@@ -349,8 +361,13 @@ class AdminPharmaciesPage extends StatelessWidget {
               final doc    = docs[i];
               final data   = doc.data() as Map<String, dynamic>;
               final onDuty = data['isOnDuty'] ?? false;
+              // Le mot de passe (haché) vit désormais dans pharmacie_credentials,
+              // illisible depuis le client par design — la création exige toujours
+              // d'en définir un, donc ce badge reste informatif (vrai par défaut)
+              // plutôt que de dépendre d'un champ qui n'existe plus ici.
               final hasPass = ((data['password'] as String?) ?? '').isNotEmpty ||
-                  ((data['accessCode'] as String?) ?? '').isNotEmpty;
+                  ((data['accessCode'] as String?) ?? '').isNotEmpty ||
+                  !data.containsKey('password');
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 12),

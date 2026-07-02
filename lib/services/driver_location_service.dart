@@ -106,7 +106,7 @@ class DriverLocationService {
     _positionSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy:       LocationAccuracy.high,
-        distanceFilter: 3, // mètres — seuil bas pour animation fluide
+        distanceFilter: 50, // mètres — throttle Firestore 15m, hausse 10→50m pour réduire écrits GPS
       ),
     ).listen(
       (pos) {
@@ -115,6 +115,8 @@ class DriverLocationService {
       },
       onError: (_) {
         _gpsState = GpsTrackingState.error;
+        _positionSub?.cancel();
+        _positionSub = null;
       },
     );
 

@@ -3,15 +3,25 @@ import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 
+import '../constants/app_constants.dart';
 import '../models/route_model.dart';
 
-const String _mapsKey = 'AIzaSyCjWt989YSIBblhRE9WNVOWXvOsXHIQ1DE';
+const String _mapsKey = MapsConfig.apiKey;
 
 /// Service de calcul d'itinéraire utilisant Google Directions API.
-/// Retourne les points de polyline, la distance réelle et l'ETA trafic.
+/// Cache en mémoire par grille 100m (TTL 5 min) pour éviter les appels répétitifs.
 class GoogleRoutesService {
   static const _directionsUrl =
       'https://maps.googleapis.com/maps/api/directions/json';
+
+  // ── Cache itinéraires : clé = grille 100m × 100m, TTL 5 minutes ───────────
+  // Arrondir à 3 décimales ≈ 111m de précision
+  static final Map<String, _CachedRoute> _routeCache = {};
+  static const _routeCacheTtl = Duration(minutes: 5);
+
+  static String _routeKey(LatLng origin, LatLng dest) =>
+      '${origin.latitude.toStringAsFixed(3)},${origin.longitude.toStringAsFixed(3)}'
+      '→${dest.latitude.toStringAsFixed(3)},${dest.longitude.toStringAsFixed(3)}';
 
   // ── Route complète avec détails (distance API + durée trafic) ─────────────
 
@@ -20,6 +30,15 @@ class GoogleRoutesService {
     required LatLng destination,
     bool withTraffic = false,
   }) async {
+    // Vérifier le cache (sauf si withTraffic, car le trafic change vite)
+    if (!withTraffic) {
+      final key    = _routeKey(origin, destination);
+      final cached = _routeCache[key];
+      if (cached != null && !cached.isExpired(_routeCacheTtl)) {
+        return cached.route;
+      }
+    }
+
     try {
       final params = <String, String>{
         'origin':      '${origin.latitude},${origin.longitude}',
@@ -35,7 +54,7 @@ class GoogleRoutesService {
 
       final uri = Uri.parse(_directionsUrl).replace(queryParameters: params);
 
-      // C5 — 12s timeout, 1 retry avant fallback ligne droite
+      // 12s timeout, 1 retry avant fallback ligne droite
       http.Response resp;
       try {
         resp = await http.get(uri).timeout(const Duration(seconds: 12));
@@ -66,7 +85,7 @@ class GoogleRoutesService {
       final distKm  = distM / 1000;
       final etaMins = (durS / 60).ceil();
 
-      return RouteModel(
+      final result = RouteModel(
         points:         points,
         distanceKm:     distKm,
         etaMinutes:     etaMins,
@@ -74,6 +93,17 @@ class GoogleRoutesService {
         etaText:        RouteModel.formatEta(etaMins),
         estimatedPrice: RouteModel.estimatePrice(distKm),
       );
+
+      // Mettre en cache (sans traffic uniquement)
+      if (!withTraffic) {
+        final key = _routeKey(origin, destination);
+        _routeCache[key] = _CachedRoute(result);
+        if (_routeCache.length > 50) {
+          _routeCache.removeWhere((_, v) => v.isExpired(_routeCacheTtl));
+        }
+      }
+
+      return result;
     } catch (_) {
       return _fallback(origin, destination);
     }
@@ -85,6 +115,13 @@ class GoogleRoutesService {
     required LatLng origin,
     required LatLng destination,
   }) async {
+    // Vérifier le cache d'abord
+    final key    = _routeKey(origin, destination);
+    final cached = _routeCache[key];
+    if (cached != null && !cached.isExpired(_routeCacheTtl)) {
+      return cached.route.points;
+    }
+
     try {
       final result = await PolylinePoints().getRouteBetweenCoordinates(
         googleApiKey: _mapsKey,
@@ -148,4 +185,13 @@ class GoogleRoutesService {
   static double _sqrt(double x) => x <= 0 ? 0 : x < 1 ? x * (1 + x / 2) : x;
   static double _atan2(double y, double x) =>
       x == 0 ? (y > 0 ? 1.5708 : -1.5708) : (x > 0 ? y / x : y / x + 3.14159);
+}
+
+// ── Entrée de cache interne ────────────────────────────────────────────────
+
+class _CachedRoute {
+  final RouteModel route;
+  final DateTime   createdAt;
+  _CachedRoute(this.route) : createdAt = DateTime.now();
+  bool isExpired(Duration ttl) => DateTime.now().difference(createdAt) > ttl;
 }

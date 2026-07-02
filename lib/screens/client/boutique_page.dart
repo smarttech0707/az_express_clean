@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:uuid/uuid.dart';
@@ -94,22 +95,73 @@ class _BoutiquePageState extends State<BoutiquePage>
   }
 
   // ── ACHAT ─────────────────────────────────────────────────────
+  // Paiement wallet : délègue entièrement au Cloud Function
+  // `payBoutiqueOrderCF` (débit client + crédit vendeur + décrément stock +
+  // création de la commande + course de livraison, tout atomique côté
+  // serveur). Auparavant, le crédit du vendeur (FirestoreService.
+  // creditSellerWallet) était une écriture Firestore directe depuis ce client
+  // — la règle `sellers/{id}` n'autorisant que l'admin ou le propriétaire à
+  // wallet inchangé, cette écriture échouait toujours (`permission-denied`)
+  // alors que le débit client et la commande avaient déjà réussi juste
+  // avant : paiement partiel silencieux en production, corrigé ici.
   Future<void> _buyProduct(
       Map<String, dynamic> product, int qty, String payMethod) async {
     if (_uid == null) return;
 
     final totalPrice = (product["price"] as num? ?? 0).toInt() * qty;
 
-    // Stock check
+    // Stock check (raccourci UX — le serveur revalide de façon autoritaire).
     if ((product["stock"] as int? ?? 0) < qty) {
       _snack(context.tr('insufficient_stock'), Colors.red);
       return;
     }
 
+    if (payMethod == 'wallet') {
+      try {
+        double clientLat = 0, clientLng = 0;
+        try {
+          final pos = await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 5),
+            ),
+          );
+          clientLat = pos.latitude;
+          clientLng = pos.longitude;
+        } catch (_) {}
+
+        final fn = FirebaseFunctions.instanceFor(region: 'europe-west1')
+            .httpsCallable('payBoutiqueOrderCF');
+        await fn.call(<String, dynamic>{
+          'productId': product["id"],
+          'qty': qty,
+          'deliveryLat': clientLat,
+          'deliveryLng': clientLng,
+        });
+
+        if (!mounted) return;
+        Navigator.pop(context);
+        _snack(context.tr('order_confirmed'), Colors.green);
+        _tabCtrl.animateTo(1);
+      } catch (e) {
+        final msg = e.toString();
+        if (!mounted) return;
+        if (msg.contains("STOCK_EPUISE")) {
+          _snack(context.tr('out_of_stock_label'), Colors.red);
+        } else if (msg.contains("SOLDE_INSUFFISANT")) {
+          _snack(context.tr('insufficient_balance'), Colors.red);
+        } else {
+          _snack("${context.tr('error')} : $msg", Colors.red);
+        }
+      }
+      return;
+    }
+
+    // ── Paiement cash à la livraison — inchangé (pas de crédit wallet
+    // cross-user ici, donc pas concerné par le bug corrigé ci-dessus) ──────
     final orderId = const Uuid().v4();
     final deadline = DateTime.now().add(const Duration(hours: 48));
 
-    // ── Chercher le vendeur boutique ─────────────────────────
     String? sellerId;
     String? sellerName;
     try {
@@ -125,102 +177,36 @@ class _BoutiquePageState extends State<BoutiquePage>
     } catch (_) {}
 
     try {
-      if (payMethod == 'wallet') {
-        // ── Paiement wallet ───────────────────────────────────
-        final clientRef =
-            FirebaseFirestore.instance.collection("clients").doc(_uid);
-
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final productRef = FirebaseFirestore.instance
-              .collection("boutique_products")
-              .doc(product["id"]);
-          final productSnap = await tx.get(productRef);
-          final currentStock = (productSnap.data()?["stock"] ?? 0) as int;
-          if (currentStock < qty) throw Exception("STOCK_EPUISE");
-
-          final walletSnap = await tx.get(clientRef);
-          final currentWallet = (walletSnap.data()?["wallet"] ?? 0) as int;
-          if (currentWallet < totalPrice) throw Exception("SOLDE_INSUFFISANT");
-
-          tx.update(clientRef, {"wallet": currentWallet - totalPrice});
-          tx.update(productRef, {"stock": currentStock - qty});
-          tx.set(
-            FirebaseFirestore.instance
-                .collection("boutique_orders")
-                .doc(orderId),
-            {
-              "id": orderId,
-              "clientId": _uid,
-              "sellerId": sellerId,
-              "productId": product["id"],
-              "productName": product["name"],
-              "productCategory": product["category"],
-              "qty": qty,
-              "unitPrice": product["price"],
-              "totalPrice": totalPrice,
-              "paymentMethod": "wallet",
-              "status": "paid",
-              "deliveryDeadline": Timestamp.fromDate(deadline),
-              "createdAt": Timestamp.now(),
-            },
-          );
-        });
-
-        // Log wallet client
-        await FirebaseFirestore.instance
-            .collection("clients")
-            .doc(_uid)
-            .collection("wallet_transactions")
-            .add({
-          "type": "purchase",
-          "amount": totalPrice,
-          "description": "Achat : ${product['name']} ×$qty",
-          "orderId": orderId,
-          "createdAt": Timestamp.now(),
-        });
-
-        // Créditer le wallet vendeur
-        if (sellerId != null) {
-          await FirestoreService().creditSellerWallet(
-            sellerId,
-            totalPrice,
-            "Vente wallet : ${product['name']} ×$qty",
-            orderId: orderId,
-          );
-        }
-      } else {
-        // ── Paiement cash à la livraison ──────────────────────
-        final productRef = FirebaseFirestore.instance
-            .collection("boutique_products")
-            .doc(product["id"]);
-        final productSnap = await productRef.get();
-        final currentStock = (productSnap.data()?["stock"] ?? 0) as int;
-        if (currentStock < qty) {
-          if (!mounted) return;
-          _snack(context.tr('out_of_stock_label'), Colors.red);
-          return;
-        }
-        await productRef.update({"stock": currentStock - qty});
-
-        await FirebaseFirestore.instance
-            .collection("boutique_orders")
-            .doc(orderId)
-            .set({
-          "id": orderId,
-          "clientId": _uid,
-          "sellerId": sellerId,
-          "productId": product["id"],
-          "productName": product["name"],
-          "productCategory": product["category"],
-          "qty": qty,
-          "unitPrice": product["price"],
-          "totalPrice": totalPrice,
-          "paymentMethod": "cash",
-          "status": "pending_payment",
-          "deliveryDeadline": Timestamp.fromDate(deadline),
-          "createdAt": Timestamp.now(),
-        });
+      final productRef = FirebaseFirestore.instance
+          .collection("boutique_products")
+          .doc(product["id"]);
+      final productSnap = await productRef.get();
+      final currentStock = (productSnap.data()?["stock"] ?? 0) as int;
+      if (currentStock < qty) {
+        if (!mounted) return;
+        _snack(context.tr('out_of_stock_label'), Colors.red);
+        return;
       }
+      await productRef.update({"stock": currentStock - qty});
+
+      await FirebaseFirestore.instance
+          .collection("boutique_orders")
+          .doc(orderId)
+          .set({
+        "id": orderId,
+        "clientId": _uid,
+        "sellerId": sellerId,
+        "productId": product["id"],
+        "productName": product["name"],
+        "productCategory": product["category"],
+        "qty": qty,
+        "unitPrice": product["price"],
+        "totalPrice": totalPrice,
+        "paymentMethod": "cash",
+        "status": "pending_payment",
+        "deliveryDeadline": Timestamp.fromDate(deadline),
+        "createdAt": Timestamp.now(),
+      });
 
       // ── Course de livraison ───────────────────────────────────
       try {
@@ -256,12 +242,7 @@ class _BoutiquePageState extends State<BoutiquePage>
 
       if (!mounted) return;
       Navigator.pop(context);
-      _snack(
-        payMethod == 'wallet'
-            ? context.tr('order_confirmed')
-            : "Commande envoyée ! Paiement à la livraison",
-        Colors.green,
-      );
+      _snack("Commande envoyée ! Paiement à la livraison", Colors.green);
       _tabCtrl.animateTo(1);
     } catch (e) {
       final msg = e.toString();

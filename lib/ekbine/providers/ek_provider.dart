@@ -5,7 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/ek_order.dart';
 import '../models/ek_agent.dart';
 import '../services/ek_service.dart';
-import '../ek_constants.dart';
 
 class EkProvider extends ChangeNotifier {
   List<EkOrder> _myOrders  = [];
@@ -64,10 +63,12 @@ class EkProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final fee         = ekCalculateFee(serviceId, amount);
-      final totalPaid   = amount + fee;
-      final commAZ      = ekAzCommission(fee);
-      final agentEarn   = ekAgentEarning(fee);
+      // Pas de frais — client paie exactement le montant demandé
+      const fee       = 0;
+      final totalPaid = amount;
+      // Wallet : l'agent est remboursé du montant total après confirmation
+      // Non-wallet (cash/MM) : agent payé directement par le client hors app
+      final agentEarn = paymentMethod == 'wallet' ? amount : 0;
 
       // If paying by wallet, debit first
       if (paymentMethod == 'wallet') {
@@ -90,7 +91,6 @@ class EkProvider extends ChangeNotifier {
         'amount':            amount,
         'fee':               fee,
         'totalPaid':         totalPaid,
-        'commissionAZ':      commAZ,
         'agentEarning':      agentEarn,
         'paymentMethod':     paymentMethod,
         'status':            'pending',

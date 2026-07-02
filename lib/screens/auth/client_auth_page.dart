@@ -180,12 +180,14 @@ class _ClientAuthPageState extends State<ClientAuthPage>
         setState(() => _loading = false);
         return;
       }
+      AuthService().logAuthEvent('login', 'seller');
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => SellerDashboard(
           sellerId: uid, sellerData: sellerDoc.data()!)),
         (route) => false,
       );
     } else {
+      AuthService().logAuthEvent('login', 'client');
       _goToDashboard();
     }
   }

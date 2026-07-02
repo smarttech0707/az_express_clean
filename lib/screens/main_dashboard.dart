@@ -6,6 +6,7 @@ import '../l10n/app_text.dart';
 import '../theme/app_theme.dart';
 import '../marketplace/screens/mp_home_screen.dart';
 import '../widgets/tap_effect.dart';
+import 'ai/az_ia_chat_screen.dart';
 import 'client/client_map.dart';
 import 'client/create_order.dart';
 import 'client/suivi_commande.dart';
@@ -56,6 +57,12 @@ class _MainDashboardState extends State<MainDashboard>
         AppTransitions.fadeSlide(const CreateOrderScreen()));
   }
 
+  void _openAzIa() {
+    HapticFeedback.mediumImpact();
+    Navigator.push(context,
+        AppTransitions.fadeSlide(const AzIaChatScreen()));
+  }
+
   @override
   Widget build(BuildContext context) {
     final text = AppText(AppLanguage.of(context).locale);
@@ -83,7 +90,30 @@ class _MainDashboardState extends State<MainDashboard>
             onTap:        _navigate,
             onCommander:  _openCommander,
           ),
+          floatingActionButton: _AzIaFab(onTap: _openAzIa),
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOUTON FLOTTANT AZ IA — accès rapide à l'assistant conversationnel
+// ─────────────────────────────────────────────────────────────────────────────
+class _AzIaFab extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AzIaFab({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 76),
+      child: FloatingActionButton(
+        heroTag: 'az_ia_fab',
+        onPressed: onTap,
+        backgroundColor: AppColors.primary,
+        tooltip: 'AZ IA',
+        child: const Icon(Icons.auto_awesome, color: Colors.white),
       ),
     );
   }

@@ -4,9 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'route_service.dart';
-
-const String _mapsKey = 'AIzaSyCjWt989YSIBblhRE9WNVOWXvOsXHIQ1DE';
+import 'google_routes_service.dart';
 
 /// État de suivi partagé entre la vue client et la vue livreur.
 class TrackingState {
@@ -92,8 +90,8 @@ class TrackingService extends ChangeNotifier {
   LatLng? _lastRouteCalcPos;
   Timer?  _animTimer;
 
-  // Recalcule la route si le livreur a bougé de plus de 30 m
-  static const double _routeRefreshMeters = 30;
+  // Recalcule la route si le livreur a bougé de plus de 200m — aligné avec RealtimeTrackingService
+  static const double _routeRefreshMeters = 200;
   // Durée de l'animation entre deux positions GPS (ms)
   static const int _animDurationMs = 1000;
   // Pas de mise à jour (~60 fps)
@@ -192,12 +190,12 @@ class TrackingService extends ChangeNotifier {
 
     final etaToClient = _eta(distToClient);
 
-    // Route livreur → client (via Directions API)
-    final routeToClient = await RouteService.getRoute(
-      driverPos.latitude, driverPos.longitude,
-      _clientPosition.latitude, _clientPosition.longitude,
-      _mapsKey,
+    // Route livreur → client — via GoogleRoutesService (avec cache 5 min)
+    final routeModel1 = await GoogleRoutesService.getRouteModel(
+      origin:      driverPos,
+      destination: _clientPosition,
     );
+    final routeToClient = routeModel1.points;
 
     // Route client → destination (si destination disponible)
     List<LatLng> routeToDest = [];
@@ -211,11 +209,11 @@ class TrackingService extends ChangeNotifier {
       ) / 1000;
       etaToDest = _eta(distToDest);
 
-      routeToDest = await RouteService.getRoute(
-        _clientPosition.latitude, _clientPosition.longitude,
-        _destination!.latitude, _destination!.longitude,
-        _mapsKey,
+      final routeModel2 = await GoogleRoutesService.getRouteModel(
+        origin:      _clientPosition,
+        destination: _destination!,
       );
+      routeToDest = routeModel2.points;
     }
 
     _state = _state.copyWith(

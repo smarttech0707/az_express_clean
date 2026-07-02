@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../services/notification_service.dart';
+import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
 
 class RestaurantOwnerDashboard extends StatefulWidget {
@@ -122,6 +123,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
   }
 
   Future<void> _logout() async {
+    AuthService().logAuthEvent('logout', 'restaurant');
     await FirebaseAuth.instance.signOut();
     try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
     if (!mounted) return;
@@ -417,6 +419,11 @@ class _MenuTab extends StatelessWidget {
                             double.tryParse(priceCtrl.text.trim()) ?? 0;
                         final stock = int.tryParse(stockCtrl.text.trim()) ?? 0;
                         if (name.isEmpty || price <= 0) return;
+
+                        // DEBUG — à supprimer après validation terrain
+                        debugPrint('[MENU] AUTH UID   : ${FirebaseAuth.instance.currentUser?.uid}');
+                        debugPrint('[MENU] RESTAURANT : $restaurantId');
+                        debugPrint('[MENU] PATH       : restaurants/$restaurantId/menu');
 
                         final payload = {
                           'name': name,

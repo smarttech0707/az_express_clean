@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'restaurant_owner_dashboard.dart';
 import '../../services/notification_service.dart';
 import '../../services/subscription_service.dart';
+import '../../services/auth_service.dart';
 import '../auth/generic_forgot_password_page.dart';
 
 class RestaurantOwnerLogin extends StatefulWidget {
@@ -107,6 +108,7 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
       }
 
       NotificationService().saveToken(uid, 'restaurants');
+      AuthService().logAuthEvent('login', 'restaurant');
       if (!mounted) return;
       await SubscriptionService.checkAndRenew('restaurants', restaurantId);
       if (!mounted) return;

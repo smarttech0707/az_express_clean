@@ -90,6 +90,7 @@ class _DriverLoginState extends State<DriverLogin> {
       // 3. Approuvé → accès au dashboard
       final driverName = doc["name"] ?? "Livreur";
       NotificationService().saveToken(uid, 'livreurs');
+      AuthService().logAuthEvent('login', 'livreur');
 
       if (!mounted) return;
       Navigator.pushReplacement(

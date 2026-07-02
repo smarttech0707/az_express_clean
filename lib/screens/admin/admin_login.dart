@@ -3,6 +3,7 @@ import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/notification_service.dart';
+import '../../services/auth_service.dart';
 import 'admin_dashboard.dart';
 import '../auth/generic_forgot_password_page.dart';
 import 'admin_otp_page.dart';
@@ -93,6 +94,7 @@ class _AdminLoginState extends State<AdminLogin> {
           backgroundColor: Colors.orange,
           duration: Duration(seconds: 5),
         ));
+        AuthService().logAuthEvent('login', 'admin');
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => AdminDashboard(adminData: adminData)),

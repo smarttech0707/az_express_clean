@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/notification_service.dart';
+import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
 
 class PharmacieDashboard extends StatefulWidget {
@@ -60,6 +61,7 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
   }
 
   Future<void> _logout() async {
+    AuthService().logAuthEvent('logout', 'pharmacie');
     await FirebaseAuth.instance.signOut();
     try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
     if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);

@@ -287,14 +287,10 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                   style: GoogleFonts.inter(fontSize: 12, color: kEkMuted)),
             ]),
           ),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(_fmt(order.totalPaid),
-                style: GoogleFonts.inter(
-                    fontSize: 16, fontWeight: FontWeight.w800,
-                    color: kEkGreen)),
-            Text('dont frais : ${_fmt(order.fee)}',
-                style: GoogleFonts.inter(fontSize: 10, color: kEkMuted)),
-          ]),
+          Text(_fmt(order.totalPaid),
+              style: GoogleFonts.inter(
+                  fontSize: 16, fontWeight: FontWeight.w800,
+                  color: kEkGreen)),
         ]),
         if (order.createdAt != null) ...[
           const SizedBox(height: 10),

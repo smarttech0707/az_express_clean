@@ -23,6 +23,10 @@ migrate_working_dir/
 # is commented out by default.
 #.vscode/
 
+# Node dependencies — never commit these (functions/node_modules is already
+# tracked historically; see project memory for the cleanup this implies)
+node_modules/
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
@@ -49,6 +53,9 @@ google-services.json
 GoogleService-Info.plist
 lib/firebase_options.dart
 .env
+.env.*
+functions/.env
+functions/.env.*
 
 # Release keystore — never commit private signing keys
 *.keystore

@@ -216,6 +216,24 @@ class _OrderCard extends StatelessWidget {
                 Text("${order.budget} FCFA",
                     style: const TextStyle(
                         fontSize: 14, color: Color(0xFFFF7A1A))),
+                if (order.items != null && order.items!.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  ...order.items!.map((item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(item.name,
+                                  style: const TextStyle(fontSize: 13)),
+                            ),
+                            Text("${item.budgetFcfa} FCFA",
+                                style: const TextStyle(
+                                    fontSize: 13, color: Colors.grey)),
+                          ],
+                        ),
+                      )),
+                ],
               ],
             ),
           ),

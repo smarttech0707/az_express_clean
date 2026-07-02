@@ -556,7 +556,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
       'lng': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
       'idNumber': _idNumberCtrl.text.trim(),
       'idPhotoUrl': idPhotoUrl ?? '',
-      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      if (!_isEditing) 'createdAt': FieldValue.serverTimestamp(),
     };
 
     try {

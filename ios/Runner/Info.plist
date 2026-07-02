@@ -3,7 +3,9 @@
 <plist version="1.0">
 	<dict>
 		<key>NSMicrophoneUsageDescription</key>
-		<string>L'application a besoin du microphone pour enregistrer des messages vocaux.</string>
+		<string>L'application a besoin du microphone pour enregistrer des messages vocaux et pour la saisie vocale (courses, AZ IA).</string>
+		<key>NSSpeechRecognitionUsageDescription</key>
+		<string>L'application utilise la reconnaissance vocale pour dicter une liste de courses ou parler à AZ IA.</string>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
 		<key>CFBundleDevelopmentRegion</key>

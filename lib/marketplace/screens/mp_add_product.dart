@@ -150,6 +150,8 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
         // For edits, don't overwrite createdAt
         final updateData = Map<String, dynamic>.from(data)
           ..remove('createdAt')
+          ..remove('views')
+          ..remove('favoritesCount')
           ..['images'] = allImages;
         await MpService.updateProduct(productId, updateData);
       } else {

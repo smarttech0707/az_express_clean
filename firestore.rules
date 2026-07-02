@@ -9,10 +9,16 @@ service cloud.firestore {
       return request.auth.uid;
     }
     function isAdmin() {
-      return isAuth() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return isAuth()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('isActive', true) != false;
     }
     function isOwner(userId) {
       return isAuth() && uid() == userId;
+    }
+    function isSuperAdmin() {
+      return isAdmin()
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('role', 'super') != 'sub';
     }
     function isRealUser() {
       return isAuth() && request.auth.token.firebase.sign_in_provider != 'anonymous';
@@ -35,14 +41,25 @@ service cloud.firestore {
 
     match /admins/{adminId} {
       allow read:  if isOwner(adminId) || isAdmin();
-      allow write: if isAdmin();
+      // Super admin peut tout modifier (permissions, rôle, isActive…)
+      // Tout admin peut mettre à jour uniquement ses propres champs OTP (2FA login)
+      allow write: if isSuperAdmin()
+        || (isOwner(adminId) && isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['otpHash', 'otpCode', 'otpExpiry', 'otpAttempts', 'fcmToken']));
     }
 
     match /clients/{clientId} {
       allow read:   if isOwner(clientId) || isAdmin();
       allow create: if isOwner(clientId);
       allow update: if isAdmin() ||
-        (isOwner(clientId) && unchanged('wallet') && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled'));
+        (isOwner(clientId) && unchanged('wallet') && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled')) ||
+        // Débit wallet autorisé (paiement Ekbine côté client) — solde ne peut que diminuer
+        (isOwner(clientId)
+          && request.resource.data.wallet is int
+          && request.resource.data.wallet >= 0
+          && request.resource.data.wallet < resource.data.wallet
+          && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled'));
       allow delete: if isAdmin();
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(clientId) || isAdmin();
@@ -113,6 +130,17 @@ service cloud.firestore {
     match /restaurants/{restaurantId} {
       allow read:  if isAuth();
       allow write: if isAdmin();
+
+      // Sous-collection utilisée par restaurant_owner_dashboard.dart
+      match /menu/{menuId} {
+        allow read: if isAuth();
+        allow write: if isAdmin()
+          || (isRealUser()
+            && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+                .data.get('restaurantId', '') == restaurantId);
+      }
+
+      // Ancienne sous-collection (conservée pour compatibilité)
       match /menus/{menuId} {
         allow read:  if isAuth();
         allow write: if isAdmin();
@@ -158,13 +186,27 @@ service cloud.firestore {
     }
 
     match /pharmacies/{pharmacieId} {
+      // Le listing pharmacie (nom/adresse/horaires/garde) reste public aux
+      // utilisateurs authentifiés (y compris anonymes) pour ne pas casser le
+      // parcours client — ce n'est plus un risque puisque le mot de passe ne
+      // vit plus ici : voir pharmacie_credentials ci-dessous, alimenté
+      // uniquement par les Cloud Functions pharmacieLogin()/setPharmaciePassword().
       allow read:  if isAuth();
-      allow write: if isAdmin();
+      // password/accessCode ne doivent plus jamais être écrits directement,
+      // même par un admin — uniquement via setPharmaciePassword() (Admin SDK).
+      allow write: if isAdmin()
+        && !request.resource.data.keys().hasAny(['password', 'accessCode']);
       // La pharmacie peut sauvegarder son UID de session pour l'accès aux commandes.
       // Seul le champ currentUid est modifiable, et uniquement avec l'UID de la session active.
       allow update: if isAuth()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentUid'])
         && request.resource.data.currentUid == uid();
+    }
+
+    // Identifiants pharmacie hachés — écriture/lecture exclusivement via
+    // pharmacieLogin()/setPharmaciePassword() (Cloud Functions, Admin SDK).
+    match /pharmacie_credentials/{pharmacieId} {
+      allow read, write: if false;
     }
 
     match /pharmacie_requests/{requestId} {
@@ -260,7 +302,8 @@ service cloud.firestore {
         && request.resource.data.userId == uid()
         && request.resource.data.status == 'pending'
         && request.resource.data.amount is int
-        && request.resource.data.amount >= 500;
+        && request.resource.data.amount >= 500
+        && request.resource.data.amount <= 500000;
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
@@ -304,9 +347,8 @@ service cloud.firestore {
             && unchanged('clientId') && unchanged('agentId') && unchanged('amount'))
         )) ||
         (isAuth() && resource.data.clientId == uid() && (
-          (resource.data.status == 'proof_sent'
-            && request.resource.data.status == 'completed'
-            && unchanged('agentId') && unchanged('amount') && unchanged('agentEarning')) ||
+          // completed : interdit en direct — passe obligatoirement par ekClientConfirmOrder (CF)
+          // pour créditer le wallet agent atomiquement
           ((resource.data.status == 'pending' || resource.data.status == 'awaiting_deposit')
             && request.resource.data.status == 'cancelled'
             && unchanged('agentId') && unchanged('amount')) ||
@@ -331,14 +373,8 @@ service cloud.firestore {
         (isOwner(agentId) && unchanged('walletBalance') && unchanged('isVerified')
           && unchanged('isSuspended') && unchanged('rating') && unchanged('ratingCount')
           && unchanged('totalCompleted')) ||
-        // Client confirme la commande (transaction atomique) → crédite walletBalance
-        // La transaction clientConfirmOrder n'écrit que walletBalance et totalCompleted
-        (isAuth()
-          && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['walletBalance', 'totalCompleted'])
-          && request.resource.data.walletBalance is int
-          && request.resource.data.walletBalance > resource.data.walletBalance
-          && request.resource.data.totalCompleted == resource.data.totalCompleted + 1) ||
+        // Wallet crédité uniquement via Cloud Function ekClientConfirmOrder
+        // Écriture directe depuis le client interdite pour éviter l'injection de montants arbitraires
         // Client note l'agent après service — lié à une commande completed de cet agent
         (isAuth()
           && request.resource.data.diff(resource.data).affectedKeys()
@@ -375,14 +411,24 @@ service cloud.firestore {
     }
 
     match /marketplace_products/{productId} {
-      allow read: if isAuth();
+      // Les produits 'hidden' ne sont visibles que par leur vendeur et les admins
+      allow read: if isAdmin()
+        || (isRealUser() && resource.data.sellerId == uid())
+        || (isAuth() && resource.data.get('status', 'active') == 'active');
       allow create: if isRealUser()
         && request.resource.data.sellerId == uid()
         && request.resource.data.status in ['active', 'hidden']
         && request.resource.data.price is int && request.resource.data.price > 0;
-      allow update: if isAdmin() ||
-        (isRealUser() && resource.data.sellerId == uid()
-          && unchanged('sellerId') && unchanged('views') && unchanged('favoritesCount'));
+      allow update: if isAdmin()
+        // Propriétaire modifie son annonce (sans toucher views/favoritesCount)
+        || (isRealUser() && resource.data.sellerId == uid()
+          && unchanged('sellerId') && unchanged('views') && unchanged('favoritesCount'))
+        // N'importe quel utilisateur peut incrémenter les vues uniquement
+        || (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views']))
+        // N'importe quel utilisateur peut modifier favoritesCount uniquement
+        || (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['favoritesCount']));
       allow delete: if isAdmin() || (isRealUser() && resource.data.sellerId == uid());
     }
 
@@ -414,6 +460,51 @@ service cloud.firestore {
         && request.resource.data.reportedBy == uid()
         && request.resource.data.keys().hasAll(['productId','reportedBy','reason']);
       allow read, update, delete: if isAdmin();
+    }
+
+    // ── Immobilier (M6) — calqué sur sellers/seller_requests/marketplace_products ──
+    match /real_estate_agents/{agentId} {
+      allow read:   if isOwner(agentId) || isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isOwner(agentId) && unchanged('isVerified') && unchanged('isActive'));
+      allow delete: if isAdmin();
+    }
+
+    match /real_estate_agent_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Types de biens administrables (pas de liste codée en dur, cf. dette Marketplace).
+    match /real_estate_categories/{categoryId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /real_estate_listings/{listingId} {
+      allow read: if isAdmin()
+        || (isRealUser() && resource.data.agentId == uid())
+        || (isAuth() && resource.data.get('status', 'active') == 'active');
+      allow create: if isRealUser()
+        && request.resource.data.agentId == uid()
+        && request.resource.data.status in ['active', 'hidden']
+        && request.resource.data.price is int && request.resource.data.price > 0;
+      allow update: if isAdmin()
+        || (isRealUser() && resource.data.agentId == uid()
+          && unchanged('agentId') && unchanged('views'))
+        || (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views']));
+      allow delete: if isAdmin() || (isRealUser() && resource.data.agentId == uid());
+    }
+
+    // Demandes de visite — écriture exclusivement via requestPropertyVisit()/
+    // respondToVisitRequest() (Cloud Functions), jamais depuis le client.
+    match /real_estate_visit_requests/{requestId} {
+      allow read: if isAdmin()
+        || (isAuth() && (resource.data.clientId == uid() || resource.data.agentId == uid()));
+      allow write: if false;
     }
 
     match /sos_alerts/{alertId} {
@@ -464,14 +555,27 @@ service cloud.firestore {
 
     match /boutique_orders/{orderId} {
       allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
-      allow create: if isAuth() && request.resource.data.clientId == uid();
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(['clientId', 'status'])
+        && ('totalAmount' in request.resource.data
+          ? request.resource.data.totalAmount is int && request.resource.data.totalAmount > 0
+          : true);
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
     match /boutique_products/{productId} {
-      allow read:  if isAuth();
-      allow write: if isAdmin();
+      allow read: if isAuth();
+      allow create: if isRealUser()
+        && request.resource.data.sellerId == uid();
+      allow update: if isAdmin()
+        || (isRealUser()
+          && resource.data.sellerId == uid()
+          && unchanged('sellerId'));
+      allow delete: if isAdmin()
+        || (isRealUser() && resource.data.sellerId == uid());
     }
 
     match /services/{serviceId} {
@@ -480,6 +584,8 @@ service cloud.firestore {
     }
 
     match /service_providers/{providerId} {
+      // LIMITATION ARCHITECTURALE : le login artisan utilise signInAnonymously() explicitement.
+      // isRealUser() casserait le login. Mitigation : Phase 5 — migrer vers Cloud Function artisanLogin().
       allow read:  if isAuth();
       allow write: if isAdmin();
       allow update: if isRealUser() && !('artisanUid' in resource.data)
@@ -502,14 +608,26 @@ service cloud.firestore {
 
     match /blanchisserie_orders/{orderId} {
       allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
-      allow create: if isAuth() && request.resource.data.clientId == uid();
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(['clientId', 'status'])
+        && ('totalAmount' in request.resource.data
+          ? request.resource.data.totalAmount is int && request.resource.data.totalAmount > 0
+          : true);
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
     match /eau_boissons_orders/{orderId} {
       allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
-      allow create: if isAuth() && request.resource.data.clientId == uid();
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(['clientId', 'status'])
+        && ('totalAmount' in request.resource.data
+          ? request.resource.data.totalAmount is int && request.resource.data.totalAmount > 0
+          : true);
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
@@ -527,7 +645,7 @@ service cloud.firestore {
         && request.resource.data.longitude is number);
       allow update: if isAdmin()
         || (isAuth() && request.resource.data.diff(resource.data)
-              .affectedKeys().hasOnly(['searchCount', 'updatedAt', 'latitude', 'longitude']));
+              .affectedKeys().hasOnly(['searchCount', 'updatedAt']));
       allow delete: if isAdmin();
     }
 
@@ -586,6 +704,71 @@ service cloud.firestore {
     match /driver_rankings/{driverId} {
       allow read:  if isAuth();
       allow write: if isAdmin();
+    }
+
+    // ── Audit logs — écriture réservée aux Cloud Functions ────────────────────
+    // Lecture restreinte au super-admin (2026-07-01) : un journal d'audit
+    // complet ne doit pas être visible par tout sous-admin.
+    match /audit_logs/{logId} {
+      allow read:   if isSuperAdmin();
+      allow write:  if false;
+    }
+
+    // ── Événements sécurité — écriture réservée aux Cloud Functions ───────────
+    match /security_events/{eventId} {
+      allow read:   if isAdmin();
+      allow update: if isAdmin();
+      allow write:  if false;
+    }
+
+    // ── Rate limits — géré par Cloud Functions uniquement ────────────────────
+    match /rate_limits/{key} {
+      allow read, write: if false;
+    }
+
+    // ── Journal d'observabilité par requête (Prompt 25, 2026-07-02) ─────────
+    // Distinct d'audit_logs : diagnostic technique haut-volume (requestId,
+    // durée, statut), pas une piste d'audit métier — voir functions/observability.js.
+    // Utilisé uniquement par les nouvelles Cloud Functions, pas rétrofité.
+    match /request_logs/{logId} {
+      allow read:  if isSuperAdmin();
+      allow write: if false;
+    }
+
+    // ── Tokens FCM invalides — nettoyage asynchrone Cloud Functions ──────────
+    match /invalid_fcm_tokens/{docId} {
+      allow read, write: if false;
+    }
+
+    // ── Conciliation wallet (Prompt 28, 2026-07-02) ──────────────────────────
+    // Écarts détectés entre le champ `wallet` et wallet_transactions —
+    // données financières sensibles, super-admin uniquement.
+    match /wallet_reconciliation_findings/{findingId} {
+      allow read:  if isSuperAdmin();
+      allow write: if false;
+    }
+
+    // ── Métriques dispatching — écriture réservée aux Cloud Functions ─────────
+    match /dispatch_metrics/{metricId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ── AZ IA — historique de conversation, écriture réservée aux Cloud Functions ──
+    match /ai_conversations/{ownerId} {
+      allow read: if isOwner(ownerId) || isAdmin();
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if isOwner(ownerId) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // ── AZ IA — actions en attente de confirmation, gérées par Cloud Functions ──
+    match /ai_pending_actions/{actionId} {
+      allow read: if isAuth() && (resource.data.uid == uid() || isAdmin());
+      allow write: if false;
     }
   }
 }

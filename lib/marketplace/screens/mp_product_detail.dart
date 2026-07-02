@@ -644,8 +644,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                   : () async {
                       setState(() => _sending = true);
                       final uid =
-                          // ignore: use_build_context_synchronously
-                          (await Future.value(null)) ?? '';
+                          FirebaseAuth.instance.currentUser?.uid ?? '';
                       await MpService.reportProduct(
                           widget.product.id, uid, _selected!);
                       if (!context.mounted) return;

@@ -16,6 +16,7 @@ import '../../models/route_model.dart';
 import '../../services/firestore_service.dart';
 import '../../services/google_routes_service.dart';
 import '../../services/places_search_service.dart';
+import '../../services/places_service.dart';
 import '../../services/tarif_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/driver_marker.dart';
@@ -166,24 +167,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           timeLimit: Duration(seconds: 10),
         ),
       );
-      String? addr;
-      try {
-        final uri = Uri.parse(
-            'https://maps.googleapis.com/maps/api/geocode/json').replace(
-          queryParameters: {
-            'latlng':   '${pos.latitude},${pos.longitude}',
-            'language': 'fr',
-            'key':      'AIzaSyCjWt989YSIBblhRE9WNVOWXvOsXHIQ1DE',
-          },
-        );
-        final resp = await _http(uri);
-        if (resp != null) {
-          final results = resp['results'] as List?;
-          if (results != null && results.isNotEmpty) {
-            addr = results.first['formatted_address'] as String?;
-          }
-        }
-      } catch (_) {}
+      // Utilise PlacesService.reverseGeocode : Nominatim (gratuit) + cache 2h
+      final addr = await PlacesService.reverseGeocode(
+          pos.latitude, pos.longitude);
 
       final place = LocalPlace.fromExternal(
         name:      addr?.split(',').first ?? 'Ma position',

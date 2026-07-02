@@ -34,6 +34,7 @@ import 'admin_ekbine_page.dart';
 import 'admin_sub_admins_page.dart';
 import 'admin_commissions_page.dart';
 import 'admin_live_tracking_page.dart';
+import 'admin_security_dashboard.dart';
 
 class AdminDashboard extends StatefulWidget {
   final Map<String, dynamic> adminData;
@@ -373,6 +374,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const AdminSubAdminsPage()),
+          ),
+        ),
+      if (_isSuper)
+        _MenuCard(
+          title:    'Sécurité',
+          subtitle: 'Audit & monitoring',
+          icon:     Icons.security_rounded,
+          gradient: const [Color(0xFF1A1A2E), Color(0xFF16213E)],
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AdminSecurityDashboard()),
           ),
         ),
     ];

@@ -1,6 +1,9 @@
 import 'dart:math';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 class AuthService {
   static final AuthService _i = AuthService._();
@@ -165,12 +168,20 @@ class AuthService {
     await _db.collection(collection).doc(user.uid).update({'phone': newPhone.trim()});
   }
 
+  // ── Hash OTP pour stockage sécurisé ─────────────────────────────────────
+  static String _hashOtp(String code) {
+    final bytes = utf8.encode('az_otp_$code');
+    return sha256.convert(bytes).toString();
+  }
+
   // ── Génère + stocke un OTP 6 chiffres pour la 2FA admin ─────────────────
   Future<String> generateAdminOtp(String adminUid) async {
-    final code = (100000 + Random().nextInt(900000)).toString();
+    final code = (100000 + Random.secure().nextInt(900000)).toString();
     await _db.collection('admins').doc(adminUid).update({
-      'otpCode':   code,
-      'otpExpiry': DateTime.now().add(const Duration(minutes: 5)).millisecondsSinceEpoch,
+      'otpHash':     _hashOtp(code),
+      'otpCode':     null,
+      'otpExpiry':   DateTime.now().add(const Duration(minutes: 5)).millisecondsSinceEpoch,
+      'otpAttempts': 0,
     });
     return code;
   }
@@ -180,16 +191,44 @@ class AuthService {
     final doc = await _db.collection('admins').doc(adminUid).get();
     final data = doc.data();
     if (data == null) return false;
-    final stored   = data['otpCode']   as String?;
-    final expiry   = data['otpExpiry'] as int?;
-    if (stored == null || expiry == null) return false;
-    if (DateTime.now().millisecondsSinceEpoch > expiry) return false;
-    if (stored != code) return false;
-    // Invalider l'OTP après usage
+    final storedHash = data['otpHash']     as String?;
+    final expiry     = data['otpExpiry']   as int?;
+    final attempts   = (data['otpAttempts'] as int?) ?? 0;
+
+    if (storedHash == null || expiry == null) return false;
+    if (DateTime.now().millisecondsSinceEpoch > expiry) {
+      await _db.collection('admins').doc(adminUid).update({'otpHash': null, 'otpExpiry': null});
+      return false;
+    }
+    if (attempts >= 5) {
+      await _db.collection('admins').doc(adminUid).update({'otpHash': null, 'otpExpiry': null, 'otpAttempts': 0});
+      return false;
+    }
+
+    if (_hashOtp(code) != storedHash) {
+      await _db.collection('admins').doc(adminUid).update({'otpAttempts': FieldValue.increment(1)});
+      return false;
+    }
+
     await _db.collection('admins').doc(adminUid).update({
-      'otpCode': null, 'otpExpiry': null,
+      'otpHash': null, 'otpExpiry': null, 'otpAttempts': 0,
     });
     return true;
+  }
+
+  // ── Journalisation des événements de connexion (audit_logs) ─────────────
+  // Appelé juste après un signIn réussi ou juste avant un signOut, pendant
+  // que l'utilisateur est encore authentifié (le CF exige request.auth).
+  // Best-effort : ne doit jamais bloquer/faire échouer un login ou logout si
+  // la journalisation échoue (réseau coupé, etc.).
+  Future<void> logAuthEvent(String event, String userType) async {
+    try {
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('logAuthEvent')
+          .call(<String, dynamic>{'event': event, 'userType': userType});
+    } catch (_) {
+      // Non-bloquant.
+    }
   }
 
   // ── Validation ───────────────────────────────────────────────────────────
