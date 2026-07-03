@@ -9,6 +9,7 @@ const {
   buildCancelOrder,
   buildDeliverOrder,
   buildPayBoutiqueOrder,
+  buildRefundExpiredBoutiqueOrder,
 } = require('../orderActions');
 
 // Fake Firestore : un Map en mémoire + de quoi satisfaire get/set/update/add
@@ -318,6 +319,61 @@ test('cancelOrderCF: also refunds the driver commission when the order was alrea
   assert.equal(store.get('clients/c1').wallet, 0); // cash order: no client refund
 });
 
+test('cancelOrderCF: debits a marketplace seller already paid at order creation', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':  { clientId: 'c1', status: 'pending', paymentMethod: 'wallet', budget: 1000, sellerId: 's1', sellerType: 'seller' },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 1000 }, // déjà crédité en entier par create_marketplace_order
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('clients/c1').wallet, 1000); // remboursé
+  assert.equal(store.get('sellers/s1').wallet, 0);     // repris — plus d'argent créé à partir de rien
+});
+
+test('cancelOrderCF: clamps the seller debit at 0 if they already spent part of the prepaid credit', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':  { clientId: 'c1', status: 'pending', paymentMethod: 'wallet', budget: 1000, sellerId: 's1', sellerType: 'seller' },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 300 }, // a déjà retiré une partie des 1000 FCFA crédités
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('clients/c1').wallet, 1000); // remboursé en entier malgré tout
+  assert.equal(store.get('sellers/s1').wallet, 0);     // repris jusqu'à 0, jamais négatif
+});
+
+test('cancelOrderCF: does NOT touch a boutique seller wallet (delivery-leg order, different amount)', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':  { clientId: 'c1', status: 'pending', paymentMethod: 'wallet', budget: 500, isPaid: false, type: 'boutique', sellerId: 's1', sellerType: 'boutique', linkedBoutiqueOrderId: 'bo1' },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 20000 }, // crédité via boutique_orders, montant différent de `budget` ici
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('sellers/s1').wallet, 20000); // volontairement inchangé (voir commentaire code)
+  assert.equal(store.get('clients/c1').wallet, 0);      // pas de remboursement fantôme (rien n'a été payé sur ce document)
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+});
+
 test('cancelOrderCF: rejects cancelling an already-delivered order', async () => {
   const { db } = makeFakeDb({
     'orders/o1': { clientId: 'c1', status: 'delivered', paymentMethod: 'cash', budget: 500 },
@@ -401,6 +457,42 @@ test('deliverOrderCF: wallet-paid delivery with a seller credits the partner, no
 
   assert.equal(store.get('restaurants/r1').wallet, 900); // 1000 - 100 commission
   assert.equal(store.get('livreurs/d1').wallet, 500); // driver's own wallet untouched
+  assert.equal(store.get('livreurs/d1').isOnDelivery, false);
+});
+
+test('deliverOrderCF: does not re-credit a marketplace seller already paid at order creation', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, sellerId: 's1', sellerType: 'seller' },
+    'livreurs/d1': { wallet: 500 },
+    'sellers/s1':  { wallet: 1000 }, // déjà crédité en entier par create_marketplace_order
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('sellers/s1').wallet, 1000); // inchangé — pas de second crédit
+  assert.equal(store.get('livreurs/d1').wallet, 500); // driver's own wallet untouched
+  assert.equal(store.get('livreurs/d1').isOnDelivery, false);
+  assert.equal(store.get('orders/o1').status, 'delivered');
+});
+
+test('deliverOrderCF: does not re-credit a boutique seller already paid at order creation', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, sellerId: 's1', sellerType: 'boutique' },
+    'livreurs/d1': { wallet: 500 },
+    'sellers/s1':  { wallet: 2000 }, // déjà crédité en entier par payBoutiqueOrderCF
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('sellers/s1').wallet, 2000); // inchangé — pas de second crédit
   assert.equal(store.get('livreurs/d1').isOnDelivery, false);
 });
 
@@ -589,6 +681,118 @@ test('payBoutiqueOrderCF: rejects unauthenticated calls', async () => {
   });
   await assert.rejects(
     () => fn.run({ data: { productId: 'p1', qty: 1 } }),
+    (err) => err.code === 'unauthenticated',
+  );
+});
+
+// ── refundExpiredBoutiqueOrderCF ────────────────────────────────────────────
+
+test('refundExpiredBoutiqueOrderCF: refunds the client and debits the seller once the 48h deadline has passed', async () => {
+  const { db, store } = makeFakeDb({
+    'boutique_orders/bo1': {
+      clientId: 'c1', sellerId: 's1', status: 'paid', totalPrice: 5000,
+      deliveryDeadline: fakeAdmin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+    },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 5000 }, // déjà crédité en entier à l'achat
+  });
+  const fn = buildRefundExpiredBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  const result = await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'bo1' } });
+
+  assert.deepEqual(result, { success: true, amount: 5000 });
+  assert.equal(store.get('clients/c1').wallet, 5000);
+  assert.equal(store.get('sellers/s1').wallet, 0);
+  assert.equal(store.get('boutique_orders/bo1').status, 'refunded');
+});
+
+test('refundExpiredBoutiqueOrderCF: clamps the seller debit at 0 if they already spent part of the credit', async () => {
+  const { db, store } = makeFakeDb({
+    'boutique_orders/bo1': {
+      clientId: 'c1', sellerId: 's1', status: 'paid', totalPrice: 5000,
+      deliveryDeadline: fakeAdmin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+    },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 1000 }, // a déjà retiré une partie des 5000 FCFA crédités
+  });
+  const fn = buildRefundExpiredBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'bo1' } });
+
+  assert.equal(store.get('clients/c1').wallet, 5000); // remboursé en entier malgré tout
+  assert.equal(store.get('sellers/s1').wallet, 0);     // repris jusqu'à 0, jamais négatif
+});
+
+test('refundExpiredBoutiqueOrderCF: rejects when the 48h deadline has not passed yet', async () => {
+  const { db } = makeFakeDb({
+    'boutique_orders/bo1': {
+      clientId: 'c1', sellerId: 's1', status: 'paid', totalPrice: 5000,
+      deliveryDeadline: fakeAdmin.firestore.Timestamp.fromMillis(Date.now() + 60000),
+    },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 5000 },
+  });
+  const fn = buildRefundExpiredBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { orderId: 'bo1' } }),
+    (err) => err.code === 'failed-precondition',
+  );
+});
+
+test('refundExpiredBoutiqueOrderCF: rejects a caller who does not own the order', async () => {
+  const { db } = makeFakeDb({
+    'boutique_orders/bo1': {
+      clientId: 'c1', sellerId: 's1', status: 'paid', totalPrice: 5000,
+      deliveryDeadline: fakeAdmin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+    },
+  });
+  const fn = buildRefundExpiredBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'stranger' }, data: { orderId: 'bo1' } }),
+    (err) => err.code === 'permission-denied',
+  );
+});
+
+test('refundExpiredBoutiqueOrderCF: rejects an order that is not in "paid" status', async () => {
+  const { db } = makeFakeDb({
+    'boutique_orders/bo1': {
+      clientId: 'c1', sellerId: 's1', status: 'delivered', totalPrice: 5000,
+      deliveryDeadline: fakeAdmin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+    },
+  });
+  const fn = buildRefundExpiredBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { orderId: 'bo1' } }),
+    (err) => err.code === 'failed-precondition',
+  );
+});
+
+test('refundExpiredBoutiqueOrderCF: rejects unauthenticated calls', async () => {
+  const { db } = makeFakeDb();
+  const fn = buildRefundExpiredBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+  await assert.rejects(
+    () => fn.run({ data: { orderId: 'bo1' } }),
     (err) => err.code === 'unauthenticated',
   );
 });

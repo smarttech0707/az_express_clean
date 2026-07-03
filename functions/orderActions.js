@@ -15,6 +15,10 @@
 
 const AZ_COMMISSION_FIXED = 100; // même constante que _kCommissionAmount côté Dart
 
+// sellerType déjà payés intégralement (0% commission) à la création de la
+// commande, par leur propre Cloud Function atomique — voir buildDeliverOrder.
+const PREPAID_PARTNER_TYPES = new Set(['seller', 'boutique']);
+
 function partnerCollection(sellerType) {
   switch (sellerType) {
     case 'restaurant':  return 'restaurants';
@@ -136,6 +140,7 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
 
     const orderRef = db.collection('orders').doc(String(orderId));
     let clientRefund = 0, driverRefund = 0, driverId = null;
+    let sellerDebit = 0, sellerId = null, sellerCol = null;
 
     await db.runTransaction(async (tx) => {
       const orderSnap = await tx.get(orderRef);
@@ -151,14 +156,40 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
 
       const budget         = Number(order.budget || 0);
       const shoppingBudget = Number(order.shoppingBudget || 0);
-      const needsClientRefund = order.paymentMethod === 'wallet';
+      // 'boutique' : ce document `orders` ne représente que le trajet de
+      // livraison (budget = frais fixe, isPaid TOUJOURS false, voir
+      // buildPayBoutiqueOrder) — rien n'a jamais été prélevé au client sur CE
+      // document précis (le vrai paiement, totalPrice, vit sur
+      // `boutique_orders` via `linkedBoutiqueOrderId`, remboursé séparément
+      // par buildRefundExpiredBoutiqueOrder). Le rembourser ici créerait de
+      // l'argent à partir de rien pour un montant jamais payé — confirmé et
+      // corrigé (Master Prompt 48 bis), après l'avoir laissé en trouvaille
+      // documentée seule au Prompt 47.
+      const needsClientRefund = order.paymentMethod === 'wallet' && order.type !== 'boutique';
       const needsDriverRefund = ['accepted', 'picked_up'].includes(order.status) && !!order.driverId;
+      // Marketplace ('seller') est crédité en entier à la CRÉATION de la
+      // commande (voir PREPAID_PARTNER_TYPES, Master Prompt 46) — s'il
+      // gardait cet argent après un remboursement client, l'annulation
+      // créerait de l'argent à partir de rien (client remboursé + vendeur
+      // déjà payé). Il faut donc le débiter en retour ici, symétrique au
+      // remboursement de commission du livreur ci-dessous (Master Prompt 47).
+      // Volontairement limité à 'seller' — 'boutique' n'atteint plus jamais
+      // needsClientRefund ci-dessus, donc jamais ce débit non plus.
+      const orderSellerId = order.sellerId || null;
+      const needsSellerDebit = needsClientRefund && !!orderSellerId &&
+        order.sellerType === 'seller';
+      if (needsSellerDebit) {
+        sellerId  = orderSellerId;
+        sellerCol = partnerCollection(order.sellerType || 'seller');
+      }
 
       const clientRef = db.collection('clients').doc(uid);
       const driverRef = needsDriverRefund ? db.collection('livreurs').doc(order.driverId) : null;
+      const sellerRef = needsSellerDebit ? db.collection(sellerCol).doc(sellerId) : null;
 
       const clientSnap = needsClientRefund ? await tx.get(clientRef) : null;
       const driverSnap = needsDriverRefund ? await tx.get(driverRef) : null;
+      const sellerSnap = needsSellerDebit   ? await tx.get(sellerRef) : null;
 
       tx.update(orderRef, { status: 'cancelled' });
 
@@ -178,6 +209,18 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
           tx.update(driverRef, { wallet: w + driverRefund });
         }
       }
+
+      if (needsSellerDebit && sellerSnap.exists) {
+        const w = Number(sellerSnap.data().wallet || 0);
+        // Plafonné à 0 : si le vendeur a déjà retiré une partie de ce crédit
+        // avant l'annulation, on reprend ce qu'il reste plutôt que de créer
+        // un solde négatif — le client est de toute façon remboursé en
+        // entier ci-dessus, cette reprise ne fait qu'atténuer la perte.
+        sellerDebit = Math.min(budget, w);
+        if (sellerDebit > 0) {
+          tx.update(sellerRef, { wallet: w - sellerDebit });
+        }
+      }
     });
 
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -195,10 +238,17 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
         orderId, createdAt: now,
       });
     }
+    if (sellerId && sellerCol && sellerDebit > 0) {
+      await db.collection(sellerCol).doc(sellerId).collection('wallet_transactions').add({
+        type: 'debit', amount: sellerDebit,
+        description: 'Commande annulée par le client — reprise du paiement',
+        orderId, createdAt: now,
+      });
+    }
 
     await logAudit({
       userId: uid, userType: 'client', action: 'cancel_order', targetId: orderId,
-      metadata: { clientRefund, driverRefund, driverId },
+      metadata: { clientRefund, driverRefund, driverId, sellerDebit, sellerId },
     });
 
     return { success: true };
@@ -245,10 +295,19 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
       deliveryFee = budget;
       payMethod   = order.paymentMethod || '';
 
+      // Marketplace ('seller') et Boutique ('boutique') sont déjà payés
+      // intégralement au vendeur à la création de la commande (0% commission
+      // par design — create_marketplace_order/payBoutiqueOrderCF créditent le
+      // vendeur immédiatement, via Admin SDK). Les recréditer ici en plus
+      // paierait le vendeur deux fois pour la même commande, la seconde fois
+      // avec une commission de 100 FCFA que ces deux types ne devraient
+      // jamais subir — double-crédit confirmé et corrigé (Master Prompt 46).
+      const isPrepaidPartner = PREPAID_PARTNER_TYPES.has(sType);
+
       const driverSnap = await tx.get(driverRef);
 
       let partnerRef = null, partnerSnap = null;
-      if (payMethod === 'wallet' && sid) {
+      if (payMethod === 'wallet' && sid && !isPrepaidPartner) {
         partnerCol  = partnerCollection(sType);
         partnerRef  = db.collection(partnerCol).doc(sid);
         partnerSnap = await tx.get(partnerRef);
@@ -266,7 +325,12 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
       const driverWallet = Number(driverSnap.data()?.wallet || 0);
 
       if (payMethod === 'wallet') {
-        if (sid) {
+        if (sid && isPrepaidPartner) {
+          // Déjà crédité en entier à la création — rien à faire ici, juste
+          // libérer le livreur.
+          walletTarget = 'partner_prepaid';
+          tx.update(driverRef, { isOnDelivery: false });
+        } else if (sid) {
           partnerId    = sid;
           walletTarget = 'partner';
           creditAmount = Math.max(0, budget - AZ_COMMISSION_FIXED);
@@ -493,11 +557,116 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
   });
 }
 
+// Remplace boutique_page.dart:_processRefund() — remboursement automatique
+// (48h sans livraison) d'une commande boutique. L'original créditait
+// directement le wallet du client depuis une transaction Firestore
+// lancée par le client lui-même (`tx.update(clientRef, {wallet: wallet +
+// amount})`) — mais la règle `clients/{id}` n'autorise une mise à jour du
+// champ `wallet` par son propriétaire que si la nouvelle valeur est
+// STRICTEMENT INFÉRIEURE à l'ancienne (un client peut diminuer son propre
+// solde, jamais l'augmenter, même pour lui-même) ; de plus
+// `boutique_orders/{id}` n'autorise `allow update: if isAdmin();` — aucune
+// des deux écritures de cette transaction ne pouvait donc réussir. Le
+// remboursement automatique 48h n'a donc jamais fonctionné en production,
+// et l'échec était avalé silencieusement par le try/catch de
+// `_checkAutoRefunds()` (Master Prompt 48 bis). Même en admettant que
+// l'écriture ait réussi, elle ne débitait jamais le vendeur (déjà crédité
+// en entier à l'achat) — un vrai remboursement doit le reprendre,
+// symétrique au correctif Marketplace (Master Prompt 47/PREPAID_PARTNER_TYPES).
+// Le délai de 48h est revalidé côté serveur (jamais fait confiance à
+// l'appelant) pour empêcher un remboursement instantané frauduleux.
+function buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit }) {
+  return onCall(async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
+    const uid = request.auth.uid;
+    const { orderId } = request.data || {};
+    if (!orderId) throw new HttpsError('invalid-argument', 'orderId manquant');
+
+    await checkRateLimit(uid, 'refund_boutique_order', 10, 60);
+
+    const orderRef = db.collection('boutique_orders').doc(String(orderId));
+    let amount = 0, sellerId = null, sellerDebit = 0;
+
+    await db.runTransaction(async (tx) => {
+      const orderSnap = await tx.get(orderRef);
+      if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
+      const order = orderSnap.data();
+
+      if (order.clientId !== uid) {
+        throw new HttpsError('permission-denied', "Cette commande n'est pas la vôtre");
+      }
+      if (order.status !== 'paid') {
+        throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être remboursée automatiquement');
+      }
+      const deadline = order.deliveryDeadline;
+      if (!deadline || deadline.toMillis() > Date.now()) {
+        throw new HttpsError('failed-precondition', "Le délai de 48h n'est pas encore dépassé");
+      }
+
+      amount   = Number(order.totalPrice || 0);
+      sellerId = order.sellerId || null;
+
+      const clientRef = db.collection('clients').doc(uid);
+      const sellerRef = sellerId ? db.collection('sellers').doc(sellerId) : null;
+
+      const clientSnap = await tx.get(clientRef);
+      const sellerSnap = sellerRef ? await tx.get(sellerRef) : null;
+
+      tx.update(orderRef, {
+        status:       'refunded',
+        refundedAt:   admin.firestore.FieldValue.serverTimestamp(),
+        refundReason: 'Non livré dans les 48h',
+      });
+
+      if (amount > 0) {
+        const clientWallet = Number(clientSnap.data()?.wallet || 0);
+        tx.update(clientRef, { wallet: clientWallet + amount });
+
+        if (sellerRef && sellerSnap && sellerSnap.exists) {
+          const sellerWallet = Number(sellerSnap.data().wallet || 0);
+          // Plafonné à 0 : si le vendeur a déjà retiré une partie de ce
+          // crédit, on reprend ce qu'il reste plutôt que de créer un solde
+          // négatif (même logique que cancelOrderCF, Master Prompt 48).
+          sellerDebit = Math.min(amount, sellerWallet);
+          if (sellerDebit > 0) {
+            tx.update(sellerRef, { wallet: sellerWallet - sellerDebit });
+          }
+        }
+      }
+    });
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    if (amount > 0) {
+      await db.collection('clients').doc(uid).collection('wallet_transactions').add({
+        type: 'refund', amount,
+        description: 'Remboursement automatique — commande boutique non livrée (48h)',
+        orderId, createdAt: now,
+      });
+    }
+    if (sellerId && sellerDebit > 0) {
+      await db.collection('sellers').doc(sellerId).collection('wallet_transactions').add({
+        type: 'debit', amount: sellerDebit,
+        description: 'Commande boutique non livrée (48h) — reprise du paiement',
+        orderId, createdAt: now,
+      });
+    }
+
+    await logAudit({
+      userId: uid, userType: 'client', action: 'refund_boutique_order', targetId: orderId,
+      amount, metadata: { sellerId, sellerDebit },
+    });
+
+    return { success: true, amount };
+  });
+}
+
 module.exports = {
   buildPayOrderFromWallet,
   buildCancelOrder,
   buildDeliverOrder,
   buildPayBoutiqueOrder,
+  buildRefundExpiredBoutiqueOrder,
   partnerCollection,
   AZ_COMMISSION_FIXED,
+  PREPAID_PARTNER_TYPES,
 };

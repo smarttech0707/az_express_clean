@@ -1479,6 +1479,24 @@ exports.autoExpireOrders = onSchedule({
         // Vérifier que le statut est encore annulable (un livreur a peut-être accepté)
         if (!['pending', 'broadcast', 'assigned'].includes(freshData.status)) return;
 
+        const willRefund = freshData.paymentMethod === 'wallet' && freshData.isPaid === true;
+        // Marketplace ('seller') est crédité en entier à la création de la
+        // commande (voir PREPAID_PARTNER_TYPES, Master Prompt 46) — sans ce
+        // débit en retour, l'expiration automatique créerait de l'argent à
+        // partir de rien (client remboursé + vendeur déjà payé), exactement
+        // comme pour cancelOrderCF (Master Prompt 47). Même limitation
+        // volontaire qu'orderActions.js:buildCancelOrder — n'inclut pas
+        // 'boutique', dont le document `orders` ici ne représente que le
+        // trajet de livraison (montant différent du paiement réel, qui vit
+        // sur `boutique_orders` séparément) : débiter `budget` ici serait
+        // incorrect pour ce type, documenté comme trouvaille distincte.
+        const needsSellerDebit = willRefund && freshData.sellerId && freshData.sellerType === 'seller';
+        // Toutes les lectures doivent précéder toute écriture dans une
+        // transaction Firestore — lire le vendeur ici, avant tx.update(doc.ref)
+        // ci-dessous, pour pouvoir plafonner le débit à 0 (pas de solde négatif).
+        const sellerRef  = needsSellerDebit ? db.collection('sellers').doc(freshData.sellerId) : null;
+        const sellerSnap = needsSellerDebit ? await tx.get(sellerRef) : null;
+
         // Annuler la commande
         tx.update(doc.ref, {
           status:       'cancelled',
@@ -1487,7 +1505,7 @@ exports.autoExpireOrders = onSchedule({
         });
 
         // Remboursement wallet si paiement par wallet
-        if (freshData.paymentMethod === 'wallet' && freshData.isPaid === true) {
+        if (willRefund) {
           const amount    = freshData.budget || 0;
           const clientRef = db.collection('clients').doc(freshData.clientId);
           tx.update(clientRef, {
@@ -1501,6 +1519,27 @@ exports.autoExpireOrders = onSchedule({
             orderId:     orderId,
             createdAt:   admin.firestore.FieldValue.serverTimestamp(),
           });
+
+          if (needsSellerDebit && sellerSnap.exists) {
+            const w = Number(sellerSnap.data().wallet || 0);
+            // Plafonné à 0 : si le vendeur a déjà retiré une partie de ce
+            // crédit avant l'expiration, on reprend ce qu'il reste plutôt que
+            // de créer un solde négatif (même logique que cancelOrderCF).
+            const sellerDebit = Math.min(amount, w);
+            if (sellerDebit > 0) {
+              tx.update(sellerRef, {
+                wallet: w - sellerDebit,
+              });
+              const sellerHistRef = sellerRef.collection('wallet_transactions').doc();
+              tx.set(sellerHistRef, {
+                type:        'debit',
+                amount:      sellerDebit,
+                description: 'Commande expirée (aucun livreur) — reprise du paiement',
+                orderId:     orderId,
+                createdAt:   admin.firestore.FieldValue.serverTimestamp(),
+              });
+            }
+          }
         }
 
         // Métriques dispatching — incrémente le compteur de la tranche horaire/zone
@@ -1711,12 +1750,13 @@ exports.dispatchOrderToDriver = onCall(async (request) => {
 // dans orderActions.js (testables sans Firebase Admin, même pattern que
 // azia/pendingActions.js:buildConfirmAction).
 // ═══════════════════════════════════════════════════════════════════════════
-const { buildPayOrderFromWallet, buildCancelOrder, buildDeliverOrder, buildPayBoutiqueOrder } = require('./orderActions');
+const { buildPayOrderFromWallet, buildCancelOrder, buildDeliverOrder, buildPayBoutiqueOrder, buildRefundExpiredBoutiqueOrder } = require('./orderActions');
 
 exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
 exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission });
 exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
 exports.payBoutiqueOrderCF   = buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
+exports.refundExpiredBoutiqueOrderCF = buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
 
 
 // ═══════════════════════════════════════════════════════════════════════════

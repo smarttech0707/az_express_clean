@@ -154,24 +154,21 @@ function createRestaurantOrder({ db, admin, HttpsError }) {
     confirmHandler: async (tx, uid, toolInput) => {
       const { restaurantId, restaurantName, items, budget, deliveryLat, deliveryLng, paymentMethod } = toolInput;
 
+      // Le restaurant est crédité plus tard par deliverOrderCF (côté serveur,
+      // quand le livreur marque la commande livrée) — pas ici. Créditer le
+      // restaurant immédiatement en plus de deliverOrderCF payait le
+      // restaurant deux fois pour la même commande (Master Prompt 46).
       if (paymentMethod === 'wallet') {
-        const clientRef     = db.collection('clients').doc(uid);
-        const restaurantRef = db.collection('restaurants').doc(restaurantId);
-        const clientSnap    = await tx.get(clientRef);
-        const balance       = (clientSnap.exists ? clientSnap.data().wallet : 0) || 0;
+        const clientRef  = db.collection('clients').doc(uid);
+        const clientSnap = await tx.get(clientRef);
+        const balance    = (clientSnap.exists ? clientSnap.data().wallet : 0) || 0;
         if (balance < budget) {
           throw new HttpsError('failed-precondition', 'Solde wallet insuffisant pour cette commande.');
         }
         tx.update(clientRef, { wallet: balance - budget });
-        tx.update(restaurantRef, { wallet: admin.firestore.FieldValue.increment(budget) });
         tx.set(clientRef.collection('wallet_transactions').doc(), {
           type: 'purchase', amount: budget,
           description: `Commande ${restaurantName} (AZ IA, wallet)`,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        tx.set(restaurantRef.collection('wallet_transactions').doc(), {
-          type: 'sale', amount: budget,
-          description: `Commande client (AZ IA, wallet) — ${budget} FCFA`,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       }
