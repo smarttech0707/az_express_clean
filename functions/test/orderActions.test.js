@@ -9,6 +9,7 @@ const {
   buildCancelOrder,
   buildDeliverOrder,
   buildPayBoutiqueOrder,
+  buildPayBoutiqueOrderCash,
   buildRefundExpiredBoutiqueOrder,
 } = require('../orderActions');
 
@@ -676,6 +677,156 @@ test('payBoutiqueOrderCF: still succeeds (purchase honored) even if dispatch thr
 test('payBoutiqueOrderCF: rejects unauthenticated calls', async () => {
   const { db } = makeFakeDb();
   const fn = buildPayBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+  await assert.rejects(
+    () => fn.run({ data: { productId: 'p1', qty: 1 } }),
+    (err) => err.code === 'unauthenticated',
+  );
+});
+
+// ── payBoutiqueOrderCashCF ───────────────────────────────────────────────────
+// Master Prompt 54 : l'ancien chemin cash (boutique_page.dart) décrémentait le
+// stock via une écriture directe PUIS tentait de créer boutique_orders avec un
+// statut qui violait la règle Firestore — cette dernière écriture échouait
+// donc systématiquement, laissant le stock décrémenté sans commande créée.
+
+test('payBoutiqueOrderCashCF: happy path decrements stock and creates the order — no wallet touched', async () => {
+  fakeDispatchOrder.calls = [];
+  const { db, store } = makeFakeDb({
+    'sellers/s1':            { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
+    'boutique_products/p1':  { name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
+  });
+  const logAudit = makeLogAudit();
+  const fn = buildPayBoutiqueOrderCash({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit, dispatchOrder: fakeDispatchOrder,
+  });
+
+  const result = await fn.run({
+    auth: { uid: 'c1' },
+    data: { productId: 'p1', qty: 2, deliveryLat: 6.7, deliveryLng: -3.5 },
+  });
+
+  assert.equal(result.totalPrice, 6000);
+  assert.equal(result.dispatched, true);
+  assert.equal(store.get('sellers/s1').wallet, 0); // jamais touché — paiement cash physique
+  assert.equal(store.get('boutique_products/p1').stock, 8);
+
+  const orderEntry = [...store.entries()].find(([k]) => k.startsWith('boutique_orders/'));
+  assert.ok(orderEntry, 'boutique_orders entry should exist alongside the stock decrement');
+  assert.equal(orderEntry[1].status, 'pending_payment');
+  assert.equal(orderEntry[1].paymentMethod, 'cash');
+  assert.equal(orderEntry[1].totalPrice, 6000);
+
+  assert.equal(fakeDispatchOrder.calls.length, 1);
+  assert.equal(logAudit.calls[0].action, 'pay_boutique_order_cash');
+});
+
+test('payBoutiqueOrderCashCF: rejects when stock is insufficient — no stock decrement, no order created', async () => {
+  const { db, store } = makeFakeDb({
+    'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
+    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 1 },
+  });
+  const fn = buildPayBoutiqueOrderCash({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 5, deliveryLat: 6.7, deliveryLng: -3.5 } }),
+    (err) => err.message === 'STOCK_EPUISE',
+  );
+
+  // Rien n'a bougé : ni le stock, ni une commande fantôme.
+  assert.equal(store.get('boutique_products/p1').stock, 1);
+  const orderEntry = [...store.entries()].find(([k]) => k.startsWith('boutique_orders/'));
+  assert.equal(orderEntry, undefined);
+});
+
+test('payBoutiqueOrderCashCF: two purchases against the last unit — only one succeeds, stock never goes negative', async () => {
+  // Proxy pour "double achat simultané" : avec ce faux Firestore synchrone,
+  // deux transactions ne peuvent jamais littéralement s'exécuter en parallèle
+  // (comme en JS single-thread) — mais ça reproduit fidèlement la garantie
+  // que Firestore lui-même offre : le net effect de deux transactions
+  // concurrentes équivaut toujours à un ordre séquentiel, jamais à une
+  // survente. La 2ᵉ tentative doit voir le stock déjà à 0 et échouer proprement.
+  const { db, store } = makeFakeDb({
+    'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
+    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 1 },
+  });
+  const fn = buildPayBoutiqueOrderCash({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  const first  = await fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5 } });
+  assert.ok(first.orderId);
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c2' }, data: { productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5 } }),
+    (err) => err.message === 'STOCK_EPUISE',
+  );
+
+  assert.equal(store.get('boutique_products/p1').stock, 0); // jamais négatif
+  const orders = [...store.entries()].filter(([k]) => k.startsWith('boutique_orders/'));
+  assert.equal(orders.length, 1); // une seule commande créée, pas deux
+});
+
+test('payBoutiqueOrderCashCF: still succeeds (order honored) even if dispatch throws', async () => {
+  const { db, store } = makeFakeDb({
+    'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
+    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 5 },
+  });
+  const throwingDispatch = async () => { throw new Error('dispatch is down'); };
+  const fn = buildPayBoutiqueOrderCash({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: throwingDispatch,
+  });
+
+  const result = await fn.run({
+    auth: { uid: 'c1' },
+    data: { productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5 },
+  });
+
+  assert.equal(result.dispatched, false);
+  assert.equal(store.get('boutique_products/p1').stock, 4); // l'achat reste honoré
+});
+
+test('payBoutiqueOrderCashCF: rejects an unknown product', async () => {
+  const { db } = makeFakeDb({
+    'sellers/s1': { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
+  });
+  const fn = buildPayBoutiqueOrderCash({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'missing', qty: 1 } }),
+    (err) => err.code === 'not-found',
+  );
+});
+
+test('payBoutiqueOrderCashCF: rejects when no boutique seller is configured', async () => {
+  const { db } = makeFakeDb({
+    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 5 },
+  });
+  const fn = buildPayBoutiqueOrderCash({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } }),
+    (err) => err.code === 'failed-precondition',
+  );
+});
+
+test('payBoutiqueOrderCashCF: rejects unauthenticated calls', async () => {
+  const { db } = makeFakeDb();
+  const fn = buildPayBoutiqueOrderCash({
     db, admin: fakeAdmin, onCall, HttpsError,
     checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
   });

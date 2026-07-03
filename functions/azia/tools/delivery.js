@@ -2,9 +2,9 @@
 
 const { createPendingAction } = require('../pendingActions');
 const { dispatchOrder, calculateCommission } = require('../../dispatch');
+const tarifService = require('../../tarifService');
+const { cancelOrderTx, cancelOrderPostTx } = require('../../orderActions');
 
-const MIN_DELIVERY_FEE = 500;
-const MAX_DELIVERY_FEE = 10000;
 const MIN_SHOPPING_BUDGET = 500;
 const MAX_ITEMS = 20;
 const CANCELLABLE_STATUSES = ['pending', 'broadcast', 'assigned', 'accepted', 'picked_up'];
@@ -86,16 +86,22 @@ async function debitWalletIfNeeded(tx, db, admin, HttpsError, uid, amount, payme
 
 // Créer une livraison de colis/document — reprend le contrat de données de
 // lib/screens/client/create_order.dart (type='shopping', budget=frais de
-// livraison, mêmes bornes 500-10000 FCFA, même logique de débit wallet).
+// livraison, même logique de débit wallet). Le prix n'est plus fourni par le
+// modèle (Master Prompt 51) : avant ce correctif, `budget` était un simple
+// nombre choisi librement par Claude dans une fourchette large [500, 10000],
+// sans aucun rapport avec la distance ou l'heure réelles — la seule des 3
+// sources de tarification livraison qui n'appliquait absolument aucune
+// formule. Calculé désormais côté serveur via `tarifService.compute()` (port
+// Node de TarifService, la source unique de vérité tarifaire), exactement
+// comme le ferait livraison_screen.dart pour la même destination.
 function createDeliveryOrder({ db, admin, HttpsError }) {
   return {
     name: 'create_delivery_order',
-    description: "Crée une livraison de colis/document pour le client (ex. « envoie ce colis à Cafétou »). Nécessite une confirmation explicite avant toute création réelle.",
+    description: "Crée une livraison de colis/document pour le client (ex. « envoie ce colis à Cafétou »). Le prix est calculé automatiquement selon la distance et l'heure — ne jamais demander ou proposer un montant. Nécessite une confirmation explicite avant toute création réelle.",
     input_schema: {
       type: 'object',
       properties: {
         description:     { type: 'string', description: 'Description du colis/document à livrer.' },
-        budget:          { type: 'number', description: 'Frais de livraison en FCFA (entre 500 et 10000).' },
         deliveryLat:      { type: 'number', description: 'Latitude du point de livraison.' },
         deliveryLng:      { type: 'number', description: 'Longitude du point de livraison.' },
         deliveryAddress: { type: 'string', description: 'Adresse ou repère du point de livraison.' },
@@ -106,15 +112,11 @@ function createDeliveryOrder({ db, admin, HttpsError }) {
         deliveryMode:    { type: 'string', enum: ['standard', 'express'], description: 'Mode de livraison.' },
         paymentMethod:   { type: 'string', enum: ['cash', 'wallet'], description: 'Moyen de paiement des frais de livraison.' },
       },
-      required: ['description', 'budget', 'deliveryLat', 'deliveryLng'],
+      required: ['description', 'deliveryLat', 'deliveryLng'],
     },
     handler: async (uid, input, ctx) => {
       const description = String(input?.description || '').trim();
       if (!description) throw new Error('La description du colis est requise.');
-
-      const budget = Number(input?.budget);
-      if (!budget || budget < MIN_DELIVERY_FEE) throw new Error(`Frais de livraison minimum : ${MIN_DELIVERY_FEE} FCFA`);
-      if (budget > MAX_DELIVERY_FEE) throw new Error(`Frais de livraison maximum : ${MAX_DELIVERY_FEE} FCFA`);
 
       const deliveryLat = Number(input?.deliveryLat);
       const deliveryLng = Number(input?.deliveryLng);
@@ -123,6 +125,12 @@ function createDeliveryOrder({ db, admin, HttpsError }) {
       const paymentMethod = input?.paymentMethod === 'wallet' ? 'wallet' : 'cash';
       const deliveryMode  = input?.deliveryMode === 'express' ? 'express' : 'standard';
       const forSelf       = input?.forSelf !== false;
+
+      const tarif = tarifService.compute({ clientLat: deliveryLat, clientLng: deliveryLng });
+      if (!tarif.canOrder) {
+        return { error: tarif.rejectionMessage || 'Livraison non disponible pour cette adresse à cette heure.' };
+      }
+      const budget = deliveryMode === 'express' ? tarif.expressPrice : tarif.standardPrice;
 
       if (paymentMethod === 'wallet') {
         const snap = await db.collection('clients').doc(uid).get();
@@ -370,64 +378,31 @@ function cancelOrder({ db, admin, HttpsError }) {
       const orderRef = db.collection('orders').doc(toolInput.orderId);
       const orderSnap = await tx.get(orderRef);
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable.');
-      const data = orderSnap.data();
-      if (data.clientId !== uid) throw new HttpsError('permission-denied', 'Non autorisé.');
-      if (!CANCELLABLE_STATUSES.includes(data.status)) {
-        throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée.');
-      }
+      const order = orderSnap.data();
+      if (order.clientId !== uid) throw new HttpsError('permission-denied', 'Non autorisé.');
 
-      const originalStatus = data.status;
-      const paymentMethod  = data.paymentMethod;
-      const budget         = Number(data.budget || 0);
-      const shoppingBudget = Number(data.shoppingBudget || 0);
-      const clientId       = data.clientId;
-      const driverId       = data.driverId;
-
-      const needsClientRefund = paymentMethod === 'wallet' && !!clientId;
-      const needsDriverRefund = ['accepted', 'picked_up'].includes(originalStatus) && !!driverId;
-
-      let clientSnap = null;
-      let driverSnap = null;
-      if (needsClientRefund) clientSnap = await tx.get(db.collection('clients').doc(clientId));
-      if (needsDriverRefund) driverSnap = await tx.get(db.collection('livreurs').doc(driverId));
-
-      tx.update(orderRef, {
-        status:      'cancelled',
-        cancelReason: 'ai_client_cancel',
-        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      let refundAmount = 0;
-      if (needsClientRefund) {
-        refundAmount = budget + shoppingBudget;
-        if (refundAmount > 0 && clientSnap && clientSnap.exists) {
-          const w = Number(clientSnap.data().wallet || 0);
-          tx.update(db.collection('clients').doc(clientId), { wallet: w + refundAmount });
-          tx.set(db.collection('clients').doc(clientId).collection('wallet_transactions').doc(), {
-            type:        'refund',
-            amount:      refundAmount,
-            description: 'Remboursement annulation commande (AZ IA)',
-            orderId:     toolInput.orderId,
-            createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
-      }
-
-      let commissionRefund = 0;
-      if (needsDriverRefund && driverSnap && driverSnap.exists) {
-        commissionRefund = await calculateCommission(db, budget);
-        const w = Number(driverSnap.data().wallet || 0);
-        tx.update(db.collection('livreurs').doc(driverId), { wallet: w + commissionRefund });
-        tx.set(db.collection('livreurs').doc(driverId).collection('wallet_transactions').doc(), {
-          type:        'refund',
-          amount:      commissionRefund,
-          description: 'Remboursement commission — commande annulée (AZ IA)',
-          orderId:     toolInput.orderId,
-          createdAt:   admin.firestore.FieldValue.serverTimestamp(),
+      let refundInfo;
+      try {
+        refundInfo = await cancelOrderTx(tx, {
+          db, admin, orderRef, order, uid, calculateCommission, reason: 'ai_client_cancel',
         });
+      } catch (err) {
+        if (err.message === 'ORDER_NOT_CANCELLABLE') {
+          throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée.');
+        }
+        throw err;
       }
 
-      return { orderId: toolInput.orderId, refundAmount, commissionRefund };
+      return { orderId: toolInput.orderId, ...refundInfo };
+    },
+
+    afterConfirm: async (uid, result) => {
+      await cancelOrderPostTx(db, admin, { orderId: result.orderId, uid, ...result });
+      return {
+        orderId: result.orderId,
+        refundAmount: result.clientRefund,
+        commissionRefund: result.driverRefund,
+      };
     },
   };
 }

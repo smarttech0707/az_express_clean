@@ -4,10 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../l10n/app_text.dart';
-import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
 import 'client_wallet_page.dart';
 
@@ -89,8 +87,6 @@ class _BoutiquePageState extends State<BoutiquePage>
       Map<String, dynamic> product, int qty, String payMethod) async {
     if (_uid == null) return;
 
-    final totalPrice = (product["price"] as num? ?? 0).toInt() * qty;
-
     // Stock check (raccourci UX — le serveur revalide de façon autoritaire).
     if ((product["stock"] as int? ?? 0) < qty) {
       _snack(context.tr('insufficient_stock'), Colors.red);
@@ -138,88 +134,35 @@ class _BoutiquePageState extends State<BoutiquePage>
       return;
     }
 
-    // ── Paiement cash à la livraison — inchangé (pas de crédit wallet
-    // cross-user ici, donc pas concerné par le bug corrigé ci-dessus) ──────
-    final orderId = const Uuid().v4();
-    final deadline = DateTime.now().add(const Duration(hours: 48));
-
-    String? sellerId;
-    String? sellerName;
+    // ── Paiement cash à la livraison — délègue à `payBoutiqueOrderCashCF`
+    // (Master Prompt 54). L'ancienne version décrémentait le stock via une
+    // écriture directe PUIS tentait de créer `boutique_orders` avec un statut
+    // qui violait la règle Firestore de création — cette dernière écriture
+    // échouait donc systématiquement, laissant le stock décrémenté sans
+    // aucune commande créée (trouvaille du Prompt 48 bis, corrigée ici). Le
+    // CF fait les deux dans une seule transaction Firestore : soit le stock
+    // ET la commande sont créés ensemble, soit ni l'un ni l'autre.
     try {
-      final sellerSnap = await FirebaseFirestore.instance
-          .collection('sellers')
-          .where('type', isEqualTo: 'boutique')
-          .limit(1)
-          .get();
-      if (sellerSnap.docs.isNotEmpty) {
-        sellerId = sellerSnap.docs.first.id;
-        sellerName = sellerSnap.docs.first.data()['name'] as String?;
-      }
-    } catch (_) {}
-
-    try {
-      final productRef = FirebaseFirestore.instance
-          .collection("boutique_products")
-          .doc(product["id"]);
-      final productSnap = await productRef.get();
-      final currentStock = (productSnap.data()?["stock"] ?? 0) as int;
-      if (currentStock < qty) {
-        if (!mounted) return;
-        _snack(context.tr('out_of_stock_label'), Colors.red);
-        return;
-      }
-      await productRef.update({"stock": currentStock - qty});
-
-      await FirebaseFirestore.instance
-          .collection("boutique_orders")
-          .doc(orderId)
-          .set({
-        "id": orderId,
-        "clientId": _uid,
-        "sellerId": sellerId,
-        "productId": product["id"],
-        "productName": product["name"],
-        "productCategory": product["category"],
-        "qty": qty,
-        "unitPrice": product["price"],
-        "totalPrice": totalPrice,
-        "paymentMethod": "cash",
-        "status": "pending_payment",
-        "deliveryDeadline": Timestamp.fromDate(deadline),
-        "createdAt": Timestamp.now(),
-      });
-
-      // ── Course de livraison ───────────────────────────────────
+      double clientLat = 0, clientLng = 0;
       try {
-        double clientLat = 0, clientLng = 0;
-        try {
-          final pos = await Geolocator.getCurrentPosition(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.high,
-              timeLimit: Duration(seconds: 5),
-            ),
-          );
-          clientLat = pos.latitude;
-          clientLng = pos.longitude;
-        } catch (_) {}
-
-        final deliveryOrder = OrderModel(
-          id: const Uuid().v4(),
-          description: "🛍️ Boutique AZ : ${product['name']} ×$qty",
-          budget: 500,
-          status: "pending",
-          latitude: clientLat,
-          longitude: clientLng,
-          type: "boutique",
-          clientId: _uid,
-          sellerId: sellerId,
-          sellerName: sellerName,
-          sellerType: "boutique",
-          paymentMethod: payMethod,
-          linkedBoutiqueOrderId: orderId,
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 5),
+          ),
         );
-        await FirestoreService().createOrder(deliveryOrder);
+        clientLat = pos.latitude;
+        clientLng = pos.longitude;
       } catch (_) {}
+
+      final fn = FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('payBoutiqueOrderCashCF');
+      await fn.call(<String, dynamic>{
+        'productId': product["id"],
+        'qty': qty,
+        'deliveryLat': clientLat,
+        'deliveryLng': clientLng,
+      });
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -230,8 +173,6 @@ class _BoutiquePageState extends State<BoutiquePage>
       if (!mounted) return;
       if (msg.contains("STOCK_EPUISE")) {
         _snack(context.tr('out_of_stock_label'), Colors.red);
-      } else if (msg.contains("SOLDE_INSUFFISANT")) {
-        _snack(context.tr('insufficient_balance'), Colors.red);
       } else {
         _snack("${context.tr('error')} : $msg", Colors.red);
       }

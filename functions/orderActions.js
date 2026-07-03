@@ -125,10 +125,135 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
   });
 }
 
+// Cœur transactionnel de l'annulation d'une commande — source unique de
+// vérité (Master Prompt 52), appelée à la fois par cancelOrderCF (le client
+// annule depuis l'app) et par l'outil AZ IA cancel_order
+// (functions/azia/tools/delivery.js), pour qu'une annulation produise
+// exactement le même résultat quel que soit le chemin. Doit être appelée
+// DANS une transaction déjà ouverte par l'appelant (qui a déjà vérifié la
+// propriété de la commande) ; ne fait aucune écriture hors tx — les logs
+// `wallet_transactions` post-commit sont dans cancelOrderPostTx ci-dessous.
+// Lève une Error('ORDER_NOT_CANCELLABLE') si le statut ne le permet plus —
+// à l'appelant de la traduire dans son propre type d'erreur (HttpsError
+// côté onCall, message renvoyé à l'utilisateur côté AZ IA). `reason` identifie
+// le déclencheur pour l'audit/le support (ex. 'client_cancel', 'ai_client_cancel')
+// — même champ que celui déjà écrit par autoExpireOrders ('no_driver_found'),
+// désormais cohérent sur les 3 chemins d'annulation.
+async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason }) {
+  if (['delivered', 'cancelled'].includes(order.status)) {
+    throw new Error('ORDER_NOT_CANCELLABLE');
+  }
+
+  const budget         = Number(order.budget || 0);
+  const shoppingBudget = Number(order.shoppingBudget || 0);
+  // 'boutique' : ce document `orders` ne représente que le trajet de
+  // livraison (budget = frais fixe, isPaid TOUJOURS false, voir
+  // buildPayBoutiqueOrder) — rien n'a jamais été prélevé au client sur CE
+  // document précis (le vrai paiement, totalPrice, vit sur
+  // `boutique_orders` via `linkedBoutiqueOrderId`, remboursé séparément
+  // par buildRefundExpiredBoutiqueOrder). Le rembourser ici créerait de
+  // l'argent à partir de rien pour un montant jamais payé — confirmé et
+  // corrigé (Master Prompt 48 bis), après l'avoir laissé en trouvaille
+  // documentée seule au Prompt 47.
+  const needsClientRefund = order.paymentMethod === 'wallet' && order.type !== 'boutique';
+  const needsDriverRefund = ['accepted', 'picked_up'].includes(order.status) && !!order.driverId;
+  // Marketplace ('seller') est crédité en entier à la CRÉATION de la
+  // commande (voir PREPAID_PARTNER_TYPES, Master Prompt 46) — s'il gardait
+  // cet argent après un remboursement client, l'annulation créerait de
+  // l'argent à partir de rien (client remboursé + vendeur déjà payé). Il
+  // faut donc le débiter en retour ici, symétrique au remboursement de
+  // commission du livreur ci-dessous (Master Prompt 47). Volontairement
+  // limité à 'seller' — 'boutique' n'atteint plus jamais needsClientRefund
+  // ci-dessus, donc jamais ce débit non plus.
+  const orderSellerId = order.sellerId || null;
+  const needsSellerDebit = needsClientRefund && !!orderSellerId &&
+    order.sellerType === 'seller';
+
+  let sellerId = null, sellerCol = null;
+  if (needsSellerDebit) {
+    sellerId  = orderSellerId;
+    sellerCol = partnerCollection(order.sellerType || 'seller');
+  }
+
+  const clientRef = db.collection('clients').doc(uid);
+  const driverRef = needsDriverRefund ? db.collection('livreurs').doc(order.driverId) : null;
+  const sellerRef = needsSellerDebit ? db.collection(sellerCol).doc(sellerId) : null;
+
+  const clientSnap = needsClientRefund ? await tx.get(clientRef) : null;
+  const driverSnap = needsDriverRefund ? await tx.get(driverRef) : null;
+  const sellerSnap = needsSellerDebit   ? await tx.get(sellerRef) : null;
+
+  tx.update(orderRef, {
+    status: 'cancelled',
+    ...(reason ? { cancelReason: reason, cancelledAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+  });
+
+  let clientRefund = 0, driverId = null, driverRefund = 0, sellerDebit = 0;
+
+  if (needsClientRefund) {
+    clientRefund = budget + shoppingBudget;
+    if (clientRefund > 0 && clientSnap.exists) {
+      const w = Number(clientSnap.data().wallet || 0);
+      tx.update(clientRef, { wallet: w + clientRefund });
+    }
+  }
+
+  if (needsDriverRefund) {
+    driverId     = order.driverId;
+    driverRefund = await calculateCommission(db, budget);
+    if (driverSnap.exists) {
+      const w = Number(driverSnap.data().wallet || 0);
+      tx.update(driverRef, { wallet: w + driverRefund });
+    }
+  }
+
+  if (needsSellerDebit && sellerSnap.exists) {
+    const w = Number(sellerSnap.data().wallet || 0);
+    // Plafonné à 0 : si le vendeur a déjà retiré une partie de ce crédit
+    // avant l'annulation, on reprend ce qu'il reste plutôt que de créer un
+    // solde négatif — le client est de toute façon remboursé en entier
+    // ci-dessus, cette reprise ne fait qu'atténuer la perte (Master Prompt 48).
+    sellerDebit = Math.min(budget, w);
+    if (sellerDebit > 0) {
+      tx.update(sellerRef, { wallet: w - sellerDebit });
+    }
+  }
+
+  return { clientRefund, driverId, driverRefund, sellerId, sellerCol, sellerDebit };
+}
+
+// Journalisation post-transaction (wallet_transactions) — à appeler une fois
+// que la transaction de cancelOrderTx a été validée avec succès.
+async function cancelOrderPostTx(db, admin, { orderId, uid, clientRefund, driverId, driverRefund, sellerId, sellerCol, sellerDebit }) {
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  if (clientRefund > 0) {
+    await db.collection('clients').doc(uid).collection('wallet_transactions').add({
+      type: 'refund', amount: clientRefund,
+      description: 'Remboursement annulation commande',
+      orderId, createdAt: now,
+    });
+  }
+  if (driverId && driverRefund > 0) {
+    await db.collection('livreurs').doc(driverId).collection('wallet_transactions').add({
+      type: 'refund', amount: driverRefund,
+      description: 'Remboursement commission — commande annulée',
+      orderId, createdAt: now,
+    });
+  }
+  if (sellerId && sellerCol && sellerDebit > 0) {
+    await db.collection(sellerCol).doc(sellerId).collection('wallet_transactions').add({
+      type: 'debit', amount: sellerDebit,
+      description: 'Commande annulée par le client — reprise du paiement',
+      orderId, createdAt: now,
+    });
+  }
+}
+
 // Remplace FirestoreService.cancelOrder() : annulation par le client
 // propriétaire de la commande, avec remboursement wallet client (si payée en
 // wallet) et remboursement de la commission au livreur (si la commande avait
-// déjà été acceptée/récupérée).
+// déjà été acceptée/récupérée). Wrapper onCall autour de cancelOrderTx —
+// gère auth/rate-limit/permission puis délègue toute la logique métier.
 function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission }) {
   return onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
@@ -139,8 +264,7 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
     await checkRateLimit(uid, 'cancel_order', 20, 60);
 
     const orderRef = db.collection('orders').doc(String(orderId));
-    let clientRefund = 0, driverRefund = 0, driverId = null;
-    let sellerDebit = 0, sellerId = null, sellerCol = null;
+    let refundInfo;
 
     await db.runTransaction(async (tx) => {
       const orderSnap = await tx.get(orderRef);
@@ -150,105 +274,22 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
       if (order.clientId !== uid) {
         throw new HttpsError('permission-denied', "Cette commande n'est pas la vôtre");
       }
-      if (['delivered', 'cancelled'].includes(order.status)) {
-        throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée');
-      }
 
-      const budget         = Number(order.budget || 0);
-      const shoppingBudget = Number(order.shoppingBudget || 0);
-      // 'boutique' : ce document `orders` ne représente que le trajet de
-      // livraison (budget = frais fixe, isPaid TOUJOURS false, voir
-      // buildPayBoutiqueOrder) — rien n'a jamais été prélevé au client sur CE
-      // document précis (le vrai paiement, totalPrice, vit sur
-      // `boutique_orders` via `linkedBoutiqueOrderId`, remboursé séparément
-      // par buildRefundExpiredBoutiqueOrder). Le rembourser ici créerait de
-      // l'argent à partir de rien pour un montant jamais payé — confirmé et
-      // corrigé (Master Prompt 48 bis), après l'avoir laissé en trouvaille
-      // documentée seule au Prompt 47.
-      const needsClientRefund = order.paymentMethod === 'wallet' && order.type !== 'boutique';
-      const needsDriverRefund = ['accepted', 'picked_up'].includes(order.status) && !!order.driverId;
-      // Marketplace ('seller') est crédité en entier à la CRÉATION de la
-      // commande (voir PREPAID_PARTNER_TYPES, Master Prompt 46) — s'il
-      // gardait cet argent après un remboursement client, l'annulation
-      // créerait de l'argent à partir de rien (client remboursé + vendeur
-      // déjà payé). Il faut donc le débiter en retour ici, symétrique au
-      // remboursement de commission du livreur ci-dessous (Master Prompt 47).
-      // Volontairement limité à 'seller' — 'boutique' n'atteint plus jamais
-      // needsClientRefund ci-dessus, donc jamais ce débit non plus.
-      const orderSellerId = order.sellerId || null;
-      const needsSellerDebit = needsClientRefund && !!orderSellerId &&
-        order.sellerType === 'seller';
-      if (needsSellerDebit) {
-        sellerId  = orderSellerId;
-        sellerCol = partnerCollection(order.sellerType || 'seller');
-      }
-
-      const clientRef = db.collection('clients').doc(uid);
-      const driverRef = needsDriverRefund ? db.collection('livreurs').doc(order.driverId) : null;
-      const sellerRef = needsSellerDebit ? db.collection(sellerCol).doc(sellerId) : null;
-
-      const clientSnap = needsClientRefund ? await tx.get(clientRef) : null;
-      const driverSnap = needsDriverRefund ? await tx.get(driverRef) : null;
-      const sellerSnap = needsSellerDebit   ? await tx.get(sellerRef) : null;
-
-      tx.update(orderRef, { status: 'cancelled' });
-
-      if (needsClientRefund) {
-        clientRefund = budget + shoppingBudget;
-        if (clientRefund > 0 && clientSnap.exists) {
-          const w = Number(clientSnap.data().wallet || 0);
-          tx.update(clientRef, { wallet: w + clientRefund });
+      try {
+        refundInfo = await cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason: 'client_cancel' });
+      } catch (err) {
+        if (err.message === 'ORDER_NOT_CANCELLABLE') {
+          throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée');
         }
-      }
-
-      if (needsDriverRefund) {
-        driverId     = order.driverId;
-        driverRefund = await calculateCommission(db, budget);
-        if (driverSnap.exists) {
-          const w = Number(driverSnap.data().wallet || 0);
-          tx.update(driverRef, { wallet: w + driverRefund });
-        }
-      }
-
-      if (needsSellerDebit && sellerSnap.exists) {
-        const w = Number(sellerSnap.data().wallet || 0);
-        // Plafonné à 0 : si le vendeur a déjà retiré une partie de ce crédit
-        // avant l'annulation, on reprend ce qu'il reste plutôt que de créer
-        // un solde négatif — le client est de toute façon remboursé en
-        // entier ci-dessus, cette reprise ne fait qu'atténuer la perte.
-        sellerDebit = Math.min(budget, w);
-        if (sellerDebit > 0) {
-          tx.update(sellerRef, { wallet: w - sellerDebit });
-        }
+        throw err;
       }
     });
 
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    if (clientRefund > 0) {
-      await db.collection('clients').doc(uid).collection('wallet_transactions').add({
-        type: 'refund', amount: clientRefund,
-        description: 'Remboursement annulation commande',
-        orderId, createdAt: now,
-      });
-    }
-    if (driverId && driverRefund > 0) {
-      await db.collection('livreurs').doc(driverId).collection('wallet_transactions').add({
-        type: 'refund', amount: driverRefund,
-        description: 'Remboursement commission — commande annulée',
-        orderId, createdAt: now,
-      });
-    }
-    if (sellerId && sellerCol && sellerDebit > 0) {
-      await db.collection(sellerCol).doc(sellerId).collection('wallet_transactions').add({
-        type: 'debit', amount: sellerDebit,
-        description: 'Commande annulée par le client — reprise du paiement',
-        orderId, createdAt: now,
-      });
-    }
+    await cancelOrderPostTx(db, admin, { orderId, uid, ...refundInfo });
 
     await logAudit({
       userId: uid, userType: 'client', action: 'cancel_order', targetId: orderId,
-      metadata: { clientRefund, driverRefund, driverId, sellerDebit, sellerId },
+      metadata: refundInfo,
     });
 
     return { success: true };
@@ -551,6 +592,141 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
       });
     } catch (err) {
       console.error('payBoutiqueOrderCF: création/dispatch de la course a échoué (achat déjà validé):', err.message);
+      // Master Prompt 58 : rendre ce cas ("commande bloquée" / "livreur
+      // introuvable" après un achat déjà payé) visible dans audit_logs, pas
+      // seulement dans les logs bruts Cloud Functions — c'est exactement le
+      // genre d'échec qu'un admin doit pouvoir repérer sans lire les logs.
+      logAudit({
+        userId: uid, userType: 'client', action: 'pay_boutique_order_dispatch_failed',
+        targetId: orderId, status: 'error', metadata: { sellerId, error: err.message },
+      });
+    }
+
+    return { orderId, totalPrice, dispatched: dispatchResult?.dispatched || false };
+  });
+}
+
+// Remplace le chemin cash de boutique_page.dart:_buyProduct() — décrémentait
+// le stock via une écriture directe (hors transaction), PUIS tentait de
+// créer `boutique_orders` avec `status: 'pending_payment'`, qui viole la
+// règle de création côté client (`status == 'pending'` exact) et échouait
+// donc SYSTÉMATIQUEMENT — stock perdu sans aucune commande créée à chaque
+// tentative d'achat cash (Master Prompt 54, trouvaille documentée sans être
+// corrigée au Prompt 48 bis). Porté en Cloud Function, atomique : vérifie et
+// décrémente le stock, crée `boutique_orders`, dans la MÊME transaction —
+// soit les deux réussissent ensemble, soit aucune écriture n'a lieu (rollback
+// naturel de la transaction Firestore). Utilise Admin SDK (contourne les
+// règles côté client, qui ne s'appliquent qu'aux écritures directes) donc
+// `status: 'pending_payment'` peut être écrit sans devoir changer la règle
+// Firestore elle-même. Aucun wallet touché ici (le paiement cash se fait
+// physiquement à la livraison) — donc aucun des correctifs de paiement
+// wallet des Prompts 46-49 ne s'applique, seule l'atomicité stock↔commande
+// est en jeu, contrairement à buildPayBoutiqueOrder (chemin wallet) qui reste
+// inchangé par ce correctif.
+function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder }) {
+  return onCall(async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
+    const uid = request.auth.uid;
+    const { productId, qty, deliveryLat, deliveryLng } = request.data || {};
+    if (!productId) throw new HttpsError('invalid-argument', 'productId manquant');
+    const quantity = Math.max(1, Math.round(Number(qty) || 1));
+
+    await checkRateLimit(uid, 'pay_boutique_order_cash', 20, 60);
+
+    // Vendeur boutique unique — même requête que payBoutiqueOrderCF (le
+    // paiement wallet), non transactionnelle (ce compte change rarement).
+    const sellerSnap = await db.collection('sellers').where('type', '==', 'boutique').limit(1).get();
+    if (sellerSnap.empty) {
+      throw new HttpsError('failed-precondition', 'Aucun vendeur boutique configuré');
+    }
+    const sellerDoc  = sellerSnap.docs[0];
+    const sellerId   = sellerDoc.id;
+    const sellerName = sellerDoc.data().name || 'Boutique AZ';
+
+    const orderRef = db.collection('boutique_orders').doc();
+    const orderId  = orderRef.id;
+
+    let totalPrice, productName, productCategory;
+
+    await db.runTransaction(async (tx) => {
+      // Lecture avant écriture (obligatoire dans une transaction Firestore) —
+      // le stock est vérifié à l'intérieur de la même transaction qui le
+      // décrémente, donc deux achats simultanés du dernier exemplaire ne
+      // peuvent jamais tous les deux réussir (le second relit un stock déjà
+      // à jour au retry de la transaction, ou échoue si insuffisant).
+      const productRef = db.collection('boutique_products').doc(String(productId));
+      const productSnap = await tx.get(productRef);
+      if (!productSnap.exists) throw new HttpsError('not-found', 'Produit introuvable');
+      const product = productSnap.data();
+
+      const currentStock = Number(product.stock || 0);
+      if (currentStock < quantity) {
+        throw new HttpsError('failed-precondition', 'STOCK_EPUISE');
+      }
+
+      const unitPrice = Number(product.price || 0);
+      totalPrice      = unitPrice * quantity;
+      productName     = product.name || null;
+      productCategory = product.category || null;
+      if (totalPrice <= 0) throw new HttpsError('failed-precondition', 'Prix produit invalide');
+
+      tx.update(productRef, { stock: currentStock - quantity });
+
+      tx.set(orderRef, {
+        id: orderId,
+        clientId: uid,
+        sellerId,
+        productId: String(productId),
+        productName,
+        productCategory,
+        qty:           quantity,
+        unitPrice,
+        totalPrice,
+        paymentMethod: 'cash',
+        status:        'pending_payment',
+        deliveryDeadline: admin.firestore.Timestamp.fromMillis(Date.now() + 48 * 3600 * 1000),
+        createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    await logAudit({
+      userId: uid, userType: 'client', action: 'pay_boutique_order_cash', targetId: orderId,
+      amount: totalPrice, metadata: { productId, quantity, sellerId },
+    });
+
+    // Course de livraison — best-effort, même pattern que
+    // buildPayBoutiqueOrder : un échec ici n'invalide pas l'achat déjà créé.
+    let dispatchResult = null;
+    try {
+      const deliveryOrderRef = db.collection('orders').doc();
+      const lat = typeof deliveryLat === 'number' ? deliveryLat : 0;
+      const lng = typeof deliveryLng === 'number' ? deliveryLng : 0;
+      await deliveryOrderRef.set({
+        description:   `🛍️ Boutique AZ : ${productName} ×${quantity}`,
+        budget:         BOUTIQUE_DELIVERY_FEE,
+        shoppingBudget: 0,
+        status:         'pending',
+        latitude:       lat,
+        longitude:      lng,
+        type:           'boutique',
+        clientId:       uid,
+        sellerId,
+        sellerName,
+        sellerType:     'boutique',
+        paymentMethod:  'cash',
+        linkedBoutiqueOrderId: orderId,
+        isPaid:         false,
+        createdAt:      admin.firestore.FieldValue.serverTimestamp(),
+      });
+      dispatchResult = await dispatchOrder(db, admin, {
+        orderId: deliveryOrderRef.id, lat, lng, budget: BOUTIQUE_DELIVERY_FEE,
+      });
+    } catch (err) {
+      console.error('payBoutiqueOrderCashCF: création/dispatch de la course a échoué (achat déjà validé):', err.message);
+      logAudit({
+        userId: uid, userType: 'client', action: 'pay_boutique_order_cash_dispatch_failed',
+        targetId: orderId, status: 'error', metadata: { sellerId, error: err.message },
+      });
     }
 
     return { orderId, totalPrice, dispatched: dispatchResult?.dispatched || false };
@@ -665,7 +841,10 @@ module.exports = {
   buildCancelOrder,
   buildDeliverOrder,
   buildPayBoutiqueOrder,
+  buildPayBoutiqueOrderCash,
   buildRefundExpiredBoutiqueOrder,
+  cancelOrderTx,
+  cancelOrderPostTx,
   partnerCollection,
   AZ_COMMISSION_FIXED,
   PREPAID_PARTNER_TYPES,

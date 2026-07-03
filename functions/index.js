@@ -1750,12 +1750,13 @@ exports.dispatchOrderToDriver = onCall(async (request) => {
 // dans orderActions.js (testables sans Firebase Admin, même pattern que
 // azia/pendingActions.js:buildConfirmAction).
 // ═══════════════════════════════════════════════════════════════════════════
-const { buildPayOrderFromWallet, buildCancelOrder, buildDeliverOrder, buildPayBoutiqueOrder, buildRefundExpiredBoutiqueOrder } = require('./orderActions');
+const { buildPayOrderFromWallet, buildCancelOrder, buildDeliverOrder, buildPayBoutiqueOrder, buildPayBoutiqueOrderCash, buildRefundExpiredBoutiqueOrder } = require('./orderActions');
 
 exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
 exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission });
 exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
 exports.payBoutiqueOrderCF   = buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
+exports.payBoutiqueOrderCashCF = buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
 exports.refundExpiredBoutiqueOrderCF = buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
 
 

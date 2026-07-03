@@ -2,9 +2,8 @@
 
 const { createPendingAction } = require('../pendingActions');
 const { dispatchOrder } = require('../../dispatch');
+const tarifService = require('../../tarifService');
 
-const MIN_DELIVERY_FEE = 500;
-const MAX_DELIVERY_FEE = 3000;
 const RESULT_LIMIT = 10;
 
 // Reprend le filtrage de lib/screens/client/pharmacie_garde.dart (isOnDuty) —
@@ -50,22 +49,24 @@ function searchPharmacies({ db }) {
 // catalogue produit, demande en texte libre) et son comportement de paiement
 // exact : au paiement wallet, seul le client est débité (la pharmacie n'est
 // PAS créditée à la création, contrairement au restaurant — comportement
-// existant reproduit tel quel, pas une omission de cet outil).
+// existant reproduit tel quel, pas une omission de cet outil). Le prix n'est
+// plus fourni par le modèle (Master Prompt 51) : calculé côté serveur via
+// `tarifService.compute()` (source unique de vérité tarifaire), exactement
+// comme le ferait pharmacie_garde.dart pour la même destination.
 function createPharmacieOrder({ db, admin, HttpsError }) {
   return {
     name: 'create_pharmacie_order',
-    description: "Crée une demande de livraison de médicaments depuis une pharmacie pour le client. Nécessite une confirmation explicite avant toute création réelle.",
+    description: "Crée une demande de livraison de médicaments depuis une pharmacie pour le client. Le prix est calculé automatiquement selon la distance et l'heure — ne jamais demander ou proposer un montant. Nécessite une confirmation explicite avant toute création réelle.",
     input_schema: {
       type: 'object',
       properties: {
         pharmacieId: { type: 'string', description: 'Identifiant de la pharmacie.' },
         description: { type: 'string', description: 'Description des médicaments demandés.' },
-        budget:      { type: 'number', description: `Frais de livraison en FCFA (entre ${MIN_DELIVERY_FEE} et ${MAX_DELIVERY_FEE}).` },
         deliveryLat: { type: 'number', description: 'Latitude du point de livraison.' },
         deliveryLng: { type: 'number', description: 'Longitude du point de livraison.' },
         paymentMethod: { type: 'string', enum: ['cash', 'wallet'], description: 'Moyen de paiement des frais de livraison.' },
       },
-      required: ['pharmacieId', 'description', 'budget', 'deliveryLat', 'deliveryLng'],
+      required: ['pharmacieId', 'description', 'deliveryLat', 'deliveryLng'],
     },
     handler: async (uid, input, ctx) => {
       const pharmacieId = String(input?.pharmacieId || '').trim();
@@ -78,15 +79,17 @@ function createPharmacieOrder({ db, admin, HttpsError }) {
       const description = String(input?.description || '').trim();
       if (!description) throw new Error('La description des médicaments est requise.');
 
-      const budget = Number(input?.budget);
-      if (!budget || budget < MIN_DELIVERY_FEE) throw new Error(`Frais de livraison minimum : ${MIN_DELIVERY_FEE} FCFA`);
-      if (budget > MAX_DELIVERY_FEE) throw new Error(`Frais de livraison maximum : ${MAX_DELIVERY_FEE} FCFA`);
-
       const deliveryLat = Number(input?.deliveryLat);
       const deliveryLng = Number(input?.deliveryLng);
       if (!deliveryLat || !deliveryLng) throw new Error('Coordonnées de livraison manquantes.');
 
       const paymentMethod = input?.paymentMethod === 'wallet' ? 'wallet' : 'cash';
+
+      const tarif = tarifService.compute({ clientLat: deliveryLat, clientLng: deliveryLng });
+      if (!tarif.canOrder) {
+        return { error: tarif.rejectionMessage || 'Livraison non disponible pour cette adresse à cette heure.' };
+      }
+      const budget = tarif.standardPrice;
 
       if (paymentMethod === 'wallet') {
         const snap = await db.collection('clients').doc(uid).get();

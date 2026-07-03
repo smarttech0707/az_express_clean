@@ -65,26 +65,34 @@ service firebase.storage {
     }
 
     // ── SELFIES INSCRIPTION LIVREURS ───────────────────────────────────────
+    // Restreint au propriétaire + admin (Master Prompt 53) — contrairement à
+    // driver_photos ci-dessus (photo de profil affichée au client pendant une
+    // course, besoin légitime de lecture inter-utilisateurs), ces fichiers
+    // sont des documents KYC (selfie de vérification) sans aucun besoin de
+    // lecture par un autre utilisateur que l'admin qui approuve la demande.
     match /driver_selfies/{uid}/{file} {
-      allow read:  if isAuth();
+      allow read:  if isOwnerPath(uid) || isAdmin();
       allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
     }
 
     // ── PIÈCES D'IDENTITÉ LIVREURS ─────────────────────────────────────────
+    // Document d'identité — même restriction que driver_selfies ci-dessus.
     match /driver_id_photos/{uid}/{file} {
-      allow read:  if isAuth();
+      allow read:  if isOwnerPath(uid) || isAdmin();
       allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
     }
 
     // ── SELFIES INSCRIPTION FLOTTE ─────────────────────────────────────────
+    // Même restriction que driver_selfies (document KYC, pas une photo de
+    // profil affichée à d'autres utilisateurs).
     match /fleet_selfies/{uid}/{file} {
-      allow read:  if isAuth();
+      allow read:  if isOwnerPath(uid) || isAdmin();
       allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
     }
 
     // ── PIÈCES D'IDENTITÉ FLOTTE ───────────────────────────────────────────
     match /fleet_id_photos/{uid}/{file} {
-      allow read:  if isAuth();
+      allow read:  if isOwnerPath(uid) || isAdmin();
       allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
     }
 

@@ -14,6 +14,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../../services/firestore_service.dart';
 import '../../services/delivery_service.dart';
+import '../../services/tarif_service.dart';
 import '../../models/order_model.dart';
 import '../../widgets/scale_button.dart';
 import '../../widgets/address_picker_widget.dart';
@@ -204,7 +205,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   }
 
   // ── Calcul prix ───────────────────────────────────────────────────────────
-
+  // Source unique de vérité tarifaire : TarifService (Master Prompt 51) —
+  // c'est le moteur le plus adopté (livraison_screen.dart, courses_screen.dart,
+  // pharmacie_garde.dart, boulangerie_order_page.dart) et le seul qui
+  // implémente les règles officielles vérifiées (rayon 8 km depuis le centre
+  // d'Abengourou, seuil nuit 20h00, refus des commandes >10 km après 21h00).
+  // `DeliveryService` reste importé uniquement pour ses utilitaires neutres de
+  // distance/ETA (`calculateDistance`/`calculateETA`), qui ne font pas partie
+  // de la formule tarifaire contestée — jamais pour `priceBreakdown()`.
   Future<void> _calculatePrice() async {
     if (_deliveryResult == null) {
       _snack('Choisissez d\'abord l\'adresse de livraison');
@@ -216,7 +224,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       startLat, startLng,
       _deliveryResult!.latitude, _deliveryResult!.longitude,
     );
-    setState(() => _breakdown = DeliveryService.priceBreakdown(dist));
+    final tarif = TarifService.compute(
+      clientLat: _deliveryResult!.latitude,
+      clientLng: _deliveryResult!.longitude,
+      routeDistanceKm: dist,
+    );
+    if (!tarif.canOrder) {
+      setState(() => _breakdown = null);
+      _snack(tarif.rejectionMessage ?? 'Livraison non disponible pour cette adresse.');
+      return;
+    }
+    setState(() => _breakdown = PriceBreakdown(
+      total:      tarif.standardPrice,
+      distanceKm: dist,
+      etaMinutes: DeliveryService.calculateETA(dist),
+      isNight:    tarif.isNight,
+      detail:     tarif.isOutside
+          ? 'Hors zone centrale (${dist.toStringAsFixed(1)} km)'
+          : (tarif.isNight ? 'Tarif nuit — zone centrale' : 'Tarif jour — zone centrale'),
+    ));
   }
 
   // ── Envoi commande ────────────────────────────────────────────────────────

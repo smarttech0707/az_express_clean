@@ -77,92 +77,11 @@ class ConversationsPage extends StatelessWidget {
                     final desc = data["description"] ?? "Commande";
                     final driverId = data["driverId"];
 
-                    return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection("livreurs")
-                          .doc(driverId)
-                          .get(),
-                      builder: (context, driverSnap) {
-                        final driverName = driverSnap.hasData &&
-                                driverSnap.data!.exists
-                            ? (driverSnap.data!.data()
-                                    as Map)["name"] ??
-                                "Livreur"
-                            : "Livreur";
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: const [
-                              BoxShadow(
-                                  color: Colors.black12, blurRadius: 6)
-                            ],
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 8),
-                            leading: Container(
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFF6D00)
-                                    .withValues(alpha: 0.12),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.delivery_dining,
-                                  color: Color(0xFFFF6D00)),
-                            ),
-                            title: Text(
-                              driverName,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Text(
-                              desc,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.grey, fontSize: 12),
-                            ),
-                            trailing: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: _statusColor(status)
-                                        .withValues(alpha: 0.12),
-                                    borderRadius:
-                                        BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    _statusLabel(status),
-                                    style: TextStyle(
-                                      color: _statusColor(status),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                const Icon(Icons.chevron_right,
-                                    color: Colors.grey, size: 18),
-                              ],
-                            ),
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    ChatPage(orderId: orderId),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                    return _ConversationTile(
+                      orderId: orderId,
+                      status: status,
+                      desc: desc,
+                      driverId: driverId,
                     );
                   },
                 );
@@ -170,8 +89,38 @@ class ConversationsPage extends StatelessWidget {
             ),
     );
   }
+}
 
-  Color _statusColor(String status) {
+// Widget dédié (au lieu d'un FutureBuilder construit inline dans itemBuilder)
+// pour que le fetch du livreur ne soit lancé qu'une fois par tuile, en cache
+// pour la durée de vie du State — un FutureBuilder inline aurait relancé un
+// nouveau .get() sur "livreurs/{driverId}" à CHAQUE émission du StreamBuilder
+// parent (dès qu'une commande active change de statut, pas seulement celle-ci),
+// multiplié par le nombre de conversations affichées (Master Prompt 59).
+class _ConversationTile extends StatefulWidget {
+  final String orderId;
+  final String status;
+  final String desc;
+  final String? driverId;
+  const _ConversationTile({
+    required this.orderId,
+    required this.status,
+    required this.desc,
+    required this.driverId,
+  });
+
+  @override
+  State<_ConversationTile> createState() => _ConversationTileState();
+}
+
+class _ConversationTileState extends State<_ConversationTile> {
+  late final Future<DocumentSnapshot> _driverFuture = FirebaseFirestore
+      .instance
+      .collection("livreurs")
+      .doc(widget.driverId)
+      .get();
+
+  static Color _statusColor(String status) {
     switch (status) {
       case "accepted":
         return Colors.blue;
@@ -184,7 +133,7 @@ class ConversationsPage extends StatelessWidget {
     }
   }
 
-  String _statusLabel(String status) {
+  static String _statusLabel(String status) {
     switch (status) {
       case "accepted":
         return "En route";
@@ -195,5 +144,83 @@ class ConversationsPage extends StatelessWidget {
       default:
         return status;
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<DocumentSnapshot>(
+      future: _driverFuture,
+      builder: (context, driverSnap) {
+        final driverName = driverSnap.hasData && driverSnap.data!.exists
+            ? (driverSnap.data!.data() as Map)["name"] ?? "Livreur"
+            : "Livreur";
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(color: Colors.black12, blurRadius: 6)
+            ],
+          ),
+          child: ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6D00).withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delivery_dining,
+                  color: Color(0xFFFF6D00)),
+            ),
+            title: Text(
+              driverName,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text(
+              widget.desc,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _statusColor(widget.status).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _statusLabel(widget.status),
+                    style: TextStyle(
+                      color: _statusColor(widget.status),
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Icon(Icons.chevron_right,
+                    color: Colors.grey, size: 18),
+              ],
+            ),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ChatPage(orderId: widget.orderId),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }

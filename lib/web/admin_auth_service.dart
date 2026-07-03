@@ -16,10 +16,25 @@ class AdminAuthService extends ChangeNotifier {
           .collection('admins')
           .doc(user.uid)
           .get();
-      _isAdmin = doc.exists;
+      _isAdmin = doc.exists && !_isDeactivatedSubAdmin(doc.data());
       if (!_isAdmin) await FirebaseAuth.instance.signOut();
       notifyListeners();
     });
+  }
+
+  // Même règle que lib/screens/admin/admin_login.dart : un sous-admin désactivé
+  // (role == 'sub' && isActive == false) ne doit pas pouvoir se connecter —
+  // avant ce correctif (Master Prompt 57), AdminAuthService ne vérifiait que
+  // l'existence du document admins/{uid}, laissant un sous-admin désactivé côté
+  // mobile accéder quand même au tableau de bord web (même si chaque lecture/
+  // écriture y échouait ensuite côté règles Firestore, isAdmin() vérifiant déjà
+  // isActive — ceci ferme le dernier écart d'expérience/permission, pas une
+  // fuite de données qui aurait autrement réussi).
+  bool _isDeactivatedSubAdmin(Map<String, dynamic>? data) {
+    if (data == null) return false;
+    final role = data['role'] as String? ?? 'super';
+    final isActive = data['isActive'] as bool? ?? true;
+    return role == 'sub' && isActive == false;
   }
 
   bool _isAdmin = false;
@@ -37,6 +52,10 @@ class AdminAuthService extends ChangeNotifier {
       if (!doc.exists) {
         await FirebaseAuth.instance.signOut();
         return 'Accès refusé. Ce compte n\'est pas administrateur.';
+      }
+      if (_isDeactivatedSubAdmin(doc.data())) {
+        await FirebaseAuth.instance.signOut();
+        return 'Votre compte a été désactivé. Contactez l\'administrateur principal.';
       }
       _isAdmin = true;
       AuthService().logAuthEvent('login', 'admin');

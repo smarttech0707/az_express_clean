@@ -306,6 +306,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
   final _priceCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _roomsCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   final _latCtrl = TextEditingController();
   final _lngCtrl = TextEditingController();
   final _idNumberCtrl = TextEditingController();
@@ -330,6 +331,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
       _priceCtrl.text = "${d["price"] ?? ""}";
       _addressCtrl.text = d["address"] ?? "";
       _roomsCtrl.text = "${d["rooms"] ?? ""}";
+      _phoneCtrl.text = d["phone"] ?? "";
       _isAvailable = d["isAvailable"] ?? true;
       _existingPhotoUrl = d["photoUrl"];
       _existingIdPhotoUrl = d["idPhotoUrl"];
@@ -348,6 +350,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
     _priceCtrl.dispose();
     _addressCtrl.dispose();
     _roomsCtrl.dispose();
+    _phoneCtrl.dispose();
     _latCtrl.dispose();
     _lngCtrl.dispose();
     _idNumberCtrl.dispose();
@@ -497,6 +500,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
       "price": price,
       "address": address,
       "rooms": rooms,
+      "phone": _phoneCtrl.text.trim(),
       "isAvailable": _isAvailable,
       "photoUrl": photoUrl,
       "lat": double.tryParse(_latCtrl.text.trim()) ?? 0.0,
@@ -571,6 +575,9 @@ class _LocationFormPageState extends State<_LocationFormPage> {
           const SizedBox(height: 14),
           _field(_addressCtrl, "Adresse / Quartier", Icons.location_on,
               hint: "ex: Quartier Morafou"),
+          const SizedBox(height: 14),
+          _field(_phoneCtrl, "Téléphone du propriétaire", Icons.phone_rounded,
+              type: TextInputType.phone, hint: "ex: 0700000000"),
           const SizedBox(height: 14),
           Row(
             children: [

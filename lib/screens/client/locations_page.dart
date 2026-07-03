@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/app_text.dart';
 
@@ -382,6 +383,7 @@ class _LocationDetail extends StatelessWidget {
     final rooms = data["rooms"] ?? 1;
     final description = data["description"] ?? "";
     final photoUrl = data["photoUrl"] as String?;
+    final phone = data["phone"] as String?;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
@@ -483,39 +485,49 @@ class _LocationDetail extends StatelessWidget {
                     ),
                   ],
                   const SizedBox(height: 28),
-                  Container(
-                    width: double.infinity,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [
-                          Color(0xFF004D40),
-                          Color(0xFF00897B)
+                  GestureDetector(
+                    onTap: () async {
+                      final number = phone ?? '';
+                      if (number.isEmpty) return;
+                      final uri = Uri.parse('tel:$number');
+                      if (await canLaunchUrl(uri)) launchUrl(uri);
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [
+                            Color(0xFF004D40),
+                            Color(0xFF00897B)
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.phone_rounded,
+                              color: Colors.white, size: 24),
+                          const SizedBox(height: 4),
+                          Text(
+                            context.tr('contact_visit'),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            (phone == null || phone.isEmpty)
+                                ? context.tr('contact_owner')
+                                : phone,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 12),
+                          ),
                         ],
                       ),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      children: [
-                        const Icon(Icons.phone_rounded,
-                            color: Colors.white, size: 24),
-                        const SizedBox(height: 4),
-                        Text(
-                          context.tr('contact_visit'),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          context.tr('contact_owner'),
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 12),
-                        ),
-                      ],
                     ),
                   ),
                   const SizedBox(height: 20),
