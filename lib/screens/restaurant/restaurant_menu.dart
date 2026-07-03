@@ -126,27 +126,26 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
         sellerName: widget.restaurantName,
         sellerType: "restaurant",
         paymentMethod: _paymentMethod,
+        isPaid: _paymentMethod == 'wallet',
       );
 
       if (_paymentMethod == 'wallet') {
         final clientRef =
             FirebaseFirestore.instance.collection('clients').doc(uid);
-        final restaurantRef = FirebaseFirestore.instance
-            .collection('restaurants')
-            .doc(widget.restaurantId);
         final orderRef =
             FirebaseFirestore.instance.collection('orders').doc(id);
 
+        // Le restaurant est crédité plus tard par deliverOrderCF (côté
+        // serveur, quand le livreur marque la commande livrée) — pas ici.
+        // Le créditer directement échouait déjà systématiquement
+        // (`restaurants/{id}` n'autorise l'écriture qu'aux admins), donc le
+        // paiement wallet restaurant ne fonctionnait pas du tout avant ce
+        // correctif (Master Prompt 46).
         await FirebaseFirestore.instance.runTransaction((tx) async {
           final snap = await tx.get(clientRef);
           final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
           if (wallet < _totalPrice) throw Exception('SOLDE_INSUFFISANT');
-          // Déduire du client
           tx.update(clientRef, {'wallet': wallet - _totalPrice});
-          // Créditer le restaurant
-          tx.update(restaurantRef, {
-            'wallet': FieldValue.increment(_totalPrice),
-          });
           tx.set(orderRef, order.toMap());
         });
 
@@ -159,15 +158,6 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
           'type': 'purchase',
           'amount': _totalPrice,
           'description': 'Commande ${widget.restaurantName} (wallet)',
-          'orderId': id,
-          'createdAt': Timestamp.now(),
-        });
-
-        // Log restaurant wallet transaction
-        await restaurantRef.collection('wallet_transactions').add({
-          'type': 'sale',
-          'amount': _totalPrice,
-          'description': 'Commande client (wallet) — $_totalPrice FCFA',
           'orderId': id,
           'createdAt': Timestamp.now(),
         });

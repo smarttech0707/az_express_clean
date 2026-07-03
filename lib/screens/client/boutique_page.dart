@@ -38,6 +38,15 @@ class _BoutiquePageState extends State<BoutiquePage>
   }
 
   // ── REMBOURSEMENT AUTOMATIQUE 48H ─────────────────────────────
+  // Délègue à `refundExpiredBoutiqueOrderCF` : l'ancienne version créditait
+  // directement le wallet du client (et ne débitait jamais le vendeur, déjà
+  // payé à l'achat) depuis une transaction Firestore lancée par le client —
+  // la règle `clients/{id}` n'autorise le propriétaire qu'à DIMINUER son
+  // propre solde (jamais l'augmenter) et `boutique_orders/{id}` n'autorise
+  // l'écriture qu'aux admins : les deux écritures échouaient toujours
+  // (`permission-denied`), avalé silencieusement par le catch ci-dessous —
+  // ce remboursement automatique n'a donc jamais fonctionné en production
+  // (Master Prompt 48 bis).
   Future<void> _checkAutoRefunds() async {
     if (_uid == null) return;
     final now = DateTime.now();
@@ -48,50 +57,22 @@ class _BoutiquePageState extends State<BoutiquePage>
           .where("status", isEqualTo: "paid")
           .get();
 
+      final fn = FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('refundExpiredBoutiqueOrderCF');
       for (final doc in snap.docs) {
         final data = doc.data();
         final deadline =
             (data["deliveryDeadline"] as Timestamp?)?.toDate();
         if (deadline != null && now.isAfter(deadline)) {
-          await _processRefund(
-              doc.id, _uid!, (data["totalPrice"] as num? ?? 0).toInt(),
-              productName: data["productName"] ?? "produit");
+          try {
+            await fn.call(<String, dynamic>{'orderId': doc.id});
+          } catch (_) {
+            // Best-effort — un échec ici sera retenté à la prochaine
+            // ouverture de cet écran, comme avant.
+          }
         }
       }
     } catch (_) {}
-  }
-
-  Future<void> _processRefund(
-      String orderId, String clientId, int amount,
-      {String productName = ""}) async {
-    final clientRef =
-        FirebaseFirestore.instance.collection("clients").doc(clientId);
-    final orderRef = FirebaseFirestore.instance
-        .collection("boutique_orders")
-        .doc(orderId);
-
-    await FirebaseFirestore.instance.runTransaction((tx) async {
-      final snap = await tx.get(clientRef);
-      final wallet = (snap.data()?["wallet"] ?? 0) as int;
-      tx.update(clientRef, {"wallet": wallet + amount});
-      tx.update(orderRef, {
-        "status": "refunded",
-        "refundedAt": Timestamp.now(),
-        "refundReason": "Non livré dans les 48h"
-      });
-    });
-
-    await FirebaseFirestore.instance
-        .collection("clients")
-        .doc(clientId)
-        .collection("wallet_transactions")
-        .add({
-      "type": "refund",
-      "amount": amount,
-      "description": "Remboursement automatique : $productName (48h dépassées)",
-      "orderId": orderId,
-      "createdAt": Timestamp.now(),
-    });
   }
 
   // ── ACHAT ─────────────────────────────────────────────────────
@@ -276,6 +257,7 @@ class _BoutiquePageState extends State<BoutiquePage>
 
     int qty = 1;
     String payMethod = 'wallet';
+    bool buying = false; // anti double-tap — payBoutiqueOrderCF n'est pas idempotent
 
     showModalBottomSheet(
       context: context,
@@ -488,11 +470,19 @@ class _BoutiquePageState extends State<BoutiquePage>
                   width: double.infinity,
                   height: 52,
                   child: ScaleButton(
-                    onPressed: stock == 0 ||
+                    onPressed: buying ||
+                            stock == 0 ||
                             (payMethod == 'wallet' && !hasWallet) ||
                             (payMethod == 'cash' && !codEnabled)
                         ? null
-                        : () => _buyProduct(product, qty, payMethod),
+                        : () async {
+                            setS(() => buying = true);
+                            await _buyProduct(product, qty, payMethod);
+                            // Le sheet peut déjà être fermé (Navigator.pop sur
+                            // le chemin wallet réussi) — ne pas rappeler setS
+                            // dans ce cas (setState après dispose).
+                            if (ctx.mounted) setS(() => buying = false);
+                          },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFFF6D00),
                       shape: RoundedRectangleBorder(
@@ -629,9 +619,11 @@ class _BoutiquePageState extends State<BoutiquePage>
             ),
             _MyOrdersTab(
               uid: _uid,
-              onRefund: (orderId, amount, name) =>
-                  _processRefund(orderId, _uid!, amount,
-                      productName: name),
+              onRefund: (orderId, amount, name) async {
+                await FirebaseFunctions.instanceFor(region: 'europe-west1')
+                    .httpsCallable('refundExpiredBoutiqueOrderCF')
+                    .call(<String, dynamic>{'orderId': orderId});
+              },
             ),
           ],
         ),

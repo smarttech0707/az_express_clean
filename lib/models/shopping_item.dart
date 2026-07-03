@@ -15,4 +15,20 @@ class ShoppingItem {
         'name': name,
         'budgetFcfa': budgetFcfa,
       };
+
+  ShoppingItem copyWith({String? name, int? budgetFcfa}) => ShoppingItem(
+        name: name ?? this.name,
+        budgetFcfa: budgetFcfa ?? this.budgetFcfa,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ShoppingItem &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          budgetFcfa == other.budgetFcfa;
+
+  @override
+  int get hashCode => Object.hash(name, budgetFcfa);
 }

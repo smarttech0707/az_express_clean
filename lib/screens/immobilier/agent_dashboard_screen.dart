@@ -73,6 +73,15 @@ class _AgentRequestFormState extends State<_AgentRequestForm> {
   final _cityCtrl = TextEditingController();
   bool _sending = false;
 
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _agencyCtrl.dispose();
+    _cityCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _submit() async {
     if (_nameCtrl.text.trim().isEmpty || _phoneCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -271,6 +280,15 @@ class _ListingFormScreenState extends State<_ListingFormScreen> {
     'Maison', 'Villa', 'Appartement', 'Studio', 'Chambre', 'Terrain',
     'Bureau', 'Magasin', 'Entrepôt', 'Immeuble', 'Ferme', 'Local commercial',
   ];
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _descCtrl.dispose();
+    _priceCtrl.dispose();
+    _cityCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _save() async {
     final title = _titleCtrl.text.trim();

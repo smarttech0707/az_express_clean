@@ -108,9 +108,21 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _PharmacieList extends StatelessWidget {
+class _PharmacieList extends StatefulWidget {
   final bool onlyOnDuty;
   const _PharmacieList({required this.onlyOnDuty});
+
+  @override
+  State<_PharmacieList> createState() => _PharmacieListState();
+}
+
+class _PharmacieListState extends State<_PharmacieList> {
+  // Anti double-tap — _orderDelivery lance une transaction Firestore sans
+  // clé d'idempotence ; sans ce garde-fou, un double-tap sur "Livraison"
+  // crée deux commandes indépendantes et débite le client deux fois
+  // (Master Prompt 49, même famille que le bug boutique_page.dart corrigé
+  // au Prompt 48).
+  bool _busy = false;
 
   Future<void> _call(String phone) async {
     final url = Uri.parse('tel:$phone');
@@ -132,8 +144,9 @@ class _PharmacieList extends StatelessWidget {
       backgroundColor: Colors.transparent,
       builder: (_) => const _PaymentPickerSheet(),
     );
-    if (payment == null) return;
+    if (payment == null || _busy) return;
 
+    setState(() => _busy = true);
     int deliveryFee = 0;
     try {
       var user = FirebaseAuth.instance.currentUser;
@@ -240,6 +253,8 @@ class _PharmacieList extends StatelessWidget {
               behavior: SnackBarBehavior.floating),
         );
       }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -248,7 +263,7 @@ class _PharmacieList extends StatelessWidget {
     Query<Map<String, dynamic>> query =
         FirebaseFirestore.instance.collection('pharmacies').orderBy('name');
 
-    if (onlyOnDuty) {
+    if (widget.onlyOnDuty) {
       query = FirebaseFirestore.instance
           .collection('pharmacies')
           .where('isOnDuty', isEqualTo: true);
@@ -272,14 +287,14 @@ class _PharmacieList extends StatelessWidget {
                     size: 72, color: Colors.grey.shade300),
                 const SizedBox(height: 16),
                 Text(
-                  onlyOnDuty
+                  widget.onlyOnDuty
                       ? 'Aucune pharmacie de garde\nen ce moment'
                       : 'Aucune pharmacie enregistrée',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
                       fontSize: 15, color: Colors.grey),
                 ),
-                if (onlyOnDuty) ...[
+                if (widget.onlyOnDuty) ...[
                   const SizedBox(height: 8),
                   Text(
                     'Revenez plus tard ou appelez le 15',
@@ -319,7 +334,7 @@ class _PharmacieList extends StatelessWidget {
               hasCoords: hasCoords,
               onCall: phone.isNotEmpty ? () => _call(phone) : null,
               onMap: hasCoords ? () => _openMap(lat, lng, name) : null,
-              onDeliver: () => _orderDelivery(context, name, doc.id),
+              onDeliver: _busy ? null : () => _orderDelivery(context, name, doc.id),
             );
           },
         );

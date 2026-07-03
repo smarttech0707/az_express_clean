@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'shopping_item.dart';
 
 class OrderModel {
@@ -213,4 +214,212 @@ class OrderModel {
       if (items != null) 'items': items!.map((e) => e.toMap()).toList(),
     };
   }
+
+  OrderModel copyWith({
+    String? id,
+    String? description,
+    int? budget,
+    String? status,
+    double? latitude,
+    double? longitude,
+    String? type,
+    String? driverId,
+    String? clientId,
+    String? clientName,
+    String? clientPhone,
+    String? voiceMessage,
+    DateTime? createdAt,
+    int? rating,
+    String? deliveryPhoto,
+    int? shoppingBudget,
+    String? driverAcceptanceSelfie,
+    String? driverPhotoUrl,
+    String? pickupAddress,
+    String? paymentMethod,
+    String? sellerId,
+    String? sellerName,
+    String? sellerType,
+    String? linkedBoutiqueOrderId,
+    bool? isPaid,
+    int? medicineAmount,
+    String? pharmacieId,
+    String? pharmacieName,
+    int? sellerRating,
+    double? destLat,
+    double? destLng,
+    String? deliveryAddress,
+    double? pickupLat,
+    double? pickupLng,
+    bool? forSelf,
+    String? deliveryMode,
+    String? recipientPhone,
+    String? recipientName,
+    String? pickupContactName,
+    String? pickupContactPhone,
+    String? pickupZone,
+    String? deliveryZone,
+    double? deliveredLat,
+    double? deliveredLng,
+    DateTime? deliveredAt,
+    List<ShoppingItem>? items,
+  }) {
+    return OrderModel(
+      id: id ?? this.id,
+      description: description ?? this.description,
+      budget: budget ?? this.budget,
+      status: status ?? this.status,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      type: type ?? this.type,
+      driverId: driverId ?? this.driverId,
+      clientId: clientId ?? this.clientId,
+      clientName: clientName ?? this.clientName,
+      clientPhone: clientPhone ?? this.clientPhone,
+      voiceMessage: voiceMessage ?? this.voiceMessage,
+      createdAt: createdAt ?? this.createdAt,
+      rating: rating ?? this.rating,
+      deliveryPhoto: deliveryPhoto ?? this.deliveryPhoto,
+      shoppingBudget: shoppingBudget ?? this.shoppingBudget,
+      driverAcceptanceSelfie: driverAcceptanceSelfie ?? this.driverAcceptanceSelfie,
+      driverPhotoUrl: driverPhotoUrl ?? this.driverPhotoUrl,
+      pickupAddress: pickupAddress ?? this.pickupAddress,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      sellerId: sellerId ?? this.sellerId,
+      sellerName: sellerName ?? this.sellerName,
+      sellerType: sellerType ?? this.sellerType,
+      linkedBoutiqueOrderId: linkedBoutiqueOrderId ?? this.linkedBoutiqueOrderId,
+      isPaid: isPaid ?? this.isPaid,
+      medicineAmount: medicineAmount ?? this.medicineAmount,
+      pharmacieId: pharmacieId ?? this.pharmacieId,
+      pharmacieName: pharmacieName ?? this.pharmacieName,
+      sellerRating: sellerRating ?? this.sellerRating,
+      destLat: destLat ?? this.destLat,
+      destLng: destLng ?? this.destLng,
+      deliveryAddress: deliveryAddress ?? this.deliveryAddress,
+      pickupLat: pickupLat ?? this.pickupLat,
+      pickupLng: pickupLng ?? this.pickupLng,
+      forSelf: forSelf ?? this.forSelf,
+      deliveryMode: deliveryMode ?? this.deliveryMode,
+      recipientPhone: recipientPhone ?? this.recipientPhone,
+      recipientName: recipientName ?? this.recipientName,
+      pickupContactName: pickupContactName ?? this.pickupContactName,
+      pickupContactPhone: pickupContactPhone ?? this.pickupContactPhone,
+      pickupZone: pickupZone ?? this.pickupZone,
+      deliveryZone: deliveryZone ?? this.deliveryZone,
+      deliveredLat: deliveredLat ?? this.deliveredLat,
+      deliveredLng: deliveredLng ?? this.deliveredLng,
+      deliveredAt: deliveredAt ?? this.deliveredAt,
+      items: items ?? this.items,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OrderModel &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          description == other.description &&
+          budget == other.budget &&
+          status == other.status &&
+          latitude == other.latitude &&
+          longitude == other.longitude &&
+          type == other.type &&
+          driverId == other.driverId &&
+          clientId == other.clientId &&
+          clientName == other.clientName &&
+          clientPhone == other.clientPhone &&
+          voiceMessage == other.voiceMessage &&
+          createdAt == other.createdAt &&
+          rating == other.rating &&
+          deliveryPhoto == other.deliveryPhoto &&
+          shoppingBudget == other.shoppingBudget &&
+          driverAcceptanceSelfie == other.driverAcceptanceSelfie &&
+          driverPhotoUrl == other.driverPhotoUrl &&
+          pickupAddress == other.pickupAddress &&
+          paymentMethod == other.paymentMethod &&
+          sellerId == other.sellerId &&
+          sellerName == other.sellerName &&
+          sellerType == other.sellerType &&
+          linkedBoutiqueOrderId == other.linkedBoutiqueOrderId &&
+          isPaid == other.isPaid &&
+          medicineAmount == other.medicineAmount &&
+          pharmacieId == other.pharmacieId &&
+          pharmacieName == other.pharmacieName &&
+          sellerRating == other.sellerRating &&
+          destLat == other.destLat &&
+          destLng == other.destLng &&
+          deliveryAddress == other.deliveryAddress &&
+          pickupLat == other.pickupLat &&
+          pickupLng == other.pickupLng &&
+          forSelf == other.forSelf &&
+          deliveryMode == other.deliveryMode &&
+          recipientPhone == other.recipientPhone &&
+          recipientName == other.recipientName &&
+          pickupContactName == other.pickupContactName &&
+          pickupContactPhone == other.pickupContactPhone &&
+          pickupZone == other.pickupZone &&
+          deliveryZone == other.deliveryZone &&
+          deliveredLat == other.deliveredLat &&
+          deliveredLng == other.deliveredLng &&
+          deliveredAt == other.deliveredAt &&
+          listEquals(items, other.items);
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        description,
+        budget,
+        status,
+        latitude,
+        longitude,
+        type,
+        driverId,
+        clientId,
+        clientName,
+        Object.hash(
+          clientPhone,
+          voiceMessage,
+          createdAt,
+          rating,
+          deliveryPhoto,
+          shoppingBudget,
+          driverAcceptanceSelfie,
+          driverPhotoUrl,
+          pickupAddress,
+          paymentMethod,
+        ),
+        Object.hash(
+          sellerId,
+          sellerName,
+          sellerType,
+          linkedBoutiqueOrderId,
+          isPaid,
+          medicineAmount,
+          pharmacieId,
+          pharmacieName,
+          sellerRating,
+          destLat,
+        ),
+        Object.hash(
+          destLng,
+          deliveryAddress,
+          pickupLat,
+          pickupLng,
+          forSelf,
+          deliveryMode,
+          recipientPhone,
+          recipientName,
+          pickupContactName,
+          pickupContactPhone,
+        ),
+        Object.hash(
+          pickupZone,
+          deliveryZone,
+          deliveredLat,
+          deliveredLng,
+          deliveredAt,
+          Object.hashAll(items ?? const []),
+        ),
+      );
 }
