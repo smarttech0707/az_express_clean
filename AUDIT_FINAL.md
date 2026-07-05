@@ -1,6 +1,14 @@
 # AZ Express — Audit final avant mise en production
 
-**Date** : 2026-07-03 (mise à jour Master Prompt 60 — « Release Candidate 2 Final Decision » — audit final avant pilote étendu, depuis la version Master Prompt 59)
+**Date** : 2026-07-03 (mise à jour Master Prompt 63 — « Android Play Store Release Preparation » — depuis la version Master Prompt 62)
+
+**Ce qui a changé depuis la version du Prompt 62** : audit-only de la préparation release Android (aucun code modifié). **Verdict : BLOCKED — pas pour une raison technique** (le build Android fonctionne réellement : `flutter build appbundle --release` testé en conditions réelles, produit un vrai `app-release.aab` de 74,3 Mo, signature vérifiée de bout en bout puisque le build aurait échoué sans un keystore valide) **— mais pour 2 vraies trouvailles de conformité Play Store** : (1) la politique de confidentialité publique et les pages légales nomment "CinetPay" comme prestataire de paiement alors que le code réel utilise exclusivement FeexPay depuis le début de cette session — zéro trace de CinetPay dans `functions/` ; (2) la politique de confidentialité ne déclare jamais Anthropic/Claude comme tiers destinataire des données envoyées par AZ IA (texte + voix transcrite), un vrai gap de conformité "Data Safety" Play Console. Aucune des deux n'est corrigée dans cette passe (édition de contenu légal public, décision explicite requise). Nouveau risque documenté, sans rapport avec le Play Store : le SDK Flutter installé est sur le canal `beta` (3.45.0-0.1.pre), jamais signalé avant. Un avertissement de build non-fatal (symboles de debug non retirés) tracé à un problème d'environnement local (`cmdline-tools`/licences Android manquantes sur cette machine), pas un défaut du code.
+
+**Ce qui a changé depuis la version du Prompt 61** : audit du pipeline CI/CD et de la préparation au build de release (Android/iOS/Web), sans aucun changement de code (prompt explicitement audit-only, scopé à CI/build/release safety). **Verdict : CI STATUS READY** — les 3 jobs existants (`flutter`, `functions`, `firestore-rules`) sont fonctionnels et sans YAML cassée. **Un vrai blocueur de release trouvé, spécifique à iOS** : `PRODUCT_BUNDLE_IDENTIFIER = com.example.azExpressClean` dans `ios/Runner.xcodeproj/project.pbxproj` est toujours le bundle ID par défaut de `flutter create` — bloque toute soumission App Store/TestFlight (Apple n'autorise pas `com.example.*`). Android, lui, a déjà un `applicationId` correctement branded (`com.azexpress.app`) et un build release fonctionnel (keystore + `key.properties` présents localement, correctement exclus de git). `flutter build web --release` testé réellement, réussit proprement. Aucun secret GitHub requis par la CI actuelle (aucun job de déploiement n'existe). Incohérence de version documentée : le tag git `v0.2-rc2` et la version applicative (`pubspec.yaml` : `1.0.0+1`, identique côté Android/iOS) ne se sont jamais synchronisés — deux schémas de version indépendants.
+
+**Ce qui a changé depuis la version du Prompt 60** : RC2 est désormais committée, taguée (`v0.2-rc2`) et poussée vers GitHub (confirmé : `git status -sb` montre `master...origin/master` sans écart) — le point le plus urgent listé au Prompt 60 est résolu. Cette mise à jour est un audit de préparation au déploiement Firebase réel, sans aucun changement de code (prompt explicitement audit-only). Testé réellement (pas supposé) : `firestore.rules`, `storage.rules` et `functions/` compilent/packagent tous sans erreur via `firebase deploy --only ... --dry-run` contre le vrai projet `az-express-clean`. Aucun secret codé en dur trouvé. Deux avertissements d'infrastructure réels remontés par Firebase lui-même (pas par une recherche de code) : le runtime Node.js 20 est déprécié (décommissionné le 2026-10-30) et le SDK `firebase-functions` est obsolète. Une trouvaille de documentation corrigée : `.github/workflows/ci.yml` a en réalité 3 jobs (flutter, functions, et un job `firestore-rules` jamais documenté) contre 2 déjà notés depuis le Prompt 16/38. **Verdict : READY TO DEPLOY** — voir Section 14 pour le rapport complet.
+
+**Date précédente** : 2026-07-03 (mise à jour Master Prompt 60 — « Release Candidate 2 Final Decision » — audit final avant pilote étendu, depuis la version Master Prompt 59)
 **Périmètre** : synthèse des audits réalisés au fil des Master Prompts 01→60 (chacun grounded dans le code réel, jamais dans une supposition) + des jalons AZ IA M0→M7 livrés, plus une tranche ciblée de M8. Ce document ne réintroduit pas de nouvelles recherches à chaque section — il compile ce qui a déjà été vérifié et documenté dans `CLAUDE.md`, section par section, en un rapport priorisé. Conformément à l'instruction explicite du Prompt 60 (« ne pas inventer de nouveaux risques, utiliser uniquement les audits existants »), ce dernier passage ne réaudite rien : il compile la Section 0 (bilan global) et refond la Section 13 (verdict final) à partir de tout ce qui précède, plus une vérification factuelle de l'état Git/CI/secrets (Phase 3 du prompt) qui a corrigé une erreur répétée dans ce document depuis le Prompt 38 — voir ci-dessous.
 
 **🔧 Correction factuelle importante (Prompt 60)** : ce document a affirmé, de façon répétée depuis le Prompt 38, que « zéro commit git » avait été fait et qu'aucun remote n'existait. **C'était vrai au moment où c'était écrit, mais ce n'est plus le cas** — vérifié directement (`git remote -v`, `git log`) : un remote `origin` existe (`github.com/smarttech0707/az_express_clean.git`), et **2 commits de release existent déjà**, capturant l'état du projet jusqu'au Prompt 50 inclus (`4a3d469 release: AZ Express pilot ready after master prompts 01-50 audit`, `28d0c03 release: AZ Express ready pilot after prompts 41-50 fixes`) — faits hors de cette session de conversation (aucun commit n'a été créé par l'agent IA au cours de cette série de prompts, conformément à la consigne « ne pas commit »). **Ce qui reste vrai** : tout le travail des Prompts 51 à 60 (tarification serveur AZ IA, dédoublonnage de l'annulation, App Check + correctif KYC Storage, Cloud Function Boutique cash, audit Immobilier + correctif contact, audit back-office + 2 correctifs, audit observabilité + correctif logAudit, audit performance + correctif lectures répétées) reste **non commité** — 21 fichiers modifiés/nouveaux dans l'arbre de travail actuel, jamais poussés. Voir Phase 3 (Section 13) pour le détail exact.
@@ -385,3 +393,250 @@ Les 9 bugs financiers critiques trouvés sur l'ensemble de la session (paiement 
 8. Corriger le flux de création de compte livreur de flotte ; nettoyer le code mort 2FA admin ; renforcer l'authentification `service_providers` (artisans).
 
 **Ce verdict reste "pilote étendu sous supervision humaine active", pas "lancement public non supervisé"** — la distinction avec le verdict READY PILOT des versions précédentes de ce document est un changement d'échelle du pilote (plus d'utilisateurs, plus de confiance dans la couverture de test et l'architecture), pas un changement de posture de supervision.
+
+---
+
+## 14. Préparation au déploiement Firebase réel — Master Prompt 61
+
+Audit-only, conformément à l'instruction explicite du prompt (« ne pas refactoriser, ne pas ajouter de fonctionnalités, ne pas modifier une logique métier stable », « ne rien déployer automatiquement »). Aucun code modifié dans cette section. Toutes les vérifications ci-dessous sont réellement exécutées (dry-run contre le projet Firebase réel `az-express-clean`), pas supposées.
+
+### Phase 1 — Audit du projet Firebase
+
+- **`.firebaserc`** : un seul projet, `az-express-clean` — pas d'alias dev/staging/prod (décision déjà assumée, section DevOps de `CLAUDE.md`).
+- **`firebase.json`** : références correctes vers `firestore.rules`/`firestore.indexes.json`/`storage.rules` ; Functions en `nodejs20` ; Hosting sert `build/web` avec en-têtes de sécurité déjà présents (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy) — pas de CSP explicite (gap mineur, non corrigé ici, hors périmètre "ne rien modifier").
+- **Région Cloud Functions** : cohérente — `setGlobalOptions({ region: 'europe-west1' })` s'applique à toutes les fonctions sauf `azIaChat`, qui déclare explicitement la même région — aucune divergence trouvée.
+- **App Check** : SDK client actif (mobile), enforcement serveur toujours pas activé — conforme à l'instruction explicite de ce prompt de ne pas y toucher.
+- **Authentication / Remote Config** : inchangés, pas re-audités sans nouvel angle (Remote Config confirmé toujours absent, déjà documenté).
+
+### Phase 2/3 — Firestore & Storage deploy readiness (testé réellement)
+
+- `firebase deploy --only firestore --dry-run` → **compilation réussie**, aucune erreur.
+- `firebase deploy --only storage --dry-run` → **compilation réussie**, aucune erreur.
+- Aucune règle temporaire dangereuse trouvée (`allow read, write: if true` : 0 occurrence dans `firestore.rules`).
+- Aucun accès public inattendu au-delà de ce qui est déjà documenté et voulu (`config`, annonces actives Marketplace/Immobilier).
+- Collections sensibles confirmées protégées : `ai_conversations`, `ai_pending_actions`, `audit_logs`, `security_events`, `rate_limits` — toutes `allow write: if false` (Cloud Function uniquement).
+- KYC/documents livreurs (Storage) : `driver_selfies`/`driver_id_photos`/`fleet_selfies`/`fleet_id_photos` restreints à `isOwnerPath(uid) || isAdmin()` (déjà corrigé Prompt 53) ; `driver_photos` (photo de profil, publique par nécessité fonctionnelle) volontairement large — confirmé toujours cohérent.
+
+### Phase 4 — Cloud Functions release check
+
+- `firebase deploy --only functions --dry-run` → **packaging réussi** (176,66 Ko), aucune erreur de chargement.
+- **53 fonctions exportées**, région cohérente, secrets chargés depuis `.env` correctement au moment du dry-run.
+- **2 avertissements d'infrastructure réels, remontés par l'outil Firebase lui-même** :
+  1. 🟡 Runtime **Node.js 20 déprécié depuis le 2026-04-30, décommissionné le 2026-10-30** — pas un blocage aujourd'hui, mais une action à planifier avant fin octobre 2026.
+  2. 🟡 SDK **`firebase-functions` obsolète**, avec avertissement explicite de changements cassants à la mise à niveau — pas mis à jour ici (décision explicite requise avant toute montée de version majeure, politique déjà actée).
+- Mémoire/timeout : seules 3 fonctions ont des overrides explicites (`autoExpireOrders` 120s/256MiB, `cleanupExpiredRateLimits` 300s/256MiB, `azIaChat` 120s/512MiB) — les 50 autres sur les valeurs par défaut v2, cohérent avec un trafic pilote.
+- Fonctions sensibles identifiées (déjà connues, listées pour référence) : wallet/paiement (`orderActions.js`, `initiateFeexPayPayment`, `initiateWithdrawal`), commandes/dispatch (`dispatchOrderToDriver`, `autoExpireOrders`), AZ IA (`azIaChat`, `aiConfirmAction`), admin (`createSubAdmin`, `deleteSubAdmin`).
+
+### Phase 5 — Variables d'environnement / secrets
+
+- Recherche exhaustive de secrets codés en dur dans `functions/*.js` — **zéro résultat**.
+- `functions/.env` existe, correctement gitignoré (4 motifs dans `.gitignore`), contient exactement 3 clés (noms vérifiés, valeurs jamais lues) : `FEEXPAY_TOKEN`, `FEEXPAY_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`.
+- Clé Google Maps : embarquée côté client par nécessité du SDK (`MapsConfig.apiKey`), pas un secret serveur — restriction par domaine/app reste une action Console GCP.
+- Aucun secret trouvé dans l'historique Git visible localement (pas d'audit exhaustif de tout l'historique — hors de portée raisonnable de cette passe).
+
+### Phase 6 — Stratégie de sauvegarde
+
+- Toujours aucun export Firestore planifié dans le code (confirmé, pas re-construit — action Console GCP native, `gcloud firestore export` + Cloud Scheduler).
+- Rollback : possible via `firebase deploy --only <cible> --project az-express-clean` en repointant sur un commit/tag antérieur (`v0.2-rc2` ou les 2 commits précédents) — jamais testé en conditions réelles.
+- Restauration Firestore : dépend entièrement de l'export planifié ci-dessus, qui n'existe pas encore — **tant que ce n'est pas activé, aucune restauration réelle n'est possible en cas de perte de données**.
+
+### Phase 7 — CI/CD
+
+- `.github/workflows/ci.yml` a **3 jobs** (trouvaille de documentation : 2 seulement étaient documentés depuis le Prompt 16/38) : `flutter` (analyze + test), `functions` (`npm test`), `firestore-rules` (`npm run test:rules`, Java préinstallé sur les runners `ubuntu-latest`).
+- `package.json` racine confirme le script `test:rules` existe et correspond.
+- Le remote GitHub existe et le code est poussé (Prompt 60) — la CI a dû se déclencher au moins une fois, mais son résultat n'est **pas vérifiable depuis cet environnement** (`gh` CLI indisponible ici).
+- Aucun déploiement automatique en production dans le workflow — conforme à l'instruction explicite de ne jamais déployer automatiquement.
+
+### Validation finale
+
+`flutter analyze` : 5 avertissements préexistants, 0 erreur (inchangé). `npm test` : **155/155**. `firebase deploy --only {firestore,storage,functions} --dry-run` : les 3 réussis contre le projet réel. Cloud Functions load : **53 exports**, chargement propre. Aucun code modifié par cette section.
+
+---
+
+### 🎯 Production readiness status : **READY TO DEPLOY**
+
+Aucun bloqueur de code trouvé — les 3 cibles de déploiement (`firestore`, `storage`, `functions`) compilent/packagent toutes sans erreur contre le projet réel, aucun secret codé en dur, aucune règle dangereuse, RC2 déjà committée/taguée/poussée. Les seuls éléments restants sont soit des actions Console Firebase humaines (App Check, sauvegardes), soit des décisions de mise à niveau de dépendances à planifier avant octobre 2026 (Node 20, SDK `firebase-functions`) — aucun des deux n'empêche un déploiement contrôlé aujourd'hui.
+
+#### 1. Production readiness status
+**READY TO DEPLOY** — sous supervision humaine active, cohérent avec le verdict global READY PILOT EXTENDED (Prompt 60). Pas de blocage technique ; les actions restantes sont opérationnelles (Console) ou planifiables (dépendances), pas des correctifs de code en attente.
+
+#### 2. Liste exacte des actions Console Firebase manuelles (aucune ne peut être faite depuis ce code)
+1. **App Check** : activer dans la console Firebase (Play Integrity pour Android, DeviceCheck pour iOS), enregistrer le jeton de debug généré au premier lancement, obtenir une clé reCAPTCHA v3/Enterprise pour le web avant d'y activer App Check.
+2. **Sauvegarde Firestore** : activer l'export planifié natif GCP (Firestore → Sauvegardes, ou `gcloud firestore export` + Cloud Scheduler) — aucune sauvegarde n'existe à ce jour.
+3. **Vérifier l'exécution réelle de la CI sur GitHub Actions** (3 jobs, voir Phase 7) — non vérifiable depuis cet environnement.
+4. **Planifier la mise à niveau du runtime Node.js 20** avant le 2026-10-30 (décommissionnement), et la mise à niveau du SDK `firebase-functions` (changements cassants attendus, à tester en environnement séparé avant tout déploiement).
+5. **Restreindre la clé API Google Maps par domaine/app** dans Google Cloud Console (déjà signalé depuis la mémoire `project_maps_cost_audit`, jamais fait).
+6. **Enregistrer les secrets `functions/.env`** (`FEEXPAY_TOKEN`, `FEEXPAY_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`) via `firebase functions:config:set` ou Secret Manager si un jour un second mainteneur rejoint le projet (fonctionnel tel quel pour un mainteneur unique).
+
+#### 3. Risques restants (tous déjà connus, aucun nouveau — voir Section 13 pour le détail complet)
+Aucun changement par rapport à la liste des 11 risques acceptés du Prompt 60 — ce prompt n'en a trouvé aucun de plus, seulement confirmé qu'aucun n'empêche un déploiement technique. Les deux nouveautés de cette passe (dépréciation Node 20, CI à 3 jobs) sont des points opérationnels, pas des risques de sécurité/argent.
+
+#### 4. Commandes exactes pour déployer quand approuvé
+
+```bash
+# Vérification finale avant tout déploiement réel (aucune de ces commandes n'écrit en production)
+firebase deploy --only firestore --dry-run
+firebase deploy --only storage --dry-run
+firebase deploy --only functions --dry-run
+
+# Déploiement réel — à exécuter uniquement sur approbation explicite, un par un
+firebase deploy --only firestore:rules --project az-express-clean
+firebase deploy --only storage --project az-express-clean
+firebase deploy --only functions --project az-express-clean
+
+# Build + déploiement Hosting (web), si voulu dans la même passe
+flutter build web --release
+firebase deploy --only hosting --project az-express-clean
+```
+
+**Recommandation d'ordre** : `firestore:rules` et `storage` d'abord (aucune dépendance sur le code Functions, rollback immédiat si problème via un nouveau `firebase deploy --only firestore:rules` pointant sur l'ancien fichier) — puis `functions` (recompile/redéploie les 53 fonctions ; en cas d'échec sur une fonction, Firebase ne déploie que celles qui compilent, les autres gardent leur version précédente) — `hosting` en dernier, indépendant des deux autres. Ne pas tout déployer en une seule commande `firebase deploy` sans cible pour cette première mise en production réelle — déployer cible par cible permet de vérifier chaque étape avant la suivante.
+
+---
+
+## 15. CI/CD & Release Pipeline — Master Prompt 62
+
+Audit-only, conformément à l'instruction explicite du prompt (« ne pas changer la logique métier, ne pas modifier les paiements, ne pas refactoriser » — cette passe concerne uniquement CI/CD, build, validation automatique, release safety). Aucun code modifié.
+
+### Phase 1 — Audit GitHub Actions
+
+`.github/workflows/ci.yml` — 1 seul fichier, **3 jobs** :
+| Job | Contenu | État |
+|---|---|---|
+| `flutter` | `flutter analyze` + `flutter test` | ✅ Fonctionnel (5 avertissements préexistants, 1 test placeholder) |
+| `functions` | `npm test` (`functions/`) | ✅ Fonctionnel (155 tests) |
+| `firestore-rules` | `npm run test:rules` (émulateur Firestore, Java préinstallé) | ✅ Présent, jamais vérifié en exécution réelle depuis cet environnement |
+
+**Jobs manquants** (vérifié par lecture directe du YAML) : aucun build Android (`flutter build apk`/`appbundle`), aucun build Web (`flutter build web`), aucune validation Firebase (même un `--dry-run`). La CI valide le code source, jamais qu'il produit un artefact déployable.
+
+### Phase 2 — Protection de branche
+
+**Non vérifiable depuis cet environnement** (paramètre GitHub Console, pas un fichier du dépôt ; `gh` CLI indisponible). Constats locaux : une seule branche (`master`), aucun `CODEOWNERS`, aucun template de PR, historique linéaire sans merge commit — cohérent avec un flux à mainteneur unique, pas un flux PR obligatoire aujourd'hui.
+
+### Phase 3 — Build release
+
+- **Android** : `applicationId = "com.azexpress.app"` (correctement branded) ; signing config présent et fonctionnel (`key.properties` + `release.keystore` existent localement, **jamais commités** — vérifié `git ls-files`) ; ProGuard/minification activés pour `release`. **Build release Android opérationnel.**
+- **🔴 iOS** : `PRODUCT_BUNDLE_IDENTIFIER = com.example.azExpressClean` — bundle ID par défaut de `flutter create`, jamais changé. **Bloque toute soumission App Store/TestFlight** (Apple refuse `com.example.*`). Pas corrigé (décision produit/compte développeur, pas une simple édition de fichier).
+- **Web** : `flutter build web --release` testé réellement dans cet audit — **réussit proprement** (~104s, tree-shaking actif).
+
+### Phase 4 — Secrets CI
+
+Zéro secret GitHub référencé dans `ci.yml` (`grep "secrets\."` : 0 résultat) — cohérent avec l'absence de job de déploiement. Secrets qui seraient nécessaires pour un futur job de déploiement/build signé (aucun n'existe aujourd'hui) : jeton Firebase CI ou compte de service JSON, keystore Android encodé + mots de passe, certificats/profils Apple pour un build iOS signé. Aucun secret affiché ou lu en clair pendant cet audit.
+
+### Phase 5 — Release safety
+
+- Rollback : procédure manuelle uniquement (`git revert`/retour à un tag + redéploiement ciblé) — jamais testé en conditions réelles.
+- **Incohérence de version trouvée** : tag git `v0.2-rc2` vs. `pubspec.yaml`/Android/iOS tous à `1.0.0+1`/`1.0`/`1` — deux schémas de version jamais synchronisés.
+- Flux hotfix : inexistant formellement (une seule branche) — recommandation pour plus tard, pas construit ici.
+
+### Validation exécutée
+
+`flutter analyze` (5 avertissements préexistants, 0 erreur), `flutter test` (1/1 vert), `npm test` (**155/155**), `flutter build web --release` (réussi), YAML de `ci.yml` relu et cohérent.
+
+---
+
+### 🎯 CI STATUS : **READY**
+
+Le pipeline CI existant est fonctionnel, sans YAML cassée, et couvre correctement l'analyse statique et les tests automatisés sur les 3 composantes testables du projet (Flutter, Cloud Functions, règles Firestore). Le blocueur trouvé (bundle ID iOS) est un problème de **préparation au store iOS**, pas un défaut de la CI elle-même — la CI continuerait de fonctionner et de protéger contre les régressions même sans ce correctif.
+
+#### 1. Jobs actifs
+`flutter` (analyze + test), `functions` (npm test, 155 tests), `firestore-rules` (émulateur, tests de règles) — tous déclenchés sur push/PR vers n'importe quelle branche.
+
+#### 2. Jobs manquants
+Build Android (`flutter build apk`/`appbundle`), build Web (`flutter build web --release`), validation Firebase (`firebase deploy --only ... --dry-run` en CI plutôt que manuel) — aucun n'est bloquant pour la CI actuelle, tous seraient des additions utiles pour une vraie chaîne de release automatisée.
+
+#### 3. Actions GitHub manuelles
+1. Activer la protection de la branche `master` (Settings → Branches) : exiger une Pull Request, exiger que les 3 checks CI passent avant merge, interdire le force-push et la suppression de branche.
+2. **Corriger `PRODUCT_BUNDLE_IDENTIFIER` iOS** (`com.example.azExpressClean` → un identifiant réel, ex. `com.azexpress.app` pour cohérence avec Android) avant toute tentative de build/soumission iOS — décision produit à valider explicitement, pas exécutée dans cet audit.
+3. Décider et documenter un schéma de version unique (réconcilier les tags git `vX.Y-rcN` avec `pubspec.yaml`).
+4. Si une CD (déploiement continu) est un jour voulue : créer les secrets GitHub nécessaires (jeton/compte de service Firebase, keystore Android encodé, certificats Apple) — aucun n'existe aujourd'hui, cohérent avec l'absence de job de déploiement.
+
+#### 4. Procédure de release officielle AZ Express (proposée, à valider)
+1. Merger sur `master` uniquement via PR une fois la protection de branche activée (action 1 ci-dessus).
+2. Vérifier que les 3 checks CI sont verts sur le commit à releaser.
+3. Bumper `pubspec.yaml` (`version: X.Y.Z+B`) de façon cohérente avec le tag prévu.
+4. Créer un tag git annoté (`git tag -a vX.Y.Z -m "..."`) et le pousser (`git push origin vX.Y.Z`).
+5. Déployer cible par cible en production (commandes exactes : voir Section 14, Prompt 61) : `firestore:rules` → `storage` → `functions` → `hosting`.
+6. Pour un build mobile (Android d'abord, iOS une fois le bundle ID corrigé) : `flutter build appbundle --release` / `flutter build ipa --release`, publication manuelle via Play Console/App Store Connect (aucune automatisation CI n'existe pour ça aujourd'hui, et ce prompt demande explicitement de ne rien publier).
+
+---
+
+## 16. Android Play Store Release Preparation — Master Prompt 63
+
+Audit-only, conformément à l'instruction explicite du prompt (« ne pas changer la logique métier, ne pas modifier Firebase, ne pas ajouter de fonctionnalités » — scope strictement Android release readiness). Aucun code modifié.
+
+### Phase 1 — Config Android
+
+`applicationId`/`namespace` = `com.azexpress.app` (branded, confirmé). `minSdk`/`targetSdk`/`compileSdk` jamais surchargés — dérivés de la version Flutter installée. Manifests `debug`/`profile` = boilerplate Flutter pur, aucune fuite de config debug en release.
+
+**🟡 Nouveau risque, jamais signalé en 62 prompts** : Flutter installé sur le canal **beta** (3.45.0-0.1.pre), pas `stable` — risque réel pour une app financière de production, recommandé de repasser sur stable avant soumission réelle.
+
+### Phase 2 — Versioning
+
+Confirmé (Prompt 62) : tag git `v0.2-rc2` et version applicative `pubspec.yaml` (`1.0.0+1`) jamais synchronisés. Stratégie proposée (à valider) : `dev` (builds locaux non taggés) / `pilot` (pubspec aligné sur le tag pilote en cours) / `production` (premier upload Play Console avec `versionCode` strictement croissant, jamais réutilisé — discipline à respecter dès le premier upload).
+
+### Phase 3 — Signing release
+
+`key.properties`/`release.keystore` existent localement, jamais commités (`git ls-files` : 0 résultat). **Preuve la plus forte possible sans lire les secrets** : le build réel de cette passe (`flutter build appbundle --release`) a réussi à signer l'App Bundle — un keystore absent/mal configuré aurait fait échouer le build à l'étape de signature. Aucune clé privée lue ou affichée.
+
+### Phase 4 — Permissions Android
+
+14 permissions déclarées, toutes tracées à une fonctionnalité réelle : GPS premier plan/arrière-plan (livreur), caméra (selfie/preuve livraison), stockage média (image_picker, bien gaté par version SDK), micro (AZ IA/Courses), notifications, vibration, wake_lock. Aucune permission dangereuse non justifiée. `ACCESS_BACKGROUND_LOCATION` identifiée comme la permission demandant le plus d'effort Play Console (formulaire dédié + justification vidéo/captures requis par Google).
+
+### Phase 5 — Play Store Policy (le cœur du verdict BLOCKED)
+
+Politique de confidentialité publique existe (`/confidentialite`, datée 22 mai 2026), raisonnablement complète, utilisable comme URL Play Console.
+
+**🔴 Trouvaille 1** : la politique de confidentialité et les pages légales publiques (`privacy_page.dart`, `terms_page.dart`, `home_page.dart`) nomment **"CinetPay"** comme prestataire de paiement — recherche exhaustive confirme **zéro trace de CinetPay dans `functions/`**, où seul FeexPay est réellement intégré depuis le Prompt 03. Les pages publiques décrivent un partenaire qui n'existe pas dans le code réel.
+
+**🔴 Trouvaille 2** : la section « Partage des données » ne mentionne jamais Anthropic/Claude, alors qu'AZ IA envoie du texte (et de la voix transcrite) à l'API Anthropic — un tiers destinataire réel de données utilisateur, non déclaré. Gap de conformité Play Console "Data Safety", pas cosmétique.
+
+Aucune des deux trouvailles n'est corrigée dans cette passe (contenu légal public, décision explicite requise).
+
+### Phase 6 — Release build (réellement exécuté)
+
+`flutter build appbundle --release` → **succès**, `app-release.aab` réel produit (74,3 Mo). Avertissement non-fatal : *"failed to strip debug symbols from native libraries"* — root-cause identifiée (`flutter doctor -v`) : `cmdline-tools` Android manquants + licences SDK non acceptées **sur cette machine spécifique** — un problème d'environnement local, pas un défaut du code. AAB valide et installable malgré cet avertissement.
+
+### Validation exécutée
+
+`flutter analyze` (5 avertissements, inchangé), `flutter test` (1/1 vert), `npm test` (**155/155**), `flutter build appbundle --release` (**réussi**, AAB réel produit et signé).
+
+---
+
+### 🎯 ANDROID RELEASE STATUS : **BLOCKED**
+
+Bloqué pour des raisons de **conformité Play Store (contenu), pas techniques** — le pipeline de build/signature fonctionne réellement et produit un artefact valide. Les deux trouvailles de la Phase 5 sont rapides à corriger (édition de texte sur 3 pages) mais nécessitent une décision explicite avant toute soumission, puisqu'il s'agit de contenu légal public destiné aux utilisateurs et à la revue Google.
+
+#### 1. Ce qui est prêt
+- `applicationId` correctement brandé (`com.azexpress.app`), aucun placeholder Flutter.
+- Signing release fonctionnel de bout en bout (keystore + `key.properties` présents, jamais commités, build réellement signé avec succès).
+- Permissions Android toutes justifiées, aucune superflue ou dangereuse.
+- Build release réel réussi (`app-release.aab`, 74,3 Mo).
+- Politique de confidentialité existe déjà et est réutilisable comme URL Play Console (une fois les 2 trouvailles corrigées).
+- Aucune config debug ne fuit en release.
+
+#### 2. Ce qui bloque
+1. **🔴 La politique de confidentialité/CGU nomment le mauvais prestataire de paiement ("CinetPay" au lieu de FeexPay)** — à corriger avant soumission (décision : confirmer que FeexPay est bien le seul prestataire réel, puis mettre à jour `privacy_page.dart`/`terms_page.dart`/`home_page.dart`).
+2. **🔴 Anthropic/Claude (AZ IA) non déclaré comme tiers destinataire de données** dans la politique de confidentialité — à ajouter avant soumission (risque de non-conformité Data Safety Play Console).
+3. **🟡 Flutter sur canal beta** — recommandé de repasser sur `stable` avant le build de soumission officiel (pas un blocage dur, un risque de production).
+4. **🟡 Toolchain Android local incomplet** (`cmdline-tools` manquants, licences non acceptées) — cause l'avertissement de symboles de debug non retirés ; à corriger sur la machine qui produira le build final de soumission.
+
+#### 3. Actions Play Console nécessaires (aucune ne peut être faite depuis ce code)
+1. Créer/configurer l'app dans Play Console (si pas déjà fait) sous `com.azexpress.app`.
+2. Remplir le formulaire Data Safety (position précise + arrière-plan, infos personnelles, photos, infos financières, messages, identifiants d'appareil) — une fois les 2 trouvailles de la Phase 5 corrigées dans la politique de confidentialité qui sert de référence.
+3. Préparer la déclaration dédiée "Accès à la position en arrière-plan" (justification + captures d'écran/vidéo) — obligatoire pour `ACCESS_BACKGROUND_LOCATION`.
+4. Fournir l'URL de la politique de confidentialité (`/confidentialite`) dans la fiche Play Console.
+5. Configurer le premier upload sur un canal de test interne/fermé avant toute diffusion publique, avec un `versionCode` cohérent avec la stratégie de versioning à adopter (Phase 2).
+
+#### 4. Commandes officielles de build
+```bash
+# Vérification avant tout build de soumission réelle
+flutter doctor -v                      # confirmer un toolchain Android propre (cmdline-tools + licences)
+flutter channel stable && flutter upgrade   # recommandé avant la vraie soumission (actuellement sur beta)
+
+# Build App Bundle (format requis par Play Console depuis 2021)
+flutter build appbundle --release
+
+# Résultat produit à : build/app/outputs/bundle/release/app-release.aab
+# Upload manuel via Play Console (aucune automatisation CI n'existe pour ça aujourd'hui,
+# et ce prompt demande explicitement de ne pas publier).
+```
