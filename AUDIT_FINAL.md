@@ -1,6 +1,12 @@
 # AZ Express — Audit final avant mise en production
 
-**Date** : 2026-07-03 (mise à jour Master Prompt 64 — « iOS App Store Release Preparation » — depuis la version Master Prompt 63)
+**Date** : 2026-07-06 (mise à jour Master Prompt 65 — « Firebase Production Activation & Safe Rollout » — depuis la version Master Prompt 64)
+
+**🔴 Avertissement le plus important de tout ce document, à lire avant tout le reste : tous les verdicts « corrigé » de ce rapport concernent le code de ce dépôt, pas nécessairement ce qui tourne aujourd'hui pour de vrais utilisateurs.** Le Prompt 65 a comparé, via `firebase functions:list` (lecture seule, projet réel), les fonctions **réellement déployées en production** (30) aux fonctions **du code local** (53) — **23 fonctions ne sont jamais parties en production**, parmi lesquelles la totalité d'AZ IA, la totalité du module Immobilier, et surtout **toutes les Cloud Functions qui corrigent les 9 bugs financiers critiques de cette session** (`payOrderFromWalletCF`, `cancelOrderCF`, `deliverOrderCF`, `payBoutiqueOrderCF`, `payBoutiqueOrderCashCF`, `refundExpiredBoutiqueOrderCF`) ainsi que la correction de la vulnérabilité mot de passe pharmacie (`pharmacieLogin`/`setPharmaciePassword`) et la migration serveur du dispatch (`dispatchOrderToDriver`). **Si des utilisateurs réels utilisent déjà l'app aujourd'hui, ils sont potentiellement exposés aux bugs originaux**, pas aux versions corrigées documentées dans ce rapport — tant que le déploiement réel n'a pas eu lieu. Aucun déploiement n'a été effectué dans cette passe (décision explicite de l'utilisateur, voir ci-dessous) — ce risque reste entièrement ouvert à ce jour.
+
+**Ce qui a changé depuis la version du Prompt 64** : préparation de l'activation Firebase production, sans déploiement réel — l'utilisateur, interrogé explicitement sur l'ambiguïté du prompt (qui demandait un rollout progressif réel sans répéter la mise en garde « ne rien déployer » des Prompts 61-64), a choisi de préparer/valider seulement. Trouvaille majeure ci-dessus (23 fonctions jamais déployées). Par ailleurs : le travail des Prompts 61-64 a été committé et tagué hors de cette conversation (nouveau tag `v0.3-rc3`, 2 nouveaux commits) — l'arbre de travail est désormais propre et synchronisé, contrairement à l'état documenté jusqu'au Prompt 60. Nouvelle trouvaille mineure : le compte Firebase a accès à 2 autres projets (probablement abandonnés), risque de confusion si un mauvais projet était sélectionné avant un déploiement futur.
+
+**Date précédente** : 2026-07-03 (mise à jour Master Prompt 64 — « iOS App Store Release Preparation » — depuis la version Master Prompt 63)
 
 **Ce qui a changé depuis la version du Prompt 63** : audit iOS complet — **verdict BLOCKED, plus sévère qu'Android** (blocage à la fois technique ET de contenu, contrairement à Android où seul le contenu bloquait). Trouvailles fondamentales : `ios/Podfile` n'a jamais existé (CocoaPods jamais intégré, confirmé par l'absence de `Pods.xcodeproj` dans le workspace) — ce projet n'a **jamais été buildé pour iOS** ; `GoogleService-Info.plist` absent (gitignored, jamais fourni) ; aucun fichier `.entitlements` (aucune capacité Xcode jamais activée) ; `flutter build ios` **structurellement impossible depuis cet environnement Windows** (Flutter retire le sous-commande `ios` sur un hôte non-macOS — testé directement, pas supposé). **Un correctif appliqué** : `Info.plist` n'avait que 2 des 6 déclarations de confidentialité requises par des fonctionnalités déjà existantes (caméra, position premier plan/arrière-plan, photothèque, modes arrière-plan) — sur iOS, l'absence de ces clés cause un **crash immédiat**, pas juste un refus de review ; les 4 clés manquantes + `UIBackgroundModes` ont été ajoutées (fonctionnalités déjà existantes rendues non-crashantes sur iOS, pas une nouvelle fonctionnalité). Bundle ID : trouvaille clé — `.env` contient déjà `FIREBASE_IOS_BUNDLE_ID: com.azexpress.app`, donnant une cible claire, mais non appliqué à Xcode (décision à confirmer, conformément à l'instruction explicite de ne pas changer sans vérifier l'impact Firebase/App Store réel).
 
@@ -713,3 +719,65 @@ Blocage **technique ET de contenu**, plus sévère que le blocage Android (Promp
 4. Activer Push Notifications + Background Modes dans Xcode (Signing & Capabilities).
 5. Corriger la politique de confidentialité (prestataire de paiement réel, divulgation Anthropic) avant de remplir les déclarations Privacy des deux stores.
 6. `flutter build ipa --release` pour produire l'archive de soumission, une fois tout ce qui précède en place.
+
+---
+
+## 18. Firebase Production Activation & Safe Rollout — Master Prompt 65
+
+**Décision préalable** : ce prompt demandait un rollout réel progressif (règles puis 53 Cloud Functions) sans répéter l'instruction « ne rien déployer automatiquement » des Prompts 61-64. Un vrai déploiement en production étant une action à fort impact et difficile à annuler proprement, la question a été posée explicitement à l'utilisateur avant d'agir. **Réponse : préparer/valider seulement, ne pas déployer dans cette passe.** Tout ce qui suit est du dry-run/lecture seule — rien n'a été poussé vers le projet réel.
+
+### Phase 1 — Pre-deploy check
+
+- Git : arbre propre, `master` synchronisé avec `origin/master`. Nouveau tag `v0.3-rc3` + 2 nouveaux commits capturant les Prompts 61-64 (faits hors de cette conversation) — plus de travail non commité à ce jour.
+- Firebase CLI 15.18.0, projet actif `az-express-clean` (cohérent avec `.firebaserc`). **Nouveau** : le compte a accès à 2 autres projets (`az-express-e0e2f`, `azexpress-7f8ed`), probablement abandonnés — risque de confusion à garder en tête, pas un risque immédiat (`.firebaserc` fixe déjà le bon projet par défaut).
+- `functions/.env` : toujours 3 clés (noms vérifiés uniquement).
+
+**🔴 Trouvaille critique** : `firebase functions:list` (lecture seule) montre **30 fonctions déployées** contre **53 en local** — **23 fonctions jamais déployées**, incluant la totalité d'AZ IA (`azIaChat`, `aiConfirmAction`, `aiCleanupExpiredPendingActions`, `clearAiHistory`), la totalité du module Immobilier, et surtout **toutes les Cloud Functions corrigeant les 9 bugs financiers critiques de cette session** (`payOrderFromWalletCF`, `cancelOrderCF`, `deliverOrderCF`, `payBoutiqueOrderCF`, `payBoutiqueOrderCashCF`, `refundExpiredBoutiqueOrderCF`), la correction du mot de passe pharmacie en clair (`pharmacieLogin`/`setPharmaciePassword`), et la migration serveur du dispatch (`dispatchOrderToDriver`). Voir l'avertissement en tête de document.
+
+### Phase 2 — Firestore/Storage rules deploy readiness
+
+`firebase deploy --only firestore:rules --dry-run` et `--only storage --dry-run` réussissent tous les deux contre le projet réel. Ordre recommandé confirmé : `firestore:rules` puis `storage` en premier (indépendants du code Functions, rollback immédiat).
+
+### Phase 3 — Cloud Functions deploy readiness
+
+Recommandation de déploiement **progressif**, pas un `firebase deploy --only functions` global d'un coup, vu l'ampleur du rattrapage : (1) fonctions non-financières à faible risque (Immobilier, notifications manquantes) ; (2) fonctions financières (remplacent un comportement déjà cassé en prod — amélioration nette, mais à surveiller de près juste après) ; (3) AZ IA en dernier (le système le plus neuf/complexe). Node 20/dépendances/secrets/région déjà audités (Prompts 61-62), rien de nouveau.
+
+### Phase 4 — Post-deploy validation (plan, pas exécuté)
+
+Ordre recommandé après un vrai déploiement : Auth → Firestore (lecture commande existante) → Storage (upload photo) → Functions (`firebase functions:list`, confirmer 53) → Notifications (push test) → Wallet (`payOrderFromWalletCF` test, petit montant) → Commandes (cycle complet créer/dispatcher/annuler sur compte test) → AZ IA (échange simple).
+
+### Phase 5 — App Check rollout (plan consolidé, rien de nouveau)
+
+Observer les métriques pendant une période de rodage → enregistrer les jetons de debug CI/debug → vérifier Android/iOS/Web séparément → activer `enforceAppCheck` seulement après cette observation, jamais immédiatement.
+
+### Phase 6 — Backup (procédure documentée, rien configuré)
+
+`gcloud` CLI confirmé indisponible dans cet environnement. Recommandation : export planifié quotidien (Console Firebase ou `gcloud firestore backups schedules create`), conservation 7-14 jours pour un pilote, restauration toujours testée sur un projet de copie avant toute restauration réelle en prod.
+
+### Validation exécutée
+
+`flutter analyze` (5 avertissements, inchangé), `npm test` (**155/155**), dry-runs `firestore`/`storage` réussis contre le projet réel, `firebase functions:list` (lecture seule) confirmé 30 vs 53 fonctions — aucun déploiement réel, aucun code modifié.
+
+---
+
+### 🎯 PRODUCTION STATUS : **BLOCKED** (au sens strict de ce prompt : rien n'a été activé)
+
+Le code est prêt (voir Prompts 60-64), mais la production réelle n'a reçu aucun des correctifs de cette session — le statut n'est donc « LIVE READY » que pour le code, jamais encore pour les utilisateurs réels.
+
+#### 1. Ce qui est déployé
+30 Cloud Functions (notifications, fonctions les plus anciennes du projet — `autoExpireOrders`, `createSubAdmin`/`deleteSubAdmin`, `feexPayWebhook`, `initiateFeexPayPayment`/`initiateWithdrawal`, `ekClientConfirmOrder`, `cleanupExpiredRateLimits`, `enforceOrderRateLimit`) — probablement datées d'avant cette série d'audits (~Prompt 20-25).
+
+#### 2. Ce qui reste manuel
+- Déployer les 23 fonctions manquantes (ordre recommandé en Phase 3).
+- Déployer `firestore.rules`/`storage.rules` (dry-run déjà validé).
+- Exécuter le plan de validation post-déploiement (Phase 4) sur un compte de test avant tout trafic réel.
+- Rollout App Check progressif (Phase 5) — enforcement jamais immédiat.
+- Configurer la sauvegarde Firestore planifiée (Phase 6) — action Console/gcloud, jamais faite à ce jour.
+
+#### 3. Risques production
+1. **🔴 Si des utilisateurs réels sont déjà actifs, ils utilisent la version non corrigée** de tous les bugs financiers déjà documentés comme résolus dans ce rapport.
+2. Confusion possible entre 3 projets Firebase accessibles au même compte (mitigé par `.firebaserc`).
+3. Tous les risques déjà documentés Sections 13-17 (App Check enforcement, `livreurs.wallet`, permissions sous-admin, bundle ID iOS, Node 20, contenu privacy policy) restent valides et non affectés par cette passe.
+
+#### 4. Plan premiers utilisateurs Abengourou
+Reprend le plan déjà chiffré au Prompt 60 (Section 13) : 100-300 clients, 15-30 livreurs, 10-20 vendeurs/vertical, minimum 2 semaines sans écart de conciliation wallet — **mais ce plan ne peut démarrer qu'après le déploiement réel des 23 fonctions manquantes**, sans quoi les nouveaux utilisateurs seraient exposés aux mêmes bugs déjà corrigés dans le code.
