@@ -1,6 +1,8 @@
 # AZ Express — Audit final avant mise en production
 
-**Date** : 2026-07-03 (mise à jour Master Prompt 63 — « Android Play Store Release Preparation » — depuis la version Master Prompt 62)
+**Date** : 2026-07-03 (mise à jour Master Prompt 64 — « iOS App Store Release Preparation » — depuis la version Master Prompt 63)
+
+**Ce qui a changé depuis la version du Prompt 63** : audit iOS complet — **verdict BLOCKED, plus sévère qu'Android** (blocage à la fois technique ET de contenu, contrairement à Android où seul le contenu bloquait). Trouvailles fondamentales : `ios/Podfile` n'a jamais existé (CocoaPods jamais intégré, confirmé par l'absence de `Pods.xcodeproj` dans le workspace) — ce projet n'a **jamais été buildé pour iOS** ; `GoogleService-Info.plist` absent (gitignored, jamais fourni) ; aucun fichier `.entitlements` (aucune capacité Xcode jamais activée) ; `flutter build ios` **structurellement impossible depuis cet environnement Windows** (Flutter retire le sous-commande `ios` sur un hôte non-macOS — testé directement, pas supposé). **Un correctif appliqué** : `Info.plist` n'avait que 2 des 6 déclarations de confidentialité requises par des fonctionnalités déjà existantes (caméra, position premier plan/arrière-plan, photothèque, modes arrière-plan) — sur iOS, l'absence de ces clés cause un **crash immédiat**, pas juste un refus de review ; les 4 clés manquantes + `UIBackgroundModes` ont été ajoutées (fonctionnalités déjà existantes rendues non-crashantes sur iOS, pas une nouvelle fonctionnalité). Bundle ID : trouvaille clé — `.env` contient déjà `FIREBASE_IOS_BUNDLE_ID: com.azexpress.app`, donnant une cible claire, mais non appliqué à Xcode (décision à confirmer, conformément à l'instruction explicite de ne pas changer sans vérifier l'impact Firebase/App Store réel).
 
 **Ce qui a changé depuis la version du Prompt 62** : audit-only de la préparation release Android (aucun code modifié). **Verdict : BLOCKED — pas pour une raison technique** (le build Android fonctionne réellement : `flutter build appbundle --release` testé en conditions réelles, produit un vrai `app-release.aab` de 74,3 Mo, signature vérifiée de bout en bout puisque le build aurait échoué sans un keystore valide) **— mais pour 2 vraies trouvailles de conformité Play Store** : (1) la politique de confidentialité publique et les pages légales nomment "CinetPay" comme prestataire de paiement alors que le code réel utilise exclusivement FeexPay depuis le début de cette session — zéro trace de CinetPay dans `functions/` ; (2) la politique de confidentialité ne déclare jamais Anthropic/Claude comme tiers destinataire des données envoyées par AZ IA (texte + voix transcrite), un vrai gap de conformité "Data Safety" Play Console. Aucune des deux n'est corrigée dans cette passe (édition de contenu légal public, décision explicite requise). Nouveau risque documenté, sans rapport avec le Play Store : le SDK Flutter installé est sur le canal `beta` (3.45.0-0.1.pre), jamais signalé avant. Un avertissement de build non-fatal (symboles de debug non retirés) tracé à un problème d'environnement local (`cmdline-tools`/licences Android manquantes sur cette machine), pas un défaut du code.
 
@@ -640,3 +642,74 @@ flutter build appbundle --release
 # Upload manuel via Play Console (aucune automatisation CI n'existe pour ça aujourd'hui,
 # et ce prompt demande explicitement de ne pas publier).
 ```
+
+---
+
+## 17. iOS App Store Release Preparation — Master Prompt 64
+
+Audit iOS complet (aucune modification de logique métier/Firebase/paiement — un seul correctif de configuration native appliqué, voir Phase 1). Verdict plus sévère qu'Android : blocage technique ET de contenu.
+
+**Note de transparence** : une commande de listage des clés `.env` (dart-define, distinct de `functions/.env`) a affiché par erreur le contenu complet du fichier. Valeurs concernées : configuration Firebase côté client (non secrète par conception Firebase — sécurité réelle = règles Firestore/Storage). Les vrais secrets (`functions/.env` : FeexPay/Anthropic) n'ont pas été touchés.
+
+### Phase 1 — Config iOS
+
+- `PRODUCT_BUNDLE_IDENTIFIER = com.example.azExpressClean` confirmé à 5+3 occurrences (`project.pbxproj`) — placeholder `flutter create`, jamais changé.
+- **🔴 `ios/Podfile` n'a jamais existé** — confirmé par `git log --all` (aucun résultat) et par l'absence de `Pods.xcodeproj` dans `Runner.xcworkspace` (signal indépendant confirmant que CocoaPods n'a jamais été intégré). **Ce projet n'a jamais été buildé pour iOS.**
+- **🔴 `GoogleService-Info.plist` absent** — gitignored (attendu localement), jamais fourni ni committé.
+- **Aucun fichier `.entitlements`** — aucune capacité Xcode (Push, Background Modes...) jamais activée.
+- **🔴 Corrigé** : `Info.plist` n'avait que 2 des 6 déclarations de confidentialité requises par des fonctionnalités déjà existantes et fonctionnelles sur Android (caméra, position premier/arrière-plan, photothèque). Sur iOS, l'absence de ces clés cause un **crash immédiat** à l'appel de l'API correspondante — pas un simple refus App Store. Ajouté : `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`, `NSLocationWhenInUseUsageDescription`, `NSLocationAlwaysAndWhenInUseUsageDescription`, `UIBackgroundModes` (`location`, `remote-notification`). Validé XML/plist bien formé après édition. Traité comme rendre des fonctionnalités déjà existantes non-crashantes sur iOS, pas une nouvelle fonctionnalité.
+
+### Phase 2 — Bundle ID
+
+`.env` racine contient déjà `FIREBASE_IOS_BUNDLE_ID: com.azexpress.app` — cible déjà décidée ailleurs dans le projet, cohérente avec l'`applicationId` Android, mais jamais appliquée à Xcode. **Non changé dans cette passe** (instruction explicite : ne pas changer sans confirmer l'impact Firebase/App Store réel — impossible de vérifier depuis cet environnement si une app iOS a été enregistrée en Console Firebase sous ce Bundle ID exact).
+
+### Phase 3 — App Store Privacy
+
+Mêmes catégories de données qu'Android (Prompt 63) : position précise + arrière-plan, photos, documents KYC, téléphone, commandes, paiements (FeexPay), texte/audio AZ IA (Anthropic), notifications. Les 2 trouvailles de contenu du Prompt 63 (mauvais prestataire de paiement nommé "CinetPay", Anthropic non divulgué) s'appliquent identiquement à la déclaration App Store Privacy Nutrition Label — même politique de confidentialité, mêmes 2 corrections requises avant soumission sur les deux stores.
+
+### Phase 4 — Capacités iOS
+
+Push Notifications (nécessite compte Apple Developer + clé APNs, rien configuré), Background Modes (`Info.plist` fait, capacité Xcode restante), Location/Camera/Microphone (désormais déclarés), App Check DeviceCheck (déjà préparé côté Dart, Prompt 53, aucune capacité Xcode supplémentaire requise pour DeviceCheck spécifiquement), Signatures (`CODE_SIGN_STYLE = Automatic`, nécessite un compte Apple Developer connecté dans Xcode sur une vraie machine Mac).
+
+### Phase 5 — Build readiness (testé réellement)
+
+`flutter build ios` → **`Could not find a subcommand named "ios" for "flutter build"`** — Flutter retire ce sous-commande sur un hôte non-macOS. **Structurellement impossible depuis cet environnement Windows**, aucun contournement légitime possible — nécessite une vraie machine macOS avec Xcode (locale ou CI Mac).
+
+### Validation exécutée
+
+`flutter analyze` (5 avertissements, inchangé), `flutter test` (1/1 vert), `npm test` (**155/155**), `Info.plist` validé bien formé.
+
+---
+
+### 🎯 iOS RELEASE STATUS : **BLOCKED**
+
+Blocage **technique ET de contenu**, plus sévère que le blocage Android (Prompt 63, qui n'était que du contenu). Le projet iOS n'a jamais été réellement construit — CocoaPods jamais intégré, Firebase natif jamais configuré, entitlements jamais créés — et aucun build ne peut être tenté depuis cet environnement Windows.
+
+#### 1. Ce qui est prêt
+- Bundle ID cible déjà identifié sans ambiguïté (`com.azexpress.app`, cohérent avec Android et déjà présent dans `.env`).
+- App Check DeviceCheck déjà préparé côté Dart (Prompt 53).
+- `Info.plist` désormais complet pour les déclarations de confidentialité des fonctionnalités existantes (corrigé cette passe).
+- Politique de confidentialité déjà rédigée et réutilisable pour App Store Privacy (une fois les 2 corrections de contenu du Prompt 63 faites).
+
+#### 2. Ce qui bloque
+1. **🔴 `ios/Podfile` inexistant** — aucune dépendance native (Firebase, plugins) jamais installée ; à générer sur une vraie machine Mac (`flutter build ios`/`pod install` lors du premier build réel).
+2. **🔴 `GoogleService-Info.plist` absent** — à télécharger depuis la Console Firebase une fois l'app iOS enregistrée sous le bon Bundle ID.
+3. **🔴 `PRODUCT_BUNDLE_IDENTIFIER` toujours `com.example.azExpressClean`** — cible déjà connue (`com.azexpress.app`) mais changement non appliqué, décision à confirmer.
+4. **🔴 Aucun entitlements/capacité Xcode configuré** (Push Notifications, Background Modes) — nécessite Xcode + compte Apple Developer.
+5. **🔴 Build iOS impossible depuis cet environnement** — nécessite une machine macOS.
+6. Les 2 trouvailles de contenu du Prompt 63 (prestataire de paiement erroné, Anthropic non divulgué) s'appliquent aussi à App Store Privacy.
+
+#### 3. Actions Apple Developer nécessaires
+1. Créer/vérifier l'app dans App Store Connect sous le Bundle ID final choisi.
+2. Enregistrer l'app iOS dans la Console Firebase sous ce même Bundle ID, télécharger `GoogleService-Info.plist`.
+3. Activer les capacités Push Notifications et Background Modes dans Xcode (génère les entitlements), configurer une clé APNs dans Apple Developer.
+4. Configurer la signature automatique (`CODE_SIGN_STYLE = Automatic`) avec un compte Apple Developer connecté à Xcode.
+5. Remplir la déclaration App Store Privacy Nutrition Label (mêmes catégories que Play Console Data Safety, Prompt 63) une fois la politique de confidentialité corrigée.
+
+#### 4. Configuration finale recommandée
+1. Sur une vraie machine macOS avec Xcode : mettre à jour `PRODUCT_BUNDLE_IDENTIFIER` → `com.azexpress.app` (et `com.azexpress.app.RunnerTests` pour la cible de tests) dans les 3 configurations (Debug/Release/Profile).
+2. Enregistrer l'app dans Firebase Console sous ce Bundle ID, placer `GoogleService-Info.plist` dans `ios/Runner/`.
+3. Lancer `flutter build ios --release` une première fois pour générer/valider le `Podfile` et intégrer CocoaPods.
+4. Activer Push Notifications + Background Modes dans Xcode (Signing & Capabilities).
+5. Corriger la politique de confidentialité (prestataire de paiement réel, divulgation Anthropic) avant de remplir les déclarations Privacy des deux stores.
+6. `flutter build ipa --release` pour produire l'archive de soumission, une fois tout ce qui précède en place.
