@@ -38,7 +38,7 @@ class _MpFavoritesScreenState extends State<MpFavoritesScreen> {
       backgroundColor: kMpBg,
       appBar: AppBar(
         title: Text('Mes favoris',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 16, fontWeight: FontWeight.w700, color: kMpText)),
         backgroundColor: Colors.white,
         foregroundColor: kMpText,
@@ -56,13 +56,13 @@ class _MpFavoritesScreenState extends State<MpFavoritesScreen> {
                           size: 64, color: kMpMuted),
                       const SizedBox(height: 16),
                       Text('Aucun favori',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
                               color: kMpText)),
                       const SizedBox(height: 8),
                       Text('Appuyez sur ❤️ pour sauvegarder des annonces',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 13, color: kMpMuted),
                           textAlign: TextAlign.center),
                     ]))

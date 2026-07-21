@@ -18,7 +18,9 @@ const KNOWN_USER_TYPES = [
 ];
 
 function buildLogAuthEvent({ onCall, HttpsError, checkRateLimit, logAudit }) {
-  return onCall(async (request) => {
+  // Master Prompt 122 — quota CPU Cloud Run régional : Groupe C (logs),
+  // réduction modérée de maxInstances, cpu inchangé.
+  return onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
     const { event, userType } = request.data || {};
@@ -46,7 +48,7 @@ function buildLogAuthEvent({ onCall, HttpsError, checkRateLimit, logAudit }) {
 const ADMIN_AUDIT_ACTIONS = ['permissions_changed', 'admin_activated', 'admin_deactivated'];
 
 function buildLogAdminAuditEvent({ db, onCall, HttpsError, checkRateLimit, logAudit }) {
-  return onCall(async (request) => {
+  return onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
 

@@ -8,7 +8,7 @@ const { getAuth } = require('firebase-admin/auth');
 
 // Utilise les credentials Firebase CLI (pas besoin de service account séparé)
 const app = initializeApp({
-  projectId: 'az-express-clean',
+  projectId: 'az-express-b0469',
 });
 
 const db  = getFirestore(app);

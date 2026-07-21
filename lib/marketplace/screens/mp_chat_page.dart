@@ -12,6 +12,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/mp_product.dart';
 import '../mp_constants.dart';
+import '../../widgets/stream_error_state.dart';
 
 // ── Chat page marketplace ─────────────────────────────────────────────────────
 // chatId = mp_{productId}_{buyerUid}
@@ -259,7 +260,7 @@ class _MpChatPageState extends State<MpChatPage> {
               widget.product.sellerName.isNotEmpty
                   ? widget.product.sellerName[0].toUpperCase()
                   : '?',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   color: Colors.white,
                   fontWeight: FontWeight.w700),
             ),
@@ -273,7 +274,7 @@ class _MpChatPageState extends State<MpChatPage> {
                   _myRole == 'buyer'
                       ? widget.product.sellerName
                       : (widget.buyerName ?? 'Acheteur'),
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: Colors.white),
@@ -282,7 +283,7 @@ class _MpChatPageState extends State<MpChatPage> {
                 ),
                 Text(
                   widget.product.title,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 11,
                       color: Colors.white.withValues(alpha: 0.85)),
                   maxLines: 1,
@@ -329,6 +330,9 @@ class _MpChatPageState extends State<MpChatPage> {
                   .orderBy('time')
                   .snapshots(),
               builder: (_, snap) {
+                if (snap.hasError) {
+                  return const StreamErrorState(message: "Impossible de charger les messages.");
+                }
                 if (!snap.hasData) {
                   return const Center(
                       child: CircularProgressIndicator(color: kMpOrange));
@@ -357,7 +361,7 @@ class _MpChatPageState extends State<MpChatPage> {
                               color: Colors.grey.shade300),
                           const SizedBox(height: 12),
                           Text('Posez vos questions sur ce produit',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   color: Colors.grey)),
                         ]),
                   );
@@ -455,12 +459,12 @@ class _ProductBanner extends StatelessWidget {
               Text(product.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: const Color(0xFF1A1A2E))),
               Text(_fmt(product.price),
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                       color: kMpOrange)),
@@ -670,7 +674,7 @@ class _InputBar extends StatelessWidget {
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
                   hintText: 'Message...',
-                  hintStyle: GoogleFonts.inter(
+                  hintStyle: GoogleFonts.urbanist(
                       color: Colors.grey, fontSize: 14),
                   border: InputBorder.none,
                   contentPadding: const EdgeInsets.symmetric(
@@ -681,32 +685,42 @@ class _InputBar extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           // Mic button
-          GestureDetector(
-            onTap: onMicTap,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: const BoxDecoration(
-                color: Color(0xFFEEEEEE),
-                shape: BoxShape.circle,
+          Semantics(
+            label: 'Message vocal',
+            button: true,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: onMicTap,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFEEEEEE),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.mic_rounded,
+                    color: Color(0xFF555555), size: 22),
               ),
-              child: const Icon(Icons.mic_rounded,
-                  color: Color(0xFF555555), size: 22),
             ),
           ),
           const SizedBox(width: 6),
           // Send button
-          GestureDetector(
-            onTap: onSend,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: const BoxDecoration(
-                color: kMpOrange,
-                shape: BoxShape.circle,
+          Semantics(
+            label: 'Envoyer le message',
+            button: true,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: onSend,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: const BoxDecoration(
+                  color: kMpOrange,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.send_rounded,
+                    color: Colors.white, size: 20),
               ),
-              child: const Icon(Icons.send_rounded,
-                  color: Colors.white, size: 20),
             ),
           ),
         ]),
@@ -735,17 +749,22 @@ class _RecordingBar extends StatelessWidget {
         top: false,
         child: Row(children: [
           // Cancel
-          GestureDetector(
-            onTap: onCancel,
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: const BoxDecoration(
-                color: Color(0xFFFFEBEE),
-                shape: BoxShape.circle,
+          Semantics(
+            label: 'Annuler l\'enregistrement vocal',
+            button: true,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: onCancel,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFFEBEE),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.delete_rounded,
+                    color: Colors.red, size: 20),
               ),
-              child: const Icon(Icons.delete_rounded,
-                  color: Colors.red, size: 20),
             ),
           ),
           const SizedBox(width: 12),
@@ -755,13 +774,13 @@ class _RecordingBar extends StatelessWidget {
               const _PulsingDot(),
               const SizedBox(width: 8),
               Text('Enregistrement...',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 13, color: Colors.red,
                       fontWeight: FontWeight.w600)),
               const Spacer(),
               Text(
                 '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: Colors.red),

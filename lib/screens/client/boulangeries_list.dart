@@ -37,7 +37,7 @@ class BoulangeriesList extends StatelessWidget {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Boulangeries & Cafés',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF5D4037),
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -64,13 +64,13 @@ class BoulangeriesList extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Petit-déjeuner livré',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                             fontSize: 16)),
                     Text(
                       'Pains, viennoiseries, cafés… livrés chez vous le matin',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 12),
                     ),
                   ],
@@ -100,10 +100,10 @@ class BoulangeriesList extends StatelessWidget {
                             style: TextStyle(fontSize: 64)),
                         const SizedBox(height: 16),
                         Text('Aucune boulangerie disponible',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 color: Colors.grey, fontSize: 16)),
                         Text('Revenez bientôt !',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 color: Colors.grey.shade400,
                                 fontSize: 13)),
                       ],
@@ -204,13 +204,13 @@ class BoulangeriesList extends StatelessWidget {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(name,
-                                          style: GoogleFonts.inter(
+                                          style: GoogleFonts.urbanist(
                                               color: Colors.white,
                                               fontWeight:
                                                   FontWeight.bold,
                                               fontSize: 16)),
                                       Text(address,
-                                          style: GoogleFonts.inter(
+                                          style: GoogleFonts.urbanist(
                                               color: Colors.white70,
                                               fontSize: 12)),
                                     ],
@@ -269,7 +269,7 @@ class BoulangeriesList extends StatelessWidget {
                                           size: 14),
                                       const SizedBox(width: 4),
                                       Text('Commander',
-                                          style: GoogleFonts.inter(
+                                          style: GoogleFonts.urbanist(
                                               color: Colors.white,
                                               fontSize: 12,
                                               fontWeight:

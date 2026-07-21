@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../utils/app_haptics.dart';
 
 /// Wrapper qui ajoute un effet visuel de pression + haptic feedback
 /// sur n'importe quel widget.
@@ -17,6 +18,11 @@ class TapEffect extends StatefulWidget {
   final Duration    duration;
   final HapticType  haptic;
   final BorderRadius? borderRadius;
+  // Master Prompt 125 (Partie 2/4) — optionnel, purement additif : ce widget
+  // enveloppe un `GestureDetector` brut sans aucune sémantique propre ;
+  // quand `child` est une icône/image seule sans texte, ce libellé est le
+  // seul moyen pour un lecteur d'écran d'annoncer le rôle du bouton.
+  final String?     semanticLabel;
 
   const TapEffect({
     super.key,
@@ -27,6 +33,7 @@ class TapEffect extends StatefulWidget {
     this.duration     = const Duration(milliseconds: 120),
     this.haptic       = HapticType.light,
     this.borderRadius,
+    this.semanticLabel,
   });
 
   @override
@@ -69,15 +76,18 @@ class _TapEffectState extends State<TapEffect>
   void _triggerHaptic() {
     switch (widget.haptic) {
       case HapticType.light:
-        // vibrate() fonctionne sur tous les appareils Android (y compris budget)
-        HapticFeedback.vibrate();
+        // Master Prompt 126 — délègue à AppHaptics.tap() (même
+        // HapticFeedback.vibrate() qu'avant, fonctionne sur tous les
+        // appareils Android y compris budget), centralisé pour ne plus
+        // dupliquer le choix de méthode native à chaque widget.
+        AppHaptics.tap();
         break;
       case HapticType.medium:
         HapticFeedback.mediumImpact();
         HapticFeedback.vibrate();
         break;
       case HapticType.selection:
-        HapticFeedback.selectionClick();
+        AppHaptics.selection();
         break;
       case HapticType.none:
         break;
@@ -86,7 +96,7 @@ class _TapEffectState extends State<TapEffect>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final content = GestureDetector(
       onTapDown:   widget.onTap != null ? _onTapDown   : null,
       onTapUp:     widget.onTap != null ? _onTapUp     : null,
       onTapCancel: widget.onTap != null ? _onTapCancel : null,
@@ -99,6 +109,18 @@ class _TapEffectState extends State<TapEffect>
         ),
         child: widget.child,
       ),
+    );
+    // Master Prompt 125 — ce GestureDetector brut n'a aucune sémantique par
+    // défaut ; quand un libellé est fourni, on en fait un vrai bouton
+    // accessible (excludeSemantics évite une double annonce de l'icône).
+    if (widget.semanticLabel == null) return content;
+    return Semantics(
+      label: widget.semanticLabel,
+      button: widget.onTap != null,
+      enabled: widget.onTap != null,
+      onTap: widget.onTap,
+      excludeSemantics: true,
+      child: content,
     );
   }
 }

@@ -20,6 +20,44 @@ function getWalletBalance({ db }) {
   };
 }
 
+// Lecture seule — comble un manque réel (Master Prompt 113, section 4) :
+// AZ IA pouvait consulter le solde mais pas l'historique, ni donc expliquer
+// pourquoi un paiement a été refusé ou vérifier qu'un remboursement a bien
+// eu lieu. Sous-collection déjà utilisée par client_wallet_page.dart —
+// mêmes 5 derniers mouvements, pas une nouvelle source de données.
+function getWalletTransactions({ db }) {
+  return {
+    name: 'get_wallet_transactions',
+    description: "Consulte les derniers mouvements du wallet du client (paiements, recharges, remboursements, débits) — utile pour expliquer un paiement refusé ou vérifier qu'un remboursement a bien été crédité.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Nombre de mouvements à retourner (5 par défaut, 20 maximum).' },
+      },
+    },
+    handler: async (uid, input) => {
+      const limit = Math.min(Math.max(Number(input?.limit) || 5, 1), 20);
+      const snap = await db.collection('clients').doc(uid)
+        .collection('wallet_transactions')
+        .orderBy('createdAt', 'desc')
+        .limit(limit)
+        .get();
+      const transactions = snap.docs.map(d => {
+        const t = d.data();
+        return {
+          type:        t.type || null,
+          amount:      t.amount ?? null,
+          description: t.description || null,
+          orderId:     t.orderId || null,
+          provider:    t.provider || null,
+          createdAt:   t.createdAt ? t.createdAt.toDate().toISOString() : null,
+        };
+      });
+      return { transactions };
+    },
+  };
+}
+
 // Réutilise exactement la validation (montant, téléphone, anti-doublon) et le
 // flux Firestore/FeexPay de `initiateFeexPayPayment` (functions/index.js) —
 // seule la couche « confirmation AZ IA » est nouvelle. Ce outil ne déclenche
@@ -142,4 +180,4 @@ function initiateWalletRecharge({ db, admin, checkRateLimit, axios, feexpayOpera
   };
 }
 
-module.exports = { getWalletBalance, initiateWalletRecharge };
+module.exports = { getWalletBalance, getWalletTransactions, initiateWalletRecharge };

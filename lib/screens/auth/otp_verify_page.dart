@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
 import 'reset_password_page.dart';
+import '../../theme/app_theme.dart';
 
 enum OtpMode { resetPassword, adminTwoFa }
 
@@ -169,7 +170,7 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
   @override
   Widget build(BuildContext context) {
     final isAdmin = widget.mode == OtpMode.adminTwoFa;
-    final color   = isAdmin ? const Color(0xFFFF6D00) : const Color(0xFF167DB7);
+    final color   = isAdmin ? AppColors.primary : const Color(0xFF167DB7);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
@@ -226,6 +227,8 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
                 color: color,
                 onChanged: (val) => _onDigit(i, val),
                 onBackspace: () => _onBackspace(i),
+                index: i,
+                total: 6,
               )),
             ),
 
@@ -282,6 +285,11 @@ class _OtpBox extends StatelessWidget {
   final Color color;
   final void Function(String) onChanged;
   final VoidCallback onBackspace;
+  // Master Prompt 125 (Partie 6) — sans ceci, un lecteur d'écran annonçait
+  // seulement "champ de texte" pour chacune des 6 cases OTP, sans jamais dire
+  // laquelle ; purement additif (défauts sûrs), aucun changement de logique.
+  final int index;
+  final int total;
 
   const _OtpBox({
     required this.controller,
@@ -289,11 +297,16 @@ class _OtpBox extends StatelessWidget {
     required this.color,
     required this.onChanged,
     required this.onBackspace,
+    this.index = 0,
+    this.total = 6,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return Semantics(
+      label: 'Chiffre ${index + 1} sur $total du code de vérification',
+      textField: true,
+      child: SizedBox(
       width: 46,
       height: 56,
       child: KeyboardListener(
@@ -324,6 +337,7 @@ class _OtpBox extends StatelessWidget {
           ),
           onChanged: onChanged,
         ),
+      ),
       ),
     );
   }

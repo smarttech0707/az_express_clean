@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +8,7 @@ import '../../services/auth_service.dart';
 import 'admin_dashboard.dart';
 import '../auth/generic_forgot_password_page.dart';
 import 'admin_otp_page.dart';
+import '../../theme/app_theme.dart';
 
 class AdminLogin extends StatefulWidget {
   const AdminLogin({super.key});
@@ -15,11 +17,96 @@ class AdminLogin extends StatefulWidget {
   State<AdminLogin> createState() => _AdminLoginState();
 }
 
+// ⚠️⚠️⚠️ MASTER PROMPT 134 — DÉSACTIVATION TEMPORAIRE, MODE DÉVELOPPEMENT UNIQUEMENT ⚠️⚠️⚠️
+// Contourne la 2FA SMS admin (Firebase Phone Auth) pour débloquer les tests
+// pendant que le blocage Play Integrity/reCAPTCHA (Master Prompt 133 — cause :
+// cette build n'est pas distribuée via Google Play, donc jamais "reconnue")
+// empêche l'envoi réel de SMS. Ne désactive QUE l'étape OTP : la vérification
+// de rôle admin (document `admins/{uid}` + `isActive` pour les sous-admins)
+// reste entièrement appliquée avant, inchangée.
+// Garde-fou double :
+//   1. `kDebugMode` est une constante de compilation Dart — `false` dans tout
+//      build release/profile (`flutter build apk/appbundle --release`), donc
+//      cette branche est éliminée à la compilation et NE PEUT PAS partir en
+//      production par oubli.
+//   2. `_kBypassAdminOtpInDebug` reste un second interrupteur explicite —
+//      repasser à `false` ici réactive l'OTP même en debug, sans toucher au
+//      reste du fichier.
+// AVANT PUBLICATION : repasser `_kBypassAdminOtpInDebug` à `false` (ou
+// simplement supprimer ce bloc) — voir Master Prompt 134 dans CLAUDE.md.
+const bool _kBypassAdminOtpInDebug = true;
+bool get _otpBypassActive => kDebugMode && _kBypassAdminOtpInDebug;
+
 class _AdminLoginState extends State<AdminLogin> {
   final _idCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _showPass = false;
   bool _loading = false;
+
+  // Master Prompt 128 — voir driver_login.dart pour le contexte complet.
+  // Choix de sécurité délibéré, différent des 8 autres rôles corrigés
+  // dans cette même passe : l'auto-reprise ici ne saute JAMAIS la 2FA par
+  // SMS si un téléphone est enregistré — seul le mot de passe (déjà
+  // prouvé par la session Firebase persistée) est court-circuité. La 2FA
+  // reste un second facteur réel à chaque lancement pour ce rôle à hauts
+  // privilèges, pas une case cochée une seule fois pour toujours.
+  bool _autoResuming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && !user.isAnonymous) {
+      _autoResuming = true;
+      _tryAutoResume(user);
+    }
+  }
+
+  Future<void> _tryAutoResume(User user) async {
+    try {
+      final adminDoc = await FirebaseFirestore.instance
+          .collection('admins')
+          .doc(user.uid)
+          .get();
+      if (!mounted) return;
+      if (!adminDoc.exists) {
+        setState(() => _autoResuming = false);
+        return;
+      }
+      final adminData = <String, dynamic>{'uid': user.uid, ...adminDoc.data()!};
+      adminData['role'] ??= 'super';
+      if (adminData['role'] == 'sub' && adminData['isActive'] == false) {
+        setState(() => _autoResuming = false);
+        return;
+      }
+
+      NotificationService().saveToken(user.uid, 'admins');
+      final adminPhone = adminData['phone'] as String?;
+      final hasPhone = adminPhone != null && adminPhone.isNotEmpty;
+      if (hasPhone && !_otpBypassActive) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => AdminOtpPage(
+            adminUid:   user.uid,
+            adminPhone: adminPhone,
+            adminData:  adminData,
+          )),
+        );
+      } else {
+        if (hasPhone && _otpBypassActive) {
+          debugPrint('⚠️ [DEV MODE] OTP admin SMS contourné (Master Prompt 134, '
+              '_kBypassAdminOtpInDebug=true) — À NE JAMAIS EXPÉDIER EN PRODUCTION.');
+        }
+        AuthService().logAuthEvent('login', 'admin');
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => AdminDashboard(adminData: adminData)),
+        );
+      }
+    } catch (_) {
+      if (mounted) setState(() => _autoResuming = false);
+    }
+  }
 
   Future<void> _login() async {
     FocusScope.of(context).unfocus();
@@ -77,7 +164,8 @@ class _AdminLoginState extends State<AdminLogin> {
 
       // ── 2FA : vérification OTP par SMS si l'admin a un téléphone ──────────
       final adminPhone = adminData['phone'] as String?;
-      if (adminPhone != null && adminPhone.isNotEmpty) {
+      final hasPhone = adminPhone != null && adminPhone.isNotEmpty;
+      if (hasPhone && !_otpBypassActive) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => AdminOtpPage(
@@ -87,13 +175,24 @@ class _AdminLoginState extends State<AdminLogin> {
           )),
         );
       } else {
-        // Aucun téléphone enregistré → accès direct + avertissement
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              '⚠️ Ajoutez un numéro de téléphone à votre profil admin pour activer la 2FA.'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 5),
-        ));
+        if (!hasPhone) {
+          // Aucun téléphone enregistré → accès direct + avertissement
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                '⚠️ Ajoutez un numéro de téléphone à votre profil admin pour activer la 2FA.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 5),
+          ));
+        } else {
+          // Téléphone présent mais OTP volontairement contourné (dev only)
+          debugPrint('⚠️ [DEV MODE] OTP admin SMS contourné (Master Prompt 134, '
+              '_kBypassAdminOtpInDebug=true) — À NE JAMAIS EXPÉDIER EN PRODUCTION.');
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('🛠️ Mode développement : 2FA SMS contournée.'),
+            backgroundColor: Colors.blueGrey,
+            duration: Duration(seconds: 4),
+          ));
+        }
         AuthService().logAuthEvent('login', 'admin');
         Navigator.pushReplacement(
           context,
@@ -135,11 +234,17 @@ class _AdminLoginState extends State<AdminLogin> {
 
   @override
   Widget build(BuildContext context) {
+    if (_autoResuming) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F5F5),
+        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text("Administration"),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
       ),
@@ -152,7 +257,7 @@ class _AdminLoginState extends State<AdminLogin> {
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                  colors: [Color(0xFFFF6D00), Color(0xFFFFB300)],
+                  colors: [AppColors.primary, Color(0xFFFFB300)],
                 ),
                 borderRadius: BorderRadius.circular(20),
               ),
@@ -221,14 +326,14 @@ class _AdminLoginState extends State<AdminLogin> {
                   MaterialPageRoute(
                     builder: (_) => const GenericForgotPasswordPage(
                       userType:    'admin',
-                      accentColor: Color(0xFFFF6D00),
+                      accentColor: AppColors.primary,
                       title:       'Mot de passe oublié',
                     ),
                   ),
                 ),
                 child: const Text(
                   'Mot de passe oublié ?',
-                  style: TextStyle(color: Color(0xFFFF6D00), fontSize: 13),
+                  style: TextStyle(color: AppColors.primary, fontSize: 13),
                 ),
               ),
             ),
@@ -240,7 +345,7 @@ class _AdminLoginState extends State<AdminLogin> {
               child: ScaleButton(
                 onPressed: _loading ? null : _login,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6D00),
+                  backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),
                 ),

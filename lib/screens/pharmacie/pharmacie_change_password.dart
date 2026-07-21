@@ -99,7 +99,7 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Définir un mot de passe',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: red,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -127,7 +127,7 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Première connexion',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
                                 color: Colors.orange.shade800)),
@@ -135,7 +135,7 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
                         Text(
                             'Définissez un mot de passe personnel '
                             'pour sécuriser votre accès.',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontSize: 12,
                                 color: Colors.orange.shade700)),
                       ],
@@ -176,7 +176,7 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text('Enregistrer mon mot de passe',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),

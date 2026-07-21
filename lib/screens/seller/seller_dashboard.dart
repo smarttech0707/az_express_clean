@@ -11,7 +11,10 @@ import '../../services/firestore_service.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../widgets/partner_account_sheet.dart';
+import '../../widgets/logout_confirm_dialog.dart';
 import '../home/home_screen.dart';
+import '../../theme/app_theme.dart';
 
 class SellerDashboard extends StatefulWidget {
   final String sellerId;
@@ -34,6 +37,7 @@ class _SellerDashboardState extends State<SellerDashboard>
   StreamSubscription? _walletSub;
   StreamSubscription<QuerySnapshot>? _orderSub;
   int _prevPendingCount = -1;
+  String? _photoUrl;
 
   String get _sellerType => widget.sellerData['type'] ?? '';
   String get _sellerName => widget.sellerData['name'] ?? 'Vendeur';
@@ -41,6 +45,7 @@ class _SellerDashboardState extends State<SellerDashboard>
   @override
   void initState() {
     super.initState();
+    _photoUrl = widget.sellerData['photoUrl'] as String?;
     _tabCtrl = TabController(length: 4, vsync: this);
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
@@ -214,7 +219,12 @@ class _SellerDashboardState extends State<SellerDashboard>
     );
   }
 
-  Future<void> _logout() async {
+  // Master Prompt 135 — _logout() affiche désormais une confirmation avant
+  // d'appeler _doLogout(), qui porte l'intégralité de la logique déjà
+  // existante et inchangée (signOut, redirection).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'seller');
     await FirebaseAuth.instance.signOut();
     try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
@@ -295,6 +305,27 @@ class _SellerDashboardState extends State<SellerDashboard>
               isScrollControlled: true,
               backgroundColor: Colors.transparent,
               builder: (_) => _AnalyticsSheet(sellerId: widget.sellerId),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: "Mon compte",
+            onPressed: () => showPartnerAccountSheet(
+              context,
+              role: 'seller',
+              roleLabel: 'Vendeur Marketplace',
+              name: _sellerName,
+              phone: widget.sellerData['phone'] as String?,
+              onLogout: _logout,
+              photoUrl: _photoUrl,
+              photoStoragePath: 'seller_photos/${widget.sellerId}/profile.jpg',
+              onPhotoUploaded: (url) async {
+                await FirebaseFirestore.instance
+                    .collection('sellers')
+                    .doc(widget.sellerId)
+                    .set({'photoUrl': url}, SetOptions(merge: true));
+                if (mounted) setState(() => _photoUrl = url);
+              },
             ),
           ),
           IconButton(
@@ -1163,7 +1194,7 @@ class _OrderCard extends StatelessWidget {
 
                 _InfoSection(
                   icon: Icons.person_rounded,
-                  color: const Color(0xFFFF6D00),
+                  color: AppColors.primary,
                   title: "Client",
                   lines: [
                     order.clientName ?? "Nom non renseigné",

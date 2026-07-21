@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/stream_error_state.dart';
 
 class AdminSosPage extends StatelessWidget {
   const AdminSosPage({super.key});
@@ -28,6 +29,9 @@ class AdminSosPage extends StatelessWidget {
             .orderBy('timestamp', descending: true)
             .snapshots(),
         builder: (context, snap) {
+          if (snap.hasError) {
+            return const StreamErrorState(message: "Impossible de charger les alertes SOS.");
+          }
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }

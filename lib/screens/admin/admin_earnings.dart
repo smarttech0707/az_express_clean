@@ -2,6 +2,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/firestore_service.dart';
 import '../../models/driver_earnings_summary.dart';
+import '../../widgets/stream_error_state.dart';
+import '../../theme/app_theme.dart';
 
 class AdminEarnings extends StatefulWidget {
   const AdminEarnings({super.key});
@@ -19,7 +21,7 @@ class _AdminEarningsState extends State<AdminEarnings> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text("Revenus & Gains"),
-        backgroundColor: const Color(0xFFFF7A1A),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
       ),
       body: Column(
@@ -67,6 +69,9 @@ class _AdminEarningsState extends State<AdminEarnings> {
                   .collection("livreurs")
                   .snapshots(),
               builder: (context, snap) {
+                if (snap.hasError) {
+                  return const StreamErrorState(message: "Impossible de charger les livreurs.");
+                }
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -107,11 +112,11 @@ class _AdminEarningsState extends State<AdminEarnings> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFFFF7A1A) : Colors.white,
+            color: selected ? AppColors.primary : Colors.white,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: selected
-                  ? const Color(0xFFFF7A1A)
+                  ? AppColors.primary
                   : Colors.grey.shade300,
             ),
           ),
@@ -153,7 +158,7 @@ class _GlobalTotals extends StatelessWidget {
           .where("status", isEqualTo: "delivered")
           .snapshots(),
       builder: (context, snap) {
-        if (!snap.hasData) return const SizedBox.shrink();
+        if (snap.hasError || !snap.hasData) return const SizedBox.shrink();
 
         int totalCourses = 0;
         int totalCommissions = 0;
@@ -187,7 +192,7 @@ class _GlobalTotals extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              colors: [Color(0xFFFF6D00), Color(0xFFFF8F00)],
+              colors: [AppColors.primary, Color(0xFFFF8F00)],
             ),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
@@ -614,7 +619,7 @@ class _ToggleChip extends StatelessWidget {
             const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         decoration: BoxDecoration(
           color: active
-              ? const Color(0xFFFF7A1A)
+              ? AppColors.primary
               : Colors.grey.shade100,
           borderRadius: BorderRadius.circular(20),
         ),

@@ -148,7 +148,7 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Inscription Restaurateur',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -174,13 +174,13 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
                       size: 52, color: Colors.white),
                   const SizedBox(height: 10),
                   Text('Rejoignez AZ Express',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white,
                           fontSize: 18,
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
                   Text('Votre restaurant livré à Abengourou',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 12)),
                 ],
               ),
@@ -313,7 +313,7 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text('Envoyer ma demande',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),
@@ -352,7 +352,7 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
 
   Widget _section(String title) => Text(
         title,
-        style: GoogleFonts.inter(
+        style: GoogleFonts.urbanist(
             fontSize: 13,
             fontWeight: FontWeight.bold,
             color: Colors.grey.shade600),

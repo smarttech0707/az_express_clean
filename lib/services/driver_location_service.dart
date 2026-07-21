@@ -54,6 +54,7 @@ class DriverLocationService {
 
   // ── Internes ───────────────────────────────────────────────────────────────
   StreamSubscription<Position>? _positionSub;
+  Timer?    _heartbeatTimer;
   String?   _currentDriverId;
   DateTime? _lastSave;
   Position? _lastSavedPos;
@@ -62,6 +63,35 @@ class DriverLocationService {
 
   static const _minSaveInterval   = Duration(seconds: 5);
   static const _minDistanceMeters = 15.0;
+  // Master Prompt 129 — cause racine confirmée du dispatch silencieusement
+  // cassé pour un livreur stationnaire : le double throttle (temps ET
+  // distance) n'avait aucune limite haute pour la distance. Un livreur qui
+  // ne bouge pas de plus de 15 m ne déclenchait donc plus JAMAIS
+  // `_saveToFirestore()` après sa première position — `updatedAt` restait
+  // figé indéfiniment, alors même que l'app reste ouverte et le GPS actif.
+  // Côté serveur, `functions/dispatch.js` exclut tout livreur dont
+  // `updatedAt` dépasse `STALE_MINUTES = 3` — un livreur en attente d'une
+  // course (donc typiquement à l'arrêt) devenait invisible au dispatch
+  // après seulement 3 minutes, sans qu'aucun signal ne le révèle ni côté
+  // livreur ni côté admin. Marge de 90 s sous ce seuil de 3 min.
+  //
+  // Correctif du 2026-07-19 (audit E2E réel en production) : le premier
+  // correctif ci-dessus plaçait ce heartbeat DANS `_maybeSave()`, appelée
+  // uniquement depuis le callback du stream de position — donc seulement
+  // quand l'OS émet un NOUVEL événement GPS. Avec `distanceFilter: 50`, un
+  // livreur véritablement stationnaire (le cas le plus courant en attente
+  // d'une course) ne déclenche jamais un nouvel événement, donc le
+  // heartbeat ne s'exécutait jamais non plus — le bug réapparaissait
+  // silencieusement dans le cas exact qu'il devait corriger. Preuve directe :
+  // test de bout en bout réel (device physique, vrai livreur approuvé,
+  // dashboard ouvert et immobile) — `updatedAt` figé à la position initiale
+  // après 4m27s, `dispatchOrderToDriver` renvoyant `dispatched:false` par
+  // exclusion `staleGps` alors que le livreur était réellement en ligne.
+  // Corrigé en rendant le heartbeat véritablement périodique (`Timer.periodic`
+  // indépendant, démarré dans `startTracking()`), qui réécrit la dernière
+  // position connue à intervalle fixe qu'un nouvel événement GPS soit
+  // survenu ou non.
+  static const _heartbeatInterval = Duration(seconds: 90);
 
   // ── Démarrage du tracking ──────────────────────────────────────────────────
 
@@ -120,8 +150,28 @@ class DriverLocationService {
       },
     );
 
+    // Heartbeat véritablement périodique — indépendant du stream de
+    // position, garantit une écriture au moins toutes les
+    // `_heartbeatInterval`, même si le livreur ne bouge jamais assez pour
+    // qu'un nouvel événement GPS n'arrive (voir commentaire du 2026-07-19
+    // ci-dessus).
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) => _heartbeatTick());
+
     _gpsState = GpsTrackingState.active;
     return _gpsState;
+  }
+
+  Future<void> _heartbeatTick() async {
+    if (_currentDriverId == null || _lastSavedPos == null) return;
+    // Ne réécrit que si aucune sauvegarde "naturelle" (mouvement réel) n'a
+    // déjà eu lieu depuis le dernier tick — évite une écriture en double
+    // juste après une vraie mise à jour de position.
+    if (_lastSave != null &&
+        DateTime.now().difference(_lastSave!) < _heartbeatInterval) {
+      return;
+    }
+    await _saveToFirestore(_lastSavedPos!);
   }
 
   // ── Reprise automatique (C4 — retour depuis background) ───────────────────
@@ -161,7 +211,10 @@ class DriverLocationService {
     // Throttle temporel
     if (_lastSave != null && now.difference(_lastSave!) < _minSaveInterval) return;
 
-    // Throttle distance (évite d'écrire si livreur ne bouge pas)
+    // Throttle distance (évite d'écrire si livreur ne bouge pas) — la
+    // fraîcheur de `updatedAt` en l'absence de mouvement est désormais
+    // garantie séparément par `_heartbeatTick()` (Timer.periodic, voir
+    // startTracking()), pas par ce throttle réactif au stream de position.
     if (_lastSavedPos != null) {
       final dist = Geolocator.distanceBetween(
         _lastSavedPos!.latitude, _lastSavedPos!.longitude,
@@ -205,6 +258,8 @@ class DriverLocationService {
   Future<void> _stopStream() async {
     await _positionSub?.cancel();
     _positionSub = null;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
   }
 
   // ── ForegroundService ──────────────────────────────────────────────────────

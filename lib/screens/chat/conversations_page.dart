@@ -2,6 +2,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'chat_page.dart';
+import '../../widgets/stream_error_state.dart';
+import '../../theme/app_theme.dart';
 
 class ConversationsPage extends StatelessWidget {
   const ConversationsPage({super.key});
@@ -14,7 +16,7 @@ class ConversationsPage extends StatelessWidget {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text("Messages"),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
         automaticallyImplyLeading: false,
@@ -30,6 +32,9 @@ class ConversationsPage extends StatelessWidget {
                   .where("driverId", isNull: false)
                   .snapshots(),
               builder: (context, snap) {
+                if (snap.hasError) {
+                  return const StreamErrorState(message: "Impossible de charger vos conversations.");
+                }
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -171,11 +176,11 @@ class _ConversationTileState extends State<_ConversationTile> {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6D00).withValues(alpha: 0.12),
+                color: AppColors.primary.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.delivery_dining,
-                  color: Color(0xFFFF6D00)),
+                  color: AppColors.primary),
             ),
             title: Text(
               driverName,

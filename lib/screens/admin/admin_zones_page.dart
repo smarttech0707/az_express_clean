@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
+import '../../theme/app_theme.dart';
 
 class AdminZonesPage extends StatefulWidget {
   const AdminZonesPage({super.key});
@@ -257,7 +258,7 @@ class _AdminZonesPageState extends State<AdminZonesPage>
                 child: const Text('Annuler')),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6D00)),
+                  backgroundColor: AppColors.primary),
               onPressed: () async {
                 final name = nameCtrl.text.trim();
                 if (name.isEmpty) return;

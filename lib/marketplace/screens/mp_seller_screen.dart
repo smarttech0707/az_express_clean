@@ -18,7 +18,7 @@ class MpSellerScreen extends StatelessWidget {
       backgroundColor: kMpBg,
       appBar: AppBar(
         title: Text('Mes annonces',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 16, fontWeight: FontWeight.w700, color: kMpText)),
         backgroundColor: Colors.white,
         foregroundColor: kMpText,
@@ -77,13 +77,13 @@ class MpSellerScreen extends StatelessWidget {
                               size: 64, color: kMpMuted),
                           const SizedBox(height: 16),
                           Text('Aucune annonce',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
                                   color: kMpText)),
                           const SizedBox(height: 8),
                           Text('Publiez votre premier produit !',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontSize: 13, color: kMpMuted)),
                           const SizedBox(height: 24),
                           ElevatedButton.icon(
@@ -94,7 +94,7 @@ class MpSellerScreen extends StatelessWidget {
                             ),
                             icon: const Icon(Icons.add_rounded),
                             label: Text('Publier une annonce',
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                     fontWeight: FontWeight.w700)),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kMpOrange,
@@ -133,7 +133,7 @@ class MpSellerScreen extends StatelessWidget {
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add_rounded),
         label: Text('Nouvelle annonce',
-            style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
       ),
     );
   }
@@ -151,13 +151,13 @@ class _Stat extends StatelessWidget {
     return Expanded(
       child: Column(children: [
         Text(value,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontSize: 18,
               fontWeight: FontWeight.w800,
               color: color,
             )),
         Text(label,
-            style: GoogleFonts.inter(fontSize: 11, color: kMpMuted)),
+            style: GoogleFonts.urbanist(fontSize: 11, color: kMpMuted)),
       ]),
     );
   }
@@ -234,7 +234,7 @@ class _SellerProductTile extends StatelessWidget {
                   Text(product.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: kMpText,
@@ -242,7 +242,7 @@ class _SellerProductTile extends StatelessWidget {
                       )),
                   const SizedBox(height: 4),
                   Text(_fmt(product.price),
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
                           color: kMpOrange)),
@@ -256,7 +256,7 @@ class _SellerProductTile extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(statusLabel,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
                               color: statusColor)),
@@ -267,7 +267,7 @@ class _SellerProductTile extends StatelessWidget {
                     const SizedBox(width: 2),
                     Text('${product.views}',
                         style:
-                            GoogleFonts.inter(fontSize: 11, color: kMpMuted)),
+                            GoogleFonts.urbanist(fontSize: 11, color: kMpMuted)),
                   ]),
                 ],
               ),
@@ -342,10 +342,10 @@ class _SellerProductTile extends StatelessWidget {
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16)),
             title: Text('Supprimer ?',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
             content: Text(
                 'Cette annonce sera masquée définitivement.',
-                style: GoogleFonts.inter()),
+                style: GoogleFonts.urbanist()),
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(context, false),
@@ -376,7 +376,7 @@ class _MenuItem extends StatelessWidget {
       const SizedBox(width: 10),
       Text(label,
           style:
-              GoogleFonts.inter(fontSize: 14, color: color, fontWeight: FontWeight.w600)),
+              GoogleFonts.urbanist(fontSize: 14, color: color, fontWeight: FontWeight.w600)),
     ]);
   }
 }

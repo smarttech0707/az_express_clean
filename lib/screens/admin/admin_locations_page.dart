@@ -319,6 +319,14 @@ class _LocationFormPageState extends State<_LocationFormPage> {
   bool _saving = false;
   bool _gpsLoading = false;
 
+  // Master Prompt "photos manquantes" — galerie multi-photo additive :
+  // `photoUrl` (couverture, ci-dessus) reste inchangé pour compatibilité
+  // avec locations_page.dart, qui l'affiche toujours comme photo unique.
+  // `photos` (nouveau champ, tableau d'URLs) porte les photos supplémentaires.
+  final List<XFile> _pickedGalleryFiles = [];
+  final List<String> _existingGalleryUrls = [];
+  String? _galleryUploadStatus;
+
   bool get _isEditing => widget.docId != null;
 
   @override
@@ -335,6 +343,8 @@ class _LocationFormPageState extends State<_LocationFormPage> {
       _isAvailable = d["isAvailable"] ?? true;
       _existingPhotoUrl = d["photoUrl"];
       _existingIdPhotoUrl = d["idPhotoUrl"];
+      _existingGalleryUrls.addAll(
+          (d["photos"] as List?)?.map((e) => e.toString()) ?? const []);
       _idNumberCtrl.text = d["idNumber"] ?? "";
       final lat = (d["lat"] as num?)?.toDouble() ?? 0.0;
       final lng = (d["lng"] as num?)?.toDouble() ?? 0.0;
@@ -419,6 +429,22 @@ class _LocationFormPageState extends State<_LocationFormPage> {
     );
   }
 
+  Future<void> _pickGalleryPhotos() async {
+    try {
+      final files = await ImagePicker().pickMultiImage(imageQuality: 70, maxWidth: 1600);
+      if (files.isEmpty) return;
+      final remaining = 10 - _existingGalleryUrls.length - _pickedGalleryFiles.length;
+      if (remaining <= 0) return;
+      setState(() => _pickedGalleryFiles.addAll(files.take(remaining)));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Impossible d'accéder à la galerie."), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _pickIdPhoto(ImageSource source) async {
     final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
     if (picked != null) setState(() => _idPhotoFile = File(picked.path));
@@ -494,6 +520,23 @@ class _LocationFormPageState extends State<_LocationFormPage> {
     final photoUrl = await _uploadPhoto(docId);
     final idPhotoUrl = await _uploadIdPhoto(docId);
 
+    final galleryUrls = [..._existingGalleryUrls];
+    for (var i = 0; i < _pickedGalleryFiles.length; i++) {
+      if (mounted) {
+        setState(() =>
+            _galleryUploadStatus = "Envoi de la galerie ${i + 1}/${_pickedGalleryFiles.length}…");
+      }
+      try {
+        final ref = FirebaseStorage.instance.ref(
+            "locations/$docId/gallery_${DateTime.now().millisecondsSinceEpoch}_$i.jpg");
+        final snap = await ref.putFile(File(_pickedGalleryFiles[i].path));
+        if (snap.state == TaskState.success) {
+          galleryUrls.add(await ref.getDownloadURL());
+        }
+      } catch (_) {}
+    }
+    if (mounted) setState(() => _galleryUploadStatus = null);
+
     final data = {
       "title": title,
       "description": desc,
@@ -503,6 +546,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
       "phone": _phoneCtrl.text.trim(),
       "isAvailable": _isAvailable,
       "photoUrl": photoUrl,
+      "photos": galleryUrls,
       "lat": double.tryParse(_latCtrl.text.trim()) ?? 0.0,
       "lng": double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
       "idNumber": _idNumberCtrl.text.trim(),
@@ -722,6 +766,125 @@ class _LocationFormPageState extends State<_LocationFormPage> {
                     ),
                   ),
                 ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          // ── GALERIE PHOTOS SUPPLÉMENTAIRES (additif, photoUrl inchangé) ──
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Galerie (${_existingGalleryUrls.length + _pickedGalleryFiles.length}/10)",
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: Color(0xFF00695C)),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 84,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (var i = 0; i < _existingGalleryUrls.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Stack(children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.network(_existingGalleryUrls[i],
+                                  width: 84, height: 84, fit: BoxFit.cover),
+                            ),
+                            Positioned(
+                              top: 2,
+                              right: 2,
+                              child: GestureDetector(
+                                onTap: () => setState(
+                                    () => _existingGalleryUrls.removeAt(i)),
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                      color: Colors.black54,
+                                      shape: BoxShape.circle),
+                                  child: const Icon(Icons.close_rounded,
+                                      size: 16, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      for (var i = 0; i < _pickedGalleryFiles.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Stack(children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.file(
+                                  File(_pickedGalleryFiles[i].path),
+                                  width: 84, height: 84, fit: BoxFit.cover),
+                            ),
+                            Positioned(
+                              top: 2,
+                              right: 2,
+                              child: GestureDetector(
+                                onTap: () => setState(
+                                    () => _pickedGalleryFiles.removeAt(i)),
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                      color: Colors.black54,
+                                      shape: BoxShape.circle),
+                                  child: const Icon(Icons.close_rounded,
+                                      size: 16, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      if (_existingGalleryUrls.length +
+                              _pickedGalleryFiles.length <
+                          10)
+                        GestureDetector(
+                          onTap: _pickGalleryPhotos,
+                          child: Container(
+                            width: 84,
+                            height: 84,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF00695C).withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: const Color(0xFF00695C).withValues(alpha: 0.3)),
+                            ),
+                            child: const Icon(Icons.add_a_photo_rounded,
+                                color: Color(0xFF00695C)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (_galleryUploadStatus != null) ...[
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                    const SizedBox(width: 10),
+                    Text(_galleryUploadStatus!, style: const TextStyle(fontSize: 12)),
+                  ]),
+                ],
               ],
             ),
           ),

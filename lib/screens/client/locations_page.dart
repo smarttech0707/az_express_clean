@@ -384,6 +384,13 @@ class _LocationDetail extends StatelessWidget {
     final description = data["description"] ?? "";
     final photoUrl = data["photoUrl"] as String?;
     final phone = data["phone"] as String?;
+    // Master Prompt "photos manquantes" — galerie additive : photoUrl reste
+    // toujours la couverture (première image), `photos` (nouveau champ,
+    // optionnel) s'y ajoute pour former une galerie si présent.
+    final gallery = <String>[
+      if (photoUrl != null && photoUrl.isNotEmpty) photoUrl,
+      ...((data["photos"] as List?)?.map((e) => e.toString()) ?? const []),
+    ];
 
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
@@ -411,18 +418,16 @@ class _LocationDetail extends StatelessWidget {
               ),
             ),
 
-            // Photo
-            if (photoUrl != null && photoUrl.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.zero,
-                child: SizedBox(
-                  height: 220,
-                  width: double.infinity,
-                  child: Image.network(photoUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _buildGradient()),
-                ),
+            // Photo(s) — galerie si plusieurs, sinon photo unique comme avant
+            if (gallery.isNotEmpty)
+              SizedBox(
+                height: 220,
+                child: gallery.length == 1
+                    ? Image.network(gallery.first,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        errorBuilder: (_, __, ___) => _buildGradient())
+                    : _GalleryPageView(urls: gallery),
               )
             else
               SizedBox(height: 180, child: _buildGradient()),
@@ -576,6 +581,65 @@ class _LocationDetail extends StatelessWidget {
         child: Icon(Icons.home_rounded,
             size: 80, color: Colors.white24),
       ),
+    );
+  }
+}
+
+// ── GALERIE PHOTOS (Master Prompt "photos manquantes") ─────────
+class _GalleryPageView extends StatefulWidget {
+  final List<String> urls;
+  const _GalleryPageView({required this.urls});
+
+  @override
+  State<_GalleryPageView> createState() => _GalleryPageViewState();
+}
+
+class _GalleryPageViewState extends State<_GalleryPageView> {
+  final _ctrl = PageController();
+  int _index = 0;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        PageView.builder(
+          controller: _ctrl,
+          itemCount: widget.urls.length,
+          onPageChanged: (i) => setState(() => _index = i),
+          itemBuilder: (_, i) => Image.network(
+            widget.urls[i],
+            fit: BoxFit.cover,
+            width: double.infinity,
+            errorBuilder: (_, __, ___) => Container(color: Colors.grey.shade200),
+          ),
+        ),
+        Positioned(
+          bottom: 10,
+          left: 0,
+          right: 0,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < widget.urls.length; i++)
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: i == _index ? 8 : 6,
+                  height: i == _index ? 8 : 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: i == _index ? Colors.white : Colors.white54,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

@@ -1,11 +1,21 @@
 ﻿import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
 import '../auth/generic_forgot_password_page.dart';
 
 import 'artisan_dashboard.dart';
+
+/// Master Prompt 128 — même situation que la pharmacie (voir
+/// `pharmacie_login.dart`) : l'artisan s'authentifie via PIN + Cloud
+/// Function (`artisanLogin`), pas via une identité Firebase Auth propre à
+/// ce rôle — donc aucune session ne survivait à la fermeture de l'app.
+/// Seul l'identifiant du document `service_providers` est conservé
+/// localement (jamais le PIN), revalidé contre Firestore à chaque lancement.
+const kArtisanLastDocIdPrefKey = 'az_artisan_last_doc_id';
 
 class ArtisanLogin extends StatefulWidget {
   const ArtisanLogin({super.key});
@@ -20,6 +30,43 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
   bool _loading = false;
   String? _error;
   bool _obscurePin = true;
+  bool _autoResuming = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tryAutoResume();
+  }
+
+  Future<void> _tryAutoResume() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastDocId = prefs.getString(kArtisanLastDocIdPrefKey);
+      if (lastDocId == null || lastDocId.isEmpty) {
+        if (mounted) setState(() => _autoResuming = false);
+        return;
+      }
+      final doc = await FirebaseFirestore.instance
+          .collection('service_providers')
+          .doc(lastDocId)
+          .get();
+      if (!mounted) return;
+      if (!doc.exists) {
+        await prefs.remove(kArtisanLastDocIdPrefKey);
+        setState(() => _autoResuming = false);
+        return;
+      }
+      NotificationService().saveToken(lastDocId, 'service_providers');
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ArtisanDashboard(docId: lastDocId, initialData: doc.data()!),
+        ),
+      );
+    } catch (_) {
+      if (mounted) setState(() => _autoResuming = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -46,37 +93,33 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
         await FirebaseAuth.instance.signInAnonymously();
         user = FirebaseAuth.instance.currentUser;
       }
-      final uid = user!.uid;
 
-      // Look up provider by phone + PIN
-      final snap = await FirebaseFirestore.instance
-          .collection('service_providers')
-          .where('phone', isEqualTo: phone)
-          .where('artisanPin', isEqualTo: pin)
-          .limit(1)
-          .get();
+      // Vérification + liaison artisanUid via Cloud Function (Admin SDK) :
+      // le login artisan reste explicitement anonyme (isRealUser() casserait
+      // ce flux, déjà documenté dans firestore.rules) — la mise à jour
+      // artisanUid par un compte anonyme échouait donc toujours avec
+      // permission-denied à la première connexion.
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('artisanLogin')
+          .call({'phone': phone, 'pin': pin});
+      final loginData = Map<String, dynamic>.from(result.data as Map);
 
-      if (snap.docs.isEmpty) {
+      if (loginData['success'] != true) {
         setState(() => _error = "Téléphone ou PIN incorrect");
         if (mounted) setState(() => _loading = false);
         return;
       }
 
-      final doc = snap.docs.first;
-      final data = Map<String, dynamic>.from(doc.data());
+      final docId = loginData['docId'] as String;
+      final data = Map<String, dynamic>.from(loginData['data'] as Map);
 
-      // Link UID the first time
-      if (data['artisanUid'] != uid) {
-        await doc.reference.update({'artisanUid': uid});
-        data['artisanUid'] = uid;
-      }
-
-      NotificationService().saveToken(doc.id, 'service_providers');
+      NotificationService().saveToken(docId, 'service_providers');
+      (await SharedPreferences.getInstance()).setString(kArtisanLastDocIdPrefKey, docId);
       if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => ArtisanDashboard(docId: doc.id, initialData: data),
+            builder: (_) => ArtisanDashboard(docId: docId, initialData: data),
           ),
         );
       }
@@ -88,6 +131,12 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
 
   @override
   Widget build(BuildContext context) {
+    if (_autoResuming) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF1565C0),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFF1565C0),
       body: SafeArea(

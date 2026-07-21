@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
+import '../../theme/app_theme.dart';
 
 class ResetPasswordPage extends StatefulWidget {
   final PhoneAuthCredential? phoneCredential;
@@ -76,7 +77,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text('Nouveau mot de passe'),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
       ),
@@ -90,7 +91,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                    colors: [Color(0xFFFF6D00), Color(0xFFFFB300)]),
+                    colors: [AppColors.primary, Color(0xFFFFB300)]),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Row(
@@ -167,7 +168,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
               child: ElevatedButton(
                 onPressed: _loading ? null : _save,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6D00),
+                  backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16)),
                   elevation: 4,
@@ -221,7 +222,7 @@ class _PassField extends StatelessWidget {
       obscureText: !showPass,
       decoration: InputDecoration(
         labelText: label,
-        prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFFFF6D00)),
+        prefixIcon: const Icon(Icons.lock_outline, color: AppColors.primary),
         suffixIcon: IconButton(
           icon: Icon(showPass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
               color: Colors.grey),
@@ -230,7 +231,7 @@ class _PassField extends StatelessWidget {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFFF6D00), width: 2),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
         filled: true,
         fillColor: Colors.white,

@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import '../services/firestore_service.dart';
+import '../theme/app_theme.dart';
 
 class RatingDialog extends StatefulWidget {
   final String orderId;
@@ -105,7 +106,7 @@ class _RatingDialogState extends State<RatingDialog> {
                         ? null
                         : _submit,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF7A1A),
+                      backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),

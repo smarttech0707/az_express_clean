@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../theme/app_theme.dart';
 
 class AdminBoutiquePage extends StatefulWidget {
   const AdminBoutiquePage({super.key});
@@ -82,7 +83,7 @@ class _AdminBoutiquePageState extends State<AdminBoutiquePage>
               child: const Text("Annuler")),
           ScaleButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6D00),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white),
             onPressed: () async {
               await FirebaseFirestore.instance
@@ -107,7 +108,7 @@ class _AdminBoutiquePageState extends State<AdminBoutiquePage>
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text("Boutique"),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
         actions: [
@@ -160,7 +161,7 @@ class _ProductsAdminTab extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
         label: const Text("Ajouter"),
@@ -194,7 +195,7 @@ class _ProductsAdminTab extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   border: isAvailable
                       ? Border.all(
-                          color: const Color(0xFFFF6D00).withValues(alpha: 0.3))
+                          color: AppColors.primary.withValues(alpha: 0.3))
                       : null,
                   boxShadow: [
                     BoxShadow(
@@ -226,18 +227,20 @@ class _ProductsAdminTab extends StatelessWidget {
                     children: [
                       Switch(
                         value: isAvailable,
-                        activeThumbColor: const Color(0xFFFF6D00),
+                        activeThumbColor: AppColors.primary,
                         onChanged: (_) => doc.reference
                             .update({"isAvailable": !isAvailable}),
                       ),
                       IconButton(
                         icon: const Icon(Icons.edit_outlined,
                             size: 20, color: Colors.grey),
+                        tooltip: 'Modifier',
                         onPressed: () => _showAddProduct(context, doc),
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete_outline,
                             size: 20, color: Colors.red),
+                        tooltip: 'Supprimer',
                         onPressed: () => doc.reference.delete(),
                       ),
                     ],
@@ -255,9 +258,9 @@ class _ProductsAdminTab extends StatelessWidget {
 Widget _productIcon() => Container(
       width: 46,
       height: 46,
-      color: const Color(0xFFFF6D00).withValues(alpha: 0.1),
+      color: AppColors.primary.withValues(alpha: 0.1),
       child: const Icon(Icons.shopping_bag,
-          color: Color(0xFFFF6D00), size: 22),
+          color: AppColors.primary, size: 22),
     );
 
 // ── PAGE AJOUT / MODIFICATION PRODUIT ────────────────────────────
@@ -340,11 +343,11 @@ class _AddProductPageState extends State<_AddProductPage> {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFF6D00).withValues(alpha: 0.1),
+                  color: AppColors.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.camera_alt,
-                    color: Color(0xFFFF6D00)),
+                    color: AppColors.primary),
               ),
               title: const Text("Prendre une photo",
                   style: TextStyle(fontWeight: FontWeight.w600)),
@@ -456,7 +459,7 @@ class _AddProductPageState extends State<_AddProductPage> {
         title: Text(widget.existing != null
             ? "Modifier le produit"
             : "Ajouter un produit"),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
       ),
@@ -478,7 +481,7 @@ class _AddProductPageState extends State<_AddProductPage> {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: hasImage
-                        ? const Color(0xFFFF6D00)
+                        ? AppColors.primary
                         : Colors.grey.shade300,
                     width: 2,
                   ),
@@ -516,7 +519,7 @@ class _AddProductPageState extends State<_AddProductPage> {
                 label:
                     Text(hasImage ? "Changer la photo" : "Ajouter une photo"),
                 style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFFFF6D00)),
+                    foregroundColor: AppColors.primary),
               ),
             ),
 
@@ -573,7 +576,7 @@ class _AddProductPageState extends State<_AddProductPage> {
                       color: _isAvailable ? Colors.green : Colors.grey,
                       fontSize: 12),
                 ),
-                activeThumbColor: const Color(0xFFFF6D00),
+                activeThumbColor: AppColors.primary,
               ),
             ]),
 
@@ -603,7 +606,7 @@ class _AddProductPageState extends State<_AddProductPage> {
                       fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6D00),
+                  backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),
                 ),
@@ -707,6 +710,7 @@ class _OrdersAdminTab extends StatelessWidget {
                 status == "paid";
 
             final statusColors = {
+              "pending_payment": Colors.red,
               "paid": Colors.orange,
               "preparing": Colors.blue,
               "shipped": const Color(0xFF1565C0),
@@ -714,6 +718,13 @@ class _OrdersAdminTab extends StatelessWidget {
               "refunded": Colors.purple,
             };
             final statusLabels = {
+              // Achat cash (payBoutiqueOrderCashCF) : le stock est déjà
+              // décrémenté et la commande créée, mais aucun bouton ne
+              // permettait jusqu'ici de la faire progresser — bloquée
+              // indéfiniment (corrigé 2026-07-09). "Confirmer l'espèce reçue"
+              // ci-dessous fait office à la fois de déblocage du workflow et
+              // de preuve que le livreur a bien remis le cash à la boutique.
+              "pending_payment": "Cash à confirmer",
               "paid": "En attente",
               "preparing": "En préparation",
               "shipped": "En livraison",
@@ -793,6 +804,10 @@ class _OrdersAdminTab extends StatelessWidget {
                         scrollDirection: Axis.horizontal,
                         child: Row(
                           children: [
+                            if (status == "pending_payment")
+                              _actionBtn("Confirmer l'espèce reçue",
+                                  Colors.red,
+                                  () => _updateStatus(doc, "paid")),
                             if (status == "paid")
                               _actionBtn("En préparation", Colors.blue,
                                   () => _updateStatus(doc, "preparing")),

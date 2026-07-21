@@ -38,7 +38,7 @@ class WebPrivacyPage extends StatelessWidget {
         Text('Politique de Confidentialité',
           style: kH1Style(ctx), textAlign: TextAlign.center),
         const SizedBox(height: 12),
-        Text('Dernière mise à jour : 22 mai 2026',
+        Text('Dernière mise à jour : 9 juillet 2026',
           style: GoogleFonts.inter(fontSize: 14, color: kTextMuted)),
       ]),
     );
@@ -83,7 +83,9 @@ class WebPrivacyPage extends StatelessWidget {
             '• Nos livreurs partenaires (uniquement nom et adresse de livraison)\n'
             '• Nos commerçants partenaires (commande et coordonnées pour livraison)\n'
             '• Firebase/Google (infrastructure cloud sécurisée)\n'
-            '• CinetPay (traitement sécurisé des paiements)\n'
+            '• FeexPay (traitement sécurisé des paiements mobile money)\n'
+            '• Anthropic (fournisseur de l\'assistant intelligent AZ IA — uniquement le texte '
+            'nécessaire au traitement de votre demande, voir section 9 ci-dessous)\n'
             '• Autorités judiciaires (uniquement si requis par la loi)'),
 
           _Section('5. Localisation',
@@ -116,30 +118,47 @@ class WebPrivacyPage extends StatelessWidget {
             '• Supprimer votre compte et vos données\n'
             '• Vous opposer au traitement de vos données\n'
             '• Retirer votre consentement\n\n'
-            'Pour exercer ces droits, contactez-nous à : privacy@az-express.ci'),
+            'Pour exercer ces droits, contactez-nous à : privacy@az-express.ci\n\n'
+            'Pour demander la suppression de votre compte, utilisez le menu de l\'application '
+            '(Profil > Supprimer mon compte) ou notre page dédiée : az-express.ci/delete-account.'),
 
-          _Section('9. Notifications Push',
+          _Section('9. Assistant intelligent AZ IA',
+            'AZ Express propose un assistant conversationnel intelligent (« AZ IA ») pour vous aider '
+            'à effectuer vos commandes et répondre à vos questions.\n\n'
+            '• AZ IA fait appel à un fournisseur d\'intelligence artificielle externe, Anthropic '
+            '(modèle Claude), pour comprendre et répondre à vos demandes\n'
+            '• Seul le texte nécessaire au traitement de votre demande (votre message, et si vous '
+            'utilisez la fonction vocale, sa transcription) est transmis à ce fournisseur\n'
+            '• Ces données ne sont jamais vendues, ni utilisées à des fins publicitaires\n'
+            '• L\'objectif unique de ce traitement est de vous assister dans l\'utilisation de '
+            'l\'application (suivi de commande, aide à la commande, réponses à vos questions)\n'
+            '• Aucune action financière ou destructrice (paiement, retrait, remboursement, suppression) '
+            'n\'est jamais exécutée par AZ IA sans votre confirmation explicite\n'
+            '• Vous pouvez à tout moment consulter, exporter ou effacer votre historique de conversation '
+            'avec AZ IA depuis le menu de la conversation dans l\'application'),
+
+          _Section('10. Notifications Push',
             'Avec votre consentement, nous envoyons des notifications push pour :\n'
             '• Le statut de vos commandes en temps réel\n'
             '• Les confirmations de paiement\n'
             '• Les alertes de sécurité\n\n'
             'Vous pouvez désactiver les notifications dans les paramètres de votre appareil.'),
 
-          _Section('10. Mineurs',
+          _Section('11. Mineurs',
             'Nos services sont destinés aux personnes âgées de 16 ans et plus. '
             'Nous ne collectons pas sciemment de données concernant des mineurs. '
             'Si vous pensez qu\'un mineur utilise nos services, contactez-nous.'),
 
-          _Section('11. Modifications',
+          _Section('12. Modifications',
             'Nous pouvons modifier cette politique à tout moment. '
             'Les modifications importantes vous seront notifiées via l\'application. '
             'La date de dernière mise à jour est indiquée en haut de ce document.'),
 
-          _Section('12. Contact',
+          _Section('13. Contact',
             'Pour toute question relative à cette politique de confidentialité :\n\n'
             'Email : privacy@az-express.ci\n'
             'Adresse : Abidjan, Côte d\'Ivoire\n'
-            'WhatsApp : +225 07 00 00 00 00'),
+            'WhatsApp : +225 07 98 05 13 97'),
         ]),
       ),
     );

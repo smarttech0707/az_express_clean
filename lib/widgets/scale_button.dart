@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import '../utils/app_haptics.dart';
 
 /// Remplace ElevatedButton avec effet "press in" (scale + haptic).
 /// Utilise Listener au lieu de GestureDetector pour ne pas interférer
@@ -9,6 +9,10 @@ class ScaleButton extends StatefulWidget {
   final VoidCallback? onPressed;
   final ButtonStyle?  style;
   final bool          loading;
+  // Master Prompt 125 (Partie 2/4) — optionnel, purement additif : quand
+  // fourni, décrit le bouton pour un lecteur d'écran (utile si `child` est
+  // une icône seule ou un contenu ambigu sans texte lisible).
+  final String?       semanticLabel;
 
   const ScaleButton({
     super.key,
@@ -16,6 +20,7 @@ class ScaleButton extends StatefulWidget {
     required this.onPressed,
     this.style,
     this.loading = false,
+    this.semanticLabel,
   });
 
   @override
@@ -46,12 +51,12 @@ class _ScaleButtonState extends State<ScaleButton>
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
+    final content = Listener(
       // Listener fire avant le gesture arena — pas de conflit avec ElevatedButton
       onPointerDown: (_) {
         if (widget.onPressed == null || widget.loading) return;
         if (mounted) _ctrl.forward();
-        HapticFeedback.vibrate();
+        AppHaptics.tap();
       },
       onPointerUp: (_) {
         if (mounted) _ctrl.reverse();
@@ -78,5 +83,11 @@ class _ScaleButtonState extends State<ScaleButton>
         ),
       ),
     );
+    // ElevatedButton fournit déjà sa propre sémantique de bouton (activé/
+    // désactivé) — ce Semantics ajoute seulement le libellé quand fourni,
+    // sans la remplacer (pas de excludeSemantics).
+    return widget.semanticLabel == null
+        ? content
+        : Semantics(label: widget.semanticLabel, child: content);
   }
 }

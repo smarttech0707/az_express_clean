@@ -39,6 +39,19 @@ service firebase.storage {
           || order.driverId == request.auth.uid;
     }
 
+    // Variante pour un enregistrement vocal envoyé PENDANT la création d'une
+    // commande (create_order.dart) : orderId est généré côté client avant
+    // que le document orders/{orderId} n'existe — isOrderParticipant() seul
+    // échouerait alors systématiquement (firestore.get() sur un document
+    // absent). Bug confirmé le 2026-07-20 (audit exhaustif des usages
+    // Storage) : autorise l'écriture si la commande n'existe pas encore
+    // (première étape légitime du flux de création), sinon retombe sur la
+    // vérification stricte de participation habituelle.
+    function isOrderParticipantOrNew(orderId) {
+      return !firestore.exists(/databases/(default)/documents/orders/$(orderId))
+        || isOrderParticipant(orderId);
+    }
+
     // Vérifie que l'utilisateur est acheteur ou vendeur d'un chat marketplace
     function isMpChatParticipant(chatId) {
       return chatId.matches('mp_[^_]+_' + request.auth.uid)
@@ -52,16 +65,78 @@ service firebase.storage {
           || order.agentId == request.auth.uid;
     }
 
+    // ── NOTE (Master Prompt 110, audit fonctionnel réel) ──────────────────
+    // Chaque bloc ci-dessous sépare désormais `allow create, update` (qui
+    // valide le contenu via isImage()/isAudio()/maxSize()) de `allow delete`
+    // (qui ne valide que la propriété/l'admin). Avant ce correctif, tous les
+    // blocs utilisaient un seul `allow write` combinant les deux — sur une
+    // opération de suppression, `request.resource` est toujours null
+    // (aucun nouveau fichier n'est envoyé), donc isImage()/maxSize()
+    // échouaient systématiquement et la condition entière était refusée.
+    // Confirmé empiriquement : un upload réel réussissait, la suppression
+    // du même fichier par son propriétaire légitime échouait à 100% avec
+    // permission-denied — sur les 20 chemins Storage de l'app, sans
+    // exception. Aucune condition de sécurité n'est assouplie : la
+    // suppression exige toujours exactement la même preuve de propriété/
+    // admin que l'écriture, juste sans les vérifications de contenu qui
+    // n'ont pas de sens sur un delete.
+
     // ── PHOTOS DE PROFIL CLIENT ────────────────────────────────────────────
     match /client_photos/{uid}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow create, update: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(uid);
+    }
+
+    // ── PHOTOS DE PROFIL VENDEUR MARKETPLACE ───────────────────────────────
+    match /seller_photos/{sellerId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(sellerId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(sellerId);
+    }
+
+    // ── LOGO RESTAURANT ─────────────────────────────────────────────────────
+    // Propriété prouvée via restaurant_owners (uid -> restaurantId), même
+    // lookup que la règle Firestore correspondante — pas isOwnerPath(), le
+    // nom du dossier est l'ID du restaurant, pas l'UID du propriétaire.
+    match /restaurant_logos/{restaurantId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isImage() && maxSize(5)
+        && firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid))
+            .data.get('restaurantId', '') == restaurantId;
+      allow delete: if isRealUser()
+        && firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid))
+            .data.get('restaurantId', '') == restaurantId;
+    }
+
+    // ── LOGO PHARMACIE ──────────────────────────────────────────────────────
+    // Pharmacie n'a pas de Firebase Auth propre — la session anonyme active
+    // est liée via pharmacies/{pharmacieId}.currentUid (voir firestore.rules),
+    // pas via isOwnerPath() sur l'UID directement.
+    match /pharmacie_logos/{pharmacieId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isImage() && maxSize(5)
+        && firestore.get(/databases/(default)/documents/pharmacies/$(pharmacieId))
+            .data.currentUid == request.auth.uid;
+      allow delete: if isRealUser()
+        && firestore.get(/databases/(default)/documents/pharmacies/$(pharmacieId))
+            .data.currentUid == request.auth.uid;
+    }
+
+    // ── PHOTOS DE PROFIL AGENT E-KBINE ─────────────────────────────────────
+    // ekbine_agents/{agentId} a son ID = UID Firebase Auth du propriétaire
+    // (self-registration), même convention que boulangeries/isOwnerPath().
+    match /ekbine_agent_photos/{agentId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(agentId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(agentId);
     }
 
     // ── PHOTOS LIVREURS ────────────────────────────────────────────────────
     match /driver_photos/{driverId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isOwnerPath(driverId) && isImage() && maxSize(5);
+      allow create, update: if isRealUser() && isOwnerPath(driverId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(driverId);
     }
 
     // ── SELFIES INSCRIPTION LIVREURS ───────────────────────────────────────
@@ -72,14 +147,16 @@ service firebase.storage {
     // lecture par un autre utilisateur que l'admin qui approuve la demande.
     match /driver_selfies/{uid}/{file} {
       allow read:  if isOwnerPath(uid) || isAdmin();
-      allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow create, update: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(uid);
     }
 
     // ── PIÈCES D'IDENTITÉ LIVREURS ─────────────────────────────────────────
     // Document d'identité — même restriction que driver_selfies ci-dessus.
     match /driver_id_photos/{uid}/{file} {
       allow read:  if isOwnerPath(uid) || isAdmin();
-      allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow create, update: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(uid);
     }
 
     // ── SELFIES INSCRIPTION FLOTTE ─────────────────────────────────────────
@@ -87,26 +164,45 @@ service firebase.storage {
     // profil affichée à d'autres utilisateurs).
     match /fleet_selfies/{uid}/{file} {
       allow read:  if isOwnerPath(uid) || isAdmin();
-      allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow create, update: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(uid);
     }
 
     // ── PIÈCES D'IDENTITÉ FLOTTE ───────────────────────────────────────────
     match /fleet_id_photos/{uid}/{file} {
       allow read:  if isOwnerPath(uid) || isAdmin();
-      allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow create, update: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(uid);
     }
 
     // ── SELFIES ACCEPTATION LIVRAISON ──────────────────────────────────────
+    // Nom de fichier = "{driverId}.jpg" (driver_dashboard.dart:_accept()) —
+    // vérifié directement contre l'UID de l'appelant, jamais via
+    // firestore.get() : au moment du diagnostic initial (2026-07-19), l'appel
+    // firestore.get() depuis storage.rules échouait (403 reproduit avec un
+    // vrai ID token, y compris sur isOrderParticipant() déjà existante).
+    // Correction (2026-07-20) : ce même chemin isOrderParticipant() a été
+    // retesté avec succès le lendemain sans aucun changement de code —
+    // l'échec était donc transitoire (cohérent avec le quota Cloud Run
+    // régional déjà documenté, Master Prompt 122), pas un défaut structurel
+    // de firestore.get() dans ce projet. La règle ci-dessous reste par
+    // nom de fichier quand même : plus simple, une lecture cross-service en
+    // moins, et le nom de fichier suffit déjà à garantir qu'un livreur ne
+    // peut écrire que SON PROPRE selfie ; acceptOrder() (Cloud
+    // Function/transaction Firestore) revalide de toute façon
+    // indépendamment l'éligibilité réelle du livreur avant d'accepter.
     match /acceptance_selfies/{orderId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(5)
-        && firestore.get(/databases/(default)/documents/orders/$(orderId)).data.driverId == request.auth.uid;
+      allow create, update: if isRealUser() && isImage() && maxSize(5)
+        && file == request.auth.uid + '.jpg';
+      allow delete: if isRealUser() && file == request.auth.uid + '.jpg';
     }
 
     // ── PHOTOS PREUVES LIVRAISON ───────────────────────────────────────────
     match /delivery_photos/{driverId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isOwnerPath(driverId) && isImage() && maxSize(10);
+      allow create, update: if isRealUser() && isOwnerPath(driverId) && isImage() && maxSize(10);
+      allow delete: if isRealUser() && isOwnerPath(driverId);
     }
 
     // ── MESSAGES VOCAUX COMMANDES ──────────────────────────────────────────
@@ -114,35 +210,70 @@ service firebase.storage {
     // Écriture : participant à la commande uniquement
     match /voice_messages/{orderId}/{file} {
       allow read:  if isAuth() && (isAdmin() || isOrderParticipant(orderId));
-      allow write: if isRealUser() && isAudio() && maxSize(10)
-        && isOrderParticipant(orderId);
+      // create_order.dart envoie la note vocale AVANT que la commande
+      // n'existe (orderId généré côté client) — voir
+      // isOrderParticipantOrNew() ci-dessus. Bug confirmé et corrigé le
+      // 2026-07-20.
+      allow create, update: if isRealUser() && isAudio() && maxSize(10)
+        && isOrderParticipantOrNew(orderId);
+      allow delete: if isRealUser() && isOrderParticipant(orderId);
     }
 
     // ── AUDIO CHAT LIVRAISON ───────────────────────────────────────────────
     match /chat_audio/{orderId}/{file} {
       allow read:  if isAuth() && (isAdmin() || isOrderParticipant(orderId));
-      allow write: if isRealUser() && isAudio() && maxSize(10)
+      allow create, update: if isRealUser() && isAudio() && maxSize(10)
         && isOrderParticipant(orderId);
+      allow delete: if isRealUser() && isOrderParticipant(orderId);
     }
 
     // ── MARKETPLACE : PHOTOS PRODUITS ──────────────────────────────────────
     match /marketplace/{productId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10)
+      // mp_add_product.dart uploade les photos AVANT de créer le produit
+      // pour une nouvelle annonce (productId = "tmp_<timestamp>", jamais
+      // l'ID réel du document créé ensuite) — la vérification stricte de
+      // propriété échouait donc systématiquement (firestore.get() sur un
+      // document qui n'existera jamais). Bug confirmé et corrigé le
+      // 2026-07-20 : autorisé si le produit n'existe pas encore, sinon
+      // vérification de propriété stricte inchangée (modification/re-upload
+      // sur une annonce existante).
+      allow create, update: if isRealUser() && isImage() && maxSize(10)
+        && (!firestore.exists(/databases/(default)/documents/marketplace_products/$(productId))
+            || firestore.get(/databases/(default)/documents/marketplace_products/$(productId)).data.sellerId == request.auth.uid);
+      allow delete: if isRealUser()
         && firestore.get(/databases/(default)/documents/marketplace_products/$(productId)).data.sellerId == request.auth.uid;
+    }
+
+    // ── IMMOBILIER : PHOTOS ANNONCES (terrains/maisons, agent vérifié) ─────
+    // Contrairement à marketplace/{productId} ci-dessus, l'annonce est
+    // toujours créée AVANT tout upload (agent_dashboard_screen.dart:_save())
+    // — addListing() puis upload puis updateListing({'images': urls}) — donc
+    // firestore.exists() est toujours vrai ici, pas besoin de la variante
+    // "OrNew".
+    match /real_estate/{listingId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isImage() && maxSize(10)
+        && firestore.get(/databases/(default)/documents/real_estate_listings/$(listingId)).data.agentId == request.auth.uid;
+      allow delete: if isRealUser()
+        && firestore.get(/databases/(default)/documents/real_estate_listings/$(listingId)).data.agentId == request.auth.uid;
     }
 
     // ── MARKETPLACE : AUDIO CHAT ───────────────────────────────────────────
     match /mp_chat_audio/{chatId}/{file} {
       allow read:  if isAuth() && (isAdmin() || isMpChatParticipant(chatId));
-      allow write: if isRealUser() && isAudio() && maxSize(10)
+      allow create, update: if isRealUser() && isAudio() && maxSize(10)
         && isMpChatParticipant(chatId);
+      allow delete: if isRealUser() && isMpChatParticipant(chatId);
     }
 
     // ── E-KBINE : PREUVES PAIEMENT ─────────────────────────────────────────
     match /ekbine_proofs/{orderId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10)
+      allow create, update: if isRealUser() && isImage() && maxSize(10)
+        && (firestore.get(/databases/(default)/documents/ekbine_orders/$(orderId)).data.agentId == request.auth.uid
+          || firestore.get(/databases/(default)/documents/ekbine_orders/$(orderId)).data.clientId == request.auth.uid);
+      allow delete: if isRealUser()
         && (firestore.get(/databases/(default)/documents/ekbine_orders/$(orderId)).data.agentId == request.auth.uid
           || firestore.get(/databases/(default)/documents/ekbine_orders/$(orderId)).data.clientId == request.auth.uid);
     }
@@ -151,46 +282,71 @@ service firebase.storage {
     // chatId = orderId dans l'architecture ekbine_chats/{orderId}
     match /ekbine_chat_audio/{chatId}/{file} {
       allow read:  if isAuth() && (isAdmin() || isEkChatParticipant(chatId));
-      allow write: if isRealUser() && isAudio() && maxSize(10)
+      allow create, update: if isRealUser() && isAudio() && maxSize(10)
         && isEkChatParticipant(chatId);
+      allow delete: if isRealUser() && isEkChatParticipant(chatId);
     }
 
     // ── LOGOS RESTAURANTS / BOULANGERIES ───────────────────────────────────
     match /restaurant_logos/{restaurantId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(5)
+      allow create, update: if isRealUser() && isImage() && maxSize(5)
+        && (isAdmin()
+          || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid)).data.get('restaurantId', '') == restaurantId);
+      allow delete: if isRealUser()
         && (isAdmin()
           || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid)).data.get('restaurantId', '') == restaurantId);
     }
 
+    // Corrigé (Master Prompt "photos manquantes") : le doc boulangeries/{id}
+    // n'a jamais eu de champ `ownerId` — son ID EST déjà l'UID Firebase Auth
+    // du propriétaire (mêmes conventions que firestore.rules:isOwner(),
+    // vérifié directement). L'ancienne condition ci-dessous ne pouvait donc
+    // jamais être vraie pour un vrai propriétaire — corrigé par comparaison
+    // directe de l'ID de chemin à request.auth.uid, comme isOwnerPath().
     match /boulangerie_logos/{boulangerieId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(5)
-        && (isAdmin()
-          || firestore.get(/databases/(default)/documents/boulangeries/$(boulangerieId)).data.get('ownerId', '') == request.auth.uid);
+      allow create, update: if isRealUser() && isImage() && maxSize(5)
+        && (isOwnerPath(boulangerieId) || isAdmin());
+      allow delete: if isRealUser() && (isOwnerPath(boulangerieId) || isAdmin());
     }
 
     // ── PHOTOS RÉSIDENCES / LOCATIONS (admin uniquement) ──────────────────
     match /residence_photos/{residenceId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
     }
 
     match /location_photos/{locationId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
     }
 
     // ── ASSETS PUBLICS (logos app, bannières) — admin uniquement ──────────
     match /public/{file} {
       allow read:  if true;
-      allow write: if isRealUser() && isImage() && maxSize(5) && isAdmin();
+      allow create, update: if isRealUser() && isImage() && maxSize(5) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
     }
 
     // ── PRESTATAIRES DE SERVICES (artisan + admin) ────────────────────────
     match /service_providers/{docId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10)
+      // service_provider_register_page.dart (auto-inscription client) uploade
+      // les photos AVANT que le document service_providers/{docId} n'existe
+      // (créé plus tard par la Cloud Function submitServiceProviderApplication)
+      // — la vérification stricte échouait donc systématiquement pour ce
+      // flux. Bug confirmé et corrigé le 2026-07-20 : autorisé si le
+      // document n'existe pas encore (première inscription), sinon
+      // vérification de propriété/admin stricte inchangée (artisan_dashboard.dart,
+      // admin_services_page.dart, modification ultérieure).
+      allow create, update: if isRealUser() && isImage() && maxSize(10)
+        && (isAdmin()
+          || !firestore.exists(/databases/(default)/documents/service_providers/$(docId))
+          || firestore.get(/databases/(default)/documents/service_providers/$(docId)).data.artisanUid == request.auth.uid);
+      allow delete: if isRealUser()
         && (isAdmin()
           || firestore.get(/databases/(default)/documents/service_providers/$(docId)).data.artisanUid == request.auth.uid);
     }
@@ -198,37 +354,51 @@ service firebase.storage {
     // ── PRODUITS BOUTIQUE (admin uniquement) ──────────────────────────────
     match /boutique_products/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
     }
 
     // ── RESTAURANTS MENUS (admin uniquement) ──────────────────────────────
     match /restaurant_menus/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
     }
 
     // ── LOCATIONS (admin) ─────────────────────────────────────────────────
     match /locations/{docId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
     }
 
     // ── RÉSIDENCES (admin) ────────────────────────────────────────────────
     match /residences/{docId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
     }
 
     // ── SERVICES SIMPLES (admin) ──────────────────────────────────────────
     match /simple_services/{docId}/{file} {
       allow read:  if isAuth();
-      allow write: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
     }
 
     // ── CAPTURES D'ÉCRAN SUPPORT ─────────────────────────────────────────
     match /support_screenshots/{uid}/{file} {
-      allow read:  if isRealUser() && isOwnerPath(uid);
-      allow write: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
+      // support_screen.dart utilise FirebaseAuth.instance.currentUser?.uid
+      // — un client anonyme (état par défaut de l'app mobile, voir
+      // CLAUDE.md) a un vrai uid Firebase, mais isRealUser() l'exclut
+      // explicitement (exigence pensée pour du KYC, pas pour une simple
+      // capture d'écran de support). Bug confirmé et corrigé le
+      // 2026-07-20 : la majorité des clients réels ne pouvaient jamais
+      // joindre de capture d'écran à un ticket. isAuth() suffit ici — même
+      // vérification de propriété par uid, juste sans exclure l'anonyme.
+      allow read:  if isAuth() && isOwnerPath(uid);
+      allow create, update: if isAuth() && isOwnerPath(uid) && isImage() && maxSize(5);
+      allow delete: if isAuth() && isOwnerPath(uid);
     }
 
     // ── TOUT LE RESTE : REFUSÉ ─────────────────────────────────────────────

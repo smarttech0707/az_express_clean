@@ -19,8 +19,30 @@ function sanitizeOrder(id, data) {
     deliveryAddress: data.deliveryAddress || null,
     pickupAddress:   data.pickupAddress || null,
     driverId:        data.driverId || null,
+    driverName:      null, // enrichi ci-dessous si driverId présent — jamais deviné
     createdAt:       data.createdAt ? data.createdAt.toDate().toISOString() : null,
   };
+}
+
+// Enrichit le(s) résultat(s) déjà sanitizés avec le nom réel du livreur
+// assigné (une lecture ciblée par commande, jamais une estimation) — même
+// principe que `trackEkbineOrder`'s `agentContact` (tools/ekbine.js).
+// Distance/ETA ne sont volontairement PAS ajoutés ici : aucune donnée
+// réelle de position/route n'est disponible à ce niveau sans appeler un
+// service de routage, ce qui inventerait une information (interdit).
+async function enrichWithDriverNames(db, orders) {
+  const withDriver = orders.filter(o => o.driverId);
+  if (withDriver.length === 0) return orders;
+  const uniqueIds = [...new Set(withDriver.map(o => o.driverId))];
+  const snaps = await Promise.all(uniqueIds.map(id => db.collection('livreurs').doc(id).get()));
+  const namesById = new Map();
+  snaps.forEach((snap, i) => {
+    if (snap.exists) namesById.set(uniqueIds[i], snap.data().name || null);
+  });
+  for (const o of orders) {
+    if (o.driverId && namesById.has(o.driverId)) o.driverName = namesById.get(o.driverId);
+  }
+  return orders;
 }
 
 function trackOrder({ db }) {
@@ -48,7 +70,8 @@ function trackOrder({ db }) {
         if (data.clientId !== uid) {
           return { found: false, message: 'Commande introuvable.' };
         }
-        return { found: true, orders: [sanitizeOrder(snap.id, data)] };
+        const orders = await enrichWithDriverNames(db, [sanitizeOrder(snap.id, data)]);
+        return { found: true, orders };
       }
 
       const snap = await db.collection('orders')
@@ -57,7 +80,7 @@ function trackOrder({ db }) {
         .limit(5)
         .get();
 
-      const orders = snap.docs.map(d => sanitizeOrder(d.id, d.data()));
+      const orders = await enrichWithDriverNames(db, snap.docs.map(d => sanitizeOrder(d.id, d.data())));
       return { found: orders.length > 0, orders };
     },
   };

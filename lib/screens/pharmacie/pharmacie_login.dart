@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'pharmacie_change_password.dart';
 import 'pharmacie_dashboard.dart';
@@ -11,6 +12,17 @@ import 'pharmacie_register.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../auth/generic_forgot_password_page.dart';
+
+/// Master Prompt 128 — la pharmacie n'a pas d'identité Firebase Auth (le
+/// mot de passe est vérifié côté serveur via `pharmacieLogin`, jamais par
+/// Firebase Auth — voir CLAUDE.md section Identité). Sans ce mécanisme,
+/// aucune session ne pouvait jamais être restaurée après fermeture
+/// complète de l'app : ce n'est pas une régression, la persistance
+/// n'existait tout simplement pas. Seul l'identifiant de la pharmacie est
+/// conservé localement (jamais le mot de passe ni un secret quelconque,
+/// conforme à la Partie 12) — revalidé contre Firestore à chaque
+/// lancement avant de restaurer le tableau de bord.
+const kPharmacieLastIdPrefKey = 'az_pharmacie_last_id';
 
 class PharmacieLogin extends StatefulWidget {
   const PharmacieLogin({super.key});
@@ -24,6 +36,59 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
   final _passCtrl  = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
+  bool _autoResuming = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tryAutoResume();
+  }
+
+  Future<void> _tryAutoResume() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastId = prefs.getString(kPharmacieLastIdPrefKey);
+      if (lastId == null || lastId.isEmpty) {
+        if (mounted) setState(() => _autoResuming = false);
+        return;
+      }
+      final doc = await FirebaseFirestore.instance
+          .collection('pharmacies')
+          .doc(lastId)
+          .get();
+      if (!mounted) return;
+      if (!doc.exists) {
+        await prefs.remove(kPharmacieLastIdPrefKey);
+        setState(() => _autoResuming = false);
+        return;
+      }
+      final data = doc.data()!;
+      NotificationService().saveToken(lastId, 'pharmacies');
+      final fbUser = FirebaseAuth.instance.currentUser;
+      if (fbUser != null) {
+        FirebaseFirestore.instance
+            .collection('pharmacies').doc(lastId)
+            .update({'currentUid': fbUser.uid}).catchError((_) {});
+      }
+      if (data['mustChangePassword'] == true) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PharmacieChangePassword(pharmacieId: lastId, pharmacieData: data),
+          ),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PharmacieDashboard(pharmacieId: lastId, pharmacieData: data),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) setState(() => _autoResuming = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -51,24 +116,19 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
           .get();
 
       if (snap.docs.isEmpty) {
-        // Check if there is a pending/rejected self-registration request
-        final req = await FirebaseFirestore.instance
-            .collection('pharmacie_requests')
-            .doc(phone)
-            .get();
+        // Pas de lecture de pharmacie_requests ici : contrairement aux rôles
+        // Firebase Auth (driver/seller/restaurant/boulangerie), l'appelant
+        // n'a à ce stade aucune identité prouvée liée à ce numéro de
+        // téléphone (pharmacie_register.dart n'authentifie personne) — une
+        // règle isAuth() && resource.data.phone==... serait devinable par
+        // n'importe qui (permet d'énumérer les candidatures d'autrui), donc
+        // pharmacie_requests reste volontairement admin-only en lecture.
+        // Tenter cette lecture ici échouait systématiquement en
+        // permission-denied, affichant une erreur Firestore brute au lieu
+        // du message générique ci-dessous.
         if (!mounted) return;
-        if (req.exists) {
-          final status = req.data()?['status'] ?? '';
-          if (status == 'pending') {
-            _snack('Votre demande est en cours d\'examen par l\'administrateur.', Colors.orange);
-          } else if (status == 'rejected') {
-            _snack('Votre demande a été refusée. Contactez l\'administrateur.', Colors.red);
-          } else {
-            _snack('Numéro non trouvé. Contactez l\'administrateur.', Colors.red);
-          }
-        } else {
-          _snack('Numéro non trouvé. Contactez l\'administrateur.', Colors.red);
-        }
+        _snack('Numéro non trouvé. Si vous venez de vous inscrire, patientez '
+            'que l\'administrateur valide votre demande.', Colors.red);
         return;
       }
 
@@ -99,6 +159,9 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
             .collection('pharmacies').doc(doc.id)
             .update({'currentUid': fbUser.uid}).catchError((_) {});
       }
+      // Master Prompt 128 — seul l'identifiant est conservé (jamais le mot
+      // de passe), pour restaurer la session au prochain lancement.
+      (await SharedPreferences.getInstance()).setString(kPharmacieLastIdPrefKey, doc.id);
       if (!mounted) return;
 
       if (mustChangePassword) {
@@ -142,11 +205,17 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
   @override
   Widget build(BuildContext context) {
     final red = Colors.red.shade700;
+    if (_autoResuming) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF5F5F5),
+        body: Center(child: CircularProgressIndicator(color: red)),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Espace Pharmacie',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: red,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -179,10 +248,10 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
             ),
             const SizedBox(height: 20),
             Text('Connexion Pharmacie',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 22, fontWeight: FontWeight.bold)),
             Text('Gérez votre statut et vos commandes',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, color: Colors.grey.shade600)),
 
             const SizedBox(height: 36),
@@ -281,7 +350,7 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text('Se connecter',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),

@@ -43,28 +43,42 @@ async function dispatchOrder(db, admin, { orderId, lat, lng, budget = 0, radiusK
 
   const snap = await db.collection('livreurs').where('isOnline', '==', true).get();
 
+  // Master Prompt 129 (Partie 11) — logs minimaux mais suffisants pour
+  // diagnostiquer, sans relire manuellement Firestore à chaque incident,
+  // pourquoi un livreur en ligne n'a pas été proposé : compte agrégé des
+  // raisons d'exclusion (jamais de détail par livreur — pas nécessaire au
+  // diagnostic et éviterait d'exposer des identifiants inutilement dans
+  // les logs).
+  const excluded = {
+    onDelivery: 0, unavailable: 0, suspended: 0, alreadyNotified: 0,
+    walletLow: 0, staleGps: 0, noGps: 0, tooFar: 0,
+  };
+
   const nearby = [];
   snap.docs.forEach((doc) => {
     const d = doc.data();
-    if (d.isOnDelivery === true)  return;
-    if (d.isAvailable === false)  return;
-    if (d.isSuspended === true)   return;
-    if (d.pendingOrderId === orderId) return;
+    if (d.isOnDelivery === true)  { excluded.onDelivery++; return; }
+    if (d.isAvailable === false)  { excluded.unavailable++; return; }
+    if (d.isSuspended === true)   { excluded.suspended++; return; }
+    if (d.pendingOrderId === orderId) { excluded.alreadyNotified++; return; }
     const wallet = Number(d.wallet || 0);
-    if (wallet < commission) return;
+    if (wallet < commission) { excluded.walletLow++; return; }
     const ua = d.updatedAt;
-    if (ua && typeof ua.toMillis === 'function' && ua.toMillis() < staleMs) return;
+    if (ua && typeof ua.toMillis === 'function' && ua.toMillis() < staleMs) { excluded.staleGps++; return; }
 
     const dLat = Number(d.lat || 0);
     const dLng = Number(d.lng || 0);
-    if (!dLat || !dLng) return;
+    if (!dLat || !dLng) { excluded.noGps++; return; }
     const dist = haversineMeters(lat, lng, dLat, dLng);
-    if (dist > radiusKm * 1000) return;
+    if (dist > radiusKm * 1000) { excluded.tooFar++; return; }
 
     nearby.push({ id: doc.id, dist });
   });
 
+  console.log(`[dispatch] orderId=${orderId} onlineCount=${snap.size} eligible=${nearby.length} excluded=${JSON.stringify(excluded)} radiusKm=${radiusKm} commission=${commission}`);
+
   if (nearby.length === 0) {
+    console.log(`[dispatch] orderId=${orderId} → aucun livreur éligible, commande laissée pending`);
     return { dispatched: false, mode: 'none' };
   }
 
@@ -114,7 +128,8 @@ async function dispatchOrder(db, admin, { orderId, lat, lng, budget = 0, radiusK
     await batch.commit();
   }
 
+  console.log(`[dispatch] orderId=${orderId} résultat=${result.mode} dispatched=${result.dispatched}`);
   return { dispatched: result.dispatched, mode: result.mode };
 }
 
-module.exports = { dispatchOrder, calculateCommission, haversineMeters };
+module.exports = { dispatchOrder, calculateCommission, haversineMeters, STALE_MINUTES };

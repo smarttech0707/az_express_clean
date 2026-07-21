@@ -5,7 +5,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/logout_confirm_dialog.dart';
+import 'artisan_login.dart' show kArtisanLastDocIdPrefKey;
 
 class ArtisanDashboard extends StatefulWidget {
   final String docId;
@@ -168,32 +171,42 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
             Positioned(
               top: 40,
               right: 16,
-              child: GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
-                      color: Colors.black54, shape: BoxShape.circle),
-                  child: const Icon(Icons.close,
-                      color: Colors.white, size: 22),
+              child: Semantics(
+                label: 'Fermer la photo',
+                button: true,
+                excludeSemantics: true,
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: const BoxDecoration(
+                        color: Colors.black54, shape: BoxShape.circle),
+                    child: const Icon(Icons.close,
+                        color: Colors.white, size: 22),
+                  ),
                 ),
               ),
             ),
             Positioned(
               bottom: 40,
               right: 16,
-              child: GestureDetector(
-                onTap: () {
-                  Navigator.pop(context);
-                  _deletePhoto(index);
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.85),
-                      shape: BoxShape.circle),
-                  child: const Icon(Icons.delete_outline,
-                      color: Colors.white, size: 22),
+              child: Semantics(
+                label: 'Supprimer la photo',
+                button: true,
+                excludeSemantics: true,
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    _deletePhoto(index);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.85),
+                        shape: BoxShape.circle),
+                    child: const Icon(Icons.delete_outline,
+                        color: Colors.white, size: 22),
+                  ),
                 ),
               ),
             ),
@@ -214,8 +227,14 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
     );
   }
 
-  Future<void> _logout() async {
+  // Master Prompt 135 — _logout() affiche désormais une confirmation avant
+  // d'appeler _doLogout(), qui porte l'intégralité de la logique déjà
+  // existante et inchangée (signOut, nettoyage SharedPreferences, redirection).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'artisan');
+    (await SharedPreferences.getInstance()).remove(kArtisanLastDocIdPrefKey);
     await FirebaseAuth.instance.signOut();
     if (mounted) Navigator.pop(context);
   }

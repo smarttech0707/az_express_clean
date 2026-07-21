@@ -20,6 +20,47 @@ class _FleetLoginState extends State<FleetLogin> {
   bool _loading = false;
   bool _showPass = false;
 
+  // Master Prompt 128 — voir driver_login.dart pour le contexte complet.
+  bool _autoResuming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && !user.isAnonymous) {
+      _autoResuming = true;
+      _tryAutoResume(user);
+    }
+  }
+
+  Future<void> _tryAutoResume(User user) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('fleet_owners')
+          .doc(user.uid)
+          .get();
+      if (!mounted) return;
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        final status = (data['status'] as String?) ?? 'approved';
+        if (status != 'pending' && status != 'rejected') {
+          final ownerName = (data['name'] as String?) ?? 'Patron';
+          NotificationService().saveToken(user.uid, 'fleet_owners');
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => FleetDashboard(ownerId: user.uid, ownerName: ownerName),
+            ),
+          );
+          return;
+        }
+      }
+    } catch (_) {
+      // Retombe sur le formulaire.
+    }
+    if (mounted) setState(() => _autoResuming = false);
+  }
+
   Future<void> _login() async {
     final id = _idCtrl.text.trim().toLowerCase();
     final pass = _passCtrl.text;
@@ -114,6 +155,12 @@ class _FleetLoginState extends State<FleetLogin> {
 
   @override
   Widget build(BuildContext context) {
+    if (_autoResuming) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F5F5),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFF6A1B9A))),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(

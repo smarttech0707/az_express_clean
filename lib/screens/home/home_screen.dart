@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../l10n/app_text.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/tap_effect.dart';
+import '../../services/notification_service.dart';
 import '../admin/admin_login.dart';
 import '../main_dashboard.dart';
 import '../auth/client_auth_page.dart';
@@ -206,12 +207,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           .collection('sellers').doc(user.uid).get();
       if (!mounted) return;
       if (doc.exists && (doc.data()?['isActive'] ?? false)) {
+        // Master Prompt 128 (Partie 11) — ce chemin de reprise automatique
+        // de session ne rafraîchissait jamais le jeton FCM (contrairement
+        // à chaque écran de connexion manuelle), risquant des notifications
+        // non délivrées après un long moment sans relancer l'app via un
+        // vrai formulaire de connexion.
+        NotificationService().saveToken(user.uid, 'sellers');
         Navigator.push(context, AppTransitions.fadeSlide(
           SellerDashboard(sellerId: user.uid, sellerData: doc.data()!)));
         return;
       }
     } catch (_) {}
     if (!mounted) return;
+    NotificationService().saveToken(user.uid, 'clients');
     Navigator.push(context, AppTransitions.fadeSlide(const MainDashboard()));
   }
 
@@ -256,7 +264,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               colors: [
                 Color(0xFFBF360C),
                 Color(0xFFE64A19),
-                Color(0xFFFF6D00),
+                AppColors.primary,
                 Color(0xFFFF8F00),
               ],
               begin:  Alignment.topLeft,
@@ -339,7 +347,7 @@ class _TopBar extends StatelessWidget {
             onTap: onPro,
             child: Text(
               'AZ EXPRESS',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 color:         Colors.white,
                 fontSize:      AppTypography.titleLarge(context),
                 fontWeight:    FontWeight.w900,
@@ -393,7 +401,7 @@ class _SosChip extends StatelessWidget {
             SizedBox(width: AppLayout.xs(context) + 1),
             Text(
               sent ? 'Envoyé' : 'SOS',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 color:      sent ? Colors.white54 : Colors.white,
                 fontSize:   txtSz,
                 fontWeight: FontWeight.w800,
@@ -433,9 +441,9 @@ class _LangButton extends StatelessWidget {
       onSelected: (code) => language.onLocaleChanged(Locale(code)),
       itemBuilder: (_) => [
         PopupMenuItem(value: 'fr',
-            child: Text('Français', style: GoogleFonts.inter())),
+            child: Text('Français', style: GoogleFonts.urbanist())),
         PopupMenuItem(value: 'en',
-            child: Text('English', style: GoogleFonts.inter())),
+            child: Text('English', style: GoogleFonts.urbanist())),
       ],
     );
   }
@@ -664,22 +672,22 @@ class _CardsSection extends StatelessWidget {
               width: double.infinity,
               padding: EdgeInsets.symmetric(vertical: AppLayout.md(context)),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF6D00).withValues(alpha: 0.06),
+                color: AppColors.primary.withValues(alpha: 0.06),
                 borderRadius: AppRadius.lgR,
                 border: Border.all(
-                    color: const Color(0xFFFF6D00).withValues(alpha: 0.2)),
+                    color: AppColors.primary.withValues(alpha: 0.2)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.support_agent_rounded,
                       size: AppLayout.iconSm(context),
-                      color: const Color(0xFFFF6D00)),
+                      color: AppColors.primary),
                   SizedBox(width: AppLayout.xs(context) + 2),
                   Text(
                     'Aide & Support',
                     style: AppTypography.labelLargeStyle(context,
-                        color: const Color(0xFFFF6D00),
+                        color: AppColors.primary,
                         weight: FontWeight.w600),
                   ),
                 ],
@@ -820,7 +828,7 @@ class _ServiceCardState extends State<_ServiceCard> {
                       ),
                       child: Text(
                         d.badge,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           color:         Colors.white,
                           fontSize:      AppTypography.labelSmall(context) - 0.5,
                           fontWeight:    FontWeight.w700,
@@ -838,7 +846,7 @@ class _ServiceCardState extends State<_ServiceCard> {
                       d.subtitle,
                       maxLines:  1,
                       overflow:  TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         color:    Colors.white.withValues(alpha: 0.78),
                         fontSize: AppTypography.bodySmall(context),
                       ),

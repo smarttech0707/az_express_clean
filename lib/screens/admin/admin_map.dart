@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../widgets/stream_error_state.dart';
 
 class AdminMap extends StatefulWidget {
   const AdminMap({super.key});
@@ -31,6 +32,9 @@ class _AdminMapState extends State<AdminMap> {
 
         builder: (context, driverSnapshot) {
 
+          if (driverSnapshot.hasError) {
+            return const StreamErrorState(message: "Impossible de charger les livreurs.");
+          }
           if (!driverSnapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -44,6 +48,9 @@ class _AdminMapState extends State<AdminMap> {
 
             builder: (context, orderSnapshot) {
 
+              if (orderSnapshot.hasError) {
+                return const StreamErrorState(message: "Impossible de charger les commandes en cours.");
+              }
               if (!orderSnapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -175,5 +182,4 @@ class _AdminMapState extends State<AdminMap> {
     );
 
   }
-
 }

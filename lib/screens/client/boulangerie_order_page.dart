@@ -272,7 +272,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text(name,
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold),
             overflow: TextOverflow.ellipsis),
         backgroundColor: brown,
         foregroundColor: Colors.white,
@@ -451,12 +451,12 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('Gâteau d\'anniversaire',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 15)),
                           Text('Commande personnalisée — décrivez votre gâteau',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   color: Colors.white70, fontSize: 11.5)),
                         ],
                       ),
@@ -469,7 +469,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text('Commander',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.white,
                               fontSize: 12,
                               fontWeight: FontWeight.w600)),
@@ -537,7 +537,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                       ),
                       const SizedBox(width: 8),
                       Text(cat,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontWeight: FontWeight.bold,
                               fontSize: 15,
                               color: const Color(0xFF3E2723))),
@@ -738,7 +738,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                           size: 14, color: Color(0xFF5D4037)),
                       const SizedBox(width: 6),
                       Text('$_cartCount article${_cartCount > 1 ? "s" : ""}',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: Colors.grey.shade700)),
@@ -748,13 +748,13 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text('Articles : ${_fmt(_itemsTotal)}',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontSize: 12, color: Colors.grey.shade600)),
                           Text('Livraison : ${_fmt(_deliveryFee)}',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontSize: 12, color: Colors.grey.shade600)),
                           Text(_fmt(_totalAmount),
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontWeight: FontWeight.w800,
                                   fontSize: 16,
                                   color: const Color(0xFF5D4037))),
@@ -785,7 +785,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                                     size: 20),
                                 const SizedBox(width: 10),
                                 Text('Commander — ${_fmt(_totalAmount)}',
-                                    style: GoogleFonts.inter(
+                                    style: GoogleFonts.urbanist(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 15)),
                               ],
@@ -814,7 +814,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                   color: Color(0xFF5D4037), size: 20),
               const SizedBox(width: 10),
               Text('Récapitulatif',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontWeight: FontWeight.bold, fontSize: 17)),
             ]),
             const SizedBox(height: 16),
@@ -831,7 +831,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                     ),
                     child: Center(
                       child: Text('${item['qty']}',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                               color: const Color(0xFF5D4037))),
@@ -839,9 +839,9 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(child: Text('${item['name']}',
-                      style: GoogleFonts.inter(fontSize: 14))),
+                      style: GoogleFonts.urbanist(fontSize: 14))),
                   Text(_fmt(total),
-                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                      style: GoogleFonts.urbanist(fontWeight: FontWeight.w600)),
                 ]),
               );
             }),
@@ -851,11 +851,11 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                   size: 16, color: Colors.grey),
               const SizedBox(width: 8),
               Text('Livraison',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 14, color: Colors.grey.shade700)),
               const Spacer(),
               Text(_fmt(_deliveryFee),
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w600)),
             ]),
             const SizedBox(height: 12),
             Container(
@@ -867,11 +867,11 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
               ),
               child: Row(children: [
                 Text('Total',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontWeight: FontWeight.bold, fontSize: 16)),
                 const Spacer(),
                 Text(_fmt(_totalAmount),
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontWeight: FontWeight.bold,
                         fontSize: 18,
                         color: const Color(0xFF5D4037))),
@@ -949,12 +949,12 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                     const Text('🎂', style: TextStyle(fontSize: 28)),
                     const SizedBox(width: 10),
                     Text('Gâteau d\'anniversaire',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 18, fontWeight: FontWeight.bold)),
                   ]),
                   const SizedBox(height: 4),
                   Text('Décrivez votre gâteau, nous le préparons pour vous.',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 12, color: Colors.grey)),
                   const SizedBox(height: 20),
 
@@ -1041,7 +1041,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                           deadline == null
                               ? 'Date de livraison souhaitée'
                               : '${deadline!.day}/${deadline!.month}/${deadline!.year}',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             fontSize: 13,
                             color: deadline == null
                                 ? Colors.grey.shade600
@@ -1055,7 +1055,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
 
                   // Paiement
                   Text('Paiement',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontWeight: FontWeight.w600, fontSize: 13)),
                   const SizedBox(height: 8),
                   Row(children: [
@@ -1126,7 +1126,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                           ? const CircularProgressIndicator(
                               color: Colors.white)
                           : Text('Envoyer la commande 🎂',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 15)),
                     ),

@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../constants/app_constants.dart';
+import '../../theme/app_theme.dart';
 
 class SupportScreen extends StatefulWidget {
   const SupportScreen({super.key});
@@ -38,7 +39,7 @@ class _SupportScreenState extends State<SupportScreen>
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text('Aide & Support'),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
         bottom: TabBar(
@@ -223,7 +224,7 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                 decoration: const InputDecoration(
                   labelText: 'Catégorie',
                   prefixIcon: Icon(Icons.category_outlined,
-                      color: Color(0xFFFF6D00)),
+                      color: AppColors.primary),
                   border: InputBorder.none,
                 ),
                 items: _categories
@@ -242,7 +243,7 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                 decoration: const InputDecoration(
                   labelText: 'Sujet',
                   prefixIcon:
-                      Icon(Icons.title_rounded, color: Color(0xFFFF6D00)),
+                      Icon(Icons.title_rounded, color: AppColors.primary),
                   border: InputBorder.none,
                 ),
               ),
@@ -261,7 +262,7 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                   prefixIcon: Padding(
                     padding: EdgeInsets.only(bottom: 80),
                     child: Icon(Icons.message_outlined,
-                        color: Color(0xFFFF6D00)),
+                        color: AppColors.primary),
                   ),
                   border: InputBorder.none,
                 ),
@@ -284,11 +285,11 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                       width: 42,
                       height: 42,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6D00).withValues(alpha: 0.1),
+                        color: AppColors.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Icon(Icons.add_photo_alternate_outlined,
-                          color: Color(0xFFFF6D00), size: 22),
+                          color: AppColors.primary, size: 22),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -344,7 +345,7 @@ class _NewTicketTabState extends State<_NewTicketTab> {
             child: ElevatedButton.icon(
               onPressed: _sending ? null : _submit,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6D00),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),
@@ -481,12 +482,12 @@ class _ContactButton extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
                           color: Colors.black87)),
                   Text(sublabel,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 10,
                           color: Colors.grey),
                       overflow: TextOverflow.ellipsis),
@@ -537,11 +538,11 @@ class _TicketHistoryTab extends StatelessWidget {
                     size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text('Aucun ticket pour l\'instant',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.grey, fontSize: 15)),
                 const SizedBox(height: 6),
                 Text('Signalez un problème depuis l\'onglet "Nouveau ticket"',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.grey.shade400, fontSize: 12),
                     textAlign: TextAlign.center),
               ],
@@ -601,83 +602,257 @@ class _TicketCard extends StatelessWidget {
     final category = data['category'] as String? ?? '';
     final color    = _statusColor(status);
     final hasScreenshot = (data['screenshotUrl'] as String?) != null;
+    final messages = (data['messages'] as List?) ?? [];
+    final hasReply = messages.any((m) => (m as Map)['sender'] == 'admin');
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(subject,
-                      style: GoogleFonts.inter(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: Colors.black87),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(_statusLabel(status),
-                      style: TextStyle(
-                          color: color,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(Icons.label_outline,
-                    size: 13, color: Colors.grey.shade400),
-                const SizedBox(width: 4),
-                Text(category,
-                    style: TextStyle(
-                        fontSize: 12, color: Colors.grey.shade500)),
-                const Spacer(),
-                Icon(Icons.calendar_today_outlined,
-                    size: 12, color: Colors.grey.shade400),
-                const SizedBox(width: 4),
-                Text(_formatDate(data['createdAt']),
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey.shade400)),
-                if (hasScreenshot) ...[
-                  const SizedBox(width: 8),
-                  Icon(Icons.image_outlined,
-                      size: 13, color: Colors.grey.shade400),
-                ],
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              data['message'] as String? ?? '',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey.shade600,
-                  height: 1.4),
-            ),
+    return GestureDetector(
+      onTap: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => _TicketDetailScreen(ticketId: id))),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
           ],
         ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(subject,
+                        style: GoogleFonts.urbanist(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.black87),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(_statusLabel(status),
+                        style: TextStyle(
+                            color: color,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(Icons.label_outline,
+                      size: 13, color: Colors.grey.shade400),
+                  const SizedBox(width: 4),
+                  Text(category,
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade500)),
+                  const Spacer(),
+                  Icon(Icons.calendar_today_outlined,
+                      size: 12, color: Colors.grey.shade400),
+                  const SizedBox(width: 4),
+                  Text(_formatDate(data['createdAt']),
+                      style: TextStyle(
+                          fontSize: 11, color: Colors.grey.shade400)),
+                  if (hasScreenshot) ...[
+                    const SizedBox(width: 8),
+                    Icon(Icons.image_outlined,
+                        size: 13, color: Colors.grey.shade400),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                data['message'] as String? ?? '',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade600,
+                    height: 1.4),
+              ),
+              if (hasReply) ...[
+                const SizedBox(height: 8),
+                Row(children: [
+                  Icon(Icons.reply_rounded, size: 13, color: Colors.blue.shade400),
+                  const SizedBox(width: 4),
+                  Text('Réponse du support disponible — touchez pour voir',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.blue.shade600,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Détail d'un ticket — affiche le fil complet des messages (client + admin)
+/// et permet au client de répondre. La règle Firestore autorisait déjà le
+/// propriétaire du ticket à modifier `messages` (sans toucher `status`)
+/// depuis le début — cet écran manquait simplement côté UI (Master Prompt 78,
+/// 2026-07-09).
+class _TicketDetailScreen extends StatefulWidget {
+  final String ticketId;
+  const _TicketDetailScreen({required this.ticketId});
+
+  @override
+  State<_TicketDetailScreen> createState() => _TicketDetailScreenState();
+}
+
+class _TicketDetailScreenState extends State<_TicketDetailScreen> {
+  final _replyCtrl = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _replyCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendReply() async {
+    final text = _replyCtrl.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _sending = true);
+    try {
+      final ref = FirebaseFirestore.instance
+          .collection(Collections.supportTickets)
+          .doc(widget.ticketId);
+      final snap = await ref.get();
+      final messages = List<Map<String, dynamic>>.from(
+          (snap.data()?['messages'] as List?) ?? []);
+      messages.add({
+        'sender': 'user',
+        'text': text,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      await ref.update({'messages': messages});
+      if (!mounted) return;
+      setState(() { _replyCtrl.clear(); _sending = false; });
+    } catch (_) {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F5F5),
+      appBar: AppBar(
+        title: const Text('Mon ticket'),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        centerTitle: true,
+      ),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection(Collections.supportTickets)
+            .doc(widget.ticketId)
+            .snapshots(),
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return const Center(child: Text('Impossible de charger le ticket.'));
+          }
+          if (!snap.hasData || !snap.data!.exists) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final data = snap.data!.data() as Map<String, dynamic>;
+          final messages = List<Map<String, dynamic>>.from(
+              (data['messages'] as List?) ?? []);
+          return Column(
+            children: [
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    Text(data['subject'] as String? ?? '',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 16),
+                    ...messages.map((m) {
+                      final isAdmin = m['sender'] == 'admin';
+                      return Align(
+                        alignment: isAdmin
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          constraints: const BoxConstraints(maxWidth: 280),
+                          decoration: BoxDecoration(
+                            color: isAdmin
+                                ? Colors.blue.shade50
+                                : AppColors.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(isAdmin ? 'Support AZ Express' : 'Vous',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: isAdmin
+                                          ? Colors.blue.shade700
+                                          : AppColors.primary)),
+                              const SizedBox(height: 4),
+                              Text(m['text'] as String? ?? ''),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+              if (data['status'] != 'closed')
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _replyCtrl,
+                            decoration: const InputDecoration(
+                              hintText: 'Écrire un message…',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: _sending ? null : _sendReply,
+                          icon: _sending
+                              ? const SizedBox(
+                                  width: 18, height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.send_rounded,
+                                  color: AppColors.primary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }

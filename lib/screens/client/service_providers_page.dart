@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/app_text.dart';
 import '../../models/service_provider_model.dart';
+import '../../theme/app_theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ENUMS
@@ -253,7 +254,7 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                             Expanded(
                               child: Text(
                                 widget.title,
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                   color:      Colors.white,
                                   fontSize:   20,
                                   fontWeight: FontWeight.bold,
@@ -265,7 +266,7 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                         const SizedBox(height: 2),
                         Text(
                           context.tr('providers_in'),
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.white70, fontSize: 12.5),
                         ),
                       ],
@@ -276,7 +277,7 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
             ),
             title: Text(
               widget.title,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.w600),
@@ -313,10 +314,10 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                     child: TextField(
                       controller: _searchCtrl,
                       onChanged:  (v) => setState(() => _search = v),
-                      style:      GoogleFonts.inter(fontSize: 13.5),
+                      style:      GoogleFonts.urbanist(fontSize: 13.5),
                       decoration: InputDecoration(
                         hintText:  context.tr('search_provider'),
-                        hintStyle: GoogleFonts.inter(
+                        hintStyle: GoogleFonts.urbanist(
                             fontSize: 13.5, color: Colors.grey),
                         prefixIcon: Icon(Icons.search_rounded,
                             color: widget.color, size: 20),
@@ -393,7 +394,7 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                                       color: Colors.orange.shade700),
                                   const SizedBox(width: 4),
                                   Text('Effacer filtres',
-                                      style: GoogleFonts.inter(
+                                      style: GoogleFonts.urbanist(
                                           fontSize: 11.5,
                                           color:     Colors.orange.shade700,
                                           fontWeight: FontWeight.w600)),
@@ -612,7 +613,7 @@ class _SortChip extends StatelessWidget {
             const SizedBox(width: 5),
             Text(
               label,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 fontSize:   12,
                 fontWeight: FontWeight.w600,
                 color:      active ? Colors.white : Colors.grey.shade700,
@@ -741,7 +742,7 @@ class _ProviderCard extends StatelessWidget {
                                 color: Colors.white, size: 11),
                             const SizedBox(width: 3),
                             Text('Vérifié',
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                     color: Colors.white,
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold)),
@@ -768,7 +769,7 @@ class _ProviderCard extends StatelessWidget {
                                 color: Colors.white, size: 11),
                             const SizedBox(width: 3),
                             Text(p.distanceStr,
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                     color: Colors.white,
                                     fontSize: 10.5,
                                     fontWeight: FontWeight.w600)),
@@ -791,7 +792,7 @@ class _ProviderCard extends StatelessWidget {
                       Expanded(
                         child: Text(
                           p.name,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             fontWeight: FontWeight.bold,
                             fontSize:   15,
                             color:      Colors.black87,
@@ -818,7 +819,7 @@ class _ProviderCard extends StatelessWidget {
                         Expanded(
                           child: Text(
                             p.address,
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 color: Colors.grey.shade600, fontSize: 12),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -834,7 +835,7 @@ class _ProviderCard extends StatelessWidget {
                       p.description,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color:  Colors.grey.shade600,
                           fontSize: 12,
                           height: 1.4),
@@ -1025,7 +1026,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                           children: [
                             Text(
                               p.name,
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                 fontSize:   22,
                                 fontWeight: FontWeight.bold,
                                 color:      Colors.black87,
@@ -1042,7 +1043,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                                   Expanded(
                                     child: Text(
                                       p.address,
-                                      style: GoogleFonts.inter(
+                                      style: GoogleFonts.urbanist(
                                           color:    Colors.grey.shade600,
                                           fontSize: 13),
                                     ),
@@ -1063,7 +1064,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                             const SizedBox(height: 4),
                             Text(
                               '${p.ratingCount} avis',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontSize: 11,
                                   color: Colors.grey.shade500),
                             ),
@@ -1116,14 +1117,14 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                     const SizedBox(height: 20),
                     Text(
                       context.tr('about_provider'),
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize:   16,
                           fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       p.description,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color:    Colors.grey.shade700,
                           fontSize: 14,
                           height:   1.6),
@@ -1139,7 +1140,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                         const SizedBox(width: 6),
                         Text(
                           'À ${p.distanceStr} de vous',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize:   13,
                               color:      widget.color,
                               fontWeight: FontWeight.w600),
@@ -1168,18 +1169,18 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                     children: [
                       Text(
                         'Avis clients',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       TextButton.icon(
                         onPressed: () =>
                             _showRateDialog(context, p),
                         icon: const Icon(Icons.star_rounded,
-                            size: 16, color: Color(0xFFFF6D00)),
+                            size: 16, color: AppColors.primary),
                         label: Text(
                           'Laisser un avis',
-                          style: GoogleFonts.inter(
-                              color: const Color(0xFFFF6D00),
+                          style: GoogleFonts.urbanist(
+                              color: AppColors.primary,
                               fontSize: 12.5,
                               fontWeight: FontWeight.w600),
                         ),
@@ -1211,7 +1212,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
               borderRadius: BorderRadius.circular(20)),
           title: Text(
             'Noter ${p.name}',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1239,7 +1240,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                 maxLines:    3,
                 decoration:  InputDecoration(
                   hintText:   'Votre commentaire (optionnel)',
-                  hintStyle:  GoogleFonts.inter(fontSize: 13),
+                  hintStyle:  GoogleFonts.urbanist(fontSize: 13),
                   border:     OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   contentPadding: const EdgeInsets.all(12),
@@ -1265,7 +1266,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                     borderRadius: BorderRadius.circular(12)),
               ),
               child: Text('Envoyer',
-                  style: GoogleFonts.inter(color: Colors.white)),
+                  style: GoogleFonts.urbanist(color: Colors.white)),
             ),
           ],
         ),
@@ -1292,6 +1293,12 @@ class _ReviewsList extends StatelessWidget {
           .limit(10)
           .snapshots(),
       builder: (ctx, snap) {
+        if (snap.hasError) {
+          return Text(
+            'Impossible de charger les avis.',
+            style: GoogleFonts.urbanist(color: Colors.grey, fontSize: 13),
+          );
+        }
         if (!snap.hasData) {
           return const Center(
               child: CircularProgressIndicator(strokeWidth: 2));
@@ -1300,7 +1307,7 @@ class _ReviewsList extends StatelessWidget {
         if (docs.isEmpty) {
           return Text(
             'Aucun avis pour l\'instant.',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 color: Colors.grey, fontSize: 13),
           );
         }
@@ -1333,7 +1340,7 @@ class _ReviewsList extends StatelessWidget {
                       if (ts != null)
                         Text(
                           '${ts.day}/${ts.month}/${ts.year}',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 10, color: Colors.grey),
                         ),
                     ],
@@ -1342,7 +1349,7 @@ class _ReviewsList extends StatelessWidget {
                     const SizedBox(height: 5),
                     Text(
                       comment,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 12.5,
                           color: Colors.black87,
                           height: 1.4),
@@ -1419,7 +1426,7 @@ class _FilterSheetState extends State<_FilterSheet> {
           ),
 
           Text('Filtres',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 18, fontWeight: FontWeight.bold)),
 
           const SizedBox(height: 20),
@@ -1430,12 +1437,12 @@ class _FilterSheetState extends State<_FilterSheet> {
               const Icon(Icons.star_rounded, color: Colors.amber, size: 20),
               const SizedBox(width: 8),
               Text('Note minimale',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 14, fontWeight: FontWeight.w600)),
               const Spacer(),
               Text(
                 _minRating == 0 ? 'Toutes' : '$_minRating ⭐',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     color: widget.color, fontWeight: FontWeight.bold),
               ),
             ],
@@ -1452,7 +1459,7 @@ class _FilterSheetState extends State<_FilterSheet> {
           // GPS seulement
           SwitchListTile(
             title: Text('Avec localisation GPS uniquement',
-                style: GoogleFonts.inter(fontSize: 13)),
+                style: GoogleFonts.urbanist(fontSize: 13)),
             value:       _gpsOnly,
             onChanged:   (v) => setState(() => _gpsOnly = v),
             activeThumbColor: widget.color,
@@ -1462,7 +1469,7 @@ class _FilterSheetState extends State<_FilterSheet> {
           // Disponibles uniquement
           SwitchListTile(
             title: Text('Disponibles uniquement',
-                style: GoogleFonts.inter(fontSize: 13)),
+                style: GoogleFonts.urbanist(fontSize: 13)),
             value:       _availableOnly,
             onChanged:   (v) => setState(() => _availableOnly = v),
             activeThumbColor: widget.color,
@@ -1482,7 +1489,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                   });
                 },
                 child: Text('Réinitialiser',
-                    style: GoogleFonts.inter()),
+                    style: GoogleFonts.urbanist()),
               ),
             ),
             const SizedBox(width: 12),
@@ -1498,7 +1505,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                       borderRadius: BorderRadius.circular(12)),
                 ),
                 child: Text('Appliquer',
-                    style: GoogleFonts.inter(color: Colors.white)),
+                    style: GoogleFonts.urbanist(color: Colors.white)),
               ),
             ),
           ]),
@@ -1533,7 +1540,7 @@ class _RatingBadge extends StatelessWidget {
           const SizedBox(width: 3),
           Text(
             rating.toStringAsFixed(1),
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontSize:   12,
               fontWeight: FontWeight.bold,
               color:      Colors.amber.shade800,
@@ -1541,7 +1548,7 @@ class _RatingBadge extends StatelessWidget {
           ),
           Text(
             ' ($count)',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 10, color: Colors.amber.shade600),
           ),
         ],
@@ -1580,7 +1587,7 @@ class _ActionBtn extends StatelessWidget {
             const SizedBox(width: 5),
             Text(
               label,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 color:      color,
                 fontWeight: FontWeight.bold,
                 fontSize:   12.5,
@@ -1631,7 +1638,7 @@ class _BigActionBtn extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               label,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 color:      Colors.white,
                 fontWeight: FontWeight.bold,
                 fontSize:   13,
@@ -1639,7 +1646,7 @@ class _BigActionBtn extends StatelessWidget {
             ),
             Text(
               subtitle,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   color: Colors.white70, fontSize: 10.5),
               maxLines:  1,
               overflow:  TextOverflow.ellipsis,
@@ -1668,14 +1675,14 @@ class _EmptyState extends StatelessWidget {
             search.isEmpty
                 ? context.tr('no_provider')
                 : '${context.tr('no_result_for')} "$search"',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 16, color: Colors.grey),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
             context.tr('come_back'),
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 13, color: Colors.grey.shade400),
           ),
         ],

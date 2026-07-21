@@ -1116,7 +1116,7 @@ class _MerchantsSection extends StatelessWidget {
   static const _perks = [
     (Icons.trending_up_rounded,   'Augmentez vos ventes',    'Touchez des milliers de clients supplémentaires.'),
     (Icons.dashboard_rounded,     'Dashboard complet',       'Gérez vos commandes, stocks et revenus en temps réel.'),
-    (Icons.payments_rounded,      'Paiements sécurisés',     'Wave, MTN Money, Orange Money, Moov Money & CinetPay.'),
+    (Icons.payments_rounded,      'Paiements sécurisés',     'Wave, MTN Money, Orange Money et Moov Money via FeexPay.'),
     (Icons.support_agent_rounded, 'Support 7j/7',            'Une équipe dédiée à votre réussite.'),
   ];
 

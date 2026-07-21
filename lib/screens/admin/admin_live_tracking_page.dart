@@ -28,6 +28,7 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
   // ── Données livreurs ───────────────────────────────────────────────────────
   final List<_DriverStatus> _drivers = [];
   StreamSubscription<QuerySnapshot>? _sub;
+  bool _streamError = false;
 
   // ── Abengourou centre (position par défaut) ────────────────────────────────
   static const _abengourou = LatLng(6.7294, -3.4966);
@@ -49,11 +50,16 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
         .collection('livreurs')
         .where('isOnline', isEqualTo: true)
         .snapshots()
-        .listen(_onDriversUpdate, onError: (_) {});
+        .listen(_onDriversUpdate, onError: (_) {
+      // Master Prompt 121 — la carte cessait de se mettre à jour en silence
+      // sur une panne réseau prolongée, sans que l'admin le sache.
+      if (mounted) setState(() => _streamError = true);
+    });
   }
 
   void _onDriversUpdate(QuerySnapshot snap) {
     if (!mounted) return;
+    if (_streamError) _streamError = false;
     final list = snap.docs.map((doc) {
       final d = doc.data() as Map<String, dynamic>;
       final lat = (d['lat'] as num?)?.toDouble();
@@ -128,7 +134,7 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Tracking Live',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         elevation: 0,
@@ -144,7 +150,7 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
                 ),
                 child: Text(
                   '$online / $total en ligne',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: Colors.white),
                 ),
@@ -154,6 +160,23 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
         ],
       ),
       body: Column(children: [
+
+        if (_streamError)
+          Container(
+            width: double.infinity,
+            color: Colors.orange.shade100,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(children: [
+              const Icon(Icons.wifi_off_rounded, size: 16, color: Colors.deepOrange),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Connexion perdue — les positions affichées peuvent être obsolètes.',
+                  style: GoogleFonts.urbanist(fontSize: 12, color: Colors.deepOrange.shade900),
+                ),
+              ),
+            ]),
+          ),
 
         // ── Carte ──────────────────────────────────────────────────────────
         SizedBox(
@@ -192,7 +215,7 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
         size: 56, color: Colors.grey.shade300),
     const SizedBox(height: 12),
     Text('Aucun livreur en ligne',
-        style: GoogleFonts.poppins(
+        style: GoogleFonts.urbanist(
             fontSize: 15, fontWeight: FontWeight.w600,
             color: Colors.grey.shade400)),
   ]));
@@ -275,10 +298,10 @@ class _DriverTile extends StatelessWidget {
 
           // Nom + téléphone
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(driver.name, style: GoogleFonts.inter(
+            Text(driver.name, style: GoogleFonts.urbanist(
                 fontSize: 14, fontWeight: FontWeight.w700)),
             if (driver.phone.isNotEmpty)
-              Text(driver.phone, style: GoogleFonts.inter(
+              Text(driver.phone, style: GoogleFonts.urbanist(
                   fontSize: 11, color: Colors.grey.shade500)),
           ])),
 
@@ -286,12 +309,12 @@ class _DriverTile extends StatelessWidget {
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(
               ok ? '${driver.speedKmh.toStringAsFixed(0)} km/h' : 'GPS inactif',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13, fontWeight: FontWeight.w700, color: color),
             ),
             Text(
               driver.lastUpdateStr,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 11, color: Colors.grey.shade400),
             ),
           ]),

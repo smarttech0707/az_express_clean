@@ -178,7 +178,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
       appBar: AppBar(
         title: Text(
           _isEdit ? 'Modifier l\'annonce' : 'Nouvelle annonce',
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 16, fontWeight: FontWeight.w700, color: kMpText),
         ),
         backgroundColor: Colors.white,
@@ -236,7 +236,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                                 color: kMpOrange),
                             const SizedBox(width: 8),
                             Text('Ajouter des photos',
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                     color: kMpOrange,
                                     fontWeight: FontWeight.w600)),
                           ],
@@ -246,7 +246,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                     const SizedBox(height: 4),
                     Text(
                       '${_existingUrls.length + _newImages.length}/6 photos  •  Première photo = couverture',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 11, color: kMpMuted),
                     ),
                   ],
@@ -324,7 +324,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                                   const SizedBox(height: 4),
                                   Text(
                                     c['label']! as String,
-                                    style: GoogleFonts.inter(
+                                    style: GoogleFonts.urbanist(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w700,
                                       color: _condition == c['id']
@@ -350,7 +350,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                       (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
                   decoration: _deco('Ex: iPhone 13 Pro Max 256Go Blanc',
                       Icons.title_rounded),
-                  style: GoogleFonts.inter(fontSize: 14, color: kMpText),
+                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
                 ),
               ),
 
@@ -367,7 +367,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                     return null;
                   },
                   decoration: _deco('Ex: 150000', Icons.payments_rounded),
-                  style: GoogleFonts.inter(fontSize: 14, color: kMpText),
+                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
                 ),
               ),
 
@@ -382,7 +382,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                   decoration: _deco(
                       'Décrivez l\'état, les accessoires inclus...',
                       Icons.description_rounded),
-                  style: GoogleFonts.inter(fontSize: 14, color: kMpText),
+                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
                 ),
               ),
 
@@ -404,7 +404,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                       controller: _batteryCtrl,
                       decoration: _deco('Batterie (ex: 4500 mAh)',
                           Icons.battery_full_rounded),
-                      style: GoogleFonts.inter(fontSize: 14, color: kMpText),
+                      style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
                     ),
                   ],
                 ),
@@ -420,7 +420,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                       .toList(),
                   onChanged: (v) => setState(() => _city = v ?? _city),
                   decoration: _deco('Votre ville', Icons.location_city_rounded),
-                  style: GoogleFonts.inter(fontSize: 14, color: kMpText),
+                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
                 ),
               ),
 
@@ -455,7 +455,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                         )
                       : Text(
                           _isEdit ? 'Mettre à jour' : 'Publier l\'annonce',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
                           ),
@@ -472,7 +472,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
 
   InputDecoration _deco(String hint, IconData icon) => InputDecoration(
         hintText: hint,
-        hintStyle: GoogleFonts.inter(color: kMpMuted, fontSize: 13),
+        hintStyle: GoogleFonts.urbanist(color: kMpMuted, fontSize: 13),
         prefixIcon: Icon(icon, color: kMpOrange, size: 20),
         filled: true,
         fillColor: Colors.white,
@@ -497,12 +497,12 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
     return DropdownButtonFormField<String>(
       initialValue: selectedValue,
       hint: Text('$label (optionnel)',
-          style: GoogleFonts.inter(color: kMpMuted, fontSize: 13)),
+          style: GoogleFonts.urbanist(color: kMpMuted, fontSize: 13)),
       items: options
           .map((o) => DropdownMenuItem(
                 value: o,
                 child:
-                    Text(o, style: GoogleFonts.inter(fontSize: 14, color: kMpText)),
+                    Text(o, style: GoogleFonts.urbanist(fontSize: 14, color: kMpText)),
               ))
           .toList(),
       onChanged: onChanged,
@@ -529,7 +529,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
 
   void _snack(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: GoogleFonts.inter(color: Colors.white)),
+      content: Text(msg, style: GoogleFonts.urbanist(color: Colors.white)),
       backgroundColor: color,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -558,7 +558,7 @@ class _Section extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: kMpText)),
@@ -592,7 +592,7 @@ class _SelChip extends StatelessWidget {
               color: selected ? kMpOrange : kMpDivider),
         ),
         child: Text(label,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontSize: 13,
               fontWeight: FontWeight.w600,
               color: selected ? Colors.white : kMpText,

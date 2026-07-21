@@ -23,6 +23,48 @@ class _SellerLoginState extends State<SellerLogin> {
   bool _loading = false;
   bool _showPass = false;
 
+  // Master Prompt 128 — voir driver_login.dart pour le contexte complet.
+  // Ce chemin ("Espace Professionnel" → "Boutique/Vendeur") n'avait aucun
+  // auto-reprise, contrairement au chemin "Commander" de home_screen.dart
+  // qui, lui, en a déjà un.
+  bool _autoResuming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && !user.isAnonymous) {
+      _autoResuming = true;
+      _tryAutoResume(user);
+    }
+  }
+
+  Future<void> _tryAutoResume(User user) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('sellers')
+          .doc(user.uid)
+          .get();
+      if (!mounted) return;
+      if (doc.exists && (doc.data()?['isActive'] ?? false)) {
+        final sellerData = doc.data()!;
+        NotificationService().saveToken(user.uid, 'sellers');
+        await SubscriptionService.checkAndRenew('sellers', user.uid);
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SellerDashboard(sellerId: user.uid, sellerData: sellerData),
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // Retombe sur le formulaire.
+    }
+    if (mounted) setState(() => _autoResuming = false);
+  }
+
   @override
   void dispose() {
     _phoneCtrl.dispose();
@@ -122,6 +164,12 @@ class _SellerLoginState extends State<SellerLogin> {
 
   @override
   Widget build(BuildContext context) {
+    if (_autoResuming) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F5F5),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFF1565C0))),
+      );
+    }
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(

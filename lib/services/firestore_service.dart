@@ -1,5 +1,6 @@
 ﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import '../models/order_model.dart';
 import '../models/driver_earnings_summary.dart';
 
@@ -48,11 +49,19 @@ class FirestoreService {
     final orderRef = db.collection("orders").doc(order.id);
     await orderRef.set(order.toMap());
     // Tente l'assignation auto du livreur le plus proche.
-    // Si la règle Firestore le bloque, les Cloud Functions FCM prennent le relais.
+    // Volontairement non bloquant pour la création de commande (déjà réussie
+    // à ce stade) — mais l'échec est désormais loggé plutôt qu'avalé en
+    // silence total : un dispatch qui échoue (timeout, erreur réseau...)
+    // laissait jusqu'ici la commande "pending" sans aucune trace exploitable
+    // avant l'expiration automatique 10 min plus tard (autoExpireOrders).
     try {
       await findNearestDriver(
           order.latitude, order.longitude, order.id, budget: order.budget);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[FirestoreService.createOrder] dispatch initial échoué pour '
+          '${order.id} : $e — la commande reste pending, '
+          'autoExpireOrders prendra le relais si aucun retry ne réussit.');
+    }
   }
 
   // ==============================
@@ -192,6 +201,39 @@ class FirestoreService {
 
       // Accepte à la fois les assignations directes et les broadcasts
       if (status != "assigned" && status != "broadcast") return;
+
+      // Ré-vérification à l'acceptation : dispatchOrder() (functions/dispatch.js)
+      // exclut déjà les livreurs suspendus/hors-ligne/déjà en course au moment
+      // de l'OFFRE, mais rien ne re-vérifiait ces mêmes conditions au moment de
+      // l'ACCEPTATION — un livreur notifié avant d'être suspendu (ou passé
+      // hors-ligne, ou déjà occupé par une autre course acceptée entre-temps)
+      // pouvait donc encore accepter. Fenêtre étroite mais réelle.
+      //
+      // Correctif 2026-07-19 : `driverSnapshot["champ"]` (operator [] de
+      // DocumentSnapshot) appelle .get("champ") en interne, qui lève un
+      // StateError ("field ... does not exist within the
+      // DocumentSnapshotPlatform") si le champ est absent — le `as bool? ??
+      // false` qui suit ne protège jamais contre ça, l'exception part avant
+      // que le `??` ne puisse s'appliquer. Confirmé en production : les
+      // livreurs approuvés via le flux standard (driver_requests_page.dart)
+      // n'ont jamais `isSuspended`/`isAvailable` à la création (déjà
+      // documenté CLAUDE.md), donc CHAQUE première acceptation d'un nouveau
+      // livreur faisait planter cette transaction. Corrigé en passant par
+      // `.data()` (un Map, dont l'opérateur [] retourne bien `null` sur une
+      // clé absente, sans exception) avant de lire les champs individuels.
+      final driverData = driverSnapshot.data() ?? {};
+      final bool driverSuspended  = driverData["isSuspended"]  as bool? ?? false;
+      final bool driverOnline     = driverData["isOnline"]     as bool? ?? false;
+      final bool driverOnDelivery = driverData["isOnDelivery"] as bool? ?? false;
+      if (driverSuspended) {
+        throw Exception("Votre compte a été suspendu, vous ne pouvez plus accepter de commandes.");
+      }
+      if (!driverOnline) {
+        throw Exception("Vous devez être en ligne pour accepter une commande.");
+      }
+      if (driverOnDelivery) {
+        throw Exception("Vous avez déjà une livraison en cours.");
+      }
 
       final int price      = (orderData["budget"] as num? ?? 0).toInt();
       commissionAmount     = calculateCommission(price);

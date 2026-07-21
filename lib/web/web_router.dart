@@ -11,6 +11,7 @@ import 'pages/contact_page.dart';
 import 'pages/about_page.dart';
 import 'pages/privacy_page.dart';
 import 'pages/terms_page.dart';
+import 'pages/delete_account_page.dart';
 import 'pages/admin/web_admin_login.dart';
 import 'pages/admin/web_admin_dashboard.dart';
 import 'pages/client/web_client_login.dart';
@@ -53,6 +54,7 @@ final webRouter = GoRouter(
     GoRoute(path: '/a-propos',           builder: (_, __) => const WebAboutPage()),
     GoRoute(path: '/confidentialite',    builder: (_, __) => const WebPrivacyPage()),
     GoRoute(path: '/conditions',         builder: (_, __) => const WebTermsPage()),
+    GoRoute(path: '/delete-account',     builder: (_, __) => const WebDeleteAccountPage()),
 
     // ── Auth client ───────────────────────────────────────────────────────────
     GoRoute(path: '/connexion',          builder: (_, __) => const WebClientLoginPage()),

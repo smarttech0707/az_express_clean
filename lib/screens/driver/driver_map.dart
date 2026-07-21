@@ -309,7 +309,7 @@ class _DriverMapState extends State<DriverMap>
             decoration: const BoxDecoration(color: Colors.white,
                 borderRadius: AppRadius.pillR, boxShadow: AppShadow.md),
             child: Text('Carte livraison',
-                style: GoogleFonts.inter(color: AppColors.text,
+                style: GoogleFonts.urbanist(color: AppColors.text,
                     fontSize: 15, fontWeight: FontWeight.w700)),
           ),
           centerTitle: true,
@@ -408,14 +408,14 @@ class _DriverMapState extends State<DriverMap>
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text('GPS arrière-plan désactivé',
-                                        style: GoogleFonts.inter(
+                                        style: GoogleFonts.urbanist(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w700,
                                             color: Colors.orange.shade800)),
                                     Text(
                                         'Votre position ne sera plus transmise '
                                         'si vous fermez l\'appli. Appuyez pour corriger.',
-                                        style: GoogleFonts.inter(
+                                        style: GoogleFonts.urbanist(
                                             fontSize: 11,
                                             color: Colors.orange.shade700)),
                                   ],
@@ -441,7 +441,7 @@ class _DriverMapState extends State<DriverMap>
                             _bgGranted
                                 ? 'GPS actif · Position transmise en temps réel'
                                 : 'GPS actif · arrière-plan limité',
-                            style: GoogleFonts.inter(fontSize: 12,
+                            style: GoogleFonts.urbanist(fontSize: 12,
                                 fontWeight: FontWeight.w600,
                                 color: _bgGranted
                                     ? AppColors.green
@@ -489,7 +489,7 @@ class _DriverMapState extends State<DriverMap>
                           icon: const Icon(Icons.navigation_rounded, size: 18),
                           label: Text(
                               hasDest ? 'Vers le client' : 'Naviguer',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontWeight: FontWeight.w700)),
                         )),
                         if (hasDest) ...[
@@ -504,7 +504,7 @@ class _DriverMapState extends State<DriverMap>
                             onPressed: () => _navigateTo(_destPos!),
                             icon: const Icon(Icons.place_rounded, size: 18),
                             label: Text('Destination',
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                     fontWeight: FontWeight.w700)),
                           )),
                         ],
@@ -535,11 +535,11 @@ class _DStat extends StatelessWidget {
       const SizedBox(width: 10),
       Expanded(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: GoogleFonts.inter(
+        Text(label, style: GoogleFonts.urbanist(
             fontSize: 11, color: AppColors.textMuted)),
-        Text(value, style: GoogleFonts.inter(
+        Text(value, style: GoogleFonts.urbanist(
             fontSize: 15, fontWeight: FontWeight.w800, color: color)),
-        Text(sub, style: GoogleFonts.inter(
+        Text(sub, style: GoogleFonts.urbanist(
             fontSize: 11, color: AppColors.textMuted)),
       ])),
     ]),

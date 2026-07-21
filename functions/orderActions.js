@@ -68,8 +68,19 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
 
       const clientRef = db.collection('clients').doc(uid);
       const driverRef = db.collection('livreurs').doc(driverId);
+      const pharmRef  = (pharmacieId && medAmount > 0)
+        ? db.collection('pharmacies').doc(pharmacieId) : null;
+
+      // Toutes les lectures d'abord — Firestore exige qu'aucune écriture
+      // (tx.update ci-dessous) ne précède une lecture dans une même
+      // transaction. Bug réel trouvé le 2026-07-19 (audit Wallet) :
+      // `tx.get(pharmRef)` était exécuté après deux `tx.update()` déjà
+      // faits, levant "Firestore transactions require all reads to be
+      // executed before all writes" — cassait à 100% toute commande
+      // pharmacie avec un montant médicament non nul payée par wallet.
       const clientSnap = await tx.get(clientRef);
       const driverSnap = await tx.get(driverRef);
+      const pharmSnap  = pharmRef ? await tx.get(pharmRef) : null;
 
       const clientWallet = Number(clientSnap.data()?.wallet || 0);
       if (clientWallet < total) {
@@ -82,9 +93,7 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
       const driverWallet = Number(driverSnap.data()?.wallet || 0);
       tx.update(driverRef, { wallet: driverWallet + deliveryAmount });
 
-      if (pharmacieId && medAmount > 0) {
-        const pharmRef  = db.collection('pharmacies').doc(pharmacieId);
-        const pharmSnap = await tx.get(pharmRef);
+      if (pharmRef) {
         const pharmWallet = Number(pharmSnap.data()?.wallet || 0);
         tx.update(pharmRef, { wallet: pharmWallet + medAmount });
       }
@@ -371,29 +380,78 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
           // libérer le livreur.
           walletTarget = 'partner_prepaid';
           tx.update(driverRef, { isOnDelivery: false });
-        } else if (sid) {
+        } else if (sid && order.isPaid === true) {
           partnerId    = sid;
           walletTarget = 'partner';
-          creditAmount = Math.max(0, budget - AZ_COMMISSION_FIXED);
+          // Le commissionnement AZ passe intégralement par le wallet du
+          // livreur, déjà débité à l'acceptation (acceptOrder(), Dart) — le
+          // reprélever ici en réduisant le crédit du partenaire aurait fait
+          // payer la commission deux fois pour la même commande (double
+          // prélèvement confirmé et corrigé, 2026-07-09). Le partenaire
+          // reçoit désormais le montant intégral.
+          creditAmount = Math.max(0, budget);
           if (partnerSnap && partnerSnap.exists) {
             const w = Number(partnerSnap.data().wallet || 0);
             tx.update(partnerRef, { wallet: w + creditAmount });
           }
           tx.update(driverRef, { isOnDelivery: false });
-        } else {
+        } else if (sid) {
+          // Commande wallet avec marchand, mais isPaid encore false : aucun
+          // paiement réel n'a jamais été validé côté serveur pour cette
+          // commande (order.paymentMethod est un champ librement écrit par
+          // le client à la création, non lié à un vrai débit) — créditer ici
+          // aurait permis de créer de l'argent sans qu'aucun client n'ait
+          // jamais payé (faille confirmée et corrigée, Master Prompt 80,
+          // 2026-07-09). Le marchand n'est crédité que si isPaid est déjà
+          // passé à true via un chemin serveur validé (payOrderFromWalletCF).
+          walletTarget = 'partner_unpaid';
+          tx.update(driverRef, { isOnDelivery: false });
+        } else if (order.isPaid === true) {
           walletTarget = 'driver';
-          creditAmount = Math.max(0, budget + shoppingBudget - AZ_COMMISSION_FIXED);
+          // Même raisonnement que ci-dessus : la commission a déjà été
+          // débitée du wallet livreur à l'acceptation — le crédit ici est
+          // désormais intégral (2026-07-09).
+          creditAmount = Math.max(0, budget + shoppingBudget);
           tx.update(driverRef, {
             wallet:       driverWallet + creditAmount,
             isOnDelivery: false,
           });
+        } else {
+          // Commande wallet dont le paiement final (livraison + éventuel
+          // montant additionnel, ex. médicaments pharmacie) n'a pas encore
+          // été réglé — le libeller "isPaid" reste false jusqu'au règlement
+          // post-livraison (suivi_commande.dart:_WalletPayButton →
+          // payOrderFromWalletCF, qui crédite le livreur du montant complet
+          // en une seule fois). Créditer le livreur ici en plus créerait un
+          // double crédit — confirmé et corrigé (2026-07-09), même famille
+          // que les doubles-crédits Marketplace/Boutique du Master Prompt 46.
+          walletTarget = 'driver_pending_payment';
+          tx.update(driverRef, { isOnDelivery: false });
         }
       } else {
+        // Paiement cash : le client règle le livreur directement, en
+        // espèces, à la livraison — cet argent ne transite jamais par AZ.
+        // La commission AZ a déjà été débitée du wallet livreur à
+        // l'acceptation (acceptOrder(), Dart, remboursable en cas
+        // d'annulation) ; la reprélever ici doublait la commission sur
+        // chaque commande cash (confirmé et corrigé, 2026-07-09) — le
+        // livreur garde désormais l'intégralité des espèces collectées,
+        // son wallet n'est plus touché à la livraison.
         walletTarget = 'cash';
-        tx.update(driverRef, {
-          wallet:       driverWallet - AZ_COMMISSION_FIXED,
-          isOnDelivery: false,
-        });
+        tx.update(driverRef, { isOnDelivery: false });
+
+        // Commande cash avec un marchand (restaurant/pharmacie) : le livreur
+        // collecte aussi la part "produit" en espèces, qu'il doit remettre au
+        // marchand séparément — aucun mouvement de wallet n'a lieu ici (par
+        // design, voir ci-dessus), donc rien ne trace aujourd'hui si cette
+        // remise a bien eu lieu. Ajout purement additif, jamais lu par aucune
+        // logique de paiement existante : marque la commande comme "cash à
+        // régler" pour la nouvelle vue admin dédiée (2026-07-09), sans toucher
+        // au wallet. Boutique exclue : son paiement cash suit déjà son propre
+        // document `boutique_orders`, traité séparément (voir admin_boutique_page.dart).
+        if (sid && sType !== 'boutique') {
+          tx.update(orderRef, { merchantCashSettled: false });
+        }
       }
     });
 
@@ -421,23 +479,23 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
       createdAt:     admin.firestore.FieldValue.serverTimestamp(),
     });
 
+    // walletTarget === 'cash' n'écrit plus de wallet_transactions ici : plus
+    // aucune mutation de wallet livreur n'a lieu à la livraison pour ce cas
+    // (commission déjà journalisée à l'acceptation, côté Dart) — en écrire
+    // une quand même aurait laissé une entrée fantôme sans mouvement de
+    // solde réel correspondant, faussant l'historique et la conciliation
+    // hebdomadaire (2026-07-09).
     const now = admin.firestore.FieldValue.serverTimestamp();
     if (walletTarget === 'driver' && creditAmount > 0) {
       await driverRef.collection('wallet_transactions').add({
         type: 'earning', amount: creditAmount,
-        description: `Gain livraison — ${deliveryFee} FCFA (commission AZ: ${AZ_COMMISSION_FIXED} FCFA)`,
-        orderId, createdAt: now,
-      });
-    } else if (walletTarget === 'cash') {
-      await driverRef.collection('wallet_transactions').add({
-        type: 'commission', amount: AZ_COMMISSION_FIXED,
-        description: `Commission AZ Express — espèces ${deliveryFee} FCFA`,
+        description: `Gain livraison — ${deliveryFee} FCFA (commission AZ déjà prélevée à l'acceptation)`,
         orderId, createdAt: now,
       });
     } else if (walletTarget === 'partner' && partnerId && partnerCol && creditAmount > 0) {
       await db.collection(partnerCol).doc(partnerId).collection('wallet_transactions').add({
         type: 'earning', amount: creditAmount,
-        description: `Commande livrée — commission AZ: ${AZ_COMMISSION_FIXED} FCFA`,
+        description: `Commande livrée — ${creditAmount} FCFA (commission AZ prélevée séparément sur le wallet du livreur)`,
         orderId, createdAt: now,
       });
     }

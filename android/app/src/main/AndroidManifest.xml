@@ -16,6 +16,14 @@
     <!-- Type location spécifique requis Android 14+ -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 
+    <!-- Le GPS étant utile mais pas strictement indispensable (adresse saisie
+         manuellement possible), on autorise l'installation sur les appareils
+         sans capteur GPS dédié — même logique déjà appliquée à la caméra
+         ci-dessous. Sans cette ligne, un plugin (geolocator) injecte cette
+         feature à required="true" par défaut, ce qui filtrerait ces
+         appareils hors du Play Store sans raison réelle (2026-07-09). -->
+    <uses-feature android:name="android.hardware.location" android:required="false"/>
+
     <!-- APPAREIL PHOTO (photos de livraison, selfie acceptation) -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
@@ -32,12 +40,32 @@
 
     <!-- MICRO / ENREGISTREMENT VOCAL -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Micro utile (AZ IA vocal, dictée Courses) mais pas indispensable au
+         reste de l'app — même raisonnement que location ci-dessus. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+
+    <!-- speech_to_text/flutter_foreground_task injectent android.permission.BLUETOOTH
+         et la uses-feature "bluetooth" correspondante (probablement pour le support
+         micro Bluetooth) — l'app n'utilise le Bluetooth nulle part directement,
+         donc ne pas la rendre obligatoire pour l'installation (2026-07-09). -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
 
     <!-- NOTIFICATIONS (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <!-- WAKE_LOCK — maintient le CPU actif pendant le tracking GPS arrière-plan -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <!-- L'app n'utilise pas de publicité ni l'Advertising ID (Firebase Analytics
+         est présent mais n'envoie aujourd'hui aucun événement, voir CLAUDE.md
+         section Firebase) — cette permission est injectée transitivement par
+         une dépendance Google Play Services. La retirer évite une déclaration
+         "Identifiant publicitaire" inutile en Play Console (2026-07-09). -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove"/>
+    <!-- Équivalent Privacy Sandbox (Android 13+) de AD_ID ci-dessus — même raison. -->
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID"
+        tools:node="remove"/>
 
     <!-- Needed for url_launcher tel:, https: et intent caméra sur Android 11+ -->
     <queries>

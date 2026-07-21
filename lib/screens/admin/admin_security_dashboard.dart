@@ -478,7 +478,7 @@ class _RecentAuditLogs extends StatelessWidget {
   static const _actionIcons = {
     'payment_initiated':              (Icons.payment_rounded,                Color(0xFF2196F3)),
     'wallet_credited':                (Icons.account_balance_wallet_rounded, Color(0xFF4CAF50)),
-    'withdrawal_initiated':           (Icons.send_rounded,                   Color(0xFFFF6B00)),
+    'withdrawal_initiated':           (Icons.send_rounded,                   AppColors.primary),
     'create_sub_admin':               (Icons.person_add_rounded,             Color(0xFF9C27B0)),
     'delete_sub_admin':               (Icons.person_remove_rounded,          Colors.red),
     'ekbine_confirm_order':           (Icons.check_circle_rounded,           Color(0xFF009688)),

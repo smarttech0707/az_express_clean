@@ -126,7 +126,7 @@ class EtaCard extends StatelessWidget {
                     orderStatus == 'broadcast'
                         ? 'Livreurs contactés — en attente d\'acceptation'
                         : 'Recherche d\'un livreur…',
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.urbanist(
                       fontSize: 12.5, fontWeight: FontWeight.w600,
                       color: orderStatus == 'broadcast'
                           ? AppColors.success
@@ -161,7 +161,7 @@ class EtaCard extends StatelessWidget {
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(
                   driverName ?? 'Votre livreur',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.urbanist(
                     fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.text),
                 ),
                 const SizedBox(height: 3),
@@ -175,13 +175,17 @@ class EtaCard extends StatelessWidget {
                       decoration: const BoxDecoration(
                           color: AppColors.success, shape: BoxShape.circle)),
                     Text('En ligne',
-                      style: GoogleFonts.poppins(
+                      style: GoogleFonts.urbanist(
                           fontSize: 11, color: AppColors.textMuted)),
                   ]),
               ])),
 
               // Bouton recentrer
-              GestureDetector(
+              Semantics(
+                label: 'Recentrer la carte sur le livreur',
+                button: true,
+                excludeSemantics: true,
+                child: GestureDetector(
                 onTap: onRecenter,
                 child: Container(
                   padding: const EdgeInsets.all(9),
@@ -191,6 +195,7 @@ class EtaCard extends StatelessWidget {
                   ),
                   child: const Icon(Icons.my_location_rounded,
                       color: AppColors.primary, size: 19),
+                ),
                 ),
               ),
             ]),
@@ -337,7 +342,7 @@ class _StarRating extends StatelessWidget {
     const SizedBox(width: 4),
     Text(
       rating.toStringAsFixed(1),
-      style: GoogleFonts.poppins(
+      style: GoogleFonts.urbanist(
           fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMuted),
     ),
   ]);
@@ -364,11 +369,11 @@ class _StatChip extends StatelessWidget {
       Row(children: [
         Icon(icon, color: color, size: 12),
         const SizedBox(width: 4),
-        Text(label, style: GoogleFonts.poppins(
+        Text(label, style: GoogleFonts.urbanist(
             fontSize: 10, color: AppColors.textMuted)),
       ]),
       const SizedBox(height: 4),
-      Text(value, style: GoogleFonts.poppins(
+      Text(value, style: GoogleFonts.urbanist(
           fontSize: 15, fontWeight: FontWeight.w800, color: color)),
     ]),
   ));
@@ -395,9 +400,9 @@ class _LegendItem extends StatelessWidget {
     ),
     const SizedBox(width: 6),
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: GoogleFonts.poppins(
+      Text(label, style: GoogleFonts.urbanist(
           fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.text)),
-      Text(sub, style: GoogleFonts.poppins(
+      Text(sub, style: GoogleFonts.urbanist(
           fontSize: 10, color: AppColors.textMuted)),
     ]),
   ]);
@@ -469,7 +474,7 @@ class _DeliveryProgressBar extends StatelessWidget {
         child: Text(
           _labels[step],
           key: ValueKey(step),
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.urbanist(
             fontSize: 12, fontWeight: FontWeight.w600,
             color: step == 3 ? AppColors.success : AppColors.primary,
           ),
@@ -546,7 +551,7 @@ class _ActionButton extends StatelessWidget {
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(icon, color: effectiveColor, size: 17),
           const SizedBox(width: 6),
-          Text(label, style: GoogleFonts.poppins(
+          Text(label, style: GoogleFonts.urbanist(
               fontSize: 13, fontWeight: FontWeight.w600, color: effectiveColor)),
         ]),
       ),

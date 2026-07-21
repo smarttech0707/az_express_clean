@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
 import '../../services/notification_service.dart';
 import 'admin_dashboard.dart';
+import '../../theme/app_theme.dart';
 
 /// Écran 2FA admin : envoie un OTP par Firebase Phone Auth
 /// sur le téléphone enregistré de l'admin, puis vérifie.
@@ -29,9 +31,11 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
   bool    _loading         = false;
   bool    _codeSent        = false;
   bool    _canResend       = false;
+  bool    _sendFailed      = false;
   int     _countdown       = 60;
   String? _verificationId;
   int?    _resendToken;
+  Timer?  _sendTimeoutTimer;
 
   @override
   void initState() {
@@ -41,6 +45,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
 
   @override
   void dispose() {
+    _sendTimeoutTimer?.cancel();
     for (final c in _ctrl) { c.dispose(); }
     for (final f in _focus) { f.dispose(); }
     super.dispose();
@@ -56,26 +61,42 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
   }
 
   Future<void> _sendOtp({int? resendToken}) async {
-    setState(() { _loading = true; _codeSent = false; });
+    _sendTimeoutTimer?.cancel();
+    setState(() { _loading = true; _codeSent = false; _sendFailed = false; });
+    // Filet de sécurité : verifyPhoneNumber() peut se résoudre (Future) bien
+    // avant que codeSent/verificationFailed ne soient réellement invoqués par
+    // le SDK natif (ce sont deux mécanismes indépendants) — sans ce timer, un
+    // SMS qui n'arrive jamais à déclencher l'un ou l'autre callback laissait
+    // l'écran bloqué indéfiniment sur "Envoi du code en cours...", avec un
+    // bouton "Renvoyer" jamais activable puisque _canResend ne devient true
+    // que depuis _startCountdown(), elle-même seulement appelée par onCodeSent.
+    _sendTimeoutTimer = Timer(const Duration(seconds: 25), () {
+      if (!mounted || _codeSent) return;
+      setState(() { _loading = false; _sendFailed = true; });
+      _snack('L\'envoi du SMS prend trop de temps. Réessayez.', Colors.orange);
+    });
     try {
       await AuthService().sendPhoneOtp(
         phone: widget.adminPhone,
         resendToken: resendToken,
         onCodeSent: (vid, rt) {
+          _sendTimeoutTimer?.cancel();
           _verificationId = vid;
           _resendToken    = rt;
           if (!mounted) return;
-          setState(() { _loading = false; _codeSent = true; });
+          setState(() { _loading = false; _codeSent = true; _sendFailed = false; });
           _startCountdown();
         },
         onFailed: (e) {
+          _sendTimeoutTimer?.cancel();
           if (!mounted) return;
-          setState(() => _loading = false);
+          setState(() { _loading = false; _sendFailed = true; });
           _snack('Échec envoi SMS : ${e.message}', Colors.red);
         },
       );
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      _sendTimeoutTimer?.cancel();
+      if (mounted) setState(() { _loading = false; _sendFailed = true; });
       _snack('Impossible d\'envoyer le code SMS', Colors.red);
     }
   }
@@ -149,7 +170,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text('Vérification administrateur'),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
         automaticallyImplyLeading: false,
@@ -163,7 +184,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                    colors: [Color(0xFFFF6D00), Color(0xFFFFB300)]),
+                    colors: [AppColors.primary, Color(0xFFFFB300)]),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Column(
@@ -178,7 +199,9 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
                   Text(
                     _codeSent
                         ? 'Code envoyé par SMS au\n${widget.adminPhone}'
-                        : 'Envoi du code en cours...',
+                        : (_sendFailed
+                            ? 'Échec de l\'envoi du SMS'
+                            : 'Envoi du code en cours...'),
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
@@ -189,9 +212,23 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
             const SizedBox(height: 32),
 
             if (_loading && !_codeSent) ...[
-              const CircularProgressIndicator(color: Color(0xFFFF6D00)),
+              const CircularProgressIndicator(color: AppColors.primary),
               const SizedBox(height: 16),
               const Text('Envoi du code SMS...', style: TextStyle(color: Colors.grey)),
+            ] else if (_sendFailed) ...[
+              const Icon(Icons.error_outline, color: Colors.red, size: 40),
+              const SizedBox(height: 12),
+              const Text('Le code n\'a pas pu être envoyé.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey)),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () => _sendOtp(),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Réessayer'),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white),
+              ),
             ] else ...[
               const Text('Entrez le code à 6 chiffres',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -203,6 +240,8 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
                   focusNode: _focus[i],
                   onChanged: (v) => _onDigit(i, v),
                   onBackspace: () => _onBackspace(i),
+                  index: i,
+                  total: 6,
                 )),
               ),
               const SizedBox(height: 32),
@@ -212,7 +251,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
                 child: ElevatedButton(
                   onPressed: _loading ? null : _verify,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF6D00),
+                    backgroundColor: AppColors.primary,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16)),
                     elevation: 4,
@@ -230,9 +269,9 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
               if (_canResend)
                 TextButton.icon(
                   onPressed: () => _sendOtp(resendToken: _resendToken),
-                  icon: const Icon(Icons.refresh, color: Color(0xFFFF6D00)),
+                  icon: const Icon(Icons.refresh, color: AppColors.primary),
                   label: const Text('Renvoyer le code',
-                      style: TextStyle(color: Color(0xFFFF6D00))),
+                      style: TextStyle(color: AppColors.primary)),
                 )
               else
                 Text('Renvoyer dans $_countdown secondes',
@@ -273,12 +312,19 @@ class _OtpBox extends StatelessWidget {
   final FocusNode focusNode;
   final void Function(String) onChanged;
   final VoidCallback onBackspace;
+  // Master Prompt 125 (Partie 6) — purement additif, défauts sûrs.
+  final int index;
+  final int total;
   const _OtpBox({required this.controller, required this.focusNode,
-      required this.onChanged, required this.onBackspace});
+      required this.onChanged, required this.onBackspace,
+      this.index = 0, this.total = 6});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return Semantics(
+      label: 'Chiffre ${index + 1} sur $total du code de vérification',
+      textField: true,
+      child: SizedBox(
       width: 46,
       height: 56,
       child: KeyboardListener(
@@ -303,12 +349,13 @@ class _OtpBox extends StatelessWidget {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFFF6D00), width: 2),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2),
             ),
             contentPadding: EdgeInsets.zero,
           ),
           onChanged: onChanged,
         ),
+      ),
       ),
     );
   }

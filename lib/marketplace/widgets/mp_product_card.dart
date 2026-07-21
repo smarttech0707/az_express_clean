@@ -86,7 +86,7 @@ class MpProductCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text('VENDU',
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                   color: Colors.white,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w800,
@@ -109,7 +109,7 @@ class MpProductCard extends StatelessWidget {
                     product.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: kMpText,
@@ -119,7 +119,7 @@ class MpProductCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     _fmt(product.price),
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
                       color: kMpOrange,
@@ -135,7 +135,7 @@ class MpProductCard extends StatelessWidget {
                         product.city,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 11, color: kMpMuted),
                       ),
                     ),
@@ -221,12 +221,12 @@ class MpProductTile extends StatelessWidget {
                   Text(product.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 12, fontWeight: FontWeight.w600,
                           color: kMpText, height: 1.3)),
                   const SizedBox(height: 3),
                   Text(_fmt(product.price),
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 13, fontWeight: FontWeight.w800,
                           color: kMpOrange)),
                 ],
@@ -310,7 +310,7 @@ class _ConditionBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: GoogleFonts.inter(
+        style: GoogleFonts.urbanist(
           fontSize: small ? 9 : 10,
           fontWeight: FontWeight.w700,
           color: Colors.white,

@@ -46,7 +46,9 @@ async function createVisitRequest(db, admin, { uid, listingId, preferredDate, me
 
 function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDocumentUpdated, checkRateLimit, logAudit, HttpsError, sendToToken }) {
 
-  const submitRealEstateAgentRequest = onCall(async (request) => {
+  // Master Prompt 122 — quota CPU Cloud Run régional : Groupe C (immobilier),
+  // réduction modérée de maxInstances, cpu inchangé.
+  const submitRealEstateAgentRequest = onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
     const { name, phone, agencyName, city } = request.data || {};
@@ -69,7 +71,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
     return { success: true, requestId: ref.id };
   });
 
-  const approveRealEstateAgentRequest = onCall(async (request) => {
+  const approveRealEstateAgentRequest = onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
     const uid = request.auth.uid;
     const adminSnap = await db.collection('admins').doc(uid).get();
@@ -113,7 +115,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
     return { success: true };
   });
 
-  const requestPropertyVisit = onCall(async (request) => {
+  const requestPropertyVisit = onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
     await checkRateLimit(uid, 'visit_request', 5, 3600);
@@ -126,7 +128,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
     }
   });
 
-  const respondToVisitRequest = onCall(async (request) => {
+  const respondToVisitRequest = onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
     const { requestId, action, proposedDate } = request.data || {};
@@ -167,7 +169,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
   });
 
   const notifyAgentOnVisitRequest = onDocumentCreated(
-    'real_estate_visit_requests/{requestId}',
+    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 2 },
     async (event) => {
       const data = event.data.data();
       if (!data?.agentId) return;
@@ -183,7 +185,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
   );
 
   const notifyClientOnVisitUpdate = onDocumentUpdated(
-    'real_estate_visit_requests/{requestId}',
+    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 2 },
     async (event) => {
       const before = event.data.before.data();
       const after  = event.data.after.data();

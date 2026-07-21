@@ -409,7 +409,7 @@ test('cancelOrderCF: rejects a caller who does not own the order', async () => {
 
 // ── deliverOrderCF ────────────────────────────────────────────────────────
 
-test('deliverOrderCF: cash order deducts the fixed commission from the driver', async () => {
+test('deliverOrderCF: cash order does NOT touch the driver wallet — commission already collected at acceptance (regression test for the double-commission bug fixed 2026-07-09)', async () => {
   const { db, store } = makeFakeDb({
     'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1000 },
     'livreurs/d1': { wallet: 300 },
@@ -423,14 +423,51 @@ test('deliverOrderCF: cash order deducts the fixed commission from the driver', 
 
   assert.deepEqual(result, { success: true });
   assert.equal(store.get('orders/o1').status, 'delivered');
-  assert.equal(store.get('livreurs/d1').wallet, 200); // 300 - 100 commission
+  assert.equal(store.get('livreurs/d1').wallet, 300); // inchangé — commission déjà prise à l'acceptation
   assert.equal(store.get('livreurs/d1').isOnDelivery, false);
   assert.equal(store.get('livreurs/d1').deliveries, 1);
+  // Pas de vendeur sur cette commande (livraison/course pure) — rien à
+  // régler avec un marchand, le champ ne doit pas être écrit.
+  assert.equal(store.get('orders/o1').merchantCashSettled, undefined);
 });
 
-test('deliverOrderCF: direct wallet-paid delivery (no seller) credits the driver net of commission', async () => {
+test('deliverOrderCF: cash order with a merchant (restaurant/pharmacie) is flagged as needing cash settlement (Master Prompt 76, 2026-07-09)', async () => {
   const { db, store } = makeFakeDb({
-    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000 },
+    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 2500, sellerId: 'r1', sellerType: 'restaurant' },
+    'livreurs/d1': { wallet: 300 },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('orders/o1').merchantCashSettled, false);
+  assert.equal(store.get('livreurs/d1').wallet, 300); // commission déjà prise à l'acceptation, rien ici
+});
+
+test('deliverOrderCF: cash order for boutique is NOT flagged — settlement tracked separately via boutique_orders.status', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 500, sellerId: 's1', sellerType: 'boutique' },
+    'livreurs/d1': { wallet: 300 },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('orders/o1').merchantCashSettled, undefined);
+});
+
+test('deliverOrderCF: direct wallet-paid delivery (no seller) credits the driver the full amount — commission already collected at acceptance (regression test, 2026-07-09)', async () => {
+  const { db, store } = makeFakeDb({
+    // isPaid: true — la commande a déjà été réglée à la création
+    // (livraison_screen.dart/courses_screen.dart débitent le client et
+    // marquent isPaid:true dans la même transaction). C'est le cas normal.
+    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, isPaid: true },
     'livreurs/d1': { wallet: 0 },
   });
   const fn = buildDeliverOrder({
@@ -440,12 +477,34 @@ test('deliverOrderCF: direct wallet-paid delivery (no seller) credits the driver
 
   await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
 
-  assert.equal(store.get('livreurs/d1').wallet, 900); // 1000 - 100 commission
+  assert.equal(store.get('livreurs/d1').wallet, 1000); // montant intégral — commission déjà prise à l'acceptation
 });
 
-test('deliverOrderCF: wallet-paid delivery with a seller credits the partner, not the driver wallet', async () => {
+test('deliverOrderCF: does NOT credit the driver for a wallet order not yet paid (deferred settlement, e.g. pharmacie_garde.dart) — regression test for the double-credit bug fixed 2026-07-09', async () => {
   const { db, store } = makeFakeDb({
-    'orders/o1':       { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, sellerId: 'r1', sellerType: 'restaurant' },
+    // isPaid: false — commande pharmacie : le montant final (livraison +
+    // médicaments) n'est réglé qu'après livraison via payOrderFromWalletCF.
+    // Avant le correctif, deliverOrderCF créditait quand même le livreur ici,
+    // PUIS payOrderFromWalletCF le créditait une seconde fois post-livraison
+    // — double crédit livreur + double débit client confirmé et corrigé.
+    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, isPaid: false },
+    'livreurs/d1': { wallet: 0, isOnDelivery: true },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('livreurs/d1').wallet, 0); // pas crédité ici
+  assert.equal(store.get('livreurs/d1').isOnDelivery, false); // mais bien libéré
+  assert.equal(store.get('orders/o1').status, 'delivered');
+});
+
+test('deliverOrderCF: wallet-paid delivery with a seller credits the partner the full amount, not the driver wallet — commission already collected at acceptance (regression test, 2026-07-09)', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':       { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, sellerId: 'r1', sellerType: 'restaurant', isPaid: true },
     'livreurs/d1':     { wallet: 500 },
     'restaurants/r1':  { wallet: 0 },
   });
@@ -456,9 +515,28 @@ test('deliverOrderCF: wallet-paid delivery with a seller credits the partner, no
 
   await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
 
-  assert.equal(store.get('restaurants/r1').wallet, 900); // 1000 - 100 commission
+  assert.equal(store.get('restaurants/r1').wallet, 1000); // montant intégral — commission déjà prise sur le wallet du livreur
   assert.equal(store.get('livreurs/d1').wallet, 500); // driver's own wallet untouched
   assert.equal(store.get('livreurs/d1').isOnDelivery, false);
+});
+
+test('SECURITY (Master Prompt 80): deliverOrderCF does NOT credit a partner for a wallet order whose isPaid is still false — closes a money-minting exploit (fake order + colluding/unaware driver would otherwise credit any partner for free)', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':       { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 999999, sellerId: 'r1', sellerType: 'restaurant', isPaid: false },
+    'livreurs/d1':     { wallet: 500 },
+    'restaurants/r1':  { wallet: 0 },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('restaurants/r1').wallet, 0); // aucun crédit tant que isPaid n'est pas vérifié
+  assert.equal(store.get('livreurs/d1').wallet, 500); // livreur non plus
+  assert.equal(store.get('livreurs/d1').isOnDelivery, false); // mais bien libéré
+  assert.equal(store.get('orders/o1').status, 'delivered');
 });
 
 test('deliverOrderCF: does not re-credit a marketplace seller already paid at order creation', async () => {

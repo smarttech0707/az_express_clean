@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../constants/app_constants.dart';
+import '../theme/app_theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // FORMATAGE MONTANTS
@@ -159,7 +160,7 @@ class UiHelper {
     required String message,
     String confirmLabel  = 'Confirmer',
     String cancelLabel   = 'Annuler',
-    Color  confirmColor  = const Color(0xFFFF6D00),
+    Color  confirmColor  = AppColors.primary,
   }) {
     return showDialog<bool>(
       context: context,

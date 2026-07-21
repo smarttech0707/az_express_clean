@@ -19,7 +19,7 @@ const db = admin.firestore();
 const FEEXPAY_TOKEN          = process.env.FEEXPAY_TOKEN;
 const FEEXPAY_WEBHOOK_SECRET = process.env.FEEXPAY_WEBHOOK_SECRET;
 const FEEXPAY_API_URL        = 'https://api.feexpay.me';
-const PROJECT_ID             = 'az-express-clean';
+const PROJECT_ID             = 'az-express-b0469';
 
 // Le secret est inclus dans l'URL du webhook → FeexPay le renvoie
 // sans avoir à vérifier une signature HMAC (que FeexPay ne supporte pas)
@@ -228,7 +228,7 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. WEBHOOK FEEXPAY (HTTP — appelé par FeexPay après paiement)
 //    URL à configurer dans le dashboard FeexPay :
-//    https://europe-west1-az-express-clean.cloudfunctions.net/feexPayWebhook
+//    https://europe-west1-az-express-b0469.cloudfunctions.net/feexPayWebhook
 // ═══════════════════════════════════════════════════════════════════════════
 exports.feexPayWebhook = onRequest(async (req, res) => {
   if (req.method !== 'POST') {
@@ -617,7 +617,7 @@ const CLIENT_STATUS_MESSAGES = {
 // CLIENT — Confirmation immédiate à la création de commande
 // Tous services confondus (livraison, courses, restaurant, pharmacie…)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyClientOnOrderCreated = onDocumentCreated('orders/{orderId}', async (event) => {
+exports.notifyClientOnOrderCreated = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   try {
     const order = event.data.data();
     if (!order || !order.clientId) return;
@@ -642,7 +642,7 @@ exports.notifyClientOnOrderCreated = onDocumentCreated('orders/{orderId}', async
 // CLIENT — Suivi complet par statut, messages adaptés au service
 // Couvre : assigned, broadcast, accepted, picked_up, delivered, cancelled
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyClientOnOrderUpdate = onDocumentUpdated('orders/{orderId}', async (event) => {
+exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -685,7 +685,7 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated('orders/{orderId}', async 
 // LIVREURS (broadcast) — FCM push à tous les livreurs ciblés simultanément
 // Déclenché quand status → 'broadcast' (transition uniquement)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyBroadcastDrivers = onDocumentUpdated('orders/{orderId}', async (event) => {
+exports.notifyBroadcastDrivers = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -722,7 +722,7 @@ exports.notifyBroadcastDrivers = onDocumentUpdated('orders/{orderId}', async (ev
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR (assignation directe) — FCM push quand un seul livreur est désigné
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnAssigned = onDocumentUpdated('orders/{orderId}', async (event) => {
+exports.notifyDriverOnAssigned = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -755,7 +755,7 @@ exports.notifyDriverOnAssigned = onDocumentUpdated('orders/{orderId}', async (ev
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Alerte solde bas (< 500 FCFA)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverLowBalance = onDocumentUpdated('livreurs/{driverId}', async (event) => {
+exports.notifyDriverLowBalance = onDocumentUpdated({ document: 'livreurs/{driverId}', maxInstances: 2 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -772,7 +772,7 @@ exports.notifyDriverLowBalance = onDocumentUpdated('livreurs/{driverId}', async 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Mission terminée (livraison confirmée)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnMissionEnd = onDocumentUpdated('orders/{orderId}', async (event) => {
+exports.notifyDriverOnMissionEnd = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -799,7 +799,7 @@ exports.notifyDriverOnMissionEnd = onDocumentUpdated('orders/{orderId}', async (
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Annulation d'une commande (broadcast, assigné ou accepté)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnOrderCancelled = onDocumentUpdated('orders/{orderId}', async (event) => {
+exports.notifyDriverOnOrderCancelled = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -849,7 +849,7 @@ exports.notifyDriverOnOrderCancelled = onDocumentUpdated('orders/{orderId}', asy
 // PARTENAIRES — Notification à la création de commande
 // Restaurant, pharmacie, boulangerie, marketplace — inchangés
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyRestaurantOnOrder = onDocumentCreated('orders/{orderId}', async (event) => {
+exports.notifyRestaurantOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'restaurant' || !order.sellerId) return;
 
@@ -875,7 +875,7 @@ exports.notifyRestaurantOnOrder = onDocumentCreated('orders/{orderId}', async (e
   );
 });
 
-exports.notifyPharmacieOnOrder = onDocumentCreated('orders/{orderId}', async (event) => {
+exports.notifyPharmacieOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   const order = event.data.data();
   if (!order || order.type !== 'pharmacie' || !order.pharmacieId) return;
 
@@ -890,7 +890,7 @@ exports.notifyPharmacieOnOrder = onDocumentCreated('orders/{orderId}', async (ev
   );
 });
 
-exports.notifyBoulangerieOnNewOrder = onDocumentCreated('orders/{orderId}', async (event) => {
+exports.notifyBoulangerieOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'boulangerie' || !order.sellerId) return;
 
@@ -908,7 +908,7 @@ exports.notifyBoulangerieOnNewOrder = onDocumentCreated('orders/{orderId}', asyn
   );
 });
 
-exports.notifySellerOnOrder = onDocumentCreated('orders/{orderId}', async (event) => {
+exports.notifySellerOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'seller' || !order.sellerId) return;
 
@@ -934,7 +934,7 @@ exports.notifySellerOnOrder = onDocumentCreated('orders/{orderId}', async (event
 // Exclut les commandes partenaires (restaurant/boulangerie/pharmacie/marketplace)
 // car celles-ci passent par notifyDriverOnAssigned / notifyBroadcastDrivers
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriversOnNewOrder = onDocumentCreated('orders/{orderId}', async (event) => {
+exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   const order = event.data.data();
   if (!order || (order.status && order.status !== 'pending')) return;
 
@@ -976,7 +976,7 @@ const EK_CLIENT_MESSAGES = {
 };
 
 // ─── Client — Confirmation à la création ────────────────────────────────────
-exports.notifyEkClientOnOrderCreated = onDocumentCreated('ekbine_orders/{orderId}', async (event) => {
+exports.notifyEkClientOnOrderCreated = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
   const order = event.data.data();
   if (!order || !order.clientId) return;
 
@@ -993,7 +993,7 @@ exports.notifyEkClientOnOrderCreated = onDocumentCreated('ekbine_orders/{orderId
 });
 
 // ─── Client — Suivi par statut ───────────────────────────────────────────────
-exports.notifyEkClientOnStatusChange = onDocumentUpdated('ekbine_orders/{orderId}', async (event) => {
+exports.notifyEkClientOnStatusChange = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after || before.status === after.status) return;
@@ -1014,7 +1014,7 @@ exports.notifyEkClientOnStatusChange = onDocumentUpdated('ekbine_orders/{orderId
 });
 
 // ─── Agents disponibles — Nouvelle demande E-Kbine ──────────────────────────
-exports.notifyEkAgentsOnNewOrder = onDocumentCreated('ekbine_orders/{orderId}', async (event) => {
+exports.notifyEkAgentsOnNewOrder = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
   const order = event.data.data();
   if (!order || order.status !== 'pending') return;
 
@@ -1039,7 +1039,7 @@ exports.notifyEkAgentsOnNewOrder = onDocumentCreated('ekbine_orders/{orderId}', 
 });
 
 // ─── Agent — Confirmation d'assignation ─────────────────────────────────────
-exports.notifyEkAgentOnAssigned = onDocumentUpdated('ekbine_orders/{orderId}', async (event) => {
+exports.notifyEkAgentOnAssigned = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -1061,7 +1061,7 @@ exports.notifyEkAgentOnAssigned = onDocumentUpdated('ekbine_orders/{orderId}', a
 });
 
 // ─── Agent — Mission Ekbine terminée ────────────────────────────────────────
-exports.notifyEkAgentOnCompleted = onDocumentUpdated('ekbine_orders/{orderId}', async (event) => {
+exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -1087,7 +1087,10 @@ exports.notifyEkAgentOnCompleted = onDocumentUpdated('ekbine_orders/{orderId}', 
 // 4. RÉINITIALISATION MOT DE PASSE / PIN (Callable Flutter)
 //    Appelé depuis GenericForgotPasswordPage après vérification OTP
 // ═══════════════════════════════════════════════════════════════════════════
-exports.resetAccountPassword = onCall(async (request) => {
+// Master Prompt 122 — quota CPU Cloud Run régional : fonction utilisateur
+// secondaire (Groupe B), réduction légère de maxInstances uniquement (cpu
+// inchangé, l'utilisateur attend une réponse en direct sur cet écran).
+exports.resetAccountPassword = onCall({ maxInstances: 2 }, async (request) => {
   // Le caller doit être authentifié via vérification téléphonique (OTP)
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Authentification requise');
@@ -1178,13 +1181,124 @@ exports.resetAccountPassword = onCall(async (request) => {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// LOOKUP TÉLÉPHONE CLIENT — remplace deux requêtes Firestore directes côté
+// client (clients.where('phone', isEqualTo:...)) qui échouaient toujours avec
+// permission-denied : la règle firestore.rules sur `clients` n'autorise que
+// isOwner(clientId) (lecture d'un document par son propre propriétaire), donc
+// structurellement incompatible avec une requête filtrée sur un autre champ que
+// l'ID du document, quel que soit l'état d'authentification de l'appelant.
+// Utilisé par : (1) client_auth_page.dart, vérification de doublon à
+// l'inscription ; (2) auth_service.dart:getClientAuthEmail, résolution
+// téléphone→email pour la connexion par numéro. Ne renvoie que le strict
+// nécessaire (existence + email), jamais le document `clients` complet
+// (wallet/nom/etc. restent privés) — pas d'assouplissement de firestore.rules.
+// ═══════════════════════════════════════════════════════════════════════════
+// Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
+// légère de maxInstances uniquement.
+exports.checkClientPhone = onCall({ maxInstances: 2 }, async (request) => {
+  const { phone } = request.data;
+  if (!phone || typeof phone !== 'string') {
+    throw new HttpsError('invalid-argument', 'Numéro de téléphone requis');
+  }
+
+  await checkRateLimit(`phone_check_${phone}`, 'client_phone_check', 10, 300);
+
+  const snap = await db.collection('clients').where('phone', '==', phone).limit(1).get();
+  if (snap.empty) return { exists: false, email: null };
+
+  const data = snap.docs[0].data();
+  const email = typeof data.email === 'string' ? data.email : null;
+  const isRealEmail = email && !email.includes('@azexpress.app');
+  return { exists: true, email: isRealEmail ? email : null };
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRESTATAIRES DE SERVICES (artisans) — inscription et connexion.
+// `service_providers` a `allow write: if isAdmin();` (annuaire géré par
+// l'admin), sans exception de création pour un prestataire s'inscrivant
+// lui-même — service_provider_register_page.dart écrivait donc directement
+// depuis le client et échouait à 100% en permission-denied. Le login a le
+// même problème pour la liaison artisanUid : le commentaire déjà présent
+// dans firestore.rules (« isRealUser() casserait le login » — artisan_login.dart
+// utilise signInAnonymously() explicitement) documentait déjà ce gap sans le
+// combler. Les deux write passent désormais par l'Admin SDK, sans aucun
+// assouplissement de firestore.rules/storage.rules.
+// ═══════════════════════════════════════════════════════════════════════════
+// Master Prompt 122 — quota CPU Cloud Run régional : Groupe C, réduction
+// modérée de maxInstances, cpu inchangé.
+exports.submitServiceProviderApplication = onCall({ maxInstances: 2 }, async (request) => {
+  const { name, phone, address, description, subcategory, category, photos, lat, lng, docId } = request.data;
+  if (!name || !phone || !address || !subcategory) {
+    throw new HttpsError('invalid-argument', 'Nom, téléphone, adresse et catégorie requis');
+  }
+
+  await checkRateLimit(`sp_apply_${phone}`, 'service_provider_apply', 5, 3600);
+
+  // Réutilise l'ID généré côté client (avant l'appel, pour uploader les
+  // photos au bon chemin Storage service_providers/{docId}/...) si fourni.
+  const docRef = docId ? db.collection('service_providers').doc(String(docId))
+                        : db.collection('service_providers').doc();
+  await docRef.set({
+    name:        String(name),
+    phone:       String(phone),
+    address:     String(address),
+    description: description ? String(description) : '',
+    subcategory: String(subcategory),
+    category:    category ? String(category) : 'artisans',
+    photos:      Array.isArray(photos) ? photos.slice(0, 10).map(String) : [],
+    lat:         typeof lat === 'number' ? lat : 0,
+    lng:         typeof lng === 'number' ? lng : 0,
+    isAvailable: false,
+    isVerified:  false,
+    status:      'pending',
+    rating:      0,
+    ratingCount: 0,
+    artisanPin:  '',
+    createdAt:   admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return { docId: docRef.id };
+});
+
+// Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
+// légère de maxInstances uniquement.
+exports.artisanLogin = onCall({ maxInstances: 2 }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Authentification requise');
+  }
+  const { phone, pin } = request.data;
+  if (!phone || !pin) {
+    throw new HttpsError('invalid-argument', 'Téléphone et PIN requis');
+  }
+
+  await checkRateLimit(`artisan_login_${phone}`, 'artisan_login', 10, 300);
+
+  const snap = await db.collection('service_providers')
+    .where('phone', '==', phone)
+    .where('artisanPin', '==', pin)
+    .limit(1)
+    .get();
+  if (snap.empty) return { success: false };
+
+  const doc = snap.docs[0];
+  const uid = request.auth.uid;
+  if (doc.data().artisanUid !== uid) {
+    await doc.ref.update({ artisanUid: uid });
+  }
+
+  return { success: true, docId: doc.id, data: doc.data() };
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // AUTHENTIFICATION PHARMACIE — mot de passe haché (pharmacie_credentials)
 // Remplace la comparaison en clair historique (voir commentaire dans
 // firestore.rules match /pharmacies/{pharmacieId}, "Phase 5"). Migration
 // paresseuse : au premier login réussi d'une pharmacie encore sur l'ancien
 // champ password/accessCode en clair, on hache et on supprime le champ en clair.
 // ═══════════════════════════════════════════════════════════════════════════
-exports.pharmacieLogin = onCall(async (request) => {
+// Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
+// légère de maxInstances uniquement.
+exports.pharmacieLogin = onCall({ maxInstances: 2 }, async (request) => {
   const { pharmacieId, password } = request.data;
   if (!pharmacieId || !password) {
     throw new HttpsError('invalid-argument', 'Paramètres manquants');
@@ -1229,7 +1343,9 @@ exports.pharmacieLogin = onCall(async (request) => {
 // admin (n'importe quelle pharmacie) ou par la pharmacie elle-même (son
 // propre mot de passe, session liée via `currentUid`, même mécanisme que la
 // règle Firestore existante pour ce champ).
-exports.setPharmaciePassword = onCall(async (request) => {
+// Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
+// légère de maxInstances uniquement.
+exports.setPharmaciePassword = onCall({ maxInstances: 2 }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Authentification requise');
   }
@@ -1287,7 +1403,9 @@ exports.setPharmaciePassword = onCall(async (request) => {
 // 5. GESTION DES SOUS-ADMINS (super admin seulement)
 // ═══════════════════════════════════════════════════════════════════════════
 
-exports.createSubAdmin = onCall(async (request) => {
+// Master Prompt 122 — quota CPU Cloud Run régional : Groupe C, réduction
+// modérée de maxInstances, cpu inchangé.
+exports.createSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Non authentifié');
 
   const callerDoc = await db.collection('admins').doc(request.auth.uid).get();
@@ -1319,7 +1437,7 @@ exports.createSubAdmin = onCall(async (request) => {
   return { uid: userRecord.uid };
 });
 
-exports.deleteSubAdmin = onCall(async (request) => {
+exports.deleteSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Non authentifié');
 
   const callerDoc = await db.collection('admins').doc(request.auth.uid).get();
@@ -1341,7 +1459,7 @@ exports.deleteSubAdmin = onCall(async (request) => {
 });
 
 // ─── Notify admins on new driver registration ────────────────────────────────
-exports.notifyAdminsOnNewDriver = onDocumentCreated('livreurs/{driverId}', async (event) => {
+exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{driverId}', maxInstances: 2 }, async (event) => {
   const driver = event.data.data();
   if (!driver) return;
   const snap = await db.collection('admins').where('isActive', '!=', false).get();
@@ -1355,7 +1473,7 @@ exports.notifyAdminsOnNewDriver = onDocumentCreated('livreurs/{driverId}', async
 });
 
 // ─── Notify admins on new service provider pending request ───────────────────
-exports.notifyAdminsOnNewServiceProvider = onDocumentCreated('service_providers/{id}', async (event) => {
+exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'service_providers/{id}', maxInstances: 2 }, async (event) => {
   const provider = event.data.data();
   if (!provider || provider.status !== 'pending') return;
   const snap = await db.collection('admins').where('isActive', '!=', false).get();
@@ -1370,7 +1488,7 @@ exports.notifyAdminsOnNewServiceProvider = onDocumentCreated('service_providers/
 
 // ═══════════════════════════════════════════════════════════════════════════
 
-exports.notifyClientOnRecharge = onDocumentUpdated('recharge_requests/{reqId}', async (event) => {
+exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_requests/{reqId}', maxInstances: 2 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after || before.status === after.status || after.status !== 'approved') return;
@@ -1452,6 +1570,13 @@ exports.autoExpireOrders = onSchedule({
   schedule:       'every 1 minutes',
   timeoutSeconds: 120,
   memory:         '256MiB',
+  // Master Prompt 122 — quota CPU Cloud Run régional : un seul déclenchement
+  // cron à la fois, jamais de concurrence réelle nécessaire (et ça protège
+  // contre un chevauchement si une exécution dépasse 1 minute). cpu laissé
+  // à 1 (inchangé) — cette fonction touche des remboursements wallet et
+  // tourne 1440 fois/jour, traitée avec plus de prudence que les autres
+  // schedulers (Groupe D) qui, eux, passent aussi à cpu:0.5.
+  maxInstances:   1,
 }, async () => {
   const now       = admin.firestore.Timestamp.now();
   const tenMinAgo = new admin.firestore.Timestamp(now.seconds - 600, now.nanoseconds);
@@ -1770,6 +1895,10 @@ exports.cleanupExpiredRateLimits = onSchedule({
   timeZone:       'Africa/Abidjan',
   timeoutSeconds: 300,
   memory:         '256MiB',
+  // Master Prompt 122 — quota CPU Cloud Run régional : scheduler hebdomadaire,
+  // une seule instance nécessaire, tâche de nettoyage légère.
+  maxInstances:   1,
+  cpu:            0.5,
 }, async () => {
   try {
     const now          = Date.now();
@@ -1821,6 +1950,19 @@ exports.fcmTokenCleanupCheck = buildFcmTokenCleanup({ db, admin, onSchedule });
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SCHEDULER — Correction des livreurs "en ligne" fantômes (audit dispatch,
+// 2026-07-19). `dispatch.js` exclut déjà correctement du dispatch tout
+// livreur dont le GPS est obsolète, mais rien ne corrigeait jamais le flag
+// `isOnline` lui-même — un livreur dont l'app a disparu sans `goOffline()`
+// restait visible "en ligne" indéfiniment (tableau de bord admin, carte
+// client), invisible au dispatch réel, sans aucune alerte. Voir
+// functions/staleDriverCleanup.js.
+// ═══════════════════════════════════════════════════════════════════════════
+const { buildStaleDriverCleanup } = require('./staleDriverCleanup');
+exports.staleDriverCleanupCheck = buildStaleDriverCleanup({ db, admin, onSchedule });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // AZ IA — Assistant conversationnel (Claude)
 // Créez functions/.env avec :
 //   ANTHROPIC_API_KEY=votre_clé_anthropic
@@ -1829,11 +1971,13 @@ const createAzIa = require('./azia');
 const azIa       = createAzIa({
   db, admin, onCall, onSchedule, checkRateLimit, logAudit, HttpsError,
   axios, feexpayOperatorCode, FEEXPAY_TOKEN, FEEXPAY_API_URL, WEBHOOK_URL,
+  sendToToken,
 });
 exports.azIaChat                       = azIa.azIaChat;
 exports.aiConfirmAction                = azIa.aiConfirmAction;
 exports.aiCleanupExpiredPendingActions = azIa.aiCleanupExpiredPendingActions;
 exports.clearAiHistory                 = azIa.clearAiHistory;
+exports.aiSendDueReminders             = azIa.aiSendDueReminders;
 
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -84,9 +84,9 @@ class _AdminRestaurantRequestsPageState
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Refuser la demande',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         content: Text('Refuser la demande de "$name" ?',
-            style: GoogleFonts.inter()),
+            style: GoogleFonts.urbanist()),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -122,7 +122,7 @@ class _AdminRestaurantRequestsPageState
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Demandes Restaurateurs',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -201,7 +201,7 @@ class _RequestsList extends StatelessWidget {
                     size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text('Aucune demande',
-                    style: GoogleFonts.inter(color: Colors.grey)),
+                    style: GoogleFonts.urbanist(color: Colors.grey)),
               ],
             ),
           );
@@ -307,12 +307,12 @@ class _RequestCard extends StatelessWidget {
                     children: [
                       Text(
                         data['restaurantName'] ?? '—',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontWeight: FontWeight.bold, fontSize: 15),
                       ),
                       Text(
                         data['category'] ?? '',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 12, color: Colors.grey.shade500),
                       ),
                     ],
@@ -363,7 +363,7 @@ class _RequestCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12)),
                       ),
                       child: Text('Refuser',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.red,
                               fontWeight: FontWeight.w600)),
                     ),
@@ -379,7 +379,7 @@ class _RequestCard extends StatelessWidget {
                         elevation: 2,
                       ),
                       child: Text('Approuver',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.white,
                               fontWeight: FontWeight.w600)),
                     ),
@@ -400,7 +400,7 @@ class _RequestCard extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(text,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13, color: Colors.grey.shade700),
               maxLines: 1,
               overflow: TextOverflow.ellipsis),

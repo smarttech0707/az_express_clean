@@ -1,6 +1,7 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 
 // ── Handler background — doit être top-level (hors classe) ───────────
 @pragma('vm:entry-point')
@@ -319,7 +320,7 @@ class NotificationService {
       case 'ek_update':
         return const Color(0xFF1565C0);
       default:
-        return const Color(0xFFFF6D00);
+        return AppColors.primary;
     }
   }
 }

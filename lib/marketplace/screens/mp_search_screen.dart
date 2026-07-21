@@ -94,6 +94,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
             context.read<MpProvider>().clearSearch();
             Navigator.pop(context);
           },
+          tooltip: 'Retour',
           icon: const Icon(Icons.arrow_back_rounded, color: kMpText),
         ),
         title: TextField(
@@ -101,10 +102,10 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
           autofocus: widget.initialQuery == null,
           decoration: InputDecoration(
             hintText: 'Rechercher un produit...',
-            hintStyle: GoogleFonts.inter(color: kMpMuted, fontSize: 15),
+            hintStyle: GoogleFonts.urbanist(color: kMpMuted, fontSize: 15),
             border: InputBorder.none,
           ),
-          style: GoogleFonts.inter(fontSize: 15, color: kMpText),
+          style: GoogleFonts.urbanist(fontSize: 15, color: kMpText),
           onSubmitted: (_) => _search(),
           textInputAction: TextInputAction.search,
         ),
@@ -117,6 +118,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
             ),
           IconButton(
             onPressed: () => _showFilters(context),
+            tooltip: 'Filtres',
             icon: Badge(
               isLabelVisible: _hasFilters,
               child: const Icon(Icons.tune_rounded, color: kMpText),
@@ -124,6 +126,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
           ),
           IconButton(
             onPressed: _search,
+            tooltip: 'Rechercher',
             icon: const Icon(Icons.search_rounded, color: kMpOrange),
           ),
         ],
@@ -198,7 +201,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Tendances',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                   color: kMpText)),
@@ -225,7 +228,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                               size: 14, color: kMpOrange),
                           const SizedBox(width: 6),
                           Text(s,
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontSize: 13, color: kMpText)),
                         ]),
                       ),
@@ -234,7 +237,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
           ),
           const SizedBox(height: 24),
           Text('Catégories',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                   color: kMpText)),
@@ -247,7 +250,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                 leading: Text(c['emoji']!,
                     style: const TextStyle(fontSize: 22)),
                 title: Text(c['label']!,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 14, fontWeight: FontWeight.w600,
                         color: kMpText)),
                 trailing: const Icon(Icons.chevron_right_rounded,
@@ -266,13 +269,13 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
         const Icon(Icons.search_off_rounded, size: 64, color: kMpMuted),
         const SizedBox(height: 12),
         Text('Aucun résultat',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
                 color: kMpText)),
         const SizedBox(height: 6),
         Text('Essayez d\'autres mots-clés ou filtres',
-            style: GoogleFonts.inter(fontSize: 13, color: kMpMuted)),
+            style: GoogleFonts.urbanist(fontSize: 13, color: kMpMuted)),
       ]),
     );
   }
@@ -286,7 +289,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
           child: Row(children: [
             Text(
               '${mp.searchResults.length} résultat${mp.searchResults.length > 1 ? 's' : ''}',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: kMpMuted),
@@ -365,7 +368,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                   child: Row(children: [
                     Text('Filtres',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
                             color: kMpText)),
@@ -382,7 +385,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                         Navigator.pop(ctx);
                       },
                       child: Text('Réinitialiser',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.red,
                               fontWeight: FontWeight.w600)),
                     ),
@@ -462,7 +465,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                           borderRadius: BorderRadius.circular(14)),
                     ),
                     child: Text('Appliquer les filtres',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 15, fontWeight: FontWeight.w700)),
                   ),
                 ),
@@ -494,7 +497,7 @@ class _FilterChip extends StatelessWidget {
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text(label,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 12,
                 color: kMpOrange,
                 fontWeight: FontWeight.w600)),
@@ -521,7 +524,7 @@ class _FilterSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: kMpMuted,
@@ -560,7 +563,7 @@ class _ChoiceChip extends StatelessWidget {
           border: Border.all(color: selected ? c : kMpDivider),
         ),
         child: Text(label,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontSize: 13,
               fontWeight: FontWeight.w600,
               color: selected ? Colors.white : kMpText,

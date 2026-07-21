@@ -61,14 +61,14 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
                       const SizedBox(height: 8),
                       Text(
                         'Pharmacies',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 20,
                             fontWeight: FontWeight.bold),
                       ),
                       Text(
                         'Abengourou',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white70, fontSize: 12),
                       ),
                     ],
@@ -77,7 +77,7 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
               ),
             ),
             title: Text('Pharmacies',
-                style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+                style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
             centerTitle: true,
             bottom: TabBar(
               controller: _tabCtrl,
@@ -85,7 +85,7 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
               indicatorWeight: 3,
               labelColor: Colors.white,
               unselectedLabelColor: Colors.white60,
-              labelStyle: GoogleFonts.inter(
+              labelStyle: GoogleFonts.urbanist(
                   fontWeight: FontWeight.w600, fontSize: 13),
               tabs: const [
                 Tab(icon: Icon(Icons.list_rounded), text: 'Toutes'),
@@ -199,35 +199,31 @@ class _PharmacieListState extends State<_PharmacieList> {
       };
 
       if (payment == 'wallet') {
-        final clientRef =
-            FirebaseFirestore.instance.collection('clients').doc(user.uid);
-        final orderRef =
-            FirebaseFirestore.instance.collection('orders').doc(id);
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap = await tx.get(clientRef);
-          final balance =
-              (snap.data()?['wallet'] as num? ?? 0).toInt();
-          if (balance < deliveryFee) throw Exception('SOLDE_INSUFFISANT:$balance');
-          tx.update(clientRef,
-              {'wallet': FieldValue.increment(-deliveryFee)});
-          tx.set(orderRef, orderData);
-          tx.set(
-            clientRef.collection('wallet_transactions').doc(),
-            {
-              'type': 'debit',
-              'amount': deliveryFee,
-              'description': 'Livraison pharmacie : $name',
-              'orderId': id,
-              'createdAt': FieldValue.serverTimestamp(),
-            },
-          );
-        });
-      } else {
-        await FirebaseFirestore.instance
-            .collection('orders')
-            .doc(id)
-            .set(orderData);
+        // Ne débite PAS le wallet ici — le prix final (livraison + médicaments,
+        // seulement connu une fois la pharmacie contactée) est réglé en une
+        // seule fois après livraison via le bouton de paiement de
+        // suivi_commande.dart (_WalletPayButton → payOrderFromWalletCF).
+        // Avant ce correctif, cette transaction débitait déjà le client du
+        // seul montant de livraison ICI, PUIS payOrderFromWalletCF débitait
+        // à nouveau le montant complet (livraison + médicaments) après
+        // livraison, sans jamais que cette commande soit marquée `isPaid`
+        // entre les deux — un double débit client / double crédit livreur
+        // confirmé et corrigé (2026-07-09). On garde uniquement la
+        // vérification de solde (lecture seule) pour ne pas laisser un client
+        // sans fonds suffisants passer commande.
+        final clientSnap = await FirebaseFirestore.instance
+            .collection('clients')
+            .doc(user.uid)
+            .get();
+        final balance = (clientSnap.data()?['wallet'] as num? ?? 0).toInt();
+        if (balance < deliveryFee) {
+          throw Exception('SOLDE_INSUFFISANT:$balance');
+        }
       }
+      await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(id)
+          .set(orderData);
 
       try {
         await FirestoreService().findNearestDriver(lat, lng, id, budget: deliveryFee);
@@ -291,14 +287,14 @@ class _PharmacieListState extends State<_PharmacieList> {
                       ? 'Aucune pharmacie de garde\nen ce moment'
                       : 'Aucune pharmacie enregistrée',
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 15, color: Colors.grey),
                 ),
                 if (widget.onlyOnDuty) ...[
                   const SizedBox(height: 8),
                   Text(
                     'Revenez plus tard ou appelez le 15',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.grey.shade400, fontSize: 12),
                   ),
                 ],
@@ -421,7 +417,7 @@ class _PharmacieCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
                               color: const Color(0xFF1A1A2E))),
@@ -434,7 +430,7 @@ class _PharmacieCard extends StatelessWidget {
                                 color: Colors.orange.shade700),
                             const SizedBox(width: 4),
                             Text(hours,
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                     fontSize: 12,
                                     color: Colors.orange.shade700)),
                           ],
@@ -545,7 +541,7 @@ class _PharmacieCard extends StatelessWidget {
                 icon: const Icon(Icons.delivery_dining,
                     size: 18, color: Colors.white),
                 label: Text('Commander une livraison',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white,
                         fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
@@ -632,11 +628,11 @@ class _PaymentPickerSheetState extends State<_PaymentPickerSheet> {
           ),
           const SizedBox(height: 20),
           Text('Mode de paiement',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           Text('Frais de livraison : 500 FCFA',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13, color: Colors.grey.shade600)),
           const SizedBox(height: 20),
           if (_loading)
@@ -725,12 +721,12 @@ class _PayOption extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
               Text(title,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                       color: enabled ? Colors.black87 : Colors.grey)),
               Text(subtitle,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 12, color: Colors.grey.shade600)),
             ]),
           ),

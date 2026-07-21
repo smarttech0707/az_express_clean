@@ -11,6 +11,12 @@
 // fichiers (Dart et Node) — ils doivent rester des ports fidèles l'un de
 // l'autre, comme dispatch.js:calculateCommission l'est déjà de
 // FirestoreService.calculateCommission().
+//
+// BUSINESS RULE:
+// Livraison Express
+// Jour = 1000 FCFA
+// Nuit = 1500 FCFA
+// Ne pas modifier sans décision métier.
 
 const CENTER_LAT      = 6.7273;
 const CENTER_LNG      = -3.4961;
@@ -59,7 +65,12 @@ function compute({ clientLat, clientLng, routeDistanceKm, time }) {
   if (!isOutside) {
     return {
       standardPrice: night ? 1000 : 500,
-      expressPrice:  night ? 1000 : 700,
+      // BUSINESS RULE:
+      // Livraison Express
+      // Jour = 1000 FCFA
+      // Nuit = 1500 FCFA
+      // Ne pas modifier sans décision métier.
+      expressPrice:  night ? 1500 : 1000,
       isNight: night,
       isOutside: false,
       canOrder: true,

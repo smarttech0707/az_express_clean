@@ -109,7 +109,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       elevation: 0,
       title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(order.serviceLabel,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
         Row(children: [
           Container(
@@ -121,7 +121,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           Expanded(
             child: Text(
               ekStatusLabels[order.status] ?? order.status,
-              style: GoogleFonts.inter(fontSize: 11, color: Colors.white70),
+              style: GoogleFonts.urbanist(fontSize: 11, color: Colors.white70),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -170,11 +170,11 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
               Text(isCancelled ? 'Commande annulée' : 'Litige ouvert',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w700,
+                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w700,
                       color: isCancelled ? Colors.red : Colors.deepOrange)),
               if (order.cancellationReason != null)
                 Text(order.cancellationReason!,
-                    style: GoogleFonts.inter(fontSize: 12, color: kEkMuted)),
+                    style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
             ]),
           ),
         ]),
@@ -214,7 +214,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                   const SizedBox(height: 4),
                   Text(
                     _shortStatus(s),
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                       fontSize: 8,
                       fontWeight: curr ? FontWeight.w700 : FontWeight.normal,
                       color: curr ? color : kEkMuted,
@@ -270,7 +270,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             ),
             child: Center(
               child: Text(order.operator[0].toUpperCase(),
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 20, fontWeight: FontWeight.w900,
                       color: opColor)),
             ),
@@ -280,15 +280,15 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
               Text(order.serviceLabel,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 14, fontWeight: FontWeight.w700,
                       color: kEkText)),
               Text('Pour : ${order.beneficiaryNumber}',
-                  style: GoogleFonts.inter(fontSize: 12, color: kEkMuted)),
+                  style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
             ]),
           ),
           Text(_fmt(order.totalPaid),
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 16, fontWeight: FontWeight.w800,
                   color: kEkGreen)),
         ]),
@@ -297,11 +297,11 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           const Divider(height: 1),
           const SizedBox(height: 10),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('Commandé le', style: GoogleFonts.inter(
+            Text('Commandé le', style: GoogleFonts.urbanist(
                 fontSize: 12, color: kEkMuted)),
             Text(
               _dateStr(order.createdAt!),
-              style: GoogleFonts.inter(fontSize: 12, color: kEkText,
+              style: GoogleFonts.urbanist(fontSize: 12, color: kEkText,
                   fontWeight: FontWeight.w600),
             ),
           ]),
@@ -324,7 +324,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           backgroundColor: kEkGreen,
           child: Text(
             (order.agentName ?? 'A')[0].toUpperCase(),
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 color: Colors.white, fontWeight: FontWeight.w800),
           ),
         ),
@@ -333,10 +333,10 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
             Text(order.agentName ?? 'Agent',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 14, fontWeight: FontWeight.w700, color: kEkText)),
             Text('Agent E-Kbine assigné',
-                style: GoogleFonts.inter(fontSize: 11, color: kEkGreen)),
+                style: GoogleFonts.urbanist(fontSize: 11, color: kEkGreen)),
           ]),
         ),
         const Icon(Icons.verified_rounded, color: kEkGreen, size: 22),
@@ -365,7 +365,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           Expanded(
             child: Text(
               hasProof ? 'Preuve de paiement envoyée' : 'Preuve de paiement requise',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13, fontWeight: FontWeight.w700,
                   color: const Color(0xFFE65100)),
             ),
@@ -382,7 +382,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           const SizedBox(height: 8),
           Text(
             'Importez ensuite la capture d\'écran de la confirmation.',
-            style: GoogleFonts.inter(fontSize: 12, color: kEkText, height: 1.5),
+            style: GoogleFonts.urbanist(fontSize: 12, color: kEkText, height: 1.5),
           ),
           const SizedBox(height: 12),
           SizedBox(
@@ -402,14 +402,14 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                           color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.upload_rounded, size: 18),
               label: Text(_uploadingDeposit ? 'Envoi...' : 'Importer ma preuve',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
             ),
           ),
         ],
         if (!hasProof && !isClient && awaitingDeposit) ...[
           Text(
             'En attente de la preuve de paiement du client.',
-            style: GoogleFonts.inter(fontSize: 12, color: kEkMuted),
+            style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted),
           ),
         ],
         if (hasProof) ...[
@@ -417,25 +417,30 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             isClient
                 ? 'Votre preuve a été envoyée. L\'agent va vérifier le paiement.'
                 : 'Le client a envoyé sa preuve. Vérifiez avant de commencer.',
-            style: GoogleFonts.inter(fontSize: 12, color: kEkText, height: 1.5),
+            style: GoogleFonts.urbanist(fontSize: 12, color: kEkText, height: 1.5),
           ),
           const SizedBox(height: 10),
-          GestureDetector(
-            onTap: () => _viewProof(order.depositProofUrl!),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                order.depositProofUrl!,
-                height: 160,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                loadingBuilder: (_, child, progress) => progress == null
-                    ? child
-                    : Container(height: 160, color: kEkDivider,
-                        child: const Center(child: CircularProgressIndicator())),
-                errorBuilder: (_, __, ___) => Container(height: 160,
-                    color: kEkDivider,
-                    child: const Icon(Icons.broken_image, color: kEkMuted)),
+          Semantics(
+            label: 'Voir la preuve de paiement en grand',
+            button: true,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: () => _viewProof(order.depositProofUrl!),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  order.depositProofUrl!,
+                  height: 160,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (_, child, progress) => progress == null
+                      ? child
+                      : Container(height: 160, color: kEkDivider,
+                          child: const Center(child: CircularProgressIndicator())),
+                  errorBuilder: (_, __, ___) => Container(height: 160,
+                      color: kEkDivider,
+                      child: const Icon(Icons.broken_image, color: kEkMuted)),
+                ),
               ),
             ),
           ),
@@ -451,10 +456,14 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Text('Preuve envoyée par l\'agent',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13, fontWeight: FontWeight.w700, color: kEkText)),
         ),
-        GestureDetector(
+        Semantics(
+          label: 'Voir la preuve de paiement en grand',
+          button: true,
+          excludeSemantics: true,
+          child: GestureDetector(
           onTap: () => _viewProof(order.proofUrl!),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
@@ -472,6 +481,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                   height: 200, color: kEkDivider,
                   child: const Icon(Icons.broken_image, color: kEkMuted)),
             ),
+          ),
           ),
         ),
       ]),
@@ -492,6 +502,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             top: 40, right: 16,
             child: IconButton(
               onPressed: () => Navigator.pop(context),
+              tooltip: 'Fermer',
               icon: const Icon(Icons.close, color: Colors.white, size: 28),
             ),
           ),
@@ -526,7 +537,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                         color: Colors.white, strokeWidth: 2))
                 : const Icon(Icons.verified_rounded),
             label: Text('Dépôt reçu — Commencer le service',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
           ),
         ),
       );
@@ -565,7 +576,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                       child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.check_circle_rounded),
               label: Text('Confirmer la réception',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
             ),
           ),
         if (canDispute) ...[
@@ -582,7 +593,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
               ),
               icon: const Icon(Icons.report_problem_rounded, size: 18),
               label: Text('Ouvrir un litige',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
             ),
           ),
         ],
@@ -594,7 +605,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
               style: TextButton.styleFrom(foregroundColor: Colors.red),
               icon: const Icon(Icons.cancel_outlined, size: 18),
               label: Text('Annuler la commande',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w600)),
             ),
           ),
         if (isCompleted && !_showRating && order.agentId != null) ...[
@@ -612,7 +623,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                 const Icon(Icons.star_rounded, color: Color(0xFFFFBB00)),
                 const SizedBox(width: 10),
                 Expanded(child: Text('Notez votre agent',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w700,
+                    style: GoogleFonts.urbanist(fontWeight: FontWeight.w700,
                         color: kEkText))),
                 const Icon(Icons.arrow_forward_ios, size: 14, color: kEkMuted),
               ]),
@@ -636,7 +647,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       ),
       child: Column(children: [
         Text('Notez votre agent',
-            style: GoogleFonts.inter(fontWeight: FontWeight.w700,
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.w700,
                 fontSize: 15, color: kEkText)),
         const SizedBox(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -668,7 +679,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
               elevation: 0,
             ),
             child: Text('Envoyer la note',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
           ),
         ),
       ]),
@@ -680,7 +691,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         child: Text('Chat',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 15, fontWeight: FontWeight.w700, color: kEkText)),
       ),
       StreamBuilder<QuerySnapshot>(
@@ -690,7 +701,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text('Aucun message. Écrivez à votre agent.',
-                  style: GoogleFonts.inter(fontSize: 13, color: kEkMuted)),
+                  style: GoogleFonts.urbanist(fontSize: 13, color: kEkMuted)),
             );
           }
           final docs = snap.data!.docs;
@@ -737,7 +748,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             controller: _msgCtrl,
             decoration: InputDecoration(
               hintText: 'Écrire un message...',
-              hintStyle: GoogleFonts.inter(color: kEkMuted, fontSize: 14),
+              hintStyle: GoogleFonts.urbanist(color: kEkMuted, fontSize: 14),
               filled: true,
               fillColor: kEkBg,
               contentPadding: const EdgeInsets.symmetric(
@@ -910,14 +921,14 @@ class _MomoNumberBox extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Envoyez $opLabel à :',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 12, color: kEkMuted)),
         const SizedBox(height: 6),
         Row(children: [
           Expanded(
             child: Text(
               momoNumber.isEmpty ? '(voir le chat)' : momoNumber,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 20, fontWeight: FontWeight.w900,
                   color: const Color(0xFFE65100),
                   letterSpacing: 2),
@@ -940,9 +951,9 @@ class _MomoNumberBox extends StatelessWidget {
         const Divider(height: 14),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text('Montant total à envoyer :',
-              style: GoogleFonts.inter(fontSize: 12, color: kEkMuted)),
+              style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
           Text(_fmt(total),
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 14, fontWeight: FontWeight.w800,
                   color: const Color(0xFFE65100))),
         ]),
@@ -996,12 +1007,12 @@ class _ChatBubble extends StatelessWidget {
           if (!isMe)
             Text(
               data['senderRole'] == 'agent' ? 'Agent' : 'Moi',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 10, fontWeight: FontWeight.w700,
                   color: kEkGreen),
             ),
           Text(text,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 14,
                   color: isMe ? Colors.white : kEkText,
                   height: 1.4)),

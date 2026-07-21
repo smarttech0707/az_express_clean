@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../models/route_model.dart';
+import '../theme/app_theme.dart';
 
 /// Construit le jeu de polylines pour affichage sur GoogleMap.
 class RoutePolylineBuilder {
 
   // ── Couleurs ──────────────────────────────────────────────────────────────
-  static const Color _orangeRoute = Color(0xFFFF6D00);
+  static const Color _orangeRoute = AppColors.primary;
   static const Color _blueRoute   = Color(0xFF1565C0);
   static const Color _shadowColor = Color(0x55000000);
 

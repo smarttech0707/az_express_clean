@@ -24,12 +24,13 @@ import 'residences_page.dart';
 import 'client_wallet_page.dart';
 import 'boulangeries_list.dart';
 import '../immobilier/immobilier_home_screen.dart';
+import '../../theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTES
 // ─────────────────────────────────────────────────────────────────────────────
 const LatLng _abengourou = LatLng(6.7273, -3.4961);
-const Color _primary     = Color(0xFFFF6D00);
+const Color _primary     = AppColors.primary;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ÉTAT PERMISSION
@@ -404,7 +405,7 @@ class _DriversBadge extends StatelessWidget {
                 : isAvailable
                     ? '$count ${context.tr('drivers_available')}'
                     : context.tr('no_driver'),
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontWeight: FontWeight.w600,
               fontSize:   13,
               color:      Colors.black87,
@@ -477,7 +478,7 @@ class _PermissionBanner extends StatelessWidget {
             Expanded(
               child: Text(
                 'GPS désactivé — Appuyez pour activer la localisation',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                   fontSize: 12,
                   color:    Colors.orange.shade800,
                   fontWeight: FontWeight.w500,
@@ -519,12 +520,12 @@ class _SearchBar extends StatelessWidget {
           ],
         ),
         child: Row(children: [
-          const Icon(Icons.search_rounded, color: Color(0xFFFF6D00), size: 22),
+          const Icon(Icons.search_rounded, color: AppColors.primary, size: 22),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               'Où allez-vous ?',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 fontSize:   16,
                 color:      Colors.grey.shade500,
                 fontWeight: FontWeight.w400,
@@ -534,10 +535,10 @@ class _SearchBar extends StatelessWidget {
           Container(
             width: 40, height: 40,
             decoration: BoxDecoration(
-              color:  const Color(0xFFFF6D00).withValues(alpha: 0.1),
+              color:  AppColors.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.mic_rounded, color: Color(0xFFFF6D00), size: 20),
+            child: const Icon(Icons.mic_rounded, color: AppColors.primary, size: 20),
           ),
         ]),
       ),
@@ -633,7 +634,7 @@ class _BottomPanelState extends State<_BottomPanel> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     ctx.tr('more_services'),
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                       fontSize:   18,
                       fontWeight: FontWeight.bold,
                       color:      Colors.black87,
@@ -716,7 +717,7 @@ class _BottomPanelState extends State<_BottomPanel> {
                         _firstName.isNotEmpty
                             ? '${context.tr('hello')} $_firstName 👋'
                             : context.tr('hello'),
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           fontSize:   18,
                           fontWeight: FontWeight.bold,
                           color:      Colors.black87,
@@ -726,7 +727,7 @@ class _BottomPanelState extends State<_BottomPanel> {
                       const SizedBox(height: 2),
                       Text(
                         context.tr('where_send'),
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           fontSize: 12.5,
                           color:    Colors.grey.shade500,
                         ),
@@ -769,7 +770,7 @@ class _BottomPanelState extends State<_BottomPanel> {
                         const SizedBox(width: 6),
                         Text(
                           '${_fmtWallet(_walletBalance)} F',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             color:      Colors.white,
                             fontSize:   13,
                             fontWeight: FontWeight.bold,
@@ -908,7 +909,7 @@ class _ServiceCardState extends State<_ServiceCard> {
                     widget.label,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                       fontSize:   12,
                       fontWeight: FontWeight.w600,
                       color:      Colors.black87,
@@ -1037,7 +1038,7 @@ class _PlusCardState extends State<_PlusCard> {
                   textAlign: TextAlign.center,
                   maxLines:  2,
                   overflow:  TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     fontSize:   12,
                     fontWeight: FontWeight.w600,
                     color:      Colors.black87,

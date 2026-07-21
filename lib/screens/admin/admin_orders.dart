@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../widgets/status_badge.dart';
+import '../../widgets/empty_state.dart';
 
 class AdminOrders extends StatefulWidget {
   const AdminOrders({super.key});
@@ -143,17 +145,10 @@ class _AdminOrdersState extends State<AdminOrders> {
           // Liste
           Expanded(
             child: _docs.isEmpty && !_loading
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.inbox_rounded,
-                            size: 64, color: Colors.grey.shade300),
-                        const SizedBox(height: 12),
-                        const Text("Aucune commande",
-                            style: TextStyle(color: Colors.grey)),
-                      ],
-                    ),
+                ? const EmptyState(
+                    icon: Icons.inbox_rounded,
+                    title: 'Aucune commande',
+                    description: 'Les commandes apparaîtront ici dès qu\'un client en passera une.',
                   )
                 : ListView.builder(
                     physics: const BouncingScrollPhysics(),
@@ -193,24 +188,6 @@ class _OrderCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _OrderCard({required this.docId, required this.data});
 
-  static const _statusColors = {
-    'pending':   Color(0xFFFFA000),
-    'assigned':  Color(0xFF1565C0),
-    'accepted':  Color(0xFF1976D2),
-    'picked_up': Color(0xFF7B1FA2),
-    'delivered': Color(0xFF2E7D32),
-    'cancelled': Color(0xFFB71C1C),
-  };
-
-  static const _statusLabels = {
-    'pending':   'En attente',
-    'assigned':  'Assignée',
-    'accepted':  'Acceptée',
-    'picked_up': 'Récupérée',
-    'delivered': 'Livrée',
-    'cancelled': 'Annulée',
-  };
-
   @override
   Widget build(BuildContext context) {
     final status   = data["status"] as String? ?? 'pending';
@@ -220,14 +197,22 @@ class _OrderCard extends StatelessWidget {
     final budget   = (data["budget"] as num? ?? 0).toInt();
     final ts       = data["createdAt"] as Timestamp?;
     final date     = ts?.toDate();
-    final color    = _statusColors[status] ?? Colors.grey;
-    final label    = _statusLabels[status] ?? status;
+    // Détection livreur "commande gardée ouverte" / "refuse de terminer" —
+    // aucune expiration automatique n'existe pour accepted/picked_up
+    // (autoExpireOrders ne couvre que pending/broadcast/assigned, jamais
+    // touché ici pour ne pas modifier le dispatch) : simple signal visuel
+    // pour l'admin, pas d'action automatique (Master Prompt 77, 2026-07-09).
+    // acceptedAt n'existe pas sur le document — createdAt sert d'approximation.
+    final isStuck = (status == 'accepted' || status == 'picked_up') &&
+        date != null &&
+        DateTime.now().difference(date).inMinutes > 60;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
+        border: isStuck ? Border.all(color: Colors.red.shade300, width: 1.5) : null,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -253,24 +238,27 @@ class _OrderCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: color.withValues(alpha: 0.3)),
-                  ),
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                        color: color,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
+                // Master Prompt 126 (Partie 9/19) — remplace la pastille de
+                // statut construite à la main (doublon du même pattern déjà
+                // dupliqué dans 5 autres écrans) par le composant partagé
+                // `StatusBadge`, unique source des couleurs/icônes/labels
+                // de statut désormais.
+                StatusBadge.fromRaw(status),
               ],
             ),
+            if (isStuck) ...[
+              const SizedBox(height: 6),
+              Row(children: [
+                Icon(Icons.warning_amber_rounded,
+                    color: Colors.red.shade700, size: 14),
+                const SizedBox(width: 4),
+                Text('En cours depuis plus d\'1h — vérifier avec le livreur',
+                    style: TextStyle(
+                        color: Colors.red.shade700,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ]),
+            ],
             const SizedBox(height: 8),
             const Divider(height: 1),
             const SizedBox(height: 8),

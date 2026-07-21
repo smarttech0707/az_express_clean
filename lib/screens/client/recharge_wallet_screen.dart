@@ -8,9 +8,10 @@ import '../../services/feexpay_service.dart';
 import '../../services/wallet_service.dart';
 import '../../models/feexpay_transaction.dart';
 import '../../widgets/tap_effect.dart';
+import '../../theme/app_theme.dart';
 
 // ─── Constantes visuelles ───────────────────────────────────────────────────
-const _kOrange  = Color(0xFFFF6D00);
+const _kOrange  = AppColors.primary;
 const _kOrangeL = Color(0xFFFF8F00);
 const _kBg      = Color(0xFFF5F5F5);
 
@@ -199,18 +200,18 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
                           color: Colors.white70, size: 32),
                       const SizedBox(height: 8),
                       Text('Mon Wallet',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.white70, fontSize: 13)),
                       Text(
                         _fmtAmount(_walletBalance),
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 42,
                             fontWeight: FontWeight.w900,
                             height: 1.1),
                       ),
                       Text('FCFA',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.white70,
                               fontSize: 14,
                               fontWeight: FontWeight.bold)),
@@ -220,7 +221,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
               ),
             ),
             title: Text('Recharger mon Wallet',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontWeight: FontWeight.w600, fontSize: 16)),
             centerTitle: true,
           ),
@@ -338,7 +339,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(op.label,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             fontSize: 10.5,
                             fontWeight: selected
                                 ? FontWeight.bold
@@ -403,7 +404,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
                         color: Colors.white, strokeWidth: 2.5))
                 : Text(
                     'Payer  ${_fmtAmount(_amount)} FCFA  →',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                         fontSize: 16),
@@ -415,7 +416,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
         Center(
           child: Text(
             'Paiement sécurisé via FeexPay',
-            style: GoogleFonts.inter(fontSize: 11, color: Colors.grey),
+            style: GoogleFonts.urbanist(fontSize: 11, color: Colors.grey),
           ),
         ),
 
@@ -457,10 +458,10 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
       Text(label,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 13, color: Colors.grey.shade600)),
       Text(value,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 13,
               fontWeight: bold ? FontWeight.bold : FontWeight.w600,
               color: bold ? _kOrange : Colors.black87)),
@@ -518,14 +519,14 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
         const SizedBox(height: 24),
 
         Text(title,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontSize: 22, fontWeight: FontWeight.bold, color: color)),
 
         const SizedBox(height: 12),
 
         Text(subtitle,
             textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 14, color: Colors.grey.shade600, height: 1.5)),
 
         if (isPending) ...[
@@ -560,7 +561,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
                   : isFailed || isCancelled
                       ? 'Réessayer'
                       : 'En attente…',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 16),
@@ -573,7 +574,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text('Vérifier plus tard',
-                style: GoogleFonts.inter(color: Colors.grey)),
+                style: GoogleFonts.urbanist(color: Colors.grey)),
           ),
         ],
       ],
@@ -610,7 +611,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
                           size: 52, color: Colors.grey.shade400),
                       const SizedBox(height: 10),
                       Text('Aucune transaction',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.grey, fontSize: 14)),
                     ],
                   ),
@@ -629,7 +630,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
   // ── Helpers UI ──────────────────────────────────────────────────────────
   Widget _sectionTitle(String text) => Text(
         text,
-        style: GoogleFonts.inter(
+        style: GoogleFonts.urbanist(
             fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black54),
       );
 
@@ -647,7 +648,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
             const SizedBox(width: 8),
             Expanded(
                 child: Text(text,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 12, color: Colors.grey.shade700))),
           ],
         ),
@@ -668,7 +669,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
             const SizedBox(width: 8),
             Expanded(
                 child: Text(text,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 12, color: Colors.red.shade700))),
           ],
         ),
@@ -687,7 +688,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
         onChanged: onChange,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: GoogleFonts.inter(fontSize: 13),
+          hintStyle: GoogleFonts.urbanist(fontSize: 13),
           prefixIcon: Icon(icon, size: 18, color: Colors.grey),
           filled: true,
           fillColor: Colors.white,
@@ -730,7 +731,7 @@ class _AmountChip extends StatelessWidget {
           ),
           child: Text(
             '${_fmtAmount(amount)} F',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontWeight: FontWeight.bold,
               fontSize: 13,
               color: selected ? Colors.white : Colors.black87,
@@ -759,7 +760,7 @@ class _CustomChip extends StatelessWidget {
           ),
           child: Text(
             'Autre montant',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontWeight: FontWeight.bold,
               fontSize: 13,
               color: selected ? Colors.white : Colors.black87,
@@ -825,21 +826,21 @@ class _TxTile extends StatelessWidget {
               children: [
                 Text(
                   '${tx.paymentMethod.toUpperCase()} — ${tx.provider}',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 Text(dateStr,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.grey, fontSize: 11)),
                 Text(statusLabel,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: color, fontSize: 11, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
           Text(
             '+${_fmtAmount(tx.amount)} F',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontWeight: FontWeight.bold, color: color, fontSize: 15),
           ),
         ],

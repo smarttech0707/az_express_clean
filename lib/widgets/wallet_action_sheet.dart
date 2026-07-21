@@ -204,10 +204,10 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Retirer de l\'argent',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 17, fontWeight: FontWeight.bold)),
             Text('Solde : ${_fmt(widget.currentBalance)} FCFA',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 12, color: Colors.grey.shade600)),
           ]),
         ),
@@ -280,7 +280,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
                   child: CircularProgressIndicator(
                       color: Colors.white, strokeWidth: 2))
               : Text('Retirer  ${_fmt(_amount)} FCFA  →',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                       fontSize: 15)),
@@ -302,7 +302,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
         const SizedBox(height: 20),
         Text(
           isSent ? 'Retrait envoyé  ✓' : 'Demande enregistrée',
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 20, fontWeight: FontWeight.bold,
               color: isSent ? const Color(0xFF2E7D32) : _kBlue),
         ),
@@ -312,7 +312,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
               ? '${_fmt(_amount)} FCFA envoyés vers ${_operatorLabel()} (${_phoneCtrl.text.trim()}).'
               : 'Votre retrait de ${_fmt(_amount)} FCFA est en traitement.\nDélai : sous 24h.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.inter(fontSize: 13, color: Colors.grey.shade600),
+          style: GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade600),
         ),
         const SizedBox(height: 24),
         SizedBox(
@@ -326,7 +326,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
                   borderRadius: BorderRadius.circular(14)),
             ),
             child: Text('Fermer',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ),
@@ -336,7 +336,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
 
   // ── Helpers UI ────────────────────────────────────────────────────────────
   Widget _label(String t) => Text(t,
-      style: GoogleFonts.inter(
+      style: GoogleFonts.urbanist(
           fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black54));
 
   Widget _chip(int amount) {
@@ -353,7 +353,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
               color: selected ? _kBlue : Colors.grey.shade300),
         ),
         child: Text('${_fmt(amount)} FCFA',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontWeight: FontWeight.bold, fontSize: 13,
                 color: selected ? Colors.white : Colors.black87)),
       ),
@@ -372,7 +372,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
             color: _useCustom ? _kBlue : Colors.grey.shade300),
       ),
       child: Text('Autre',
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontWeight: FontWeight.bold, fontSize: 13,
               color: _useCustom ? Colors.white : Colors.black87)),
     ),
@@ -416,7 +416,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
               const SizedBox(height: 4),
               Text(label,
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 10,
                       fontWeight: selected ? FontWeight.bold : FontWeight.w500,
                       color: selected ? color : Colors.black87)),
@@ -435,7 +435,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
         onChanged: onChange,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: GoogleFonts.inter(fontSize: 13),
+          hintStyle: GoogleFonts.urbanist(fontSize: 13),
           prefixIcon: Icon(icon, size: 18),
           filled: true,
           fillColor: Colors.grey.shade50,
@@ -464,7 +464,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
       Icon(Icons.info_outline, color: color, size: 16),
       const SizedBox(width: 8),
       Expanded(child: Text(text,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 12, color: Colors.grey.shade700))),
     ]),
   );
@@ -480,7 +480,7 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
       Icon(Icons.warning_amber, color: Colors.red.shade700, size: 16),
       const SizedBox(width: 8),
       Expanded(child: Text(text,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 12, color: Colors.red.shade700))),
     ]),
   );

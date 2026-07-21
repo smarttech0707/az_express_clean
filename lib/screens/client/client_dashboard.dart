@@ -121,13 +121,13 @@ class _ClientDashboardState extends State<ClientDashboard>
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: const LinearGradient(
-                colors: [Color(0xFFFF8C42), Color(0xFFFF6B00)],
+                colors: [Color(0xFFFF8C42), AppColors.primary],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFFFF6B00).withValues(alpha: 0.45),
+                  color: AppColors.primary.withValues(alpha: 0.45),
                   blurRadius: 16,
                   offset: const Offset(0, 5),
                   spreadRadius: 0,

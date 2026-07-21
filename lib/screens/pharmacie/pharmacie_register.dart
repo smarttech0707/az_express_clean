@@ -62,17 +62,13 @@ class _PharmacieRegisterState extends State<PharmacieRegister> {
     setState(() => _loading = true);
 
     try {
-      final existing = await FirebaseFirestore.instance
-          .collection('pharmacie_requests')
-          .doc(phone)
-          .get();
-
-      if (existing.exists) {
-        if (!mounted) return;
-        _snack('Ce numéro a déjà une demande en cours.', Colors.orange);
-        return;
-      }
-
+      // Pas de vérification préalable de doublon : ce formulaire est rempli
+      // avant toute authentification réelle (session anonyme par défaut côté
+      // mobile), donc sans identité propre à lier — la lecture directe de
+      // pharmacie_requests est réservée à l'admin (même pattern que
+      // driver_applications/partner_applications). Écrire avec le téléphone
+      // comme identifiant de document met simplement à jour la demande
+      // existante si le même numéro soumet deux fois — comportement sûr.
       await FirebaseFirestore.instance
           .collection('pharmacie_requests')
           .doc(phone)
@@ -115,7 +111,7 @@ class _PharmacieRegisterState extends State<PharmacieRegister> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Inscription Pharmacie',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: red,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -137,13 +133,13 @@ class _PharmacieRegisterState extends State<PharmacieRegister> {
                 const Icon(Icons.local_pharmacy_rounded, size: 52, color: Colors.white),
                 const SizedBox(height: 10),
                 Text('Rejoignez AZ Express',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 Text('Votre pharmacie référencée à Abengourou',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white70, fontSize: 12)),
               ]),
             ),
@@ -213,7 +209,7 @@ class _PharmacieRegisterState extends State<PharmacieRegister> {
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text('Envoyer ma demande',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),
@@ -249,7 +245,7 @@ class _PharmacieRegisterState extends State<PharmacieRegister> {
 
   Widget _section(String title) => Text(
         title,
-        style: GoogleFonts.inter(
+        style: GoogleFonts.urbanist(
             fontSize: 13,
             fontWeight: FontWeight.bold,
             color: Colors.grey.shade600),

@@ -340,10 +340,10 @@ class _DestinationPickerScreenState
                             focusNode:   _focus,
                             onChanged:   _onSearchChanged,
                             autofocus:   true,
-                            style: GoogleFonts.inter(fontSize: 15),
+                            style: GoogleFonts.urbanist(fontSize: 15),
                             decoration: InputDecoration(
                               hintText: 'Où livrer ? (quartier, rue…)',
-                              hintStyle: GoogleFonts.inter(
+                              hintStyle: GoogleFonts.urbanist(
                                   color: AppColors.textLight, fontSize: 14),
                               prefixIcon: const Icon(
                                   Icons.search_rounded,
@@ -397,11 +397,11 @@ class _DestinationPickerScreenState
                           leading: const Icon(Icons.place_rounded,
                               color: AppColors.primary, size: 22),
                           title: Text(s.mainText,
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontSize: 14, fontWeight: FontWeight.w600)),
                           subtitle: s.secondaryText.isNotEmpty
                               ? Text(s.secondaryText,
-                                  style: GoogleFonts.inter(
+                                  style: GoogleFonts.urbanist(
                                       fontSize: 12,
                                       color: AppColors.textLight))
                               : null,
@@ -458,7 +458,7 @@ class _DestinationPickerScreenState
                         Expanded(
                           child: Text(
                             _destinationAddress,
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600),
                             maxLines: 2,
@@ -521,7 +521,7 @@ class _DestinationPickerScreenState
                           foregroundColor: Colors.white,
                           shape: const RoundedRectangleBorder(
                               borderRadius: AppRadius.lgR),
-                          textStyle: GoogleFonts.inter(
+                          textStyle: GoogleFonts.urbanist(
                               fontWeight: FontWeight.w700, fontSize: 15),
                         ),
                       ),
@@ -581,7 +581,7 @@ class _StatPill extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 16),
           const SizedBox(width: 6),
-          Text(label, style: GoogleFonts.inter(
+          Text(label, style: GoogleFonts.urbanist(
               color: color, fontSize: 13, fontWeight: FontWeight.w600)),
         ],
       ),

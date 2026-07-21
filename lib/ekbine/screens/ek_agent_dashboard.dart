@@ -11,6 +11,11 @@ import '../services/ek_service.dart';
 import '../providers/ek_provider.dart';
 import 'ek_order_tracking.dart';
 import '../../services/subscription_service.dart';
+import '../../services/auth_service.dart';
+import '../../screens/home/home_screen.dart';
+import '../../widgets/partner_account_sheet.dart';
+import '../../widgets/stream_error_state.dart';
+import '../../widgets/logout_confirm_dialog.dart';
 
 class EkAgentDashboard extends StatefulWidget {
   const EkAgentDashboard({super.key});
@@ -62,6 +67,13 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
             backgroundColor: kEkDark,
             foregroundColor: Colors.white,
             title: const Text('Dashboard Agent'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.logout_rounded),
+                tooltip: 'Déconnexion',
+                onPressed: _logout,
+              ),
+            ],
           ),
           body: Center(
             child: Padding(
@@ -78,7 +90,7 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                 ),
                 const SizedBox(height: 24),
                 Text('Candidature en cours d\'examen',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: kEkText),
@@ -87,7 +99,7 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                 Text(
                   'Notre équipe vérifie votre profil. '
                   'Vous serez notifié dès que votre compte est activé (24–48h).',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 13, color: kEkMuted, height: 1.6),
                   textAlign: TextAlign.center,
                 ),
@@ -116,12 +128,47 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
     });
   }
 
+  // Master Prompt 135 — _logout() affiche désormais une confirmation avant
+  // d'appeler _doLogout(), qui porte l'intégralité de la logique déjà
+  // existante et inchangée (signOut, redirection).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
+    AuthService().logAuthEvent('logout', 'ekbine_agent');
+    await FirebaseAuth.instance.signOut();
+    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (_) => false,
+    );
+  }
+
   Widget _buildHeader(EkAgent agent, EkProvider ek) {
     return SliverAppBar(
       pinned: true,
       expandedHeight: 200,
       backgroundColor: kEkDark,
       foregroundColor: Colors.white,
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.account_circle_outlined),
+          tooltip: 'Mon compte',
+          onPressed: () => showPartnerAccountSheet(
+            context,
+            role: 'ekbine_agent',
+            roleLabel: 'Agent Ekbine',
+            name: agent.name,
+            phone: agent.phone,
+            onLogout: _logout,
+            photoUrl: agent.photoUrl,
+            photoStoragePath: 'ekbine_agent_photos/${agent.id}/photo.jpg',
+            onPhotoUploaded: (url) =>
+                EkService.updateAgentProfile(agent.id, {'photoUrl': url}),
+          ),
+        ),
+      ],
       flexibleSpace: FlexibleSpaceBar(
         collapseMode: CollapseMode.pin,
         background: Container(
@@ -136,7 +183,7 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                   backgroundColor: kEkGreen,
                   child: Text(
                     agent.name.isNotEmpty ? agent.name[0].toUpperCase() : 'A',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 22, fontWeight: FontWeight.w800,
                         color: Colors.white),
                   ),
@@ -147,7 +194,7 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                     Text(agent.name,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 16, fontWeight: FontWeight.w800,
                             color: Colors.white)),
                     Row(children: [
@@ -155,12 +202,12 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                           color: Color(0xFFFFBB00), size: 14),
                       const SizedBox(width: 4),
                       Text(agent.displayRating,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 12, color: Colors.white70)),
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text('${agent.totalCompleted} commandes',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontSize: 12, color: Colors.white70),
                             overflow: TextOverflow.ellipsis),
                       ),
@@ -176,7 +223,7 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                     activeTrackColor: kEkGreen.withValues(alpha: 0.4),
                   ),
                   Text(agent.isOnline ? 'En ligne' : 'Hors ligne',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 9,
                           color: agent.isOnline ? kEkGreen : Colors.white38)),
                 ]),
@@ -212,7 +259,7 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
         unselectedLabelColor: Colors.white60,
         indicatorColor: kEkGreen,
         indicatorWeight: 3,
-        labelStyle: GoogleFonts.inter(
+        labelStyle: GoogleFonts.urbanist(
             fontSize: 12, fontWeight: FontWeight.w700),
         tabs: const [
           Tab(text: 'Nouvelles'),
@@ -247,10 +294,10 @@ class _StatChip extends StatelessWidget {
         ),
         child: Column(children: [
           Text(value,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 14, fontWeight: FontWeight.w800, color: color)),
           Text(label,
-              style: GoogleFonts.inter(fontSize: 11, color: Colors.white70)),
+              style: GoogleFonts.urbanist(fontSize: 11, color: Colors.white70)),
         ]),
       ),
     );
@@ -271,11 +318,11 @@ class _PendingTab extends StatelessWidget {
           const Text('💤', style: TextStyle(fontSize: 52)),
           const SizedBox(height: 16),
           Text('Vous êtes hors ligne',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 16, fontWeight: FontWeight.w700, color: kEkText)),
           const SizedBox(height: 8),
           Text('Activez votre statut pour voir les nouvelles commandes',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13, color: kEkMuted, height: 1.5),
               textAlign: TextAlign.center),
         ]),
@@ -285,6 +332,9 @@ class _PendingTab extends StatelessWidget {
     return StreamBuilder<List<EkOrder>>(
       stream: EkService.streamPendingForAgent(agent.operators),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return const StreamErrorState(message: "Impossible de charger les demandes en attente.");
+        }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -295,12 +345,12 @@ class _PendingTab extends StatelessWidget {
               const Text('🔍', style: TextStyle(fontSize: 52)),
               const SizedBox(height: 16),
               Text('Aucune nouvelle commande',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 16, fontWeight: FontWeight.w700,
                       color: kEkText)),
               const SizedBox(height: 8),
               Text('Restez connecté, les commandes arrivent !',
-                  style: GoogleFonts.inter(fontSize: 13, color: kEkMuted)),
+                  style: GoogleFonts.urbanist(fontSize: 13, color: kEkMuted)),
             ]),
           );
         }
@@ -357,7 +407,7 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
             ),
             child: Center(
               child: Text(order.operator[0].toUpperCase(),
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 18, fontWeight: FontWeight.w900,
                       color: opColor)),
             ),
@@ -367,22 +417,22 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
               Text(order.serviceLabel,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 14, fontWeight: FontWeight.w700,
                       color: kEkText)),
               Text('Pour : ${order.beneficiaryNumber}',
-                  style: GoogleFonts.inter(fontSize: 12, color: kEkMuted)),
+                  style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
             ]),
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(_fmt(order.amount),
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 15, fontWeight: FontWeight.w800, color: kEkText)),
             Text(
               order.agentEarning > 0
                   ? '+${_fmt(order.agentEarning)}'
                   : 'Paiement direct',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 11, fontWeight: FontWeight.w700,
                   color: order.agentEarning > 0 ? kEkGreen : kEkMuted),
             ),
@@ -402,7 +452,7 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: Text('Voir détails',
-                  style: GoogleFonts.inter(fontSize: 13,
+                  style: GoogleFonts.urbanist(fontSize: 13,
                       fontWeight: FontWeight.w600)),
             ),
           ),
@@ -427,7 +477,7 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
                       order.agentEarning > 0
                           ? 'Accepter +${_fmt(order.agentEarning)}'
                           : 'Accepter',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 12, fontWeight: FontWeight.w800)),
             ),
           ),
@@ -463,6 +513,9 @@ class _ActiveTab extends StatelessWidget {
     return StreamBuilder<List<EkOrder>>(
       stream: EkService.streamAgentActiveOrders(agentId),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return const StreamErrorState(message: "Impossible de charger les courses actives.");
+        }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -473,7 +526,7 @@ class _ActiveTab extends StatelessWidget {
               const Text('✅', style: TextStyle(fontSize: 52)),
               const SizedBox(height: 16),
               Text('Aucune commande en cours',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 16, fontWeight: FontWeight.w700,
                       color: kEkText)),
             ]),
@@ -530,7 +583,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
             ),
             child: Center(
               child: Text(order.operator[0].toUpperCase(),
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 18, fontWeight: FontWeight.w900,
                       color: opColor)),
             ),
@@ -540,16 +593,16 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
               Text(order.serviceLabel,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 14, fontWeight: FontWeight.w700,
                       color: kEkText)),
               Text(order.beneficiaryNumber,
-                  style: GoogleFonts.inter(fontSize: 12, color: kEkMuted)),
+                  style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
             ]),
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(_fmt(order.amount),
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 14, fontWeight: FontWeight.w800,
                     color: kEkText)),
             Container(
@@ -561,7 +614,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
               ),
               child: Text(
                 ekStatusLabels[order.status] ?? order.status,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 9, fontWeight: FontWeight.w700,
                     color: statusCol),
               ),
@@ -586,7 +639,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                 order.depositProofUrl == null
                     ? 'En attente de la preuve de paiement du client…'
                     : 'Preuve reçue — vérifiez avant de commencer.',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 12, color: const Color(0xFFE65100), height: 1.4),
               ),
               if (order.depositProofUrl != null) ...[
@@ -629,7 +682,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                                 color: Colors.white, strokeWidth: 2))
                         : const Icon(Icons.verified_rounded, size: 16),
                     label: Text('Dépôt reçu — Commencer',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 12, fontWeight: FontWeight.w700)),
                   ),
                 ),
@@ -656,7 +709,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                             color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.play_arrow_rounded, size: 18),
                 label: Text('Commencer',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 13, fontWeight: FontWeight.w700)),
               ),
             ),
@@ -678,7 +731,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                             color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.upload_rounded, size: 18),
                 label: Text(_uploading ? 'Upload...' : 'Envoyer preuve',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 13, fontWeight: FontWeight.w700)),
               ),
             ),
@@ -698,7 +751,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                       color: Color(0xFF00BCD4), size: 16),
                   const SizedBox(width: 8),
                   Text('En attente de confirmation',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 12, fontWeight: FontWeight.w700,
                           color: const Color(0xFF00BCD4))),
                 ]),
@@ -710,7 +763,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
           onTap: () => Navigator.push(context, MaterialPageRoute(
               builder: (_) => EkOrderTracking(order: order))),
           child: Text('Voir les détails →',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 12, color: kEkGreen,
                   fontWeight: FontWeight.w600)),
         ),
@@ -742,6 +795,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
             top: 40, right: 16,
             child: IconButton(
               onPressed: () => Navigator.pop(context),
+              tooltip: 'Fermer',
               icon: const Icon(Icons.close, color: Colors.white, size: 28),
             ),
           ),
@@ -781,6 +835,9 @@ class _AgentHistoryTab extends StatelessWidget {
     return StreamBuilder<List<EkOrder>>(
       stream: EkService.streamAgentHistory(agentId),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return const StreamErrorState(message: "Impossible de charger l'historique.");
+        }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -791,7 +848,7 @@ class _AgentHistoryTab extends StatelessWidget {
               const Text('📋', style: TextStyle(fontSize: 52)),
               const SizedBox(height: 16),
               Text('Aucun historique',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 16, fontWeight: FontWeight.w700,
                       color: kEkText)),
             ]),
@@ -821,7 +878,7 @@ class _AgentHistoryTab extends StatelessWidget {
                   ),
                   child: Center(
                     child: Text(o.operator[0].toUpperCase(),
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 15, fontWeight: FontWeight.w800,
                             color: opColor)),
                   ),
@@ -832,11 +889,11 @@ class _AgentHistoryTab extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                     Text(o.serviceLabel,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 13, fontWeight: FontWeight.w700,
                             color: kEkText)),
                     Text(o.beneficiaryNumber,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 11, color: kEkMuted)),
                   ]),
                 ),
@@ -844,7 +901,7 @@ class _AgentHistoryTab extends StatelessWidget {
                   Text(o.status == 'completed'
                       ? (o.agentEarning > 0 ? '+${_fmt(o.agentEarning)}' : _fmt(o.totalPaid))
                       : _fmt(o.totalPaid),
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 13, fontWeight: FontWeight.w800,
                           color: o.status == 'completed'
                               ? kEkGreen : kEkMuted)),
@@ -858,7 +915,7 @@ class _AgentHistoryTab extends StatelessWidget {
                     ),
                     child: Text(
                       ekStatusLabels[o.status] ?? o.status,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 8, fontWeight: FontWeight.w700,
                           color: statusCol),
                     ),

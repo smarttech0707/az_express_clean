@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 
-// ── Brand colors ───────────────────────────────────────────────────────────────
+// ── Brand colors (Master Prompt 120) ────────────────────────────────────────
+// kEkGreen/kEkTeal/kEkDark restent INCHANGÉS : c'est la véritable identité de
+// sous-marque Ekbine (vert), pas un doublon de l'orange AZ Express — ne pas
+// re-brander silencieusement. Seuls les tokens neutres sont repointés vers
+// la palette centrale.
 const kEkGreen     = Color(0xFF00C853);
 const kEkTeal      = Color(0xFF00BFA5);
 const kEkDark      = Color(0xFF0A2E1A);
-const kEkBg        = Color(0xFFF0FFF4);
-const kEkCard      = Colors.white;
-const kEkText      = Color(0xFF1A1A2E);
-const kEkMuted     = Color(0xFF9E9E9E);
-const kEkDivider   = Color(0xFFEEEEEE);
-const kEkOrange    = Color(0xFFFF6D00);
+const kEkBg        = AppColors.bg;
+const kEkCard      = AppColors.card;
+const kEkText      = AppColors.text;
+const kEkMuted     = AppColors.textMuted;
+const kEkDivider   = AppColors.divider;
+const kEkOrange    = AppColors.primary;
 
 // ── Operators ──────────────────────────────────────────────────────────────────
 const ekOperators = [

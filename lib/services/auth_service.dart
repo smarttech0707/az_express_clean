@@ -25,18 +25,18 @@ class AuthService {
 
   // ── Cherche l'email Firebase d'un client par son téléphone ───────────────
   Future<String?> getClientAuthEmail(String phone) async {
-    // 1. Essayer le format réel (nouvel email stocké dans Firestore)
+    // 1. Essayer le format réel (nouvel email stocké dans Firestore) — via
+    // Cloud Function (checkClientPhone) : une requête Firestore directe sur
+    // `clients.where('phone'==...)` échoue toujours avec permission-denied
+    // (règle limitée à isOwner(clientId)), silencieusement avalée ici par le
+    // try/catch — donc cette résolution ne fonctionnait jamais avant ce correctif.
     try {
-      final snap = await _db
-          .collection('clients')
-          .where('phone', isEqualTo: phone)
-          .limit(1)
-          .get();
-      if (snap.docs.isNotEmpty) {
-        final email = snap.docs.first.data()['email'] as String?;
-        if (email != null && email.isNotEmpty && !email.contains('@azexpress.app')) {
-          return email;
-        }
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('checkClientPhone')
+          .call({'phone': phone});
+      final email = result.data['email'] as String?;
+      if (email != null && email.isNotEmpty) {
+        return email;
       }
     } catch (_) {}
     // 2. Fallback : anciens comptes → email fictif
@@ -48,22 +48,27 @@ class AuthService {
   Future<String?> getDriverAuthEmail(String input) async {
     // Si input ressemble à un email direct
     if (input.contains('@') && !input.contains('@az-driver.ci')) return input;
-    // Cherche dans livreurs + driver_requests par email
-    if (input.contains('@')) {
-      try {
-        for (final col in ['livreurs', 'driver_requests']) {
-          final snap = await _db.collection(col)
-              .where('email', isEqualTo: input)
-              .limit(1)
-              .get();
-          if (snap.docs.isNotEmpty) {
-            final email = snap.docs.first.data()['email'] as String?;
-            if (email != null) return email;
-          }
-        }
-      } catch (_) {}
-    }
-    // Fallback : identifiant → email fictif
+    // Cas "identifiant" (le champ que driver_register.dart demande et que
+    // l'admin copie vers livreurs/{uid} à l'approbation, avec le vrai email
+    // du compte) — résolu via `livreurs`, dont la lecture est large
+    // (isAuth()), contrairement à `driver_requests` (owner-only) qui ne
+    // permettrait pas cette requête par champ. Auparavant, ce cas tombait
+    // directement sur le fallback synthétique ci-dessous sans jamais
+    // chercher le vrai email — l'identifiant ne pouvait donc jamais servir
+    // à se connecter, alors que c'est exactement le champ demandé à
+    // l'inscription pour la connexion.
+    try {
+      final field = input.contains('@') ? 'email' : 'identifiant';
+      final snap = await _db.collection('livreurs')
+          .where(field, isEqualTo: input)
+          .limit(1)
+          .get();
+      if (snap.docs.isNotEmpty) {
+        final email = snap.docs.first.data()['email'] as String?;
+        if (email != null && email.isNotEmpty) return email;
+      }
+    } catch (_) {}
+    // Fallback : identifiant → email fictif (comptes legacy uniquement)
     return '${input.toLowerCase()}@az-driver.ci';
   }
 

@@ -19,11 +19,15 @@ class GlassCard extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final EdgeInsetsGeometry? margin;
   final BorderRadiusGeometry borderRadius;
-  final Color fillColor;
+  final Color? fillColor;
   final double blurStrength;
   final List<BoxShadow>? shadows;
   final Border? border;
   final VoidCallback? onTap;
+  // Master Prompt 125 (Partie 2) — optionnel, purement additif : décrit la
+  // carte pour un lecteur d'écran quand son contenu (image/icône) ne porte
+  // pas de texte lisible à lui seul.
+  final String? semanticLabel;
 
   const GlassCard({
     super.key,
@@ -32,16 +36,26 @@ class GlassCard extends StatelessWidget {
     this.height,
     this.padding = const EdgeInsets.all(16),
     this.margin,
-    this.borderRadius = AppRadius.xlR,
-    this.fillColor = const Color(0xF2FFFFFF),
+    this.borderRadius = AppRadius.cardR,
+    this.fillColor,
     this.blurStrength = 24,
     this.shadows,
     this.border,
     this.onTap,
+    this.semanticLabel,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Mode sombre (Master Prompt 120) — le "verre" reste teinté du fond de
+    // carte actif plutôt que blanc translucide en dur, sinon la carte
+    // apparaîtrait comme un flash blanc sur un écran sombre.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final effectiveFill = fillColor ??
+        (isDark ? const Color(0xF21E293B) : const Color(0xF2FFFFFF));
+    final effectiveBorderColor =
+        isDark ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.55);
+
     final content = Container(
       width: width,
       height: height,
@@ -57,11 +71,11 @@ class GlassCard extends StatelessWidget {
           child: Container(
             padding: padding,
             decoration: BoxDecoration(
-              color: fillColor,
+              color: effectiveFill,
               borderRadius: borderRadius,
               border: border ??
                   Border.all(
-                    color: Colors.white.withValues(alpha: 0.55),
+                    color: effectiveBorderColor,
                     width: 0.8,
                   ),
             ),
@@ -71,10 +85,14 @@ class GlassCard extends StatelessWidget {
       ),
     );
 
-    if (onTap != null) {
-      return ScaleTap(onTap: onTap, child: content);
-    }
-    return content;
+    final wrapped =
+        onTap != null ? ScaleTap(onTap: onTap, child: content) : content;
+    // Master Prompt 125 — n'exclut pas la sémantique du contenu (une carte
+    // peut déjà porter du texte lisible) : le libellé s'ajoute en complément,
+    // utile surtout quand `child` est une image/icône sans texte.
+    return semanticLabel == null
+        ? wrapped
+        : Semantics(label: semanticLabel, button: onTap != null, child: wrapped);
   }
 }
 
@@ -93,6 +111,8 @@ class PremiumCard extends StatelessWidget {
   final Border? border;
   final VoidCallback? onTap;
   final Gradient? gradient;
+  // Master Prompt 125 (Partie 2) — voir GlassCard, même usage.
+  final String? semanticLabel;
 
   const PremiumCard({
     super.key,
@@ -101,51 +121,45 @@ class PremiumCard extends StatelessWidget {
     this.height,
     this.padding = const EdgeInsets.all(16),
     this.margin,
-    this.borderRadius = AppRadius.xlR,
+    this.borderRadius = AppRadius.cardR,
     this.color,
     this.shadows,
     this.border,
     this.onTap,
     this.gradient,
+    this.semanticLabel,
   });
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final effectiveColor = color ?? (isDark ? AppColors.cardDark : AppColors.card);
+    final effectiveBorderColor = isDark ? AppColors.dividerDark : AppColors.divider;
+
     final content = Container(
       width: width,
       height: height,
       margin: margin,
       padding: padding,
       decoration: BoxDecoration(
-        color: gradient != null ? null : (color ?? Colors.white),
+        color: gradient != null ? null : effectiveColor,
         gradient: gradient,
         borderRadius: borderRadius,
-        boxShadow: shadows ??
-            const [
-              BoxShadow(
-                color: Color(0x0A000000),
-                blurRadius: 20,
-                offset: Offset(0, 4),
-              ),
-              BoxShadow(
-                color: Color(0x06000000),
-                blurRadius: 6,
-                offset: Offset(0, 1),
-              ),
-            ],
+        boxShadow: shadows ?? AppShadow.card,
         border: border ??
             Border.all(
-              color: AppColors.divider,
+              color: effectiveBorderColor,
               width: 0.5,
             ),
       ),
       child: child,
     );
 
-    if (onTap != null) {
-      return ScaleTap(onTap: onTap, child: content);
-    }
-    return content;
+    final wrapped =
+        onTap != null ? ScaleTap(onTap: onTap, child: content) : content;
+    return semanticLabel == null
+        ? wrapped
+        : Semantics(label: semanticLabel, button: onTap != null, child: wrapped);
   }
 }
 
@@ -168,19 +182,20 @@ class AzShimmer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final br = borderRadius ?? BorderRadius.circular(radius);
     return Container(
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: AppColors.divider,
+        color: isDark ? AppColors.dividerDark : AppColors.divider,
         borderRadius: br,
       ),
     )
         .animate(onPlay: (c) => c.repeat())
         .shimmer(
           duration: const Duration(milliseconds: 1400),
-          color: Colors.white.withValues(alpha: 0.75),
+          color: Colors.white.withValues(alpha: isDark ? 0.18 : 0.75),
           angle: 0.35,
         );
   }
@@ -392,18 +407,20 @@ class AzDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final lineColor = isDark ? AppColors.dividerDark : AppColors.divider;
     return Container(
       margin: margin ?? const EdgeInsets.symmetric(vertical: 8),
       height: 1,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
             Colors.transparent,
-            AppColors.divider,
-            AppColors.divider,
+            lineColor,
+            lineColor,
             Colors.transparent,
           ],
-          stops: [0.0, 0.15, 0.85, 1.0],
+          stops: const [0.0, 0.15, 0.85, 1.0],
         ),
       ),
     );

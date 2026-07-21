@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../../l10n/app_text.dart';
 import '../../services/notification_service.dart';
@@ -9,6 +10,7 @@ import '../../services/auth_service.dart';
 import '../main_dashboard.dart';
 import '../seller/seller_dashboard.dart';
 import 'forgot_password_page.dart';
+import '../../theme/app_theme.dart';
 
 class ClientAuthPage extends StatefulWidget {
   const ClientAuthPage({super.key});
@@ -199,13 +201,15 @@ class _ClientAuthPageState extends State<ClientAuthPage>
       await FirebaseAuth.instance.signOut();
     }
 
-    // Vérifier si le téléphone existe déjà
-    final phoneExists = await FirebaseFirestore.instance
-        .collection('clients')
-        .where('phone', isEqualTo: phone)
-        .limit(1)
-        .get();
-    if (phoneExists.docs.isNotEmpty) {
+    // Vérifier si le téléphone existe déjà — via Cloud Function (checkClientPhone) :
+    // une requête Firestore directe sur `clients.where('phone'==...)` échoue
+    // toujours avec permission-denied, la règle n'autorisant que la lecture de
+    // son propre document (isOwner(clientId)), jamais une requête cross-document
+    // par téléphone, quel que soit l'état d'authentification de l'appelant.
+    final checkResult = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('checkClientPhone')
+        .call({'phone': phone});
+    if (checkResult.data['exists'] == true) {
       throw FirebaseAuthException(
           code: 'phone-already-in-use',
           message: 'Ce numéro est déjà associé à un compte');
@@ -274,7 +278,7 @@ class _ClientAuthPageState extends State<ClientAuthPage>
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFFFF6D00), Color(0xFFFF8F00), Color(0xFFFFB300)],
+            colors: [AppColors.primary, Color(0xFFFF8F00), Color(0xFFFFB300)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -412,7 +416,7 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                                               : _loginCtrl.text.trim(),
                                         ))),
                                 child: const Text('Mot de passe oublié ?',
-                                    style: TextStyle(color: Color(0xFFFF6D00),
+                                    style: TextStyle(color: AppColors.primary,
                                         fontSize: 13, fontWeight: FontWeight.w600)),
                               ),
                             ),
@@ -427,7 +431,7 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                             child: ScaleButton(
                               onPressed: _loading ? null : _submit,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFFF6D00),
+                                backgroundColor: AppColors.primary,
                                 shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(16)),
                                 elevation: 4,
@@ -460,7 +464,7 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                                           ? context.tr('sign_up')
                                           : context.tr('btn_login'),
                                       style: const TextStyle(
-                                          color: Color(0xFFFF6D00),
+                                          color: AppColors.primary,
                                           fontWeight: FontWeight.bold),
                                     ),
                                   ],
@@ -524,11 +528,11 @@ class _Field extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        prefixIcon: Icon(icon, color: const Color(0xFFFF6D00)),
+        prefixIcon: Icon(icon, color: AppColors.primary),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFFF6D00), width: 2),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
@@ -554,7 +558,7 @@ class _PasswordField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFFFF6D00)),
+        prefixIcon: const Icon(Icons.lock_outline, color: AppColors.primary),
         suffixIcon: IconButton(
           icon: Icon(show ? Icons.visibility_off_outlined : Icons.visibility_outlined,
               color: Colors.grey),
@@ -563,7 +567,7 @@ class _PasswordField extends StatelessWidget {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFFF6D00), width: 2),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),

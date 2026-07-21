@@ -5,9 +5,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../l10n/app_text.dart';
+import '../../services/account_deletion_service.dart';
 import '../../services/auth_service.dart';
 import '../home/home_screen.dart';
 import '../support/support_screen.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/fade_slide_in.dart';
+import '../../widgets/glass_kit.dart';
+import '../../widgets/single_photo_editor.dart';
 
 class ProfilClient extends StatefulWidget {
   const ProfilClient({super.key});
@@ -21,6 +26,7 @@ class _ProfilClientState extends State<ProfilClient> {
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   String? _createdAt;
+  String? _photoUrl;
   bool _editing = false;
   bool _saving  = false;
 
@@ -77,6 +83,7 @@ class _ProfilClientState extends State<ProfilClient> {
           _phoneCtrl.text = doc['phone'] ?? '';
           _emailCtrl.text = doc['email'] ?? '';
           _createdAt = created;
+          _photoUrl = doc.data()?['photoUrl'] as String?;
         });
       }
     } catch (_) {}
@@ -183,7 +190,7 @@ class _ProfilClientState extends State<ProfilClient> {
               actions: [
                 TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6D00)),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
                   onPressed: loading ? null : () async {
                     final err = AuthService.validatePassword(newCtrl.text);
                     if (err != null) { if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(err), backgroundColor: Colors.orange)); return; }
@@ -228,7 +235,7 @@ class _ProfilClientState extends State<ProfilClient> {
               actions: [
                 TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6D00)),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
                   onPressed: loading ? null : () async {
                     if (!AuthService.isValidEmail(emailCtrl.text)) { if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Email invalide'), backgroundColor: Colors.orange)); return; }
                     setS(() => loading = true);
@@ -271,7 +278,7 @@ class _ProfilClientState extends State<ProfilClient> {
               actions: [
                 TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6D00)),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
                   onPressed: loading ? null : () async {
                     if (!AuthService.isValidPhone(phoneCtrl.text)) { if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Numéro invalide'), backgroundColor: Colors.orange)); return; }
                     setS(() => loading = true);
@@ -304,13 +311,13 @@ class _ProfilClientState extends State<ProfilClient> {
           SliverAppBar(
             expandedHeight: (MediaQuery.of(context).size.height * 0.25).clamp(180.0, 260.0),
             pinned: true,
-            backgroundColor: const Color(0xFFFF6D00),
+            backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xFFFF6D00), Color(0xFFFFB300)],
+                    colors: [AppColors.primary, Color(0xFFFFB300)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -320,15 +327,29 @@ class _ProfilClientState extends State<ProfilClient> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const SizedBox(height: 40),
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.25),
-                          shape: BoxShape.circle,
+                      if (_uid != null)
+                        SinglePhotoEditor(
+                          photoUrl: _photoUrl,
+                          storagePath: 'client_photos/$_uid/profile.jpg',
+                          size: 80,
+                          onUploaded: (url) async {
+                            await FirebaseFirestore.instance
+                                .collection('clients')
+                                .doc(_uid)
+                                .set({'photoUrl': url}, SetOptions(merge: true));
+                            if (mounted) setState(() => _photoUrl = url);
+                          },
+                        )
+                      else
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.person, color: Colors.white, size: 44),
                         ),
-                        child: const Icon(Icons.person, color: Colors.white, size: 44),
-                      ),
                       const SizedBox(height: 10),
                       Text(
                         _nameCtrl.text.isEmpty ? context.tr('my_profile') : _nameCtrl.text,
@@ -385,7 +406,7 @@ class _ProfilClientState extends State<ProfilClient> {
                       child: ScaleButton(
                         onPressed: _saving ? null : _saveProfile,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6D00),
+                          backgroundColor: AppColors.primary,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12)),
                         ),
@@ -423,7 +444,7 @@ class _ProfilClientState extends State<ProfilClient> {
                   Row(
                     children: [
                       _statCard(context.tr('total_orders'), "$_totalOrders",
-                          Icons.receipt_long, const Color(0xFFFF6D00)),
+                          Icons.receipt_long, AppColors.primary),
                       const SizedBox(width: 10),
                       _statCard(context.tr('delivered_orders'), "$_deliveredOrders",
                           Icons.check_circle, Colors.green),
@@ -453,7 +474,7 @@ class _ProfilClientState extends State<ProfilClient> {
                         () => Navigator.push(context,
                             MaterialPageRoute(
                                 builder: (_) => const SupportScreen())),
-                        color: const Color(0xFFFF6D00),
+                        color: AppColors.primary,
                       ),
                     ],
                   ),
@@ -580,7 +601,7 @@ class _ProfilClientState extends State<ProfilClient> {
   Widget _menuItem(IconData icon, String title, VoidCallback onTap,
       {Color? color}) {
     return ListTile(
-      leading: Icon(icon, color: color ?? const Color(0xFFFF6D00), size: 22),
+      leading: Icon(icon, color: color ?? AppColors.primary, size: 22),
       title: Text(title,
           style: TextStyle(
               color: color ?? Colors.black87,
@@ -652,7 +673,7 @@ class _ProfilClientState extends State<ProfilClient> {
         builder: (_) => Scaffold(
           appBar: AppBar(
             title: Text(title),
-            backgroundColor: const Color(0xFFFF6D00),
+            backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
           ),
           body: SingleChildScrollView(
@@ -678,7 +699,7 @@ class _ProfilClientState extends State<ProfilClient> {
               height: 72,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                    colors: [Color(0xFFFF6D00), Color(0xFFFFB300)]),
+                    colors: [AppColors.primary, Color(0xFFFFB300)]),
                 borderRadius: BorderRadius.circular(18),
               ),
               child: const Icon(Icons.delivery_dining,
@@ -805,21 +826,13 @@ class _ProfilClientState extends State<ProfilClient> {
 
   Future<void> _deleteAccount(BuildContext context, String password) async {
     try {
-      final user  = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      if (FirebaseAuth.instance.currentUser == null) return;
 
-      // Ré-authentification obligatoire avant suppression
-      final email = user.email ?? '';
-      final cred  = EmailAuthProvider.credential(email: email, password: password);
-      await user.reauthenticateWithCredential(cred);
-
-      // Supprimer les données Firestore
-      if (_uid != null) {
-        await FirebaseFirestore.instance.collection('clients').doc(_uid).delete();
-      }
-
-      // Supprimer le compte Firebase Auth
-      await user.delete();
+      // Ré-authentification + suppression Firestore/Auth déléguées au flux
+      // unique partagé par les 9 rôles (voir AccountDeletionService) —
+      // comportement inchangé pour le client, seulement extrait pour être
+      // réutilisable.
+      await AccountDeletionService.deleteClientAccountNow(password: password);
 
       // Reconnecter en anonyme
       await FirebaseAuth.instance.signInAnonymously();
@@ -839,6 +852,12 @@ class _ProfilClientState extends State<ProfilClient> {
       }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(msg),
+        backgroundColor: Colors.red,
+      ));
+    } on StateError catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.message),
         backgroundColor: Colors.red,
       ));
     }
@@ -1078,12 +1097,29 @@ class _RecentOrders extends StatelessWidget {
           .limit(6)
           .snapshots(),
       builder: (context, snap) {
-        if (!snap.hasData) {
-          return const Center(
-              child: Padding(
+        if (snap.hasError) {
+          return const Padding(
             padding: EdgeInsets.all(16),
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ));
+            child: Text('Impossible de charger vos dernières commandes.',
+                style: TextStyle(color: Colors.grey)),
+          );
+        }
+        if (!snap.hasData) {
+          // Master Prompt 124 — squelette shimmer plutôt qu'un spinner nu.
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: const BoxDecoration(
+              color: AppColors.card,
+              borderRadius: AppRadius.cardR,
+              boxShadow: AppShadow.card,
+            ),
+            child: Column(
+              children: List.generate(3, (i) => Padding(
+                padding: EdgeInsets.only(bottom: i == 2 ? 0 : 12),
+                child: const AzShimmerRow(iconSize: 42, maxWidth: 180),
+              )),
+            ),
+          );
         }
 
         final docs = snap.data!.docs;
@@ -1091,14 +1127,10 @@ class _RecentOrders extends StatelessWidget {
         if (docs.isEmpty) {
           return Container(
             padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 8)
-              ],
+            decoration: const BoxDecoration(
+              color: AppColors.card,
+              borderRadius: AppRadius.cardR,
+              boxShadow: AppShadow.card,
             ),
             child: Center(
               child: Column(
@@ -1107,7 +1139,7 @@ class _RecentOrders extends StatelessWidget {
                       size: 40, color: Colors.grey.shade300),
                   const SizedBox(height: 8),
                   Text('Aucune commande',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.grey, fontSize: 13)),
                 ],
               ),
@@ -1116,14 +1148,10 @@ class _RecentOrders extends StatelessWidget {
         }
 
         return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 8)
-            ],
+          decoration: const BoxDecoration(
+            color: AppColors.card,
+            borderRadius: AppRadius.cardR,
+            boxShadow: AppShadow.card,
           ),
           child: Column(
             children: docs.asMap().entries.map((entry) {
@@ -1137,7 +1165,9 @@ class _RecentOrders extends StatelessWidget {
               final color = _statusColor(status);
               final rating = data['rating'] as int?;
 
-              return Column(
+              return FadeSlideIn(
+                index: i,
+                child: Column(
                 children: [
                   if (i > 0) const Divider(height: 1, indent: 16),
                   ListTile(
@@ -1157,10 +1187,10 @@ class _RecentOrders extends StatelessWidget {
                       desc,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: Colors.black87,
+                        color: AppColors.text,
                       ),
                     ),
                     subtitle: Row(
@@ -1205,7 +1235,7 @@ class _RecentOrders extends StatelessWidget {
                     ),
                     trailing: Text(
                       '$budget F',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
                         color: const Color(0xFFFF5A3C),
@@ -1213,6 +1243,7 @@ class _RecentOrders extends StatelessWidget {
                     ),
                   ),
                 ],
+                ),
               );
             }).toList(),
           ),

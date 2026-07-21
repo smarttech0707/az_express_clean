@@ -21,6 +21,54 @@ class _DriverLoginState extends State<DriverLogin> {
   bool _loading = false;
   bool _showPass = false;
 
+  // Master Prompt 128 — session persistante : Firebase Auth garde déjà la
+  // session en local nativement, mais cet écran ne l'a jamais consultée
+  // avant d'afficher le formulaire, forçant une reconnexion manuelle à
+  // chaque lancement même quand une session livreur valide existe déjà.
+  // `true` uniquement s'il y a un utilisateur réel (non anonyme) à
+  // vérifier, pour ne jamais faire clignoter le formulaire pour rien.
+  bool _autoResuming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && !user.isAnonymous) {
+      _autoResuming = true;
+      _tryAutoResume(user);
+    }
+  }
+
+  Future<void> _tryAutoResume(User user) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('livreurs')
+          .doc(user.uid)
+          .get();
+      if (!mounted) return;
+      if (doc.exists) {
+        // Même chemin exact que `_login()` en cas de succès — aucune
+        // nouvelle règle métier inventée (pas de vérification isSuspended
+        // ici : le formulaire de connexion manuel ne le fait pas non plus
+        // aujourd'hui, la suspension est déjà appliquée ailleurs, à
+        // l'acceptation d'une commande).
+        final driverName = doc['name'] ?? 'Livreur';
+        NotificationService().saveToken(user.uid, 'livreurs');
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DriverDashboard(driverId: user.uid, driverName: driverName),
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // Silencieux : retombe simplement sur le formulaire de connexion
+      // normal, comme si aucune session n'existait.
+    }
+    if (mounted) setState(() => _autoResuming = false);
+  }
+
   Future<void> _login() async {
     final id = _idCtrl.text.trim().toLowerCase();
     final pass = _passCtrl.text;
@@ -131,6 +179,16 @@ class _DriverLoginState extends State<DriverLogin> {
 
   @override
   Widget build(BuildContext context) {
+    // Master Prompt 128 (Partie 13/14) — pendant la vérification (une
+    // seule lecture Firestore, quasi instantanée), ne jamais montrer le
+    // formulaire "Connexion..."/"Chargement..." si une session valide est
+    // sur le point d'être restaurée.
+    if (_autoResuming) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F5F5),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFF167DB7))),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(

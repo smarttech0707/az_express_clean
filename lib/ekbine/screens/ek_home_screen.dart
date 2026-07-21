@@ -80,14 +80,14 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text('E',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,
                   fontSize: 18)),
         ),
         const SizedBox(width: 8),
         Text('E-Kbine Services',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontSize: 17,
               fontWeight: FontWeight.w700,
               color: Colors.white,
@@ -108,13 +108,14 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
               ),
             ),
             label: Text('Agent',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     color: Colors.white, fontWeight: FontWeight.w600)),
           );
         }),
         IconButton(
           onPressed: () => Navigator.push(context,
               MaterialPageRoute(builder: (_) => const EkHistoryScreen())),
+          tooltip: 'Historique',
           icon: const Icon(Icons.history_rounded, color: Colors.white),
         ),
       ],
@@ -132,11 +133,11 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Services Télécoms',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 12, color: Colors.white60)),
               const SizedBox(height: 4),
               Text('Rapide · Fiable · Local',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
                     color: Colors.white,
@@ -155,10 +156,10 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
             ),
             child: Column(children: [
               Text('Wallet',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 10, color: kEkGreen)),
               Text(_clientWalletDisplay!,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
                     color: Colors.white,
@@ -177,7 +178,7 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
           child: Text('Choisir un opérateur',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: kEkText)),
@@ -223,7 +224,7 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(op['label'] as String,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: color,
@@ -285,7 +286,7 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
                     const SizedBox(height: 6),
                     Text(a['label'] as String,
                         textAlign: TextAlign.center,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           color: kEkText,
@@ -318,7 +319,7 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
               ),
               const SizedBox(width: 8),
               Text('Commandes en cours',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                       color: kEkText)),
@@ -362,14 +363,14 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Devenez Agent E-Kbine',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           color: Colors.white,
                           fontSize: 15,
                           fontWeight: FontWeight.w800,
                         )),
                     const SizedBox(height: 4),
                     Text('Gagnez de l\'argent en aidant votre communauté',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           color: Colors.white.withValues(alpha: 0.85),
                           fontSize: 12,
                           height: 1.4,
@@ -383,7 +384,7 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text('S\'inscrire maintenant',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             color: kEkGreen,
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
@@ -454,7 +455,7 @@ class _ActiveOrderCard extends StatelessWidget {
             child: Center(
               child: Text(
                 order.operator[0].toUpperCase(),
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     color: opColor,
                     fontSize: 18,
                     fontWeight: FontWeight.w800),
@@ -467,19 +468,19 @@ class _ActiveOrderCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(order.serviceLabel,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: kEkText)),
                 Text(order.beneficiaryNumber,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 12, color: kEkMuted)),
               ],
             ),
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(_fmt(order.totalPaid),
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
                     color: kEkGreen)),
@@ -493,7 +494,7 @@ class _ActiveOrderCard extends StatelessWidget {
               ),
               child: Text(
                 ekStatusLabels[order.status] ?? order.status,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     color: statusColor),

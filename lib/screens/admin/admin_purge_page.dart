@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../theme/app_theme.dart';
 
 class AdminPurgePage extends StatefulWidget {
   const AdminPurgePage({super.key});
@@ -209,7 +210,7 @@ class _AdminPurgePageState extends State<AdminPurgePage> {
               icon: Icons.receipt_long_rounded,
               title: "Commandes",
               subtitle: "Toutes les commandes clients (orders)",
-              color: const Color(0xFFFF6D00),
+              color: AppColors.primary,
               value: _purgeOrders,
               onChanged: _loading
                   ? null
@@ -322,7 +323,12 @@ class _CollectionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    // Master Prompt 125 (Partie 8) — MergeSemantics regroupe titre/sous-titre
+    // et la case à cocher en une seule annonce cohérente pour un lecteur
+    // d'écran (sinon la case s'annoncerait "coché/non coché" sans jamais
+    // dire de quelle collection il s'agit).
+    return MergeSemantics(
+      child: GestureDetector(
       onTap: onChanged == null ? null : () => onChanged!(!value),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -383,6 +389,7 @@ class _CollectionTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

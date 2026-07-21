@@ -190,8 +190,9 @@ class AdminRestaurantsPage extends StatelessWidget {
               Navigator.pop(ctx);
               // supprimer les plats
               final menus = await FirebaseFirestore.instance
-                  .collection("menus")
-                  .where("restaurantId", isEqualTo: doc.id)
+                  .collection("restaurants")
+                  .doc(doc.id)
+                  .collection("menu")
                   .get();
               for (final m in menus.docs) {
                 await m.reference.delete();
@@ -446,8 +447,9 @@ class _MenuManagePage extends StatelessWidget {
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
-            .collection("menus")
-            .where("restaurantId", isEqualTo: restaurantId)
+            .collection("restaurants")
+            .doc(restaurantId)
+            .collection("menu")
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -678,11 +680,13 @@ class _AddMenuItemPageState extends State<_AddMenuItemPage> {
     }
     setState(() => _loading = true);
     try {
-      final docId = widget.existing?.id ??
-          FirebaseFirestore.instance.collection("menus").doc().id;
+      final menuRef = FirebaseFirestore.instance
+          .collection("restaurants")
+          .doc(widget.restaurantId)
+          .collection("menu");
+      final docId = widget.existing?.id ?? menuRef.doc().id;
       final imageUrl = await _uploadImage(docId);
       final payload = <String, dynamic>{
-        "restaurantId": widget.restaurantId,
         "name": name,
         "description": _descCtrl.text.trim(),
         "price": price,
@@ -693,10 +697,7 @@ class _AddMenuItemPageState extends State<_AddMenuItemPage> {
         await widget.existing!.reference.update(payload);
       } else {
         payload["createdAt"] = FieldValue.serverTimestamp();
-        await FirebaseFirestore.instance
-            .collection("menus")
-            .doc(docId)
-            .set(payload);
+        await menuRef.doc(docId).set(payload);
       }
       if (mounted) Navigator.pop(context);
     } catch (e) {

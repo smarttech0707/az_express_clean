@@ -23,8 +23,18 @@ service cloud.firestore {
     function isRealUser() {
       return isAuth() && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
+    // Master Prompt "Corrections finales avant publication" — Bug Critique #1 :
+    // l'accès par crochet ([field]) lève une erreur d'évaluation (donc refuse
+    // silencieusement l'écriture) si le champ est absent d'un des deux côtés,
+    // même quand le champ modifié n'a rien à voir avec celui-ci. .get(field, null)
+    // ne lève jamais d'erreur — un champ absent des deux côtés reste "unchanged"
+    // (null == null), un champ présent d'un seul côté est correctement détecté
+    // comme changé. Comportement strictement identique quand le champ existe
+    // déjà des deux côtés (cas normal) — élargissement de sécurité, pas un
+    // relâchement : aucune écriture auparavant refusée à raison n'est permise
+    // par ce changement.
     function unchanged(field) {
-      return request.resource.data[field] == resource.data[field];
+      return request.resource.data.get(field, null) == resource.data.get(field, null);
     }
     function notPresent(field) {
       return !(field in request.resource.data);
@@ -69,6 +79,22 @@ service cloud.firestore {
             && request.resource.data.amount is int);
         allow update: if false;
         allow delete: if isAdmin();
+      }
+      // Historique local des notifications push reçues sur le device — écrit
+      // par NotificationService._saveNotification() (lib/services/
+      // notification_service.dart) à chaque réception FCM, jamais par une
+      // Cloud Function. Bug critique confirmé le 2026-07-20 (audit module
+      // Notifications) : cette sous-collection n'avait jamais eu de règle
+      // dédiée — tout écrivait/lisait en permission-denied depuis le début,
+      // avalé silencieusement par les `catch (_) {}` déjà en place côté
+      // Dart. Le centre de notifications (notification_center.dart) n'a
+      // donc jamais fonctionné pour aucun client, sur aucun device.
+      match /notifications/{notifId} {
+        allow read:   if isOwner(clientId) || isAdmin();
+        allow create: if isOwner(clientId);
+        allow update: if isOwner(clientId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+        allow delete: if isOwner(clientId) || isAdmin();
       }
     }
 
@@ -131,6 +157,19 @@ service cloud.firestore {
       allow read:  if isAuth();
       allow write: if isAdmin();
 
+      // Master Prompt "photos manquantes" : le propriétaire (restaurant_owners
+      // ownerId -> restaurantId, même lookup que la sous-collection menu
+      // ci-dessous) peut modifier son logo et son statut ouvert/fermé — jamais
+      // le wallet ni aucun autre champ. `isOpen` était déjà écrit directement
+      // par le client (restaurant_owner_dashboard.dart:_toggleOpen) sans
+      // qu'aucune règle owner ne l'autorise jusqu'ici — corrigé au passage,
+      // même portée de risque que l'ajout de logoUrl.
+      allow update: if isRealUser()
+        && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+            .data.get('restaurantId', '') == restaurantId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['logoUrl', 'isOpen']);
+
       // Sous-collection utilisée par restaurant_owner_dashboard.dart
       match /menu/{menuId} {
         allow read: if isAuth();
@@ -180,7 +219,12 @@ service cloud.firestore {
 
     match /boulangerie_requests/{requestId} {
       allow create: if isRealUser() && request.resource.data.uid == uid();
-      allow read:   if isAdmin();
+      // Même exception propriétaire que driver_requests/seller_requests/
+      // restaurant_requests (uid() prouvé par un vrai compte Firebase Auth,
+      // pas une simple affirmation côté client) — sans elle, boulangerie_login.dart
+      // ne pouvait jamais lire le statut de sa propre demande en attente
+      // (permission-denied systématique), contrairement aux 3 rôles analogues.
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
@@ -201,6 +245,18 @@ service cloud.firestore {
       allow update: if isAuth()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentUid'])
         && request.resource.data.currentUid == uid();
+
+      // Master Prompt "photos manquantes" : une fois la session déjà liée
+      // (currentUid déjà écrit ci-dessus au login), la même session peut
+      // modifier son logo et son statut de garde — jamais currentUid lui-même
+      // dans cette branche (déjà couvert ci-dessus), jamais le wallet/password.
+      // `isOnDuty` était déjà écrit directement par le client
+      // (pharmacie_dashboard.dart:_toggle) sans qu'aucune règle ne l'autorise
+      // jusqu'ici — corrigé au passage, même portée de risque que logoUrl.
+      allow update: if isAuth()
+        && resource.data.currentUid == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['logoUrl', 'isOnDuty']);
     }
 
     // Identifiants pharmacie hachés — écriture/lecture exclusivement via
@@ -209,8 +265,25 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Contrairement à driver_requests/seller_requests/restaurant_requests
+    // (qui créent un vrai compte Firebase Auth email/mot de passe AVANT
+    // d'écrire la demande, donc uid() == leur propre uid trivialement),
+    // pharmacie_register.dart n'authentifie personne — la session est encore
+    // anonyme par défaut côté mobile à ce stade (les pharmacies utilisent une
+    // authentification Firestore custom, jamais Firebase Auth, voir
+    // pharmacie_credentials). L'ancienne règle exigeait isRealUser() +
+    // uid == caller alors que le code n'écrivait même pas de champ uid —
+    // la création échouait donc à 100% des tentatives (permission-denied
+    // systématique, corrigé 2026-07-09). Traité comme un formulaire de lead
+    // pré-compte, même pattern que driver_applications/partner_applications :
+    // écriture publique avec validation stricte de la forme des champs,
+    // lecture réservée à l'admin (pas de lien à un compte propre possible).
     match /pharmacie_requests/{requestId} {
-      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow create: if request.resource.data.keys().hasAll(['ownerName', 'pharmacieName', 'phone', 'address', 'status'])
+        && request.resource.data.ownerName is string && request.resource.data.ownerName.size() > 0 && request.resource.data.ownerName.size() <= 200
+        && request.resource.data.pharmacieName is string && request.resource.data.pharmacieName.size() > 0 && request.resource.data.pharmacieName.size() <= 200
+        && request.resource.data.phone is string && request.resource.data.phone.size() > 0 && request.resource.data.phone.size() <= 30
+        && request.resource.data.status == 'pending';
       allow read:   if isAdmin();
       allow update: if isAdmin();
       allow delete: if isAdmin();
@@ -243,7 +316,21 @@ service cloud.firestore {
         && request.resource.data.budget is int
         && request.resource.data.budget >= 500
         && notPresent('driverId')
-        && request.resource.data.isPaid == false
+        // isPaid ne peut être vrai à la création que pour un paiement wallet
+        // (débit du client dans la même transaction Flutter que la création
+        // de la commande — livraison_screen.dart/courses_screen.dart/
+        // restaurant_menu.dart/boulangerie_order_page.dart) — jamais pour
+        // cash. Bug confirmé en production le 2026-07-19 (audit modules) :
+        // l'ancienne exigence isPaid==false inconditionnelle bloquait ces 4
+        // écrans à 100% pour tout paiement wallet (permission-denied),
+        // déjà suspecté sans preuve au Master Prompt 80. Ne réintroduit pas
+        // la faille corrigée au Master Prompt 80 (crédit partenaire sans
+        // paiement réel) : deliverOrderCF continue d'exiger indépendamment
+        // order.isPaid==true avant tout crédit, quelle que soit la façon
+        // dont isPaid est devenu true.
+        && (request.resource.data.isPaid == false
+            || (request.resource.data.isPaid == true
+                && request.resource.data.get('paymentMethod', '') == 'wallet'))
         && request.resource.data.status == 'pending';
       allow update: if isAdmin() ||
         (isAuth() && resource.data.driverId == uid()
@@ -252,26 +339,23 @@ service cloud.firestore {
           && (
             (resource.data.status == 'assigned'    && request.resource.data.status == 'accepted')
             || (resource.data.status == 'accepted' && request.resource.data.status == 'picked_up')
-            // À la livraison espèces : isPaid peut passer à true
-            || (resource.data.status == 'picked_up' && request.resource.data.status == 'delivered'
-                && (unchanged('isPaid') || request.resource.data.isPaid == true))
+            // isPaid ne peut plus être flippé directement ici (faille confirmée
+            // et corrigée, Master Prompt 80, 2026-07-09) : le passage à "payé"
+            // (cash ou wallet) doit obligatoirement transiter par deliverOrderCF/
+            // payOrderFromWalletCF (Admin SDK, validation serveur), jamais par
+            // une écriture Firestore directe du livreur.
+            || (resource.data.status == 'picked_up' && request.resource.data.status == 'delivered')
             || (resource.data.status == request.resource.data.status)
           )
         ) ||
         (isAuth() && resource.data.sellerId == uid()
           && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
-          && unchanged('paymentMethod') && unchanged('driverId')) ||
+          && unchanged('paymentMethod') && unchanged('driverId') && unchanged('status')) ||
         // Client annule sa commande en attente
         (isOwner(resource.data.clientId)
           && resource.data.status == 'pending'
           && request.resource.data.status == 'cancelled'
           && unchanged('budget') && unchanged('driverId') && unchanged('isPaid')) ||
-        // Système côté client assigne automatiquement le livreur le plus proche
-        (isOwner(resource.data.clientId)
-          && resource.data.status == 'pending'
-          && request.resource.data.status == 'assigned'
-          && unchanged('budget') && unchanged('clientId')
-          && unchanged('isPaid') && unchanged('paymentMethod')) ||
         // Client peut noter le livreur ou le vendeur après livraison
         (isOwner(resource.data.clientId)
           && resource.data.status == 'delivered'
@@ -438,18 +522,35 @@ service cloud.firestore {
     }
 
     match /marketplace_chats/{chatId} {
+      // Master Prompt "Corrections finales avant publication" — Bug Majeur #3 :
+      // chatId = 'mp_<productId>_<buyerUid>' — l'ancien pattern [^_]+ supposait
+      // un productId sans underscore, ce qui échouait dès qu'un ID de produit en
+      // contenait un (ex: un ID personnalisé). `.*` (glouton) retrouve toujours
+      // la bonne coupure juste avant le suffixe _<uid> exact, quel que soit le
+      // contenu du segment productId — même niveau de sécurité (le suffixe uid
+      // doit toujours correspondre exactement à l'appelant), juste indépendant
+      // du format de l'ID.
       allow read, write: if isAdmin() || (isAuth() && (
-        chatId.matches('mp_[^_]+_' + uid())
+        chatId.matches('mp_.*_' + uid())
         || (resource != null && resource.data.sellerId == uid())
         || (request.resource != null && request.resource.data.sellerId == uid())
       ));
       match /messages/{msgId} {
         allow read: if isAuth() && (isAdmin()
-          || chatId.matches('mp_[^_]+_' + uid())
+          || chatId.matches('mp_.*_' + uid())
           || get(/databases/$(database)/documents/marketplace_chats/$(chatId)).data.sellerId == uid());
+        // Corrigé (Master Prompt "Corrections finales avant publication",
+        // test réel "premier message") : le client (mp_chat_page.dart:_addMessage)
+        // écrit le champ `senderUid`, jamais `senderId` — cette règle vérifiait
+        // un nom de champ qui n'a jamais existé dans le document réel, donc
+        // `request.resource.data.senderId` était toujours absent et l'accès par
+        // point levait une erreur d'évaluation (refus systématique de TOUT
+        // message, depuis toujours, indépendamment du bug de regex ci-dessus).
+        // Même exigence de sécurité (l'expéditeur doit être l'appelant), juste
+        // sur le bon nom de champ.
         allow create: if isAuth()
-          && request.resource.data.senderId == uid()
-          && request.resource.data.keys().hasAll(['senderId','type'])
+          && request.resource.data.senderUid == uid()
+          && request.resource.data.keys().hasAll(['senderUid','type'])
           && request.resource.data.type in ['text','audio'];
         allow update, delete: if isAdmin();
       }
@@ -568,8 +669,8 @@ service cloud.firestore {
 
     match /boutique_products/{productId} {
       allow read: if isAuth();
-      allow create: if isRealUser()
-        && request.resource.data.sellerId == uid();
+      allow create: if isAdmin()
+        || (isRealUser() && request.resource.data.sellerId == uid());
       allow update: if isAdmin()
         || (isRealUser()
           && resource.data.sellerId == uid()
@@ -717,6 +818,21 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
+    // Demandes de suppression de compte — lib/services/account_deletion_service.dart
+    // (depuis l'app, authentifié) et /delete-account (site public, non authentifié,
+    // conformité Google Play "account deletion"). Écriture publique volontaire
+    // (même raisonnement que driver_applications/partner_applications ci-dessus,
+    // le point d'entrée web n'a jamais de session Firebase) — traité manuellement
+    // par un admin, jamais une suppression automatique instantanée de données financières.
+    match /account_deletion_requests/{reqId} {
+      allow create: if request.resource.data.keys().hasAll(['role', 'contactPhone', 'status', 'requestedVia'])
+        && request.resource.data.role in ['client', 'livreur', 'seller', 'restaurant', 'pharmacie', 'boulangerie', 'ekbine_agent', 'real_estate_agent', 'fleet_owner']
+        && request.resource.data.contactPhone is string && request.resource.data.contactPhone.size() > 0 && request.resource.data.contactPhone.size() <= 30
+        && request.resource.data.status == 'pending'
+        && request.resource.data.requestedVia in ['app', 'web'];
+      allow read, update, delete: if isAdmin();
+    }
+
     // ── Config app (publique : couleurs, textes UI — pas de données financières) ─
     match /config/{configId} {
       allow read:  if true;
@@ -796,6 +912,71 @@ service cloud.firestore {
     // ── AZ IA — actions en attente de confirmation, gérées par Cloud Functions ──
     match /ai_pending_actions/{actionId} {
       allow read: if isAuth() && (resource.data.uid == uid() || isAdmin());
+      allow write: if false;
+    }
+
+    // ── Master Prompt 108 — AIProviderService (multi-fournisseurs IA) ───────
+    // Aucune clé API n'est jamais stockée ici — uniquement des préférences
+    // (fournisseur actif, fallback, quotas) — mais reste admin-only en
+    // écriture par principe de moindre privilège, même pour un contenu non
+    // sensible en soi (évite qu'un utilisateur ne modifie le comportement
+    // global d'AZ IA pour tous).
+    match /settings/ai {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Écriture exclusivement via AIProviderService (Admin SDK) — jamais
+    // depuis Flutter. Lecture admin uniquement (coûts/usage = donnée
+    // financière/opérationnelle sensible, pas un contenu utilisateur).
+    match /ai_usage/{entryId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    match /ai_daily_stats/{statId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    match /ai_logs/{logId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // Cache interne pur (réponses IA pour questions identiques) — aucun
+    // intérêt pour un client ou un admin de le lire/écrire directement.
+    match /ai_cache/{cacheKey} {
+      allow read, write: if false;
+    }
+
+    // L'utilisateur peut lire son propre compteur de quota restant (utile
+    // pour un futur affichage "X requêtes IA restantes aujourd'hui") ;
+    // jamais d'écriture cliente (uniquement AIProviderService, Admin SDK).
+    match /ai_quotas/{quotaId} {
+      allow read:  if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow write: if false;
+    }
+
+    // ── Master Prompt 113 — mémoire utilisateur AZ IA (jalon M8, version
+    // scopée : pas d'écran de gestion dédié dans cette passe, mais une vraie
+    // collection opt-in, pas un stub). Écrite exclusivement par l'outil AZ IA
+    // remember_user_info (Admin SDK) quand l'utilisateur communique une
+    // information dans la conversation — jamais par Flutter directement.
+    // Lecture par le propriétaire : il doit pouvoir voir ce qu'AZ IA sait de
+    // lui, cohérent avec le principe déjà acté pour ai_conversations
+    // (contrôle utilisateur sur sa propre mémoire).
+    match /ai_user_memory/{uid} {
+      allow read:  if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    // Rappels AZ IA (Master Prompt 118) — même schéma que ai_pending_actions
+    // (uid en champ, pas en ID de document) : écriture exclusivement via
+    // create_reminder (handler)/le scheduler sendDueReminders, jamais depuis
+    // le client.
+    match /ai_reminders/{reminderId} {
+      allow read:  if isAuth() && (resource.data.uid == uid() || isAdmin());
       allow write: if false;
     }
   }

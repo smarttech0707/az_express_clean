@@ -23,6 +23,65 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
   bool _loading  = false;
   bool _obscure  = true;
 
+  // Master Prompt 128 — voir driver_login.dart pour le contexte complet :
+  // Firebase Auth persiste déjà la session, cet écran ne la consultait
+  // simplement jamais avant d'afficher le formulaire.
+  bool _autoResuming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && !user.isAnonymous) {
+      _autoResuming = true;
+      _tryAutoResume(user);
+    }
+  }
+
+  Future<void> _tryAutoResume(User user) async {
+    try {
+      final ownerDoc = await FirebaseFirestore.instance
+          .collection('restaurant_owners')
+          .doc(user.uid)
+          .get();
+      if (!mounted) return;
+      if (!ownerDoc.exists) {
+        setState(() => _autoResuming = false);
+        return;
+      }
+      final restaurantId = ownerDoc.data()?['restaurantId'] as String?;
+      if (restaurantId == null) {
+        setState(() => _autoResuming = false);
+        return;
+      }
+      final restoDoc = await FirebaseFirestore.instance
+          .collection('restaurants')
+          .doc(restaurantId)
+          .get();
+      if (!mounted) return;
+      if (!restoDoc.exists) {
+        setState(() => _autoResuming = false);
+        return;
+      }
+      // Même chemin exact que `_login()` en cas de succès.
+      NotificationService().saveToken(user.uid, 'restaurants');
+      await SubscriptionService.checkAndRenew('restaurants', restaurantId);
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => RestaurantOwnerDashboard(
+            ownerId: user.uid,
+            restaurantId: restaurantId,
+            restaurantData: restoDoc.data()!,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) setState(() => _autoResuming = false);
+    }
+  }
+
   @override
   void dispose() {
     _phoneCtrl.dispose();
@@ -153,11 +212,17 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
 
   @override
   Widget build(BuildContext context) {
+    if (_autoResuming) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F5F5),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFF1565C0))),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Espace Restaurateur',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -191,10 +256,10 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
             ),
             const SizedBox(height: 20),
             Text('Connexion',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 22, fontWeight: FontWeight.bold)),
             Text('Accédez à votre espace restaurateur',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, color: Colors.grey.shade600)),
 
             const SizedBox(height: 36),
@@ -265,7 +330,7 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
                 ),
                 child: Text(
                   'Mot de passe oublié ?',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       color: const Color(0xFF1565C0), fontSize: 13),
                 ),
               ),
@@ -286,7 +351,7 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text('Se connecter',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),

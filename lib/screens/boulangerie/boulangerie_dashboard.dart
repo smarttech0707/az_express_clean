@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../widgets/partner_account_sheet.dart';
+import '../../widgets/logout_confirm_dialog.dart';
 
 class BoulangerieDashboard extends StatefulWidget {
   final String boulangerieId;
@@ -28,12 +30,14 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
   late bool _isOpen;
   bool _toggling = false;
   int _prevNewCount = -1;
+  String? _photoUrl;
 
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 4, vsync: this);
     _isOpen  = widget.boulangerieData['isOpen'] == true;
+    _photoUrl = widget.boulangerieData['logoUrl'] as String?;
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
       if (type == 'new_boulangerie_order') _tabCtrl.animateTo(0);
@@ -71,7 +75,12 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
     ));
   }
 
-  Future<void> _logout() async {
+  // Master Prompt 135 — _logout() affiche désormais une confirmation avant
+  // d'appeler _doLogout(), qui porte l'intégralité de la logique déjà
+  // existante et inchangée (signOut, redirection).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'boulangerie');
     await FirebaseAuth.instance.signOut();
     try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
@@ -138,12 +147,12 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(name,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontWeight: FontWeight.bold, fontSize: 15),
                 overflow: TextOverflow.ellipsis),
             Text(
               _isOpen ? '🟢 Ouvert' : '🔴 Fermé',
-              style: GoogleFonts.inter(fontSize: 11, color: Colors.white70),
+              style: GoogleFonts.urbanist(fontSize: 11, color: Colors.white70),
             ),
           ],
         ),
@@ -179,13 +188,34 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
                         size: 16),
                     const SizedBox(width: 4),
                     Text('$wallet F',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 12,
                             fontWeight: FontWeight.bold)),
                   ]),
                 ),
               );
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: 'Mon compte',
+            onPressed: () => showPartnerAccountSheet(
+              context,
+              role: 'boulangerie',
+              roleLabel: 'Boulangerie',
+              name: name as String?,
+              phone: widget.boulangerieData['phone'] as String?,
+              onLogout: _logout,
+              photoUrl: _photoUrl,
+              photoStoragePath: 'boulangerie_logos/${widget.boulangerieId}/logo.jpg',
+              onPhotoUploaded: (url) async {
+                await FirebaseFirestore.instance
+                    .collection('boulangeries')
+                    .doc(widget.boulangerieId)
+                    .update({'logoUrl': url});
+                if (mounted) setState(() => _photoUrl = url);
+              },
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
@@ -200,7 +230,7 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
           unselectedLabelColor: Colors.white60,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          labelStyle: GoogleFonts.inter(
+          labelStyle: GoogleFonts.urbanist(
               fontWeight: FontWeight.w600, fontSize: 12),
           tabs: const [
             Tab(icon: Icon(Icons.fiber_new_rounded, size: 18), text: 'Nouvelles'),

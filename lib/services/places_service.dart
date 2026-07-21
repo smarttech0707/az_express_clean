@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../constants/app_constants.dart';
 
@@ -56,8 +57,16 @@ class PlacesService {
   static const _reverseTtl = Duration(hours: 2);
 
   // ═══════════════════════════════════════════════════════════════════════
-  // AUTOCOMPLETE — Nominatim d'abord, Google en fallback si < 3 résultats
-  // ═══════════════════════════════════════════════════════════════════════
+  // AUTOCOMPLETE — Firestore `places` d'abord (Master Prompt 130 : ce
+  // moteur ne consultait jusqu'ici jamais la collection `places` déjà
+  // vérifiée/administrée par AZ Express — contrairement à
+  // `PlacesSearchService` (utilisé par `livraison_screen.dart`), qui la
+  // consulte déjà en premier. Un lieu réel comme "Château d'Eau", déjà
+  // enregistré dans `places`, était donc trouvable depuis un écran de
+  // commande mais pas depuis l'autre — cause concrète et vérifiée de
+  // "certains lieux ne sont pas trouvés" scindée par écran plutôt que par
+  // absence réelle de données.), puis Nominatim, puis Google en dernier
+  // recours si toujours insuffisant.
   static Future<List<PlaceSuggestion>> autocomplete(String input) async {
     final q = input.trim();
     if (q.length < 3) return [];
@@ -69,21 +78,26 @@ class PlacesService {
       return cached.suggestions;
     }
 
-    // 1. Nominatim (gratuit) en priorité
-    final nominatim = await _nominatimSearch(q);
+    // 1. Lieux locaux déjà vérifiés (Firestore `places`)
+    final local = await _searchFirestore(q.toLowerCase());
+
+    // 2. Nominatim (gratuit) complète si peu de résultats locaux
+    final nominatim = local.length >= 5 ? <PlaceSuggestion>[] : await _nominatimSearch(q);
+
+    final seen   = <String>{};
+    final merged = <PlaceSuggestion>[];
+    for (final s in [...local, ...nominatim]) {
+      final key = s.mainText.toLowerCase().trim();
+      if (seen.add(key)) merged.add(s);
+    }
 
     List<PlaceSuggestion> result;
-
-    if (nominatim.length >= 3) {
-      // Résultats suffisants — pas d'appel Google
-      result = nominatim.take(7).toList();
+    if (merged.length >= 3) {
+      result = merged.take(7).toList();
     } else {
-      // Fallback Google si OSM insuffisant
+      // Fallback Google si local+OSM insuffisant
       final google = await _googleAutocomplete(q);
-
-      final seen   = <String>{};
-      final merged = <PlaceSuggestion>[];
-      for (final s in [...nominatim, ...google]) {
+      for (final s in google) {
         final key = s.mainText.toLowerCase().trim();
         if (seen.add(key)) merged.add(s);
       }
@@ -98,6 +112,68 @@ class PlacesService {
     }
 
     return result;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // MOTEUR 0 — Firestore `places` (lieux locaux déjà vérifiés/administrés)
+  // Même requête que `PlacesSearchService._searchFirestore` (prefixe sur
+  // `nameSearch` + `keywords` array-contains) — dupliquée ici plutôt que
+  // partagée pour ne pas fusionner deux services par ailleurs distincts et
+  // fonctionnels (risque de régression sur `destination_picker.dart`, gros
+  // fichier déjà en place, non modifié dans cette passe).
+  // ═══════════════════════════════════════════════════════════════════════
+  static Future<List<PlaceSuggestion>> _searchFirestore(String q) async {
+    try {
+      final db = FirebaseFirestore.instance;
+      final seen = <String>{};
+      final out  = <PlaceSuggestion>[];
+
+      final snap1 = await db
+          .collection('places')
+          .where('nameSearch', isGreaterThanOrEqualTo: q)
+          .where('nameSearch', isLessThanOrEqualTo: '$q')
+          .limit(10)
+          .get();
+      for (final doc in snap1.docs) {
+        if (!seen.add(doc.id)) continue;
+        final d = doc.data();
+        final lat = (d['latitude'] as num?)?.toDouble();
+        final lng = (d['longitude'] as num?)?.toDouble();
+        out.add(PlaceSuggestion(
+          placeId:       doc.id,
+          description:   (d['address'] as String?) ?? (d['name'] as String? ?? ''),
+          mainText:      (d['name'] as String?) ?? '',
+          secondaryText: (d['address'] as String?) ?? '',
+          latitude:      lat,
+          longitude:     lng,
+          source:        'firestore',
+        ));
+      }
+
+      final snap2 = await db
+          .collection('places')
+          .where('keywords', arrayContains: q)
+          .limit(6)
+          .get();
+      for (final doc in snap2.docs) {
+        if (!seen.add(doc.id)) continue;
+        final d = doc.data();
+        final lat = (d['latitude'] as num?)?.toDouble();
+        final lng = (d['longitude'] as num?)?.toDouble();
+        out.add(PlaceSuggestion(
+          placeId:       doc.id,
+          description:   (d['address'] as String?) ?? (d['name'] as String? ?? ''),
+          mainText:      (d['name'] as String?) ?? '',
+          secondaryText: (d['address'] as String?) ?? '',
+          latitude:      lat,
+          longitude:     lng,
+          source:        'firestore',
+        ));
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════

@@ -1,66 +1,63 @@
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// ── Détection plateforme ─────────────────────────────────────────────────────
-// SF Pro n'est disponible qu'en tant que police système iOS/macOS.
-// On ne peut pas la bundler — Flutter l'appelle via son nom interne.
-bool get _isApple => !kIsWeb && (Platform.isIOS || Platform.isMacOS);
-
-// SF Pro Display → grandes tailles (Display, Headline)
-const String _sfProDisplay = '.SF Pro Display';
-// SF Pro Text    → corps, labels, boutons
-const String _sfProText    = '.SF Pro Text';
-
 // ══════════════════════════════════════════════════════════════════════════════
-// COULEURS — AZ Express Brand
+// COULEURS — AZ Express Brand (Master Prompt 120, refonte premium 2026-07-15)
+// Palette douce inspirée de Tailwind slate/orange/green/red/blue/amber —
+// permet de dériver les teintes non fournies explicitement (pressed states,
+// mode sombre) en restant cohérent avec un système reconnu.
 // ══════════════════════════════════════════════════════════════════════════════
 class AppColors {
   AppColors._();
 
-  static const primary      = Color(0xFFFF6B00);
-  static const primaryLight = Color(0xFFFF8C42);
-  static const primaryDark  = Color(0xFFE65100);
-  static const primaryBg    = Color(0xFFFFF3E0);
+  static const primary      = Color(0xFFF97316); // orange-500
+  static const primaryLight = Color(0xFFFB923C); // orange-400 — "orange secondaire"
+  static const primaryDark  = Color(0xFFEA580C); // orange-600 — état pressed
+  static const primaryBg    = Color(0xFFFFF7ED); // orange-50 — teinte de fond
 
-  static const primary05 = Color(0x0DFF6B00);
-  static const primary08 = Color(0x14FF6B00);
-  static const primary10 = Color(0x1AFF6B00);
-  static const primary15 = Color(0x26FF6B00);
-  static const primary20 = Color(0x33FF6B00);
-  static const primary35 = Color(0x59FF6B00);
+  static const primary05 = Color(0x0DF97316);
+  static const primary08 = Color(0x14F97316);
+  static const primary10 = Color(0x1AF97316);
+  static const primary15 = Color(0x26F97316);
+  static const primary20 = Color(0x33F97316);
+  static const primary35 = Color(0x59F97316);
 
-  static const blue      = Color(0xFF1565C0);
-  static const blueDark  = Color(0xFF0D47A1);
-  static const blueLight = Color(0xFF1E88E5);
-  static const blueBg    = Color(0xFFE3F2FD);
+  // "Information" — bleu doux, alias sémantique explicite via `info`.
+  static const blue      = Color(0xFF3B82F6); // blue-500
+  static const blueDark  = Color(0xFF1D4ED8); // blue-700
+  static const blueLight = Color(0xFF60A5FA); // blue-400
+  static const blueBg    = Color(0xFFEFF6FF); // blue-50
+  static const info      = blue;
 
-  static const blue05 = Color(0x0D1565C0);
-  static const blue10 = Color(0x1A1565C0);
-  static const blue15 = Color(0x261565C0);
-  static const blue20 = Color(0x331565C0);
-  static const blue40 = Color(0x661565C0);
+  static const blue05 = Color(0x0D3B82F6);
+  static const blue10 = Color(0x1A3B82F6);
+  static const blue15 = Color(0x263B82F6);
+  static const blue20 = Color(0x333B82F6);
+  static const blue40 = Color(0x663B82F6);
 
-  static const green    = Color(0xFF2E7D32);
-  static const greenBg  = Color(0xFFE8F5E9);
-  static const green10  = Color(0x1A2E7D32);
+  static const green    = Color(0xFF22C55E);
+  static const greenBg  = Color(0xFFF0FDF4);
+  static const green10  = Color(0x1A22C55E);
 
   static const purple   = Color(0xFF6A1B9A);
   static const purpleBg = Color(0xFFF3E5F5);
 
-  static const red   = Color(0xFFC62828);
-  static const redBg = Color(0xFFFFEBEE);
+  static const red   = Color(0xFFEF4444);
+  static const redBg = Color(0xFFFEF2F2);
 
-  static const bg       = Color(0xFFF8F9FB);
-  static const bgLight  = Color(0xFFFCFCFE);
-  static const card     = Color(0xFFFFFFFF);
-  static const text     = Color(0xFF0F172A);
-  static const textMuted = Color(0xFF64748B);
-  static const textLight = Color(0xFF94A3B8);
-  static const divider  = Color(0xFFE2E8F0);
-  static const border   = Color(0xFFCBD5E1);
+  // "Avertissement" — n'existait pas avant cette passe, purement additif.
+  static const warning   = Color(0xFFF59E0B); // amber-500
+  static const warningBg = Color(0xFFFFFBEB); // amber-50
+
+  static const bg       = Color(0xFFF8FAFC); // slate-50 — fond principal
+  static const bgLight  = Color(0xFFFCFCFD);
+  static const card     = Color(0xFFFFFFFF); // cartes
+  static const text     = Color(0xFF1E293B); // slate-800 — titre
+  static const textMuted = Color(0xFF334155); // slate-700 — texte principal
+  static const textLight = Color(0xFF64748B); // slate-500 — texte secondaire
+  static const divider  = Color(0xFFE2E8F0); // slate-200 — bordures
+  static const border   = Color(0xFFE2E8F0);
 
   static const success  = Color(0xFF22C55E);
   static const error    = Color(0xFFEF4444);
@@ -78,12 +75,20 @@ class AppColors {
   static const black12 = Color(0x1F000000);
   static const black15 = Color(0x26000000);
   static const black20 = Color(0x33000000);
+
+  // ── Mode sombre (Master Prompt 120) — jamais de noir pur, mêmes teintes
+  // "slate" foncées que le reste de la palette pour rester cohérent.
+  static const bgDark        = Color(0xFF0F172A); // slate-900
+  static const cardDark      = Color(0xFF1E293B); // slate-800
+  static const textDark      = Color(0xFFF8FAFC); // slate-50
+  static const textMutedDark = Color(0xFFCBD5E1); // slate-300
+  static const textLightDark = Color(0xFF94A3B8); // slate-400
+  static const dividerDark   = Color(0xFF334155); // slate-700
+  static const borderDark    = Color(0xFF334155);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SYSTÈME TYPOGRAPHIQUE RESPONSIVE
-// iOS  → SF Pro Display (titres) / SF Pro Text (corps)
-// Android / Web → Inter (Google Fonts)
+// SYSTÈME TYPOGRAPHIQUE RESPONSIVE — Urbanist partout (Master Prompt 120)
 // ══════════════════════════════════════════════════════════════════════════════
 class AppTypography {
   AppTypography._();
@@ -95,42 +100,33 @@ class AppTypography {
   static double _r(BuildContext context, double base) =>
       (base * _scale(context)).roundToDouble();
 
-  // ── Tailles ─────────────────────────────────────────────────────────────
+  // ── Tailles (Master Prompt 124 — hiérarchie exacte : titre principal 20,
+  // titre secondaire 18, texte 16, texte secondaire 14, petit texte 13) ────
   static double displayLarge(BuildContext ctx)  => _r(ctx, 34);
   static double displayMedium(BuildContext ctx) => _r(ctx, 28);
-  static double headline(BuildContext ctx)      => _r(ctx, 22);
+  static double headline(BuildContext ctx)      => _r(ctx, 20);
   static double titleLarge(BuildContext ctx)    => _r(ctx, 18);
   static double titleMedium(BuildContext ctx)   => _r(ctx, 16);
   static double titleSmall(BuildContext ctx)    => _r(ctx, 14);
-  static double bodyLarge(BuildContext ctx)     => _r(ctx, 15);
-  static double bodyMedium(BuildContext ctx)    => _r(ctx, 13);
-  static double bodySmall(BuildContext ctx)     => _r(ctx, 12);
+  static double bodyLarge(BuildContext ctx)     => _r(ctx, 16);
+  static double bodyMedium(BuildContext ctx)    => _r(ctx, 14);
+  static double bodySmall(BuildContext ctx)     => _r(ctx, 13);
   static double labelLarge(BuildContext ctx)    => _r(ctx, 13);
   static double labelMedium(BuildContext ctx)   => _r(ctx, 12);
   static double labelSmall(BuildContext ctx)    => _r(ctx, 11);
 
-  // ── Constructeur de style platform-aware ────────────────────────────────
-  // [display] → SF Pro Display / Inter Bold  (Display, Headline)
-  // [!display] → SF Pro Text / Inter         (Title, Body, Label)
+  // ── Constructeur de style — Urbanist partout (Master Prompt 120), plus
+  // aucun branchement SF Pro (iOS)/Poppins (Android/Web) : une seule police
+  // cohérente sur toutes les plateformes.
   static TextStyle _build({
     required BuildContext ctx,
     required double size,
     required FontWeight weight,
     Color? color,
     double letterSpacing = 0,
-    bool display = false,       // true → grandes tailles (Display/Headline)
+    bool display = false,
   }) {
-    if (_isApple) {
-      return TextStyle(
-        fontFamily:    display ? _sfProDisplay : _sfProText,
-        fontSize:      size,
-        fontWeight:    weight,
-        color:         color,
-        letterSpacing: letterSpacing,
-        decoration:    TextDecoration.none,
-      );
-    }
-    return GoogleFonts.poppins(
+    return GoogleFonts.urbanist(
       fontSize:      size,
       fontWeight:    weight,
       color:         color,
@@ -139,10 +135,11 @@ class AppTypography {
   }
 
   // ── Styles complets ──────────────────────────────────────────────────────
+  // Grand titre — Urbanist Bold 700.
   static TextStyle displayLargeStyle(BuildContext ctx,
           {Color? color, FontWeight? weight}) =>
       _build(ctx: ctx, size: displayLarge(ctx),
-          weight: weight ?? FontWeight.w800,
+          weight: weight ?? FontWeight.w700,
           color: color ?? AppColors.text,
           letterSpacing: -0.5, display: true);
 
@@ -153,17 +150,19 @@ class AppTypography {
           color: color ?? AppColors.text,
           letterSpacing: -0.3, display: true);
 
+  // Titre écran — Urbanist SemiBold 600.
   static TextStyle headlineStyle(BuildContext ctx,
           {Color? color, FontWeight? weight}) =>
       _build(ctx: ctx, size: headline(ctx),
-          weight: weight ?? FontWeight.w700,
+          weight: weight ?? FontWeight.w600,
           color: color ?? AppColors.text,
           display: true);
 
+  // Titre carte — Urbanist SemiBold 600.
   static TextStyle titleLargeStyle(BuildContext ctx,
           {Color? color, FontWeight? weight}) =>
       _build(ctx: ctx, size: titleLarge(ctx),
-          weight: weight ?? FontWeight.w700,
+          weight: weight ?? FontWeight.w600,
           color: color ?? AppColors.text);
 
   static TextStyle titleMediumStyle(BuildContext ctx,
@@ -178,10 +177,11 @@ class AppTypography {
           weight: weight ?? FontWeight.w600,
           color: color ?? AppColors.text);
 
+  // Texte — Urbanist Medium 500 (Master Prompt 124).
   static TextStyle bodyLargeStyle(BuildContext ctx,
           {Color? color, FontWeight? weight}) =>
       _build(ctx: ctx, size: bodyLarge(ctx),
-          weight: weight ?? FontWeight.w400,
+          weight: weight ?? FontWeight.w500,
           color: color ?? AppColors.text);
 
   static TextStyle bodyMediumStyle(BuildContext ctx,
@@ -209,6 +209,22 @@ class AppTypography {
           weight: weight ?? FontWeight.w500,
           color: color ?? AppColors.textLight,
           letterSpacing: 0.4);
+
+  // ── Master Prompt 126 — hiérarchie officielle du Design System.
+  // "Caption"/"Button" n'existaient pas comme noms explicites — alias
+  // sémantiques vers les tailles déjà en place (bodySmall/16-SemiBold),
+  // aucune nouvelle taille inventée : Display=displayLarge/Medium,
+  // Headline=headline, Title=titleLarge/Medium/Small, Body=bodyLarge/Medium,
+  // Caption=bodySmall, Button=buttonStyle, Label=labelLarge/Medium/Small.
+  static TextStyle captionStyle(BuildContext ctx, {Color? color}) =>
+      bodySmallStyle(ctx, color: color);
+
+  /// Style de bouton officiel (16px SemiBold) — identique à celui déjà
+  /// appliqué par `ElevatedButtonTheme`/`OutlinedButtonTheme` dans
+  /// [AppTheme], exposé ici pour tout composant bouton personnalisé
+  /// (ex. `AppButton`) qui ne passe pas par ces thèmes Material.
+  static TextStyle buttonStyle(BuildContext ctx, {Color color = Colors.white}) =>
+      _build(ctx: ctx, size: _r(ctx, 16), weight: FontWeight.w600, color: color);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -264,6 +280,14 @@ class AppLayout {
   static double iconMd(BuildContext context)  => r(context, 22);
   static double iconLg(BuildContext context)  => r(context, 28);
   static double iconXl(BuildContext context)  => r(context, 36);
+
+  // ── Master Prompt 126 — grille officielle du Design System :
+  // 8/12/16/20/24/32/40/48 (sm→x5l). Complète la grille déjà existante
+  // (xs=4 conservé pour les micro-espacements déjà utilisés dans l'app,
+  // pas retiré pour ne pas casser les call-sites existants) ; x4l/x5l sont
+  // purement additifs, aucune valeur déjà utilisée n'a changé.
+  static double x4l(BuildContext context) => r(context, 40);
+  static double x5l(BuildContext context) => r(context, 48);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -272,28 +296,48 @@ class AppLayout {
 class AppRadius {
   AppRadius._();
 
-  static const double xs   = 6.0;
-  static const double sm   = 10.0;
-  static const double md   = 14.0;
-  static const double lg   = 18.0;
-  static const double btn  = 20.0;  // boutons & inputs
-  static const double xl   = 24.0;
-  static const double xxl  = 32.0;
-  static const double pill = 100.0;
+  static const double xs    = 6.0;
+  static const double sm    = 10.0;
+  static const double md    = 14.0;
+  static const double lg    = 18.0;
+  static const double btn   = 20.0;  // boutons
+  static const double input = 18.0;  // champs de saisie (Master Prompt 120)
+  static const double card  = 22.0;  // cartes (Master Prompt 120)
+  static const double xl    = 24.0;
+  static const double xxl   = 32.0;
+  static const double pill  = 100.0;
 
-  static const BorderRadius xsR   = BorderRadius.all(Radius.circular(xs));
-  static const BorderRadius smR   = BorderRadius.all(Radius.circular(sm));
-  static const BorderRadius mdR   = BorderRadius.all(Radius.circular(md));
-  static const BorderRadius lgR   = BorderRadius.all(Radius.circular(lg));
-  static const BorderRadius btnR  = BorderRadius.all(Radius.circular(btn));
-  static const BorderRadius xlR   = BorderRadius.all(Radius.circular(xl));
-  static const BorderRadius xxlR  = BorderRadius.all(Radius.circular(xxl));
-  static const BorderRadius pillR = BorderRadius.all(Radius.circular(pill));
+  static const BorderRadius xsR    = BorderRadius.all(Radius.circular(xs));
+  static const BorderRadius smR    = BorderRadius.all(Radius.circular(sm));
+  static const BorderRadius mdR    = BorderRadius.all(Radius.circular(md));
+  static const BorderRadius lgR    = BorderRadius.all(Radius.circular(lg));
+  static const BorderRadius btnR   = BorderRadius.all(Radius.circular(btn));
+  static const BorderRadius inputR = BorderRadius.all(Radius.circular(input));
+  static const BorderRadius cardR  = BorderRadius.all(Radius.circular(card));
+  static const BorderRadius xlR    = BorderRadius.all(Radius.circular(xl));
+  static const BorderRadius xxlR   = BorderRadius.all(Radius.circular(xxl));
+  static const BorderRadius pillR  = BorderRadius.all(Radius.circular(pill));
 
   static const BorderRadius topMd  = BorderRadius.vertical(top: Radius.circular(md));
   static const BorderRadius topLg  = BorderRadius.vertical(top: Radius.circular(lg));
   static const BorderRadius topXl  = BorderRadius.vertical(top: Radius.circular(xl));
   static const BorderRadius topXxl = BorderRadius.vertical(top: Radius.circular(xxl));
+
+  // ── Master Prompt 126 — système officiel à 3 niveaux (18/22/28) pour tout
+  // nouveau composant Design System (`AppButton`/`AppCard`/`EmptyState`...).
+  // Ne remplace pas l'échelle fine déjà utilisée par des dizaines d'écrans
+  // existants (xs/sm/md/xl/xxl/pill) — la retirer casserait ces écrans sans
+  // bénéfice réel, contraire à la règle déjà actée (pas de migration
+  // rétroactive non demandée). `official18`/`official22` sont des alias de
+  // `lg`/`card` (déjà exactement ces valeurs) ; `official28` est nouveau.
+  static const double official18 = lg;   // = 18.0
+  static const double official22 = card; // = 22.0
+  static const double official28 = 28.0;
+
+  static const BorderRadius official18R = lgR;
+  static const BorderRadius official22R = cardR;
+  static const BorderRadius official28R =
+      BorderRadius.all(Radius.circular(official28));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -302,28 +346,30 @@ class AppRadius {
 class AppShadow {
   AppShadow._();
 
+  // Ombres adoucies (Master Prompt 120) — alpha/blur réduits pour un rendu
+  // "très discret" façon Notion/Airbnb plutôt que des ombres marquées.
   static const List<BoxShadow> xs = [
-    BoxShadow(color: AppColors.black05, blurRadius: 6,  offset: Offset(0, 2)),
+    BoxShadow(color: Color(0x08000000), blurRadius: 6,  offset: Offset(0, 2)),
   ];
   static const List<BoxShadow> sm = [
-    BoxShadow(color: AppColors.black08, blurRadius: 12, offset: Offset(0, 3)),
-    BoxShadow(color: AppColors.black05, blurRadius: 3,  offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x0A000000), blurRadius: 12, offset: Offset(0, 3)),
+    BoxShadow(color: Color(0x06000000), blurRadius: 3,  offset: Offset(0, 1)),
   ];
   static const List<BoxShadow> md = [
-    BoxShadow(color: AppColors.black10, blurRadius: 20, offset: Offset(0, 6)),
-    BoxShadow(color: AppColors.black05, blurRadius: 6,  offset: Offset(0, 2)),
+    BoxShadow(color: Color(0x0D000000), blurRadius: 22, offset: Offset(0, 6)),
+    BoxShadow(color: Color(0x06000000), blurRadius: 6,  offset: Offset(0, 2)),
   ];
   static const List<BoxShadow> lg = [
-    BoxShadow(color: AppColors.black12, blurRadius: 32, offset: Offset(0, 10)),
-    BoxShadow(color: AppColors.black08, blurRadius: 10, offset: Offset(0, 4)),
+    BoxShadow(color: Color(0x12000000), blurRadius: 34, offset: Offset(0, 10)),
+    BoxShadow(color: Color(0x0A000000), blurRadius: 10, offset: Offset(0, 4)),
   ];
   static const List<BoxShadow> card = [
-    BoxShadow(color: Color(0x0A000000), blurRadius: 20, offset: Offset(0, 4)),
-    BoxShadow(color: Color(0x06000000), blurRadius: 6,  offset: Offset(0, 1)),
+    BoxShadow(color: Color(0x08000000), blurRadius: 22, offset: Offset(0, 4)),
+    BoxShadow(color: Color(0x04000000), blurRadius: 6,  offset: Offset(0, 1)),
   ];
   static const List<BoxShadow> navFloat = [
-    BoxShadow(color: AppColors.black15, blurRadius: 32, offset: Offset(0, 8)),
-    BoxShadow(color: AppColors.black08, blurRadius: 10, offset: Offset(0, 2)),
+    BoxShadow(color: Color(0x14000000), blurRadius: 34, offset: Offset(0, 8)),
+    BoxShadow(color: Color(0x0A000000), blurRadius: 10, offset: Offset(0, 2)),
   ];
 
   static List<BoxShadow> colored(Color c, {double opacity = 0.35}) => [
@@ -380,31 +426,21 @@ class AppTransitions {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// THÈME GLOBAL — Material Design 3
-// iOS → SF Pro Display / SF Pro Text
-// Android / Web → Inter
+// THÈME GLOBAL — Material Design 3, Urbanist partout, clair + sombre
+// (Master Prompt 120)
 // ══════════════════════════════════════════════════════════════════════════════
 class AppTheme {
   AppTheme._();
 
-  // ── Helper interne : construit un TextStyle platform-aware ──────────────
+  // ── Helper interne : Urbanist partout (Master Prompt 120) ───────────────
   static TextStyle _ts({
     required double   size,
     required FontWeight weight,
     Color?  color,
     double  spacing = 0,
-    bool    display = false, // SF Pro Display vs Text
+    bool    display = false,
   }) {
-    if (_isApple) {
-      return TextStyle(
-        fontFamily:    display ? _sfProDisplay : _sfProText,
-        fontSize:      size,
-        fontWeight:    weight,
-        color:         color,
-        letterSpacing: spacing,
-      );
-    }
-    return GoogleFonts.poppins(
+    return GoogleFonts.urbanist(
       fontSize:      size,
       fontWeight:    weight,
       color:         color,
@@ -412,46 +448,66 @@ class AppTheme {
     );
   }
 
-  static ThemeData get light {
+  /// Thème clair — voir [dark] pour l'équivalent sombre (Master Prompt 120),
+  /// les deux partagent la même structure via [_build].
+  static ThemeData get light => _build(Brightness.light);
+
+  /// Mode sombre (Master Prompt 120) — jamais de noir pur (fonds `slate-900`/
+  /// `slate-800`), mêmes couleurs de marque (orange/succès/erreur/info/
+  /// avertissement) qu'en clair pour rester reconnaissable, cohérent avec les
+  /// apps premium qui gardent leur identité quel que soit le thème actif.
+  static ThemeData get dark => _build(Brightness.dark);
+
+  static ThemeData _build(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+
+    final bg        = isDark ? AppColors.bgDark        : AppColors.bg;
+    final surface    = isDark ? AppColors.cardDark      : AppColors.card;
+    final onSurface  = isDark ? AppColors.textDark      : AppColors.text;
+    final textMuted  = isDark ? AppColors.textMutedDark : AppColors.textMuted;
+    final textLight  = isDark ? AppColors.textLightDark : AppColors.textLight;
+    final divider    = isDark ? AppColors.dividerDark   : AppColors.divider;
+    final border     = isDark ? AppColors.borderDark    : AppColors.border;
+
     final base = ThemeData(
       useMaterial3: true,
-      colorScheme: const ColorScheme.light(
+      brightness: brightness,
+      colorScheme: ColorScheme(
+        brightness:              brightness,
         primary:                 AppColors.primary,
         onPrimary:               Colors.white,
-        primaryContainer:        AppColors.primaryBg,
-        onPrimaryContainer:      AppColors.primaryDark,
+        primaryContainer:        isDark ? AppColors.primaryDark : AppColors.primaryBg,
+        onPrimaryContainer:      isDark ? AppColors.primaryBg : AppColors.primaryDark,
         secondary:               AppColors.blue,
         onSecondary:             Colors.white,
-        surface:                 AppColors.card,
-        onSurface:               AppColors.text,
-        surfaceContainerHighest: AppColors.bg,
+        surface:                 surface,
+        onSurface:               onSurface,
+        surfaceContainerHighest: bg,
         error:                   AppColors.red,
         onError:                 Colors.white,
-        outline:                 AppColors.border,
-        outlineVariant:          AppColors.divider,
+        outline:                 border,
+        outlineVariant:          divider,
       ),
-      scaffoldBackgroundColor: AppColors.bg,
+      scaffoldBackgroundColor: bg,
     );
 
-    // ── TextTheme M3 platform-aware ────────────────────────────────────────
-    // Grandes tailles (Display, Headline) → SF Pro Display / Inter Bold
-    // Corps et labels → SF Pro Text / Inter
+    // ── TextTheme M3 — Urbanist partout (Master Prompt 120) ────────────────
     final textTheme = TextTheme(
-      displayLarge:   _ts(size: 57, weight: FontWeight.w400, spacing: -0.25, color: AppColors.text, display: true),
-      displayMedium:  _ts(size: 45, weight: FontWeight.w400, color: AppColors.text, display: true),
-      displaySmall:   _ts(size: 36, weight: FontWeight.w400, color: AppColors.text, display: true),
-      headlineLarge:  _ts(size: 32, weight: FontWeight.w700, color: AppColors.text, display: true),
-      headlineMedium: _ts(size: 28, weight: FontWeight.w600, color: AppColors.text, display: true),
-      headlineSmall:  _ts(size: 24, weight: FontWeight.w600, color: AppColors.text, display: true),
-      titleLarge:     _ts(size: 22, weight: FontWeight.w700, color: AppColors.text),
-      titleMedium:    _ts(size: 16, weight: FontWeight.w600, spacing: 0.15, color: AppColors.text),
-      titleSmall:     _ts(size: 14, weight: FontWeight.w600, spacing: 0.10, color: AppColors.text),
-      bodyLarge:      _ts(size: 16, weight: FontWeight.w400, spacing: 0.15, color: AppColors.text),
-      bodyMedium:     _ts(size: 14, weight: FontWeight.w400, spacing: 0.25, color: AppColors.textMuted),
-      bodySmall:      _ts(size: 12, weight: FontWeight.w400, spacing: 0.40, color: AppColors.textLight),
-      labelLarge:     _ts(size: 14, weight: FontWeight.w600, spacing: 0.10, color: AppColors.text),
-      labelMedium:    _ts(size: 12, weight: FontWeight.w500, spacing: 0.50, color: AppColors.textMuted),
-      labelSmall:     _ts(size: 11, weight: FontWeight.w500, spacing: 0.50, color: AppColors.textLight),
+      displayLarge:   _ts(size: 57, weight: FontWeight.w400, spacing: -0.25, color: onSurface, display: true),
+      displayMedium:  _ts(size: 45, weight: FontWeight.w400, color: onSurface, display: true),
+      displaySmall:   _ts(size: 36, weight: FontWeight.w400, color: onSurface, display: true),
+      headlineLarge:  _ts(size: 32, weight: FontWeight.w700, color: onSurface, display: true),
+      headlineMedium: _ts(size: 28, weight: FontWeight.w600, color: onSurface, display: true),
+      headlineSmall:  _ts(size: 24, weight: FontWeight.w600, color: onSurface, display: true),
+      titleLarge:     _ts(size: 22, weight: FontWeight.w600, color: onSurface),
+      titleMedium:    _ts(size: 16, weight: FontWeight.w600, spacing: 0.15, color: onSurface),
+      titleSmall:     _ts(size: 14, weight: FontWeight.w600, spacing: 0.10, color: onSurface),
+      bodyLarge:      _ts(size: 16, weight: FontWeight.w500, spacing: 0.15, color: onSurface),
+      bodyMedium:     _ts(size: 14, weight: FontWeight.w400, spacing: 0.25, color: textMuted),
+      bodySmall:      _ts(size: 13, weight: FontWeight.w400, spacing: 0.40, color: textLight),
+      labelLarge:     _ts(size: 14, weight: FontWeight.w600, spacing: 0.10, color: onSurface),
+      labelMedium:    _ts(size: 12, weight: FontWeight.w500, spacing: 0.50, color: textMuted),
+      labelSmall:     _ts(size: 11, weight: FontWeight.w500, spacing: 0.50, color: textLight),
     );
 
     return base.copyWith(
@@ -496,8 +552,8 @@ class AppTheme {
             const RoundedRectangleBorder(borderRadius: AppRadius.btnR)),
           padding: WidgetStateProperty.all(
             const EdgeInsets.symmetric(horizontal: 24, vertical: 16)),
-          textStyle: WidgetStateProperty.all(_ts(size: 16, weight: FontWeight.w700)),
-          minimumSize: WidgetStateProperty.all(const Size(64, 52)),
+          textStyle: WidgetStateProperty.all(_ts(size: 16, weight: FontWeight.w600)),
+          minimumSize: WidgetStateProperty.all(const Size(64, 54)),
           animationDuration: const Duration(milliseconds: 80),
         ),
       ),
@@ -523,7 +579,7 @@ class AppTheme {
           padding: WidgetStateProperty.all(
             const EdgeInsets.symmetric(horizontal: 24, vertical: 16)),
           textStyle: WidgetStateProperty.all(_ts(size: 16, weight: FontWeight.w600)),
-          minimumSize: WidgetStateProperty.all(const Size(64, 52)),
+          minimumSize: WidgetStateProperty.all(const Size(64, 54)),
           animationDuration: const Duration(milliseconds: 80),
         ),
       ),
@@ -546,29 +602,29 @@ class AppTheme {
       // ── Champs de saisie ───────────────────────────────────────────────
       inputDecorationTheme: InputDecorationTheme(
         filled:      true,
-        fillColor:   AppColors.card,
-        hintStyle:   _ts(size: 14, weight: FontWeight.w400, color: AppColors.textLight),
-        border:      const OutlineInputBorder(
-            borderRadius: AppRadius.btnR,
-            borderSide: BorderSide(color: AppColors.border, width: 1)),
-        enabledBorder: const OutlineInputBorder(
-            borderRadius: AppRadius.btnR,
-            borderSide: BorderSide(color: AppColors.border, width: 1)),
+        fillColor:   surface,
+        hintStyle:   _ts(size: 14, weight: FontWeight.w400, color: textLight),
+        border:      OutlineInputBorder(
+            borderRadius: AppRadius.inputR,
+            borderSide: BorderSide(color: border, width: 1)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: AppRadius.inputR,
+            borderSide: BorderSide(color: border, width: 1)),
         focusedBorder: const OutlineInputBorder(
-            borderRadius: AppRadius.btnR,
+            borderRadius: AppRadius.inputR,
             borderSide: BorderSide(color: AppColors.primary, width: 2)),
         errorBorder: const OutlineInputBorder(
-            borderRadius: AppRadius.btnR,
+            borderRadius: AppRadius.inputR,
             borderSide: BorderSide(color: AppColors.red, width: 1.5)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
 
       // ── Cards ──────────────────────────────────────────────────────────
-      cardTheme: const CardThemeData(
+      cardTheme: CardThemeData(
         elevation:   0,
-        color:       AppColors.card,
+        color:       surface,
         shadowColor: Colors.transparent,
-        shape:       RoundedRectangleBorder(borderRadius: AppRadius.xlR),
+        shape:       const RoundedRectangleBorder(borderRadius: AppRadius.cardR),
         margin:      EdgeInsets.zero,
       ),
 
@@ -576,45 +632,45 @@ class AppTheme {
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected)
-              ? AppColors.primary : Colors.grey.shade400,
+              ? AppColors.primary : (isDark ? Colors.grey.shade600 : Colors.grey.shade400),
         ),
         trackColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected)
-              ? AppColors.primary20 : Colors.grey.shade200,
+              ? AppColors.primary20 : (isDark ? Colors.grey.shade800 : Colors.grey.shade200),
         ),
       ),
 
       // ── BottomSheet ────────────────────────────────────────────────────
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: AppColors.card,
-        shape:           RoundedRectangleBorder(borderRadius: AppRadius.topXxl),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: surface,
+        shape:           const RoundedRectangleBorder(borderRadius: AppRadius.topXxl),
       ),
 
       // ── Snackbar ───────────────────────────────────────────────────────
       snackBarTheme: SnackBarThemeData(
         behavior:         SnackBarBehavior.floating,
-        backgroundColor:  AppColors.text,
+        backgroundColor:  isDark ? AppColors.cardDark : AppColors.text,
         contentTextStyle: _ts(size: 13, weight: FontWeight.w400, color: Colors.white),
         shape:            const RoundedRectangleBorder(borderRadius: AppRadius.mdR),
       ),
 
       // ── Dialog ─────────────────────────────────────────────────────────
-      dialogTheme: const DialogThemeData(
-        backgroundColor: AppColors.card,
+      dialogTheme: DialogThemeData(
+        backgroundColor: surface,
         elevation:       0,
-        shape:           RoundedRectangleBorder(borderRadius: AppRadius.xlR),
+        shape:           const RoundedRectangleBorder(borderRadius: AppRadius.cardR),
       ),
 
       // ── Divider ────────────────────────────────────────────────────────
-      dividerTheme: const DividerThemeData(
-        color: AppColors.divider, thickness: 1, space: 1),
+      dividerTheme: DividerThemeData(
+        color: divider, thickness: 1, space: 1),
 
       // ── Chip ───────────────────────────────────────────────────────────
       chipTheme: ChipThemeData(
         shape:           const StadiumBorder(),
         padding:         const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         labelStyle:      _ts(size: 12, weight: FontWeight.w600),
-        backgroundColor: AppColors.bg,
+        backgroundColor: bg,
       ),
 
       // ── Page Transitions ───────────────────────────────────────────────

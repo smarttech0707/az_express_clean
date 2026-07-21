@@ -138,7 +138,7 @@ class _BoulangerieRegisterState extends State<BoulangerieRegister> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Inscription Boulangerie',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: _brown,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -160,13 +160,13 @@ class _BoulangerieRegisterState extends State<BoulangerieRegister> {
                 const Icon(Icons.bakery_dining_rounded, size: 52, color: Colors.white),
                 const SizedBox(height: 10),
                 Text('Rejoignez AZ Express',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 Text('Votre boulangerie livrée à Abengourou',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white70, fontSize: 12)),
               ]),
             ),
@@ -264,7 +264,7 @@ class _BoulangerieRegisterState extends State<BoulangerieRegister> {
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text('Envoyer ma demande',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),
@@ -300,7 +300,7 @@ class _BoulangerieRegisterState extends State<BoulangerieRegister> {
 
   Widget _section(String title) => Text(
         title,
-        style: GoogleFonts.inter(
+        style: GoogleFonts.urbanist(
             fontSize: 13,
             fontWeight: FontWeight.bold,
             color: Colors.grey.shade600),

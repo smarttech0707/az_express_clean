@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_theme.dart';
 
 class OrderStatusStepper extends StatelessWidget {
   final String status;
@@ -68,7 +69,7 @@ class OrderStatusStepper extends StatelessWidget {
               child: Container(
                 height: 3,
                 decoration: BoxDecoration(
-                  color: done ? const Color(0xFFFF7A1A) : Colors.grey.shade200,
+                  color: done ? AppColors.primary : Colors.grey.shade200,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -88,16 +89,16 @@ class OrderStatusStepper extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: done
-                    ? const Color(0xFFFF7A1A)
+                    ? AppColors.primary
                     : current
-                        ? const Color(0xFFFF7A1A)
+                        ? AppColors.primary
                         : Colors.grey.shade100,
                 border: current
-                    ? Border.all(color: const Color(0xFFFF7A1A), width: 3)
+                    ? Border.all(color: AppColors.primary, width: 3)
                     : null,
                 boxShadow: current
                     ? [BoxShadow(
-                        color: const Color(0xFFFF7A1A).withValues(alpha: 0.35),
+                        color: AppColors.primary.withValues(alpha: 0.35),
                         blurRadius: 8, spreadRadius: 1)]
                     : null,
               ),
@@ -110,11 +111,11 @@ class OrderStatusStepper extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               step.label,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 fontSize: 10,
                 fontWeight: current ? FontWeight.w700 : FontWeight.w500,
                 color: current
-                    ? const Color(0xFFFF7A1A)
+                    ? AppColors.primary
                     : done
                         ? Colors.black54
                         : Colors.grey.shade400,

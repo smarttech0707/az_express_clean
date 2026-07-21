@@ -53,7 +53,7 @@ class AdminServiceRequestsPage extends StatelessWidget {
         backgroundColor: const Color(0xFFF2F3F7),
         appBar: AppBar(
           title: Text('Demandes prestataires',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   color: Colors.white, fontWeight: FontWeight.bold)),
           backgroundColor: const Color(0xFF1565C0),
           foregroundColor: Colors.white,
@@ -63,7 +63,7 @@ class AdminServiceRequestsPage extends StatelessWidget {
             unselectedLabelColor: Colors.white54,
             indicatorColor: Colors.white,
             labelStyle:
-                GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
+                GoogleFonts.urbanist(fontWeight: FontWeight.w600, fontSize: 13),
             tabs: const [
               Tab(text: 'En attente'),
               Tab(text: 'Traitées'),
@@ -147,7 +147,7 @@ class _Empty extends StatelessWidget {
           Icon(icon, size: 60, color: Colors.grey.shade300),
           const SizedBox(height: 12),
           Text(message,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 15, color: Colors.grey.shade500)),
         ],
       ),
@@ -239,7 +239,7 @@ class _RequestCardState extends State<_RequestCard> {
           const Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
           const SizedBox(width: 8),
           Text('Demande approuvée',
-              style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16)),
+              style: GoogleFonts.urbanist(fontWeight: FontWeight.bold, fontSize: 16)),
         ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -247,7 +247,7 @@ class _RequestCardState extends State<_RequestCard> {
             Text(
               'Voici le code PIN du prestataire. '
               'Communiquez-le lui pour qu\'il puisse se connecter.',
-              style: GoogleFonts.inter(fontSize: 13, color: Colors.grey.shade600),
+              style: GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade600),
             ),
             const SizedBox(height: 16),
             Container(
@@ -260,7 +260,7 @@ class _RequestCardState extends State<_RequestCard> {
               ),
               child: Text(
                 pin,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 32,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 8,
@@ -278,7 +278,7 @@ class _RequestCardState extends State<_RequestCard> {
                   borderRadius: BorderRadius.circular(10)),
             ),
             child: Text('OK',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
@@ -361,10 +361,10 @@ class _RequestCardState extends State<_RequestCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontWeight: FontWeight.bold, fontSize: 15)),
                       Text(subcatLabel,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 12,
                               color: const Color(0xFF1565C0),
                               fontWeight: FontWeight.w600)),
@@ -384,7 +384,7 @@ class _RequestCardState extends State<_RequestCard> {
                       Icon(statusIcon, color: statusColor, size: 14),
                       const SizedBox(width: 4),
                       Text(statusLabel,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: statusColor,
                               fontSize: 11,
                               fontWeight: FontWeight.bold)),
@@ -450,10 +450,10 @@ class _RequestCardState extends State<_RequestCard> {
                             color: Colors.green, size: 16),
                         const SizedBox(width: 8),
                         Text('Code PIN : ',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontSize: 13, color: Colors.green.shade700)),
                         Text(pin,
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 4,
@@ -474,7 +474,7 @@ class _RequestCardState extends State<_RequestCard> {
                           icon: const Icon(Icons.close_rounded,
                               color: Colors.red, size: 16),
                           label: Text('Rejeter',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   color: Colors.red,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 13)),
@@ -500,7 +500,7 @@ class _RequestCardState extends State<_RequestCard> {
                               : const Icon(Icons.check_rounded,
                                   color: Colors.white, size: 16),
                           label: Text('Approuver',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13)),
@@ -532,7 +532,7 @@ class _RequestCardState extends State<_RequestCard> {
         const SizedBox(width: 6),
         Expanded(
           child: Text(text,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 12.5, color: Colors.grey.shade700)),
         ),
       ],

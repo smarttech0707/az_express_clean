@@ -1,5 +1,13 @@
 import 'package:geolocator/geolocator.dart';
 
+// Prix/commission/ETA retirés (2026-07-09) : jamais appelés nulle part dans
+// l'app — calculateDeliveryPrice()/calculateCommission() dupliquaient une
+// formule de tarification jamais branchée (voir TarifService/tarifService.js,
+// seule source de vérité déjà unifiée, Master Prompt 51) ; calculateETA()
+// dupliquait une estimation grossière (30km/h fixe) déjà remplacée par le
+// calcul basé sur Google Directions API (GoogleRoutesService/RouteModel).
+// Ne garder que calculateDistance(), la seule méthode réellement utilisée
+// (lib/screens/driver/driver_dashboard.dart).
 class LocationService {
 
   /// ================================
@@ -22,57 +30,5 @@ class LocationService {
     double distanceKm = distanceMeters / 1000;
 
     return double.parse(distanceKm.toStringAsFixed(2));
-  }
-
-  /// ================================
-  /// CALCUL PRIX LIVRAISON
-  /// ================================
-  static int calculateDeliveryPrice(double distanceKm) {
-
-    if (distanceKm <= 2) {
-      return 500;
-    }
-
-    if (distanceKm <= 5) {
-      return 700;
-    }
-
-    if (distanceKm <= 8) {
-      return 1000;
-    }
-
-    return 1500;
-  }
-
-  /// ================================
-  /// COMMISSION PLATEFORME
-  /// ================================
-  static Map<String, int> calculateCommission(int deliveryPrice) {
-
-    int platform = (deliveryPrice * 0.20).round();
-    int driver = deliveryPrice - platform;
-
-    return {
-      "platform": platform,
-      "driver": driver,
-    };
-  }
-
-  /// ================================
-  /// TEMPS ARRIVÉE (ETA)
-  /// ================================
-  static int calculateETA(double distanceKm) {
-
-    double speed = 30; // vitesse moyenne moto km/h
-
-    double timeHours = distanceKm / speed;
-
-    int minutes = (timeHours * 60).round();
-
-    if (minutes < 1) {
-      return 1;
-    }
-
-    return minutes;
   }
 }

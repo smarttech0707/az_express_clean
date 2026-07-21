@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -184,7 +185,14 @@ class _ServiceProviderRegisterPageState
         } catch (_) {}
       }
 
-      await docRef.set({
+      // Écriture via Cloud Function (Admin SDK) : `service_providers` n'autorise
+      // l'écriture qu'à l'admin (allow write: if isAdmin();), sans exception de
+      // création pour un prestataire s'inscrivant lui-même — une écriture
+      // directe ici échouait toujours avec permission-denied.
+      await FirebaseFunctions.instance
+          .httpsCallable('submitServiceProviderApplication')
+          .call({
+        'docId':       docId,
         'name':        name,
         'phone':       phone,
         'address':     address,
@@ -194,13 +202,6 @@ class _ServiceProviderRegisterPageState
         'photos':      photoUrls,
         'lat':         _lat ?? 0.0,
         'lng':         _lng ?? 0.0,
-        'isAvailable': false,
-        'isVerified':  false,
-        'status':      'pending',
-        'rating':      0.0,
-        'ratingCount': 0,
-        'artisanPin':  '',
-        'createdAt':   FieldValue.serverTimestamp(),
       });
 
       setState(() { _loading = false; _done = true; });
@@ -224,7 +225,7 @@ class _ServiceProviderRegisterPageState
       backgroundColor: const Color(0xFFF2F3F7),
       appBar: AppBar(
         title: Text('Devenir prestataire',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
@@ -262,14 +263,14 @@ class _ServiceProviderRegisterPageState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Inscrivez votre activité',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
                                 color: const Color(0xFF1565C0))),
                         Text(
                           'Votre demande sera examinée par notre équipe. '
                           'Vous serez contacté dans les 24h.',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 11.5, color: Colors.black54),
                         ),
                       ],
@@ -286,7 +287,7 @@ class _ServiceProviderRegisterPageState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Sélectionnez votre activité',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 12, color: Colors.grey.shade600)),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
@@ -303,7 +304,7 @@ class _ServiceProviderRegisterPageState
                                 const SizedBox(width: 8),
                                 Expanded(
                                     child: Text(s.$2,
-                                        style: GoogleFonts.inter(
+                                        style: GoogleFonts.urbanist(
                                             fontSize: 13),
                                         overflow:
                                             TextOverflow.ellipsis)),
@@ -351,7 +352,7 @@ class _ServiceProviderRegisterPageState
                   Text(
                     'Partagez votre position pour que les clients puissent '
                     'vous trouver facilement sur la carte.',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 12, color: Colors.grey.shade600),
                   ),
                   const SizedBox(height: 10),
@@ -373,7 +374,7 @@ class _ServiceProviderRegisterPageState
                             : _gpsLoading
                                 ? 'Localisation…'
                                 : 'Capturer ma position GPS',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontWeight: FontWeight.w600),
                       ),
@@ -401,7 +402,7 @@ class _ServiceProviderRegisterPageState
                 children: [
                   Text(
                     'Ajoutez jusqu\'à 5 photos pour montrer votre travail.',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 12, color: Colors.grey.shade600),
                   ),
                   const SizedBox(height: 10),
@@ -452,7 +453,7 @@ class _ServiceProviderRegisterPageState
                         icon: const Icon(Icons.add_a_photo_rounded,
                             color: Color(0xFF1565C0), size: 18),
                         label: Text('Ajouter une photo',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 color: const Color(0xFF1565C0),
                                 fontWeight: FontWeight.w600)),
                         style: OutlinedButton.styleFrom(
@@ -486,7 +487,7 @@ class _ServiceProviderRegisterPageState
                     ? const CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5)
                     : Text('Envoyer ma demande',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),
@@ -516,7 +517,7 @@ class _ServiceProviderRegisterPageState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontWeight: FontWeight.bold,
                   fontSize: 13.5,
                   color: const Color(0xFF1565C0))),
@@ -533,7 +534,7 @@ class _ServiceProviderRegisterPageState
       controller: ctrl,
       keyboardType: type,
       maxLines: maxLines,
-      style: GoogleFonts.inter(fontSize: 14),
+      style: GoogleFonts.urbanist(fontSize: 14),
       decoration: _deco(label, icon),
     );
   }
@@ -541,7 +542,7 @@ class _ServiceProviderRegisterPageState
   InputDecoration _deco(String label, IconData icon) {
     return InputDecoration(
       labelText: label,
-      labelStyle: GoogleFonts.inter(fontSize: 13),
+      labelStyle: GoogleFonts.urbanist(fontSize: 13),
       prefixIcon: Icon(icon, color: const Color(0xFF1565C0), size: 20),
       border:
           OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -585,7 +586,7 @@ class _SuccessScreen extends StatelessWidget {
               const SizedBox(height: 24),
               Text(
                 'Demande envoyée !',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 22, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),
@@ -594,7 +595,7 @@ class _SuccessScreen extends StatelessWidget {
                 'Votre demande d\'inscription a bien été reçue.\n'
                 'Notre équipe va l\'examiner et vous contactera '
                 'dans les 24 heures.',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 14, color: Colors.grey.shade600, height: 1.5),
                 textAlign: TextAlign.center,
               ),
@@ -610,7 +611,7 @@ class _SuccessScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(14)),
                   ),
                   child: Text('Retour',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
                           fontSize: 15)),

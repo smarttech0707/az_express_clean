@@ -91,6 +91,9 @@ class AdminBoulangeriesPage extends StatelessWidget {
                           icon: Icon(showPass
                               ? Icons.visibility_off_outlined
                               : Icons.visibility_outlined),
+                          tooltip: showPass
+                              ? 'Masquer le mot de passe'
+                              : 'Afficher le mot de passe',
                           onPressed: () => setS(() => showPass = !showPass),
                         ),
                         IconButton(
@@ -763,12 +766,14 @@ class _BoulangerieMenuPage extends StatelessWidget {
                       IconButton(
                         icon: const Icon(Icons.edit_outlined, size: 18),
                         color: Colors.blue.shade600,
+                        tooltip: 'Modifier',
                         onPressed: () =>
                             _showItemForm(context, existing: doc),
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete_outline, size: 18),
                         color: Colors.red.shade400,
+                        tooltip: 'Supprimer',
                         onPressed: () async {
                           await FirebaseFirestore.instance
                               .collection('boulangeries')

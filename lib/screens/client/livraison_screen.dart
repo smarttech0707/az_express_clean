@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
 import '../../models/local_place.dart';
@@ -30,7 +28,7 @@ enum _ActiveField { none, departure, destination }
 
 const _catItems = <(String, String, Color)>[
   ('documents',   '📄 Documents',   Color(0xFF1565C0)),
-  ('colis',       '📦 Colis',       Color(0xFFFF6B00)),
+  ('colis',       '📦 Colis',       AppColors.primary),
   ('medicaments', '💊 Médicaments', Color(0xFF2E7D32)),
   ('repas',       '🍔 Repas',       Color(0xFFE53935)),
   ('autre',       '🎁 Autre',       Color(0xFF607D8B)),
@@ -499,14 +497,6 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     setState(() { _activeField = _ActiveField.none; _suggestions = []; });
   }
 
-  Future<Map<String, dynamic>?> _http(Uri uri) async {
-    try {
-      final resp = await http.get(uri).timeout(const Duration(seconds: 5));
-      if (resp.statusCode == 200) return jsonDecode(resp.body) as Map<String, dynamic>;
-    } catch (_) {}
-    return null;
-  }
-
   // ══════════════════════════════════════════════════════════════════════════
   // BUILD
   // ══════════════════════════════════════════════════════════════════════════
@@ -621,7 +611,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           child: Row(children: [
             Expanded(
               child: Text(titles[_phase - 1],
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w700,
                     color: AppColors.text),
                 overflow: TextOverflow.ellipsis),
@@ -741,11 +731,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Ma position actuelle',
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.urbanist(
                         fontSize: 13, fontWeight: FontWeight.w600,
                         color: AppColors.primary)),
                   Text('Utiliser le GPS',
-                    style: GoogleFonts.poppins(
+                    style: GoogleFonts.urbanist(
                         fontSize: 11, color: AppColors.textMuted)),
                 ],
               )),
@@ -930,7 +920,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                     Text(emoji, style: const TextStyle(fontSize: 26)),
                     const SizedBox(height: 6),
                     Text(label,
-                      style: GoogleFonts.poppins(
+                      style: GoogleFonts.urbanist(
                         fontSize: 11,
                         fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                         color: sel ? cat.$3 : AppColors.text,
@@ -961,17 +951,17 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           child: TextField(
             controller: _poidsCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: GoogleFonts.poppins(fontSize: 14, color: AppColors.text),
+            style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
             decoration: InputDecoration(
               hintText:  'Poids en kg (optionnel)',
-              hintStyle: GoogleFonts.poppins(fontSize: 13, color: AppColors.textLight),
+              hintStyle: GoogleFonts.urbanist(fontSize: 13, color: AppColors.textLight),
               prefixIcon: const Padding(
                 padding: EdgeInsets.only(left: 12, right: 8),
                 child: Icon(Icons.scale_rounded, color: AppColors.textMuted, size: 18),
               ),
               prefixIconConstraints: const BoxConstraints(),
               suffixText: 'kg',
-              suffixStyle: GoogleFonts.poppins(
+              suffixStyle: GoogleFonts.urbanist(
                   fontSize: 13, color: AppColors.textMuted,
                   fontWeight: FontWeight.w600),
               border: InputBorder.none,
@@ -1047,20 +1037,20 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           ),
           child: Row(children: [
             Text(_categoryLabel,
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.urbanist(
                   fontSize: 13, fontWeight: FontWeight.w600,
                   color: AppColors.text)),
             if (_poidsCtrl.text.isNotEmpty) ...[
               const SizedBox(width: 8),
               Text('· ${_poidsCtrl.text} kg',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 12, color: AppColors.textMuted)),
             ],
             const Spacer(),
             GestureDetector(
               onTap: () => setState(() => _phase = 5),
               child: Text('Modifier',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 11, fontWeight: FontWeight.w600,
                     color: AppColors.primary)),
             ),
@@ -1133,16 +1123,16 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
               Text('Total à payer',
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w700,
                     color: AppColors.text)),
               if (_tarifResult?.isNight == true)
                 Text('🌙 Tarif nuit',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.urbanist(
                       fontSize: 11, color: AppColors.textMuted)),
             ])),
             Text(_selectedPrice > 0 ? '$_selectedPrice FCFA' : '—',
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.urbanist(
                   fontSize: 22, fontWeight: FontWeight.w800,
                   color: modeColor)),
           ]),
@@ -1152,7 +1142,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
         // Paiement
         Text('Mode de paiement',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.urbanist(
               fontSize: 13, fontWeight: FontWeight.w700,
               color: AppColors.text)),
         const SizedBox(height: 10),
@@ -1190,7 +1180,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
               padding: const EdgeInsets.symmetric(vertical: 18),
               decoration: BoxDecoration(
                 gradient: (_sending || _routeLoading) ? null : const LinearGradient(
-                  colors: [Color(0xFFE65100), Color(0xFFFF6B00), Color(0xFFFF8C42)],
+                  colors: [Color(0xFFE65100), AppColors.primary, Color(0xFFFF8C42)],
                   begin: Alignment.topLeft, end: Alignment.bottomRight,
                 ),
                 color: (_sending || _routeLoading) ? AppColors.divider : null,
@@ -1209,7 +1199,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                           color: Colors.white, size: 24),
                       const SizedBox(width: 10),
                       Text('Commander un livreur',
-                        style: GoogleFonts.poppins(
+                        style: GoogleFonts.urbanist(
                             fontSize: 16, fontWeight: FontWeight.w800,
                             color: Colors.white)),
                     ]),
@@ -1222,7 +1212,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           const Icon(Icons.lock_rounded, size: 11, color: AppColors.textLight),
           const SizedBox(width: 4),
           Text('Vos données sont sécurisées',
-            style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textLight)),
+            style: GoogleFonts.urbanist(fontSize: 11, color: AppColors.textLight)),
         ]),
       ]),
     );
@@ -1274,7 +1264,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             children: [
               Row(children: [
                 Text(title,
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.urbanist(
                       fontSize: 13, fontWeight: FontWeight.w800,
                       color: sel ? iconColor : AppColors.text)),
                 if (badge != null) ...[
@@ -1286,20 +1276,20 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(badge,
-                      style: GoogleFonts.poppins(
+                      style: GoogleFonts.urbanist(
                           fontSize: 9, fontWeight: FontWeight.w700,
                           color: iconColor)),
                   ),
                 ],
               ]),
               Text(subtitle,
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 11, color: AppColors.textMuted)),
               Row(children: [
                 const Icon(Icons.access_time_rounded, size: 11, color: Colors.grey),
                 const SizedBox(width: 3),
                 Text(etaText,
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.urbanist(
                       fontSize: 10, color: AppColors.textLight,
                       fontWeight: FontWeight.w600)),
               ]),
@@ -1308,7 +1298,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           const SizedBox(width: 10),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(price > 0 ? '$price F' : '—',
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.urbanist(
                   fontSize: 15, fontWeight: FontWeight.w800,
                   color: sel ? iconColor : AppColors.text)),
             const SizedBox(height: 4),
@@ -1371,10 +1361,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           const Icon(Icons.search_off_rounded, size: 56, color: AppColors.divider),
           const SizedBox(height: 12),
           Text('Aucun lieu trouvé',
-            style: GoogleFonts.poppins(fontSize: 15, color: AppColors.textMuted)),
+            style: GoogleFonts.urbanist(fontSize: 15, color: AppColors.textMuted)),
           const SizedBox(height: 4),
           Text('Essayez : "Cafétou", "CHU", "Marché"…',
-            style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textLight)),
+            style: GoogleFonts.urbanist(fontSize: 12, color: AppColors.textLight)),
         ],
       ));
     }
@@ -1410,7 +1400,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             _activeField == _ActiveField.departure
                 ? 'Où êtes-vous ?'
                 : 'Lieux populaires à Abengourou',
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.urbanist(
               fontSize: 11, fontWeight: FontWeight.w600,
               color: AppColors.textMuted, letterSpacing: 0.3),
           ),
@@ -1425,9 +1415,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             child: Icon(q.icon, color: q.color, size: 20),
           ),
           title: Text(q.name,
-              style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
+              style: GoogleFonts.urbanist(fontSize: 14, fontWeight: FontWeight.w600)),
           subtitle: Text('Abengourou, Côte d\'Ivoire',
-              style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textMuted)),
+              style: GoogleFonts.urbanist(fontSize: 12, color: AppColors.textMuted)),
           onTap: () => _selectPlace(LocalPlace.fromExternal(
             name:      q.name,
             address:   '${q.name}, Abengourou',
@@ -1538,10 +1528,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 10, color: color, fontWeight: FontWeight.w600)),
               Text(name,
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w600,
                     color: AppColors.text),
                 overflow: TextOverflow.ellipsis),
@@ -1587,10 +1577,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             controller: ctrl,
             focusNode:  focus,
             autofocus:  autoFocus,
-            style: GoogleFonts.poppins(fontSize: 13, color: AppColors.text),
+            style: GoogleFonts.urbanist(fontSize: 13, color: AppColors.text),
             decoration: InputDecoration(
               hintText:       hint,
-              hintStyle:      GoogleFonts.poppins(
+              hintStyle:      GoogleFonts.urbanist(
                   fontSize: 13, color: AppColors.textLight),
               border:         InputBorder.none,
               isDense:        true,
@@ -1635,11 +1625,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         maxLines: maxLines,
         textInputAction: textInputAction,
         onSubmitted: (_) => FocusScope.of(context).unfocus(),
-        style: GoogleFonts.poppins(fontSize: 14, color: AppColors.text),
+        style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
         textCapitalization: TextCapitalization.words,
         decoration: InputDecoration(
           hintText:  hint,
-          hintStyle: GoogleFonts.poppins(fontSize: 13, color: AppColors.textLight),
+          hintStyle: GoogleFonts.urbanist(fontSize: 13, color: AppColors.textLight),
           prefixIcon: Padding(
             padding: const EdgeInsets.only(left: 12, right: 8),
             child: Icon(icon, color: AppColors.textMuted, size: 20),
@@ -1661,7 +1651,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFFE65100), Color(0xFFFF6B00), Color(0xFFFF8C42)],
+            colors: [Color(0xFFE65100), AppColors.primary, Color(0xFFFF8C42)],
             begin: Alignment.topLeft, end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(20),
@@ -1672,7 +1662,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Text(label,
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.urbanist(
                 fontSize: 16, fontWeight: FontWeight.w700,
                 color: Colors.white)),
           const SizedBox(width: 8),
@@ -1704,17 +1694,17 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.urbanist(
                 fontSize: 10, color: AppColors.textMuted,
                 fontWeight: FontWeight.w600)),
           Text(name,
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.urbanist(
                 fontSize: 13, fontWeight: FontWeight.w600,
                 color: AppColors.text),
             overflow: TextOverflow.ellipsis),
           if (contact.isNotEmpty)
             Text('👤 $contact${phone.isNotEmpty ? ' · $phone' : ''}',
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.urbanist(
                   fontSize: 11, color: AppColors.textMuted)),
         ],
       )),
@@ -1728,7 +1718,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             border: Border.all(color: AppColors.divider),
           ),
           child: Text('Modifier',
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.urbanist(
                 fontSize: 10, fontWeight: FontWeight.w600,
                 color: AppColors.text)),
         ),
@@ -1741,9 +1731,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       Icon(icon, size: 14, color: color),
       const SizedBox(height: 2),
       Text(label,
-        style: GoogleFonts.poppins(fontSize: 9, color: AppColors.textMuted)),
+        style: GoogleFonts.urbanist(fontSize: 9, color: AppColors.textMuted)),
       Text(value,
-        style: GoogleFonts.poppins(
+        style: GoogleFonts.urbanist(
             fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.text)),
     ]);
   }
@@ -1784,11 +1774,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w700,
                     color: disabled ? AppColors.textLight : AppColors.text)),
               Text(sub,
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 11, color: AppColors.textMuted)),
             ],
           )),
@@ -1857,7 +1847,7 @@ class _PlaceTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(place.name,
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 14, fontWeight: FontWeight.w600),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 2),
@@ -1865,7 +1855,7 @@ class _PlaceTile extends StatelessWidget {
               place.district.isNotEmpty
                   ? '${place.district} · ${place.address.split(',').last.trim()}'
                   : place.address,
-              style: GoogleFonts.poppins(
+              style: GoogleFonts.urbanist(
                   fontSize: 12, color: AppColors.textMuted),
               maxLines: 1, overflow: TextOverflow.ellipsis,
             ),
@@ -1877,7 +1867,7 @@ class _PlaceTile extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppColors.bg, borderRadius: BorderRadius.circular(4)),
             child: Text(place.source.toUpperCase(),
-                style: GoogleFonts.poppins(
+                style: GoogleFonts.urbanist(
                     fontSize: 8, color: AppColors.textLight,
                     fontWeight: FontWeight.w600)),
           ),

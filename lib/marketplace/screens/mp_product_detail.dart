@@ -124,7 +124,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                           borderRadius: BorderRadius.circular(30),
                         ),
                         child: Text('VENDU',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                               color: Colors.white,
                               fontSize: 18,
                               fontWeight: FontWeight.w900,
@@ -151,7 +151,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                       Expanded(
                         child: Text(
                           _p.title,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
                             color: kMpText,
@@ -162,7 +162,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                       const SizedBox(width: 12),
                       Text(
                         _fmt(_p.price),
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           fontSize: 20,
                           fontWeight: FontWeight.w900,
                           color: kMpOrange,
@@ -179,14 +179,14 @@ class _MpProductDetailState extends State<MpProductDetail> {
                     const SizedBox(width: 4),
                     Text(_p.city,
                         style:
-                            GoogleFonts.inter(fontSize: 13, color: kMpMuted)),
+                            GoogleFonts.urbanist(fontSize: 13, color: kMpMuted)),
                     const SizedBox(width: 16),
                     const Icon(Icons.remove_red_eye_outlined,
                         size: 14, color: kMpMuted),
                     const SizedBox(width: 4),
                     Text('${_p.views} vues',
                         style:
-                            GoogleFonts.inter(fontSize: 13, color: kMpMuted)),
+                            GoogleFonts.urbanist(fontSize: 13, color: kMpMuted)),
                   ]),
                 ],
               ),
@@ -206,7 +206,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Caractéristiques',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: kMpText,
@@ -248,7 +248,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Description',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                           color: kMpText,
@@ -256,7 +256,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                     const SizedBox(height: 10),
                     Text(
                       _p.description,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         fontSize: 14,
                         color: const Color(0xFF555555),
                         height: 1.6,
@@ -280,7 +280,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Vendeur',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: kMpText,
@@ -299,7 +299,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                           _p.sellerName.isNotEmpty
                               ? _p.sellerName[0].toUpperCase()
                               : '?',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
                             color: kMpOrange,
@@ -317,7 +317,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                               _p.sellerName.isEmpty
                                   ? 'Vendeur AZ'
                                   : _p.sellerName,
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w600,
                                 color: kMpText,
@@ -335,7 +335,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
                                   size: 12, color: kMpMuted),
                               const SizedBox(width: 2),
                               Text(_p.sellerCity,
-                                  style: GoogleFonts.inter(
+                                  style: GoogleFonts.urbanist(
                                       fontSize: 12, color: kMpMuted)),
                             ]),
                         ],
@@ -359,7 +359,7 @@ class _MpProductDetailState extends State<MpProductDetail> {
               color: Colors.white,
               alignment: Alignment.center,
               child: Text('Ce produit a été vendu',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       color: Colors.red, fontWeight: FontWeight.w600)),
             ),
     );
@@ -405,7 +405,7 @@ class _ActionBar extends StatelessWidget {
     if (user == null || user.isAnonymous) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Connectez-vous pour envoyer un message',
-            style: GoogleFonts.inter(color: Colors.white)),
+            style: GoogleFonts.urbanist(color: Colors.white)),
         backgroundColor: kMpOrange,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -506,7 +506,7 @@ class _ActionBtn extends StatelessWidget {
         onPressed: onTap,
         icon: Icon(icon, size: 16),
         label: Text(label,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontWeight: FontWeight.w700, fontSize: 13)),
         style: OutlinedButton.styleFrom(
           foregroundColor: color,
@@ -521,7 +521,7 @@ class _ActionBtn extends StatelessWidget {
       onPressed: onTap,
       icon: Icon(icon, size: 16, color: Colors.white),
       label: Text(label,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontWeight: FontWeight.w700,
               fontSize: 13,
               color: Colors.white)),
@@ -554,7 +554,7 @@ class _SpecChip extends StatelessWidget {
         Icon(icon, size: 14, color: kMpOrange),
         const SizedBox(width: 6),
         Text(label,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: kMpText)),
@@ -579,7 +579,7 @@ class _CondBadge extends StatelessWidget {
         boxShadow: [BoxShadow(color: c.withValues(alpha: 0.4), blurRadius: 8)],
       ),
       child: Text(conditionLabel(condition),
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
             fontSize: 11,
             fontWeight: FontWeight.w700,
             color: Colors.white,
@@ -619,7 +619,7 @@ class _ReportSheetState extends State<_ReportSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Signaler cette annonce',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 16, fontWeight: FontWeight.w700, color: kMpText)),
           const SizedBox(height: 14),
           RadioGroup<String>(
@@ -627,7 +627,7 @@ class _ReportSheetState extends State<_ReportSheet> {
             onChanged: (v) => setState(() => _selected = v),
             child: Column(
               children: _reasons.map((r) => RadioListTile<String>(
-                    title: Text(r, style: GoogleFonts.inter(fontSize: 14)),
+                    title: Text(r, style: GoogleFonts.urbanist(fontSize: 14)),
                     value: r,
                     activeColor: Colors.red,
                     dense: true,
@@ -652,7 +652,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('Signalement envoyé, merci.',
-                              style: GoogleFonts.inter(color: Colors.white)),
+                              style: GoogleFonts.urbanist(color: Colors.white)),
                           backgroundColor: Colors.red,
                           behavior: SnackBarBehavior.floating,
                           shape: RoundedRectangleBorder(
@@ -674,7 +674,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
                   : Text('Envoyer le signalement',
-                      style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                      style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
             ),
           ),
           const SizedBox(height: 10),

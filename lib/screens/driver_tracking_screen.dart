@@ -13,6 +13,7 @@ import '../services/driver_location_service.dart';
 import '../services/google_routes_service.dart';
 import '../widgets/driver_marker.dart';
 import '../widgets/route_polyline.dart';
+import '../theme/app_theme.dart';
 
 /// Écran carte professionnel côté livreur — style Bolt/Yango driver.
 ///
@@ -294,7 +295,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B00),
+              backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
@@ -380,7 +381,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
                           ? Icons.navigation_rounded
                           : Icons.navigation_outlined,
                       bgColor: _followDriver
-                          ? const Color(0xFFFF6D00) : Colors.white,
+                          ? AppColors.primary : Colors.white,
                       iconColor: _followDriver ? Colors.white : Colors.black87,
                       onTap: () {
                         setState(() => _followDriver = !_followDriver);
@@ -397,7 +398,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
                       const SizedBox(
                         width: 44, height: 44,
                         child: CircularProgressIndicator(
-                            color: Color(0xFFFF6D00), strokeWidth: 3),
+                            color: AppColors.primary, strokeWidth: 3),
                       ),
                     ],
                   ]),
@@ -455,7 +456,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
               _gpsActive
                   ? 'Position transmise en temps réel'
                   : 'Acquisition GPS en cours…',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 fontSize: 12, fontWeight: FontWeight.w600,
                 color: _gpsActive
                     ? const Color(0xFF22C55E)
@@ -473,7 +474,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
             label:    'Vers le client',
             distance: _routeToClient.distanceText,
             eta:      _routeToClient.etaText,
-            color:    const Color(0xFFFF6D00),
+            color:    AppColors.primary,
             icon:     Icons.person_pin_circle_rounded,
           ),
           if (hasDest) ...[
@@ -496,7 +497,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
         Row(children: [
           Expanded(child: ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6D00),
+              backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(
@@ -507,7 +508,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
             icon:  const Icon(Icons.navigation_rounded, size: 18),
             label: Text(
               hasDest ? 'Vers le client' : 'Naviguer',
-              style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14),
+              style: GoogleFonts.urbanist(fontWeight: FontWeight.w700, fontSize: 14),
             ),
           )),
           if (hasDest && _destPos != null) ...[
@@ -524,7 +525,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
               onPressed: () => _navigateTo(_destPos!),
               icon:  const Icon(Icons.place_rounded, size: 18),
               label: Text('Destination',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14)),
+                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w700, fontSize: 14)),
             )),
           ],
         ]),
@@ -537,13 +538,13 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   Widget _buildLoadingScreen() => Scaffold(
     backgroundColor: Colors.white,
     body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const CircularProgressIndicator(color: Color(0xFFFF6D00), strokeWidth: 3),
+      const CircularProgressIndicator(color: AppColors.primary, strokeWidth: 3),
       const SizedBox(height: 20),
       Text('Localisation GPS…',
-          style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600)),
+          style: GoogleFonts.urbanist(fontSize: 16, fontWeight: FontWeight.w600)),
       const SizedBox(height: 8),
       Text('Veuillez patienter',
-          style: GoogleFonts.inter(fontSize: 13, color: Colors.grey.shade500)),
+          style: GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade500)),
     ])),
   );
 
@@ -588,7 +589,7 @@ class _GpsStatusChip extends StatelessWidget {
       const SizedBox(width: 6),
       Text(
         isActive ? 'GPS actif' : 'GPS…',
-        style: GoogleFonts.inter(
+        style: GoogleFonts.urbanist(
           fontSize: 12, fontWeight: FontWeight.w600,
           color: isActive ? const Color(0xFF22C55E) : Colors.orange,
         ),
@@ -648,11 +649,11 @@ class _StatTile extends StatelessWidget {
       Icon(icon, color: color, size: 22),
       const SizedBox(width: 10),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: GoogleFonts.inter(
+        Text(label, style: GoogleFonts.urbanist(
             fontSize: 11, color: Colors.grey.shade500)),
-        Text(distance, style: GoogleFonts.inter(
+        Text(distance, style: GoogleFonts.urbanist(
             fontSize: 15, fontWeight: FontWeight.w800, color: color)),
-        Text(eta, style: GoogleFonts.inter(
+        Text(eta, style: GoogleFonts.urbanist(
             fontSize: 11, color: Colors.grey.shade500)),
       ])),
     ]),

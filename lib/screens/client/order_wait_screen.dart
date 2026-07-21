@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../models/order_model.dart';
 import '../../services/notification_service.dart';
 import 'order_tracking_map.dart';
+import '../../theme/app_theme.dart';
 
 /// Écran affiché immédiatement après la création d'une commande.
 /// Phase 1 : animation radar "Recherche d'un livreur…"
@@ -49,7 +50,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
 
   static const _green     = Color(0xFF2E7D32);
   static const _lightGreen = Color(0xFF4CAF50);
-  static const _orange    = Color(0xFFFF7A1A);
+  static const _orange    = AppColors.primary;
 
   @override
   void initState() {
@@ -164,7 +165,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
             Text(
               'Aucun livreur disponible',
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 17, fontWeight: FontWeight.w700),
             ),
           ],
@@ -172,15 +173,15 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
         content: Text(
           'Nous n\'avons pas trouvé de livreur disponible dans votre zone pour le moment.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 13.5, color: Colors.grey.shade600, height: 1.5),
         ),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
           OutlinedButton(
             style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Color(0xFFFF6B00)),
-              foregroundColor: const Color(0xFFFF6B00),
+              side: const BorderSide(color: AppColors.primary),
+              foregroundColor: AppColors.primary,
               minimumSize: const Size(120, 44),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
@@ -189,11 +190,11 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
               Navigator.pop(context); // ferme dialog
               Navigator.pop(context); // retourne au dashboard
             },
-            child: Text('Annuler', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+            child: Text('Annuler', style: GoogleFonts.urbanist(fontWeight: FontWeight.w600)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B00),
+              backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
               minimumSize: const Size(120, 44),
               shape: RoundedRectangleBorder(
@@ -220,7 +221,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
                 if (mounted) Navigator.pop(context);
               }
             },
-            child: Text('Réessayer', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+            child: Text('Réessayer', style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -233,17 +234,17 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Annuler la commande ?',
-            style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
         content: Text(
           'La recherche sera interrompue et votre commande supprimée.',
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 13, color: Colors.grey.shade600),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: Text('Garder',
-                style: GoogleFonts.inter(color: Colors.grey.shade600)),
+                style: GoogleFonts.urbanist(color: Colors.grey.shade600)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -253,7 +254,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
             ),
             onPressed: () => Navigator.pop(context, true),
             child: Text('Annuler la commande',
-                style: GoogleFonts.inter(color: Colors.white)),
+                style: GoogleFonts.urbanist(color: Colors.white)),
           ),
         ],
       ),
@@ -324,7 +325,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
                     const SizedBox(width: 6),
                     Text(
                       _driverFound ? 'Livreur assigné' : 'En attente',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                           color: Colors.white70),
@@ -369,7 +370,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
                   onTap: _cancelOrder,
                   child: Text(
                     'Annuler la commande',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                       fontSize: 13,
                       color: Colors.red.shade300,
                       decoration: TextDecoration.underline,
@@ -465,7 +466,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
         children: [
           Text(titles[_searchPhase],
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 21,
                   fontWeight: FontWeight.w800,
                   color: Colors.white)),
@@ -473,7 +474,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
           Text(
             subtitles[_searchPhase],
             textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 13,
                 color: Colors.white60,
                 height: 1.55),
@@ -488,13 +489,13 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
       key: const ValueKey('found_txt'),
       children: [
         Text('Livreur trouvé !',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 26,
                 fontWeight: FontWeight.w800,
                 color: Colors.white)),
         const SizedBox(height: 8),
         Text('Ouverture du suivi en direct…',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 13, color: Colors.green.shade300)),
       ],
     );
@@ -527,7 +528,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
               o.description.split('\n').first,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: Colors.white),
@@ -545,7 +546,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
               o.deliveryAddress ?? '—',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 12, color: Colors.white54),
             )),
           ]),
@@ -568,7 +569,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
                     color: modeColor.withValues(alpha: 0.45)),
               ),
               child: Text(modeLabel,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 10,
                       fontWeight: FontWeight.w800,
                       color: modeColor)),
@@ -576,7 +577,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
             const Spacer(),
             Text(
               '${o.budget} FCFA',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
                   color: Colors.white),

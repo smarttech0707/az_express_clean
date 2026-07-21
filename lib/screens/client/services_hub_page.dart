@@ -244,7 +244,7 @@ class _ServicesHubPageState extends State<ServicesHubPage>
                         const SizedBox(height: 32),
                         Text(
                           context.tr('services_title'),
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -253,7 +253,7 @@ class _ServicesHubPageState extends State<ServicesHubPage>
                         const SizedBox(height: 2),
                         Text(
                           context.tr('services_sub'),
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.white70, fontSize: 12.5),
                         ),
                       ],
@@ -267,7 +267,7 @@ class _ServicesHubPageState extends State<ServicesHubPage>
               duration: const Duration(milliseconds: 200),
               child: Text(
                 context.tr('services_title'),
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     color: Colors.white,
                     fontSize: 17,
                     fontWeight: FontWeight.w600),
@@ -302,7 +302,7 @@ class _ServicesHubPageState extends State<ServicesHubPage>
               sliver: SliverToBoxAdapter(
                 child: Text(
                   '${_searchResults.length} résultat(s) pour "$_query"',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 12, color: Colors.grey.shade600),
                 ),
               ),
@@ -406,10 +406,10 @@ class _SearchBar extends StatelessWidget {
       child: TextField(
         controller: controller,
         onChanged:  onChanged,
-        style:      GoogleFonts.inter(fontSize: 14),
+        style:      GoogleFonts.urbanist(fontSize: 14),
         decoration: InputDecoration(
           hintText:  'Rechercher un service...',
-          hintStyle: GoogleFonts.inter(fontSize: 14, color: Colors.grey),
+          hintStyle: GoogleFonts.urbanist(fontSize: 14, color: Colors.grey),
           prefixIcon: const Icon(Icons.search_rounded,
               color: Color(0xFF1565C0), size: 22),
           suffixIcon: controller.text.isNotEmpty
@@ -479,7 +479,7 @@ class _SearchResultTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
                           color: Colors.black87)),
@@ -489,7 +489,7 @@ class _SearchResultTile extends StatelessWidget {
                       Icon(cat.icon, size: 11, color: Colors.grey.shade500),
                       const SizedBox(width: 4),
                       Text(catLabel,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 11, color: Colors.grey.shade500)),
                     ],
                   ),
@@ -524,13 +524,13 @@ class _EmptySearch extends StatelessWidget {
           const SizedBox(height: 16),
           Text(
             'Aucun résultat pour "$query"',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 15, color: Colors.grey.shade600),
           ),
           const SizedBox(height: 8),
           Text(
             'Essayez : maçon, plombier, location...',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 12, color: Colors.grey.shade400),
           ),
         ],
@@ -585,7 +585,7 @@ class _CategorySection extends StatelessWidget {
                   children: [
                     Text(
                       context.tr(cat.labelKey),
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         color:      Colors.white,
                         fontSize:   16,
                         fontWeight: FontWeight.bold,
@@ -593,7 +593,7 @@ class _CategorySection extends StatelessWidget {
                     ),
                     Text(
                       '${cat.subs.length} services disponibles',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 11),
                     ),
                   ],
@@ -698,7 +698,7 @@ class _SubCatTileState extends State<_SubCatTile> {
                   widget.label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     fontSize:   11.5,
                     fontWeight: FontWeight.w600,
                     color:      Colors.black87,
@@ -778,7 +778,7 @@ class _BecomeProviderBannerState extends State<_BecomeProviderBanner> {
                   children: [
                     Text(
                       'Devenir prestataire',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         color:      Colors.white,
                         fontSize:   15,
                         fontWeight: FontWeight.bold,
@@ -787,7 +787,7 @@ class _BecomeProviderBannerState extends State<_BecomeProviderBanner> {
                     const SizedBox(height: 2),
                     Text(
                       'Inscrivez votre activité sur AZ Express',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 11.5),
                     ),
                   ],
@@ -804,7 +804,7 @@ class _BecomeProviderBannerState extends State<_BecomeProviderBanner> {
                 ),
                 child: Text(
                   "S'inscrire",
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     color:      Colors.white,
                     fontWeight: FontWeight.bold,
                     fontSize:   12,
@@ -879,7 +879,7 @@ class _EkbineBannerState extends State<_EkbineBanner> {
                   children: [
                     Text(
                       'E-Kbine Services',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         color:      Colors.white,
                         fontSize:   16,
                         fontWeight: FontWeight.bold,
@@ -888,7 +888,7 @@ class _EkbineBannerState extends State<_EkbineBanner> {
                     const SizedBox(height: 2),
                     Text(
                       context.tr('ekbine_sub'),
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 11.5),
                     ),
                   ],
@@ -905,7 +905,7 @@ class _EkbineBannerState extends State<_EkbineBanner> {
                 ),
                 child: Text(
                   'Ouvrir',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     color:      Colors.white,
                     fontWeight: FontWeight.bold,
                     fontSize:   12.5,

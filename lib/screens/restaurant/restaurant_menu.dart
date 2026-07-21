@@ -391,8 +391,9 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
           // ── MENU ITEMS ───────────────────────────────────
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
-                .collection("menus")
-                .where("restaurantId", isEqualTo: widget.restaurantId)
+                .collection("restaurants")
+                .doc(widget.restaurantId)
+                .collection("menu")
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../models/real_estate_listing.dart';
 import '../../services/real_estate_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/stream_error_state.dart';
 
 class ListingDetailScreen extends StatefulWidget {
   final String listingId;
@@ -75,6 +76,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance.collection('real_estate_listings').doc(widget.listingId).snapshots(),
         builder: (context, snap) {
+          if (snap.hasError) {
+            return const StreamErrorState(message: "Impossible de charger cette annonce.");
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           if (!snap.data!.exists) return const Center(child: Text('Annonce introuvable'));
           final listing = RealEstateListing.fromDoc(snap.data!);

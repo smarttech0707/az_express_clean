@@ -9,6 +9,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../widgets/partner_account_sheet.dart';
+import '../../widgets/logout_confirm_dialog.dart';
 
 class RestaurantOwnerDashboard extends StatefulWidget {
   final String ownerId;
@@ -32,6 +34,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
   late TabController _tabCtrl;
   bool _isOpen = false;
   int _wallet = 0;
+  String? _photoUrl;
   StreamSubscription? _walletSub;
   StreamSubscription<QuerySnapshot>? _orderSub;
   int _prevPendingCount = -1;
@@ -48,6 +51,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
     _isOpen = widget.restaurantData['isOpen'] == true;
+    _photoUrl = widget.restaurantData['logoUrl'] as String?;
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
       if (type == 'new_seller_order') _tabCtrl.animateTo(1);
@@ -122,7 +126,12 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
         .update({'isOpen': v});
   }
 
-  Future<void> _logout() async {
+  // Master Prompt 135 — _logout() affiche désormais une confirmation avant
+  // d'appeler _doLogout(), qui porte l'intégralité de la logique déjà
+  // existante et inchangée (signOut, redirection).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'restaurant');
     await FirebaseAuth.instance.signOut();
     try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
@@ -139,7 +148,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: Text(name,
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold),
             overflow: TextOverflow.ellipsis),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
@@ -157,6 +166,27 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
             ),
           ),
           IconButton(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: 'Mon compte',
+            onPressed: () => showPartnerAccountSheet(
+              context,
+              role: 'restaurant',
+              roleLabel: 'Restaurant',
+              name: _name,
+              phone: widget.restaurantData['phone'] as String?,
+              onLogout: _logout,
+              photoUrl: _photoUrl,
+              photoStoragePath: 'restaurant_logos/${widget.restaurantId}/logo.jpg',
+              onPhotoUploaded: (url) async {
+                await FirebaseFirestore.instance
+                    .collection('restaurants')
+                    .doc(widget.restaurantId)
+                    .update({'logoUrl': url});
+                if (mounted) setState(() => _photoUrl = url);
+              },
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.logout_rounded),
             tooltip: 'Déconnexion',
             onPressed: _logout,
@@ -167,7 +197,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white60,
-          labelStyle: GoogleFonts.inter(
+          labelStyle: GoogleFonts.urbanist(
               fontWeight: FontWeight.w600, fontSize: 13),
           tabs: const [
             Tab(icon: Icon(Icons.restaurant_menu_rounded), text: 'Menu'),
@@ -207,7 +237,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
                           color: Colors.white, size: 15),
                       const SizedBox(width: 5),
                       Text('${_fmtWallet(_wallet)} F',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.white,
                               fontSize: 13,
                               fontWeight: FontWeight.bold)),
@@ -216,7 +246,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
                 ),
                 const Spacer(),
                 Text(_isOpen ? 'Ouvert' : 'Fermé',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: _isOpen
                             ? const Color(0xFF2E7D32)
                             : Colors.grey.shade600,
@@ -265,7 +295,7 @@ class _MenuTab extends StatelessWidget {
         backgroundColor: const Color(0xFF1565C0),
         icon: const Icon(Icons.add, color: Colors.white),
         label: Text('Ajouter',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 color: Colors.white, fontWeight: FontWeight.w600)),
       ),
       body: StreamBuilder<QuerySnapshot>(
@@ -289,10 +319,10 @@ class _MenuTab extends StatelessWidget {
                       size: 64, color: Colors.grey.shade300),
                   const SizedBox(height: 12),
                   Text('Aucun article dans le menu',
-                      style: GoogleFonts.inter(color: Colors.grey)),
+                      style: GoogleFonts.urbanist(color: Colors.grey)),
                   const SizedBox(height: 4),
                   Text('Appuyez sur + pour ajouter',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.grey.shade400, fontSize: 12)),
                 ],
               ),
@@ -354,7 +384,7 @@ class _MenuTab extends StatelessWidget {
                 ),
               ),
               Text(docId == null ? 'Nouvel article' : 'Modifier l\'article',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               _dialogField(nameCtrl, 'Nom du plat *', Icons.fastfood_rounded),
@@ -377,7 +407,7 @@ class _MenuTab extends StatelessWidget {
               Row(
                 children: [
                   Text('Disponible',
-                      style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
+                      style: GoogleFonts.urbanist(fontWeight: FontWeight.w500)),
                   const Spacer(),
                   Switch(
                     value: available,
@@ -405,7 +435,7 @@ class _MenuTab extends StatelessWidget {
                         icon: const Icon(Icons.delete_outline,
                             color: Colors.red),
                         label: Text('Supprimer',
-                            style: GoogleFonts.inter(color: Colors.red)),
+                            style: GoogleFonts.urbanist(color: Colors.red)),
                         style: OutlinedButton.styleFrom(
                             side: const BorderSide(color: Colors.red)),
                       ),
@@ -452,7 +482,7 @@ class _MenuTab extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12)),
                       ),
                       child: Text('Enregistrer',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.white,
                               fontWeight: FontWeight.w600)),
                     ),
@@ -552,7 +582,7 @@ class _MenuItemCard extends StatelessWidget {
         ),
         title: Text(
           data['name'] ?? '',
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontWeight: FontWeight.w600,
               color: available ? Colors.black87 : Colors.grey),
         ),
@@ -563,7 +593,7 @@ class _MenuItemCard extends StatelessWidget {
             if (data['description'] != null &&
                 (data['description'] as String).isNotEmpty)
               Text(data['description'],
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 11, color: Colors.grey.shade500),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
@@ -587,7 +617,7 @@ class _MenuItemCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('$price F',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontWeight: FontWeight.bold,
                     color: const Color(0xFF1565C0),
                     fontSize: 14)),
@@ -661,7 +691,7 @@ class _OrdersTab extends StatelessWidget {
                     size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text('Aucune commande pour l\'instant',
-                    style: GoogleFonts.inter(color: Colors.grey)),
+                    style: GoogleFonts.urbanist(color: Colors.grey)),
               ],
             ),
           );
@@ -707,20 +737,20 @@ class _OrdersTab extends StatelessWidget {
                 ),
                 title: Text(
                   d['description'] ?? 'Commande',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontWeight: FontWeight.w600, fontSize: 14),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Text(time,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 11, color: Colors.grey.shade400)),
                 trailing: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text('$amount F',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontWeight: FontWeight.bold,
                             color: const Color(0xFF1565C0),
                             fontSize: 14)),
@@ -797,12 +827,12 @@ class _WalletSheet extends StatelessWidget {
             ),
           ),
           Text('${_fmt(wallet)} FCFA',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 32,
                   fontWeight: FontWeight.w900,
                   color: const Color(0xFF1565C0))),
           Text('Solde wallet restaurant',
-              style: GoogleFonts.inter(color: Colors.grey, fontSize: 13)),
+              style: GoogleFonts.urbanist(color: Colors.grey, fontSize: 13)),
           const SizedBox(height: 24),
           Row(children: [
             Expanded(
@@ -974,7 +1004,7 @@ class _RestaurantAnalyticsSheetState
             const Icon(Icons.bar_chart_rounded, color: Color(0xFF1565C0)),
             const SizedBox(width: 8),
             Text('Statistiques — 7 derniers jours',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 15, fontWeight: FontWeight.bold)),
           ]),
           const SizedBox(height: 16),
@@ -1012,7 +1042,7 @@ class _RestaurantAnalyticsSheetState
             Align(
               alignment: Alignment.centerLeft,
               child: Text('Revenus par jour',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
                       color: Colors.grey)),

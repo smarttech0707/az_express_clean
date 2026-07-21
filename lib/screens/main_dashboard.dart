@@ -215,7 +215,17 @@ class _NavTab extends StatelessWidget {
     final labelSize = AppTypography.labelSmall(context);
 
     return Expanded(
-      child: TapEffect(
+      // Master Prompt 124 (Partie 17) — aucun onglet de navigation n'était
+      // annoncé aux lecteurs d'écran (zéro Semantics() dans tout le projet
+      // avant cette passe) ; un seul Semantics combiné plutôt que de laisser
+      // l'icône et le texte être annoncés séparément (excludeSemantics).
+      child: Semantics(
+        label: label,
+        selected: selected,
+        button: true,
+        onTap: onTap,
+        excludeSemantics: true,
+        child: TapEffect(
         onTap:    onTap,
         scaleDown: 0.92,
         haptic:   HapticType.selection,
@@ -238,17 +248,24 @@ class _NavTab extends StatelessWidget {
                     : Colors.transparent,
                 borderRadius: AppRadius.pillR,
               ),
-              child: Icon(
-                selected ? icon : iconOff,
-                color: selected ? kPrimary : AppColors.textLight,
-                size:  iconSize,
+              // Master Prompt 124 — l'onglet actif grandit légèrement plutôt
+              // que de ne changer que sa couleur, pour un feedback plus vivant.
+              child: AnimatedScale(
+                scale: selected ? 1.12 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutBack,
+                child: Icon(
+                  selected ? icon : iconOff,
+                  color: selected ? kPrimary : AppColors.textLight,
+                  size:  iconSize,
+                ),
               ),
             ),
             SizedBox(height: AppLayout.xs(context) / 2),
             // Label
             AnimatedDefaultTextStyle(
               duration: const Duration(milliseconds: 200),
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                 fontSize:   labelSize,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
                 color:      selected ? kPrimary : AppColors.textLight,
@@ -256,6 +273,7 @@ class _NavTab extends StatelessWidget {
               child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
           ],
+        ),
         ),
       ),
     );
@@ -297,7 +315,14 @@ class _CommanderButtonState extends State<_CommanderButton>
     final iconSize = AppLayout.iconLg(context);
     final hPad     = AppLayout.sm(context) - 2;
 
-    return GestureDetector(
+    // Master Prompt 124 (Partie 17) — bouton icône seule ("+"), sans texte ni
+    // tooltip : rien à annoncer pour un lecteur d'écran sans ce Semantics.
+    return Semantics(
+      label: 'Commander',
+      button: true,
+      onTap: widget.onTap,
+      excludeSemantics: true,
+      child: GestureDetector(
       onTapDown:   (_) { _ctrl.forward(); HapticFeedback.mediumImpact(); },
       onTapUp:     (_) { _ctrl.reverse(); widget.onTap(); },
       onTapCancel: () => _ctrl.reverse(),
@@ -324,6 +349,7 @@ class _CommanderButtonState extends State<_CommanderButton>
             ),
           ),
         ),
+      ),
       ),
     );
   }

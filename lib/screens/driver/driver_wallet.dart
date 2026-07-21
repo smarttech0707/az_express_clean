@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../services/firestore_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../theme/app_theme.dart';
 
 class DriverWallet extends StatelessWidget {
   final String driverId;
@@ -20,7 +21,7 @@ class DriverWallet extends StatelessWidget {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text("Mon Crédit"),
-        backgroundColor: const Color(0xFFFF7A1A),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
       ),
@@ -58,14 +59,14 @@ class DriverWallet extends StatelessWidget {
                     margin: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFFFF6D00), Color(0xFFFF8F00)],
+                        colors: [AppColors.primary, Color(0xFFFF8F00)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFFF6D00).withValues(alpha: 0.4),
+                          color: AppColors.primary.withValues(alpha: 0.4),
                           blurRadius: 16,
                           offset: const Offset(0, 6),
                         ),
@@ -142,10 +143,10 @@ class DriverWallet extends StatelessWidget {
                                   currentBalance: wallet,
                                 ),
                                 icon: const Icon(Icons.add,
-                                    color: Color(0xFFFF6D00), size: 18),
+                                    color: AppColors.primary, size: 18),
                                 label: const Text("Recharger",
                                     style: TextStyle(
-                                        color: Color(0xFFFF6D00),
+                                        color: AppColors.primary,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 13)),
                                 style: ElevatedButton.styleFrom(
@@ -170,10 +171,10 @@ class DriverWallet extends StatelessWidget {
                                   currentBalance: wallet,
                                 ),
                                 icon: const Icon(Icons.arrow_upward,
-                                    color: Color(0xFFFF6D00), size: 18),
+                                    color: AppColors.primary, size: 18),
                                 label: const Text("Retirer",
                                     style: TextStyle(
-                                        color: Color(0xFFFF6D00),
+                                        color: AppColors.primary,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 13)),
                                 style: ElevatedButton.styleFrom(

@@ -3,7 +3,12 @@ import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/firestore_service.dart';
+import '../../services/auth_service.dart';
 import '../../models/driver_earnings_summary.dart';
+import '../home/home_screen.dart';
+import '../../widgets/partner_account_sheet.dart';
+import '../../widgets/stream_error_state.dart';
+import '../../widgets/logout_confirm_dialog.dart';
 
 class FleetDashboard extends StatefulWidget {
   final String ownerId;
@@ -35,6 +40,23 @@ class _FleetDashboardState extends State<FleetDashboard>
     super.dispose();
   }
 
+  // Master Prompt 135 — _logout() affiche désormais une confirmation avant
+  // d'appeler _doLogout(), qui porte l'intégralité de la logique déjà
+  // existante et inchangée (signOut, redirection).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
+    AuthService().logAuthEvent('logout', 'fleet_owner');
+    await FirebaseAuth.instance.signOut();
+    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (_) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -44,6 +66,24 @@ class _FleetDashboardState extends State<FleetDashboard>
         backgroundColor: const Color(0xFF6A1B9A),
         foregroundColor: Colors.white,
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: 'Mon compte',
+            onPressed: () => showPartnerAccountSheet(
+              context,
+              role: 'fleet_owner',
+              roleLabel: 'Patron de flotte',
+              name: widget.ownerName,
+              onLogout: _logout,
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout_rounded),
+            tooltip: 'Déconnexion',
+            onPressed: _logout,
+          ),
+        ],
         bottom: TabBar(
           controller: _tab,
           labelColor: Colors.white,
@@ -121,6 +161,9 @@ class _LiveTab extends StatelessWidget {
           .where("ownerId", isEqualTo: ownerId)
           .snapshots(),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return const StreamErrorState(message: "Impossible de charger vos livreurs.");
+        }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -392,6 +435,9 @@ class _GainsTabState extends State<_GainsTab> {
                 .where("ownerId", isEqualTo: widget.ownerId)
                 .snapshots(),
             builder: (context, snap) {
+              if (snap.hasError) {
+                return const StreamErrorState(message: "Impossible de charger vos livreurs.");
+              }
               if (!snap.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }

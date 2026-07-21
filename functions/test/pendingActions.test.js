@@ -86,7 +86,13 @@ test('aiConfirmAction: happy path calls confirmHandler and marks the action comp
   const fn = buildConfirmAction({ db, admin: fakeAdmin, onCall, logAudit, HttpsError, toolsByName });
   const result = await fn.run({ auth: { uid: 'u1' }, data: { actionId: 'a1' } });
 
-  assert.deepEqual(result, { status: 'completed', orderId: 'o1' });
+  // Master Prompt 117 : `response` (enveloppe structurée) est désormais
+  // ajouté à côté des champs déjà renvoyés par l'outil — additif seulement,
+  // vérifié séparément plutôt que par une égalité stricte de tout l'objet.
+  assert.equal(result.status, 'completed');
+  assert.equal(result.orderId, 'o1');
+  assert.ok(result.response);
+  assert.equal(result.response.type, 'success'); // 'test_tool' n'a pas de mapping dédié -> repli success
   assert.equal(confirmCalls.length, 1);
   assert.equal(confirmCalls[0].uid, 'u1');
   assert.equal(store.get('ai_pending_actions/a1').status, 'completed');
@@ -110,7 +116,10 @@ test('aiConfirmAction: afterConfirm result is merged into the response', async (
   const fn = buildConfirmAction({ db, admin: fakeAdmin, onCall, logAudit: makeLogAudit(), HttpsError, toolsByName });
   const result = await fn.run({ auth: { uid: 'u1' }, data: { actionId: 'a1' } });
 
-  assert.deepEqual(result, { status: 'completed', txId: 't1', paymentUrl: 'https://pay.example/t1' });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.txId, 't1');
+  assert.equal(result.paymentUrl, 'https://pay.example/t1');
+  assert.ok(result.response); // Master Prompt 117 — ajouté à côté, jamais à la place
 });
 
 test('aiConfirmAction: rejects an unknown actionId (not-found)', async () => {

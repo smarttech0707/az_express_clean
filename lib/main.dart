@@ -167,6 +167,8 @@ class _AZExpressAppState extends State<AZExpressApp> {
             return const Locale('fr');
           },
           theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          themeMode: ThemeMode.system,
           home: const HomeScreen(),
         ),
         builder: (_, child) => child ?? const SizedBox.shrink(),

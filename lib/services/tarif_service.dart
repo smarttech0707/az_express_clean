@@ -1,5 +1,13 @@
 import 'dart:math' as math;
 
+// BUSINESS RULE:
+// Livraison Express
+// Jour = 1000 FCFA
+// Nuit = 1500 FCFA
+// Ne pas modifier sans décision métier.
+// (Zone centrale ≤8km d'Abengourou — voir TarifResult.expressPrice ci-dessous
+// pour la formule exacte. Port Node fidèle : functions/tarifService.js.)
+
 class TarifResult {
   final int standardPrice;
   final int expressPrice;
@@ -75,7 +83,12 @@ class TarifService {
     if (!isOutside) {
       return TarifResult(
         standardPrice: night ? 1000 : 500,
-        expressPrice:  night ? 1000 : 700,
+        // BUSINESS RULE:
+        // Livraison Express
+        // Jour = 1000 FCFA
+        // Nuit = 1500 FCFA
+        // Ne pas modifier sans décision métier.
+        expressPrice:  night ? 1500 : 1000,
         isNight:   night,
         isOutside: false,
         canOrder:  true,

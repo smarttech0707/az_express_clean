@@ -442,6 +442,8 @@ class _GenericForgotPasswordPageState
               color:      color,
               onChanged:  (val) => _onOtpDigit(i, val),
               onBackspace: ()   => _onOtpBackspace(i),
+              index: i,
+              total: 6,
             ),
           ),
         ),
@@ -581,6 +583,9 @@ class _OtpBox extends StatelessWidget {
   final Color                 color;
   final void Function(String) onChanged;
   final VoidCallback          onBackspace;
+  // Master Prompt 125 (Partie 6) — purement additif, défauts sûrs.
+  final int index;
+  final int total;
 
   const _OtpBox({
     required this.controller,
@@ -588,11 +593,16 @@ class _OtpBox extends StatelessWidget {
     required this.color,
     required this.onChanged,
     required this.onBackspace,
+    this.index = 0,
+    this.total = 6,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return Semantics(
+      label: 'Chiffre ${index + 1} sur $total du code de vérification',
+      textField: true,
+      child: SizedBox(
       width:  46,
       height: 56,
       child: KeyboardListener(
@@ -623,6 +633,7 @@ class _OtpBox extends StatelessWidget {
           ),
           onChanged: onChanged,
         ),
+      ),
       ),
     );
   }

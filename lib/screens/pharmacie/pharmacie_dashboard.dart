@@ -3,9 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../widgets/partner_account_sheet.dart';
+import '../../widgets/logout_confirm_dialog.dart';
+import 'pharmacie_login.dart' show kPharmacieLastIdPrefKey;
 
 class PharmacieDashboard extends StatefulWidget {
   final String pharmacieId;
@@ -26,12 +30,14 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
   late TabController _tabCtrl;
   late bool _isOnDuty;
   bool _toggling = false;
+  String? _photoUrl;
 
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
     _isOnDuty = widget.pharmacieData['isOnDuty'] == true;
+    _photoUrl = widget.pharmacieData['logoUrl'] as String?;
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
       if (type == 'new_pharmacie_order') _tabCtrl.animateTo(0);
@@ -60,8 +66,16 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
     }
   }
 
-  Future<void> _logout() async {
+  // Master Prompt 135 — _logout() affiche désormais une confirmation avant
+  // d'appeler _doLogout(), qui porte l'intégralité de la logique déjà
+  // existante et inchangée (signOut, nettoyage SharedPreferences, redirection).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'pharmacie');
+    // Master Prompt 128 (Partie 8) — la déconnexion volontaire est le seul
+    // moment où l'identifiant local de reprise de session est effacé.
+    (await SharedPreferences.getInstance()).remove(kPharmacieLastIdPrefKey);
     await FirebaseAuth.instance.signOut();
     try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
     if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
@@ -85,12 +99,33 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text(name,
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold),
             overflow: TextOverflow.ellipsis),
         backgroundColor: Colors.red.shade700,
         foregroundColor: Colors.white,
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.account_circle_outlined),
+            tooltip: 'Mon compte',
+            onPressed: () => showPartnerAccountSheet(
+              context,
+              role: 'pharmacie',
+              roleLabel: 'Pharmacie',
+              name: name as String?,
+              phone: widget.pharmacieData['phone'] as String?,
+              onLogout: _logout,
+              photoUrl: _photoUrl,
+              photoStoragePath: 'pharmacie_logos/${widget.pharmacieId}/logo.jpg',
+              onPhotoUploaded: (url) async {
+                await FirebaseFirestore.instance
+                    .collection('pharmacies')
+                    .doc(widget.pharmacieId)
+                    .update({'logoUrl': url});
+                if (mounted) setState(() => _photoUrl = url);
+              },
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
             tooltip: 'Déconnexion',
@@ -102,7 +137,7 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white60,
-          labelStyle: GoogleFonts.inter(
+          labelStyle: GoogleFonts.urbanist(
               fontWeight: FontWeight.w600, fontSize: 13),
           tabs: const [
             Tab(icon: Icon(Icons.emergency_rounded), text: 'Statut'),
@@ -182,7 +217,7 @@ class _StatusTab extends StatelessWidget {
                     color: Colors.white, size: 48),
                 const SizedBox(height: 10),
                 Text(name,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.bold),
@@ -190,20 +225,20 @@ class _StatusTab extends StatelessWidget {
                 if (address.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(address,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 12),
                       textAlign: TextAlign.center),
                 ],
                 if (phone.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(phone,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 12)),
                 ],
                 if (hours.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text('Horaires : $hours',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white60, fontSize: 11)),
                 ],
               ],
@@ -268,7 +303,7 @@ class _StatusTab extends StatelessWidget {
                   isOnDuty
                       ? 'Vous êtes de garde'
                       : 'Vous n\'êtes pas de garde',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: isOnDuty
@@ -281,7 +316,7 @@ class _StatusTab extends StatelessWidget {
                   isOnDuty
                       ? 'Votre pharmacie apparaît dans "De garde"'
                       : 'Activez pour apparaître dans "De garde"',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 12, color: Colors.grey.shade500),
                   textAlign: TextAlign.center,
                 ),
@@ -334,7 +369,7 @@ class _StatusTab extends StatelessWidget {
                                 isOnDuty
                                     ? 'Je ne suis plus de garde'
                                     : 'Je suis de garde',
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                     color: Colors.white,
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold),
@@ -413,7 +448,7 @@ class _PharmacieWallet extends StatelessWidget {
           children: [
             Text(
               'Mon wallet',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.black87),
@@ -454,7 +489,7 @@ class _PharmacieWallet extends StatelessWidget {
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text('Solde disponible',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 color: Colors.white70,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w500)),
@@ -464,14 +499,14 @@ class _PharmacieWallet extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text(
                     _fmt(balance),
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white,
                         fontSize: 40,
                         fontWeight: FontWeight.w900,
                         height: 1),
                   ),
                   Text('FCFA',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70,
                           fontSize: 14,
                           fontWeight: FontWeight.bold)),
@@ -490,7 +525,7 @@ class _PharmacieWallet extends StatelessWidget {
                       icon: const Icon(Icons.arrow_upward_rounded,
                           color: Color(0xFF2E7D32), size: 18),
                       label: Text('Retirer de l\'argent',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: const Color(0xFF2E7D32),
                               fontWeight: FontWeight.bold)),
                       style: ElevatedButton.styleFrom(
@@ -529,7 +564,7 @@ class _PharmacieWallet extends StatelessWidget {
                     ),
                     child: Center(
                       child: Text('Aucune transaction',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.grey, fontSize: 13)),
                     ),
                   );
@@ -538,7 +573,7 @@ class _PharmacieWallet extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Dernières transactions',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
                             color: Colors.grey.shade600)),
@@ -599,13 +634,13 @@ class _PharmacieWallet extends StatelessWidget {
                                     CrossAxisAlignment.start,
                                 children: [
                                   Text(desc,
-                                      style: GoogleFonts.inter(
+                                      style: GoogleFonts.urbanist(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis),
                                   Text(date,
-                                      style: GoogleFonts.inter(
+                                      style: GoogleFonts.urbanist(
                                           fontSize: 10,
                                           color: Colors.grey.shade400)),
                                 ],
@@ -613,7 +648,7 @@ class _PharmacieWallet extends StatelessWidget {
                             ),
                             Text(
                               '${isCredit ? '+' : '-'}${_fmt(amount)} F',
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13,
                                 color: isCredit
@@ -657,7 +692,7 @@ class _OrdersTab extends StatelessWidget {
               labelColor: Colors.red.shade700,
               unselectedLabelColor: Colors.grey,
               indicatorColor: Colors.red.shade700,
-              labelStyle: GoogleFonts.inter(
+              labelStyle: GoogleFonts.urbanist(
                   fontWeight: FontWeight.w600, fontSize: 12),
               tabs: const [
                 Tab(text: 'En cours'),
@@ -729,7 +764,7 @@ class _OrderList extends StatelessWidget {
                   activeOnly
                       ? 'Aucune commande en cours'
                       : 'Aucun historique',
-                  style: GoogleFonts.inter(color: Colors.grey),
+                  style: GoogleFonts.urbanist(color: Colors.grey),
                 ),
               ],
             ),
@@ -822,13 +857,13 @@ class _PharmacieOrderCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(label,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontWeight: FontWeight.w600,
                           color: color,
                           fontSize: 13)),
                 ),
                 Text(timeStr,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 11, color: Colors.grey.shade400)),
               ],
             ),
@@ -841,7 +876,7 @@ class _PharmacieOrderCard extends StatelessWidget {
               children: [
                 Text(
                   data['description'] ?? 'Commande pharmacie',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 if ((data['clientName'] as String? ?? '').isNotEmpty) ...[
@@ -852,7 +887,7 @@ class _PharmacieOrderCard extends StatelessWidget {
                           size: 14, color: Colors.grey.shade400),
                       const SizedBox(width: 4),
                       Text(data['clientName'],
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 12,
                               color: Colors.grey.shade600)),
                     ],
@@ -885,7 +920,7 @@ class _PharmacieOrderCard extends StatelessWidget {
                         const SizedBox(width: 10),
                         Text(
                           'Recherche d\'un livreur...',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 13,
                               color: Colors.orange.shade700,
                               fontWeight: FontWeight.w500),
@@ -961,7 +996,7 @@ class _DriverInfoCard extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text(
                     'Livreur assigné — Vérification sécurité',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
                         color: const Color(0xFF2E7D32)),
@@ -1015,13 +1050,13 @@ class _DriverInfoCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(name,
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15,
                                 color: Colors.black87)),
                         if (moto.isNotEmpty)
                           Text(moto,
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   fontSize: 12,
                                   color: Colors.grey.shade600)),
                         const SizedBox(height: 4),
@@ -1070,7 +1105,7 @@ class _DriverInfoCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'Vérifiez que le livreur correspond à la photo ci-dessus avant de lui remettre le colis.',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 11,
                             color: const Color(0xFF2E7D32)),
                       ),
@@ -1097,7 +1132,7 @@ class _DriverInfoCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text('Photo du livreur : $name',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontWeight: FontWeight.bold, fontSize: 14),
                   textAlign: TextAlign.center),
             ),

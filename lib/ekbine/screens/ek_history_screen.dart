@@ -21,7 +21,7 @@ class EkHistoryScreen extends StatelessWidget {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text('Historique',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 color: Colors.white)),
@@ -43,13 +43,13 @@ class EkHistoryScreen extends StatelessWidget {
                         const Text('📋', style: TextStyle(fontSize: 56)),
                         const SizedBox(height: 16),
                         Text('Aucune commande terminée',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
                                 color: kEkText)),
                         const SizedBox(height: 8),
                         Text('Vos commandes complètes apparaîtront ici',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontSize: 13, color: kEkMuted)),
                       ],
                     ),
@@ -112,7 +112,7 @@ class _HistoryCard extends StatelessWidget {
             ),
             child: Center(
               child: Text(order.operator[0].toUpperCase(),
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 18, fontWeight: FontWeight.w900,
                       color: opColor)),
             ),
@@ -123,22 +123,22 @@ class _HistoryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(order.serviceLabel,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 14, fontWeight: FontWeight.w700,
                         color: kEkText)),
                 Text(order.beneficiaryNumber,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 12, color: kEkMuted)),
                 if (order.createdAt != null)
                   Text(_dateStr(order.createdAt!),
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 10, color: kEkMuted)),
               ],
             ),
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(_fmt(order.totalPaid),
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 14, fontWeight: FontWeight.w800,
                     color: order.status == 'completed'
                         ? kEkGreen : kEkMuted)),
@@ -151,7 +151,7 @@ class _HistoryCard extends StatelessWidget {
               ),
               child: Text(
                 ekStatusLabels[order.status] ?? order.status,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 9, fontWeight: FontWeight.w700,
                     color: statusColor),
               ),

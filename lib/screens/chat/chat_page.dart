@@ -7,6 +7,7 @@ import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
+import '../../theme/app_theme.dart';
 
 class ChatPage extends StatefulWidget {
   final String orderId;
@@ -236,7 +237,7 @@ class _ChatPageState extends State<ChatPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFEDE7DC),
       appBar: AppBar(
-        backgroundColor: const Color(0xFFFF7A1A),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
         title: const Row(
@@ -265,6 +266,18 @@ class _ChatPageState extends State<ChatPage> {
                   .orderBy("time")
                   .snapshots(),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        "Impossible de charger les messages. Vérifiez votre connexion.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: Colors.grey),
+                      ),
+                    ),
+                  );
+                }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -331,7 +344,7 @@ class _ChatPageState extends State<ChatPage> {
             LinearProgressIndicator(
               minHeight: 3,
               backgroundColor: Colors.grey.shade200,
-              color: const Color(0xFFFF7A1A),
+              color: AppColors.primary,
             ),
 
           // Input area
@@ -375,7 +388,7 @@ class _TextBubble extends StatelessWidget {
             maxWidth: MediaQuery.of(context).size.width * 0.72),
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
         decoration: BoxDecoration(
-          color: isClient ? const Color(0xFFFF7A1A) : Colors.white,
+          color: isClient ? AppColors.primary : Colors.white,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -456,7 +469,7 @@ class _AudioBubble extends StatelessWidget {
             maxWidth: MediaQuery.of(context).size.width * 0.72),
         padding: const EdgeInsets.fromLTRB(10, 10, 12, 8),
         decoration: BoxDecoration(
-          color: isClient ? const Color(0xFFFF7A1A) : Colors.white,
+          color: isClient ? AppColors.primary : Colors.white,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -484,14 +497,14 @@ class _AudioBubble extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: isClient
                           ? Colors.white24
-                          : const Color(0xFFFF7A1A).withValues(alpha: 0.12),
+                          : AppColors.primary.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       isPlaying ? Icons.pause : Icons.play_arrow,
                       color: isClient
                           ? Colors.white
-                          : const Color(0xFFFF7A1A),
+                          : AppColors.primary,
                       size: 22,
                     ),
                   ),
@@ -659,7 +672,7 @@ class _RecordingBar extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: const BoxDecoration(
-                color: Color(0xFFFF7A1A),
+                color: AppColors.primary,
                 shape: BoxShape.circle,
               ),
               child:
@@ -798,14 +811,14 @@ class _InputBarState extends State<_InputBar> {
                     onTap: widget.onSend,
                     child: const _CircleBtn(
                         icon: Icons.send,
-                        color: Color(0xFFFF7A1A)),
+                        color: AppColors.primary),
                   )
                 : GestureDetector(
                     key: const ValueKey("mic"),
                     onTap: widget.onMicTap,
                     child: const _CircleBtn(
                         icon: Icons.mic,
-                        color: Color(0xFFFF7A1A)),
+                        color: AppColors.primary),
                   ),
           ),
         ],

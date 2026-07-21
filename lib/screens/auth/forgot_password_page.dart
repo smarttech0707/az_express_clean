@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
 import 'otp_verify_page.dart';
+import '../../theme/app_theme.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   final String? prefillPhone;
@@ -117,7 +118,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text('Mot de passe oublié'),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
       ),
@@ -131,7 +132,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                  colors: [Color(0xFFFF6D00), Color(0xFFFFB300)],
+                  colors: [AppColors.primary, Color(0xFFFFB300)],
                 ),
                 borderRadius: BorderRadius.circular(20),
               ),
@@ -168,7 +169,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                   icon: Icons.sms_outlined,
                   label: 'Recevoir un code\npar SMS',
                   selected: _bySms,
-                  color: const Color(0xFFFF6D00),
+                  color: AppColors.primary,
                   onTap: () => setState(() => _bySms = true),
                 )),
                 const SizedBox(width: 12),
@@ -193,11 +194,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 keyboardType: TextInputType.phone,
                 decoration: InputDecoration(
                   hintText: 'ex: 0701234567 ou +2250701234567',
-                  prefixIcon: const Icon(Icons.phone_outlined, color: Color(0xFFFF6D00)),
+                  prefixIcon: const Icon(Icons.phone_outlined, color: AppColors.primary),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFFFF6D00), width: 2),
+                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
                   ),
                   filled: true,
                   fillColor: Colors.white,
@@ -243,7 +244,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                     : (_bySms ? _submitSms : _submitEmail),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _bySms
-                      ? const Color(0xFFFF6D00)
+                      ? AppColors.primary
                       : const Color(0xFF1E88E5),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16)),

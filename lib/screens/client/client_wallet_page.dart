@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../l10n/app_text.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../theme/app_theme.dart';
 
 class ClientWalletPage extends StatefulWidget {
   const ClientWalletPage({super.key});
@@ -39,7 +40,7 @@ class _ClientWalletPageState extends State<ClientWalletPage> {
               SliverAppBar(
                 expandedHeight: (MediaQuery.of(context).size.height * 0.30).clamp(220.0, 300.0),
                 pinned: true,
-                backgroundColor: const Color(0xFFFF6D00),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 flexibleSpace: FlexibleSpaceBar(
                   background: Container(

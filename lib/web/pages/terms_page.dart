@@ -40,7 +40,7 @@ class WebTermsPage extends StatelessWidget {
             fontSize: isDesktop(ctx) ? 40 : 26,
             fontWeight: FontWeight.w700, color: kWhite), textAlign: TextAlign.center),
         const SizedBox(height: 12),
-        Text('Dernière mise à jour : 22 mai 2026',
+        Text('Dernière mise à jour : 9 juillet 2026',
           style: GoogleFonts.inter(fontSize: 14, color: kTextMuted)),
       ]),
     );
@@ -91,13 +91,13 @@ class WebTermsPage extends StatelessWidget {
             'Lors d\'une commande :\n\n'
             '• Le prix affiché est définitif avant confirmation\n'
             '• Le paiement peut être effectué par mobile money (Wave, MTN, Orange, Moov) ou en espèces\n'
-            '• Les paiements sont traités de manière sécurisée via CinetPay\n'
+            '• Les paiements sont traités de manière sécurisée via FeexPay\n'
             '• En cas d\'annulation après acceptation par le livreur, des frais peuvent s\'appliquer\n'
             '• Les remboursements sont traités sous 48 heures ouvrables'),
 
           _Section('6. Wallet et solde',
             'Le wallet AZ Express :\n\n'
-            '• Peut être rechargé via mobile money (CinetPay)\n'
+            '• Peut être rechargé via mobile money (FeexPay)\n'
             '• Le solde est valable 12 mois à compter de la dernière transaction\n'
             '• N\'est pas remboursable en espèces sauf cas exceptionnel\n'
             '• Les transactions sont irréversibles après confirmation\n'
@@ -137,7 +137,7 @@ class WebTermsPage extends StatelessWidget {
             'Pour toute question relative à ces conditions :\n\n'
             'Email : legal@az-express.ci\n'
             'Adresse : Abidjan, Côte d\'Ivoire\n'
-            'WhatsApp : +225 07 00 00 00 00'),
+            'WhatsApp : +225 07 98 05 13 97'),
         ]),
       ),
     );

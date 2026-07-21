@@ -2,6 +2,7 @@
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/firestore_service.dart';
+import '../../theme/app_theme.dart';
 
 class DriversPage extends StatelessWidget {
   const DriversPage({super.key});
@@ -12,7 +13,7 @@ class DriversPage extends StatelessWidget {
       backgroundColor: const Color(0xFFF0F2F5),
       appBar: AppBar(
         title: const Text("Gestion des livreurs"),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
       ),
@@ -170,7 +171,7 @@ class DriversPage extends StatelessWidget {
         title: Row(
           children: [
             const Icon(Icons.account_balance_wallet,
-                color: Color(0xFFFF6D00)),
+                color: AppColors.primary),
             const SizedBox(width: 8),
             Expanded(
                 child: Text("Recharger $driverName",
@@ -184,7 +185,7 @@ class DriversPage extends StatelessWidget {
           decoration: InputDecoration(
             labelText: "Montant (FCFA)",
             prefixIcon:
-                const Icon(Icons.attach_money, color: Color(0xFFFF6D00)),
+                const Icon(Icons.attach_money, color: AppColors.primary),
             border:
                 OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             suffixText: "FCFA",
@@ -419,7 +420,7 @@ class _GlobalStats extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-            colors: [Color(0xFFFF6D00), Color(0xFFFFB300)]),
+            colors: [AppColors.primary, Color(0xFFFFB300)]),
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
@@ -628,9 +629,53 @@ class _DriverCard extends StatelessWidget {
     this.isSubItem = false,
   });
 
+  // Suspension temporaire — même mécanisme que admin_ekbine_page.dart
+  // (`isSuspended`), déjà pleinement respecté côté serveur pour les livreurs
+  // classiques (dispatch.js exclut isSuspended==true depuis le Prompt 26,
+  // acceptOrder() le revérifie à l'acceptation) : seule l'action admin pour
+  // le déclencher manquait. Écrit directement ici (pas de callback threadé
+  // à travers _PatronCard/_PatronCardState) — action simple et à faible
+  // risque, cohérent avec "correction minimale" (Master Prompt 77, 2026-07-09).
+  Future<void> _toggleSuspend(BuildContext context, bool suspend) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(suspend ? 'Suspendre ce livreur ?' : 'Lever la suspension ?'),
+        content: Text(suspend
+            ? '${data["name"] ?? "Ce livreur"} ne recevra plus de nouvelles '
+              'commandes et ne pourra plus en accepter tant qu\'il est suspendu.'
+            : '${data["name"] ?? "Ce livreur"} pourra à nouveau recevoir et '
+              'accepter des commandes.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('Annuler')),
+          ScaleButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: suspend ? Colors.red : Colors.green),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(suspend ? 'Suspendre' : 'Réactiver',
+                style: const TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await FirebaseFirestore.instance.collection('livreurs').doc(driverId).update(
+      suspend ? {'isSuspended': true, 'isOnline': false} : {'isSuspended': false},
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(suspend ? 'Livreur suspendu' : 'Suspension levée'),
+        backgroundColor: suspend ? Colors.red : Colors.green,
+      ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isOnline = data["isOnline"] == true;
+    final isSuspended = data["isSuspended"] == true;
     final wallet = (data["wallet"] as num? ?? 0).toInt();
 
     return Container(
@@ -685,8 +730,26 @@ class _DriverCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(data["name"] ?? "—",
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                Row(children: [
+                  Flexible(
+                    child: Text(data["name"] ?? "—",
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  if (isSuspended) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8)),
+                      child: const Text('SUSPENDU',
+                          style: TextStyle(color: Colors.red,
+                              fontSize: 9, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ]),
                 Text(data["phone"] ?? "—",
                     style:
                         const TextStyle(color: Colors.grey, fontSize: 11)),
@@ -712,7 +775,11 @@ class _DriverCard extends StatelessWidget {
               const SizedBox(height: 4),
               Row(
                 children: [
-                  GestureDetector(
+                  Semantics(
+                    label: 'Recharger le portefeuille du livreur',
+                    button: true,
+                    excludeSemantics: true,
+                    child: GestureDetector(
                     onTap: onRecharge,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -724,6 +791,7 @@ class _DriverCard extends StatelessWidget {
                       ),
                       child: const Icon(Icons.add_card,
                           color: Colors.green, size: 18),
+                    ),
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -748,6 +816,31 @@ class _DriverCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                   ],
+                  GestureDetector(
+                    onTap: () => _toggleSuspend(context, !isSuspended),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isSuspended
+                            ? Colors.green.shade50
+                            : Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: isSuspended
+                                ? Colors.green.shade200
+                                : Colors.orange.shade200),
+                      ),
+                      child: Icon(
+                        isSuspended
+                            ? Icons.play_circle_outline
+                            : Icons.pause_circle_outline,
+                        color: isSuspended ? Colors.green : Colors.orange,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
                   GestureDetector(
                     onTap: onDelete,
                     child: Container(

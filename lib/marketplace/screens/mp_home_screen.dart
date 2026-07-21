@@ -10,6 +10,7 @@ import '../models/mp_product.dart';
 import 'mp_search_screen.dart';
 import 'mp_seller_screen.dart';
 import 'mp_favorites_screen.dart';
+import '../../theme/app_theme.dart';
 
 class MpHomeScreen extends StatefulWidget {
   const MpHomeScreen({super.key});
@@ -59,7 +60,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
         background: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFFFF6D00), Color(0xFFFF8F00)],
+              colors: [AppColors.primary, Color(0xFFFF8F00)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -73,13 +74,13 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text('AZ Market',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           fontSize: 22,
                           fontWeight: FontWeight.w900,
                           color: Colors.white,
                         )),
                     Text('Téléphones · Tablettes · Ordi',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 12,
                             color: Colors.white.withValues(alpha: 0.85))),
                   ],
@@ -88,6 +89,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                 IconButton(
                   onPressed: () => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const MpFavoritesScreen())),
+                  tooltip: 'Mes favoris',
                   icon: const Icon(Icons.favorite_border_rounded,
                       color: Colors.white),
                 ),
@@ -134,7 +136,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                 const Icon(Icons.search_rounded, color: kMpMuted, size: 20),
                 const SizedBox(width: 8),
                 Text('iPhone, Samsung, HP...',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 14, color: kMpMuted)),
               ]),
             ),
@@ -196,14 +198,14 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text('Vendez vos appareils',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         color: Colors.white,
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                       )),
                   const SizedBox(height: 2),
                   Text('Publiez gratuitement en 2 min',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                         color: Colors.white70,
                         fontSize: 11,
                       )),
@@ -226,7 +228,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text('Publier une annonce',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -260,7 +262,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
               padding: const EdgeInsets.fromLTRB(14, 20, 14, 10),
               child: Row(children: [
                 Text(title,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                       color: kMpText,
@@ -270,7 +272,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                   onTap: () => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const MpSearchScreen())),
                   child: Text('Voir tout',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 12,
                           color: kMpOrange,
                           fontWeight: FontWeight.w600)),
@@ -304,7 +306,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
               child: Column(children: [
                 const CircularProgressIndicator(color: kMpOrange),
                 const SizedBox(height: 12),
-                Text('Chargement...', style: GoogleFonts.inter(color: kMpMuted)),
+                Text('Chargement...', style: GoogleFonts.urbanist(color: kMpMuted)),
               ]),
             ),
           ),
@@ -319,7 +321,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                 const Icon(Icons.devices_rounded, size: 56, color: kMpMuted),
                 const SizedBox(height: 12),
                 Text('Aucun produit disponible',
-                    style: GoogleFonts.inter(color: kMpMuted, fontSize: 15)),
+                    style: GoogleFonts.urbanist(color: kMpMuted, fontSize: 15)),
               ]),
             ),
           ),
@@ -347,7 +349,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Connectez-vous pour vendre',
-            style: GoogleFonts.inter(color: Colors.white)),
+            style: GoogleFonts.urbanist(color: Colors.white)),
         backgroundColor: kMpOrange,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -390,7 +392,7 @@ class _CatChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
               fontSize: 13,
               fontWeight: FontWeight.w600,
               color: selected ? Colors.white : kMpText,

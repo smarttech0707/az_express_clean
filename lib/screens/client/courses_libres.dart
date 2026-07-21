@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
+import '../../theme/app_theme.dart';
 
 class CoursesLibres extends StatefulWidget {
   const CoursesLibres({super.key});
@@ -113,7 +114,7 @@ class _CoursesLibresState extends State<CoursesLibres> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Nouvelle course"),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
       ),
@@ -157,7 +158,7 @@ class _CoursesLibresState extends State<CoursesLibres> {
               child: ElevatedButton.icon(
                 onPressed: _sending ? null : _sendOrder,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6D00),
+                  backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),
                 ),

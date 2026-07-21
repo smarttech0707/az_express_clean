@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../services/firestore_service.dart';
+import '../../theme/app_theme.dart';
 
 class AdminRechargePage extends StatefulWidget {
   const AdminRechargePage({super.key});
@@ -688,7 +689,7 @@ class _RequestCardState extends State<_RequestCard> {
         ? const Color(0xFF1565C0)
         : userType == 'seller'
             ? const Color(0xFF6A1B9A)
-            : const Color(0xFFFF6D00);
+            : AppColors.primary;
     final typeLabel = userType == 'driver'
         ? 'Livreur'
         : userType == 'seller'

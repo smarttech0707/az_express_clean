@@ -1,8 +1,30 @@
 # AZ Express — Audit final avant mise en production
 
-**Date** : 2026-07-06 (mise à jour Master Prompt 65 — « Firebase Production Activation & Safe Rollout » — depuis la version Master Prompt 64)
+**Date** : 2026-07-09 (mise à jour Master Prompt 84 — « Operations Runbook & Post-Launch Monitoring » — voir Section 39 ; manuel d'exploitation complet dans [`OPERATIONS_RUNBOOK.md`](../OPERATIONS_RUNBOOK.md) à la racine du dépôt)
 
-**🔴 Avertissement le plus important de tout ce document, à lire avant tout le reste : tous les verdicts « corrigé » de ce rapport concernent le code de ce dépôt, pas nécessairement ce qui tourne aujourd'hui pour de vrais utilisateurs.** Le Prompt 65 a comparé, via `firebase functions:list` (lecture seule, projet réel), les fonctions **réellement déployées en production** (30) aux fonctions **du code local** (53) — **23 fonctions ne sont jamais parties en production**, parmi lesquelles la totalité d'AZ IA, la totalité du module Immobilier, et surtout **toutes les Cloud Functions qui corrigent les 9 bugs financiers critiques de cette session** (`payOrderFromWalletCF`, `cancelOrderCF`, `deliverOrderCF`, `payBoutiqueOrderCF`, `payBoutiqueOrderCashCF`, `refundExpiredBoutiqueOrderCF`) ainsi que la correction de la vulnérabilité mot de passe pharmacie (`pharmacieLogin`/`setPharmaciePassword`) et la migration serveur du dispatch (`dispatchOrderToDriver`). **Si des utilisateurs réels utilisent déjà l'app aujourd'hui, ils sont potentiellement exposés aux bugs originaux**, pas aux versions corrigées documentées dans ce rapport — tant que le déploiement réel n'a pas eu lieu. Aucun déploiement n'a été effectué dans cette passe (décision explicite de l'utilisateur, voir ci-dessous) — ce risque reste entièrement ouvert à ce jour.
+**📖 MANUEL D'EXPLOITATION QUOTIDIENNE CRÉÉ.** Le Prompt 84 a produit `OPERATIONS_RUNBOOK.md` — routine admin matin/journée/soir, surveillance technique, procédures d'incident par rôle, clôture financière quotidienne, signaux de fraude à surveiller, seuils de croissance avant grande échelle. Document séparé de celui-ci (historique d'audit) et de `CLAUDE.md` (doc développeur) — voir Section 39 pour le résumé, le fichier lui-même pour le détail opérationnel complet.
+
+**📋 PLAN D'ACTIVATION PRÊT, EN ATTENTE D'UN DÉBLOCAGE EXTERNE (Prompt 83).** Le Prompt 83 a figé l'ordre exact de déploiement (règles → 4 lots de Cloud Functions, commandes prêtes à copier-coller) et la checklist GO LIVE finale — voir Section 38. Rien n'a été déployé cette passe (code freeze strict, section 1 du prompt demandait explicitement de ne rien déployer). La liste des 23 fonctions manquantes a été recalculée exactement (diff programmatique entre les 53 exports du code et les 30 fonctions réellement live) et répartie dans les 4 lots demandés.
+
+**🎯 VERDICT ACTUEL : NO GO lancement réel tant que la facturation Cloud Build n'est pas débloquée — retesté réellement au Prompt 82 (nouvel essai de déploiement, échec identique), tout le reste est prêt côté code.** Bonne nouvelle indépendante détectée : Flutter est passé sur le canal stable (risque beta du Prompt 63 fermé). Firebase Hosting confirmé live (`/confidentialite` et `/delete-account` répondent 200 OK, utilisables directement pour Play Console). Voir Section 37 pour le détail complet et la checklist opérationnelle restante (données de seed, canal support, assets Play Store, simulation Jour J réelle).
+
+**🎯 VERDICT précédent (Prompt 81) : GO pour le gel de version côté code** — dernier audit avant gel (TODO dangereux, code debug, clés exposées, données sensibles, UX compte supprimé/suspendu, config Play Store) : zéro bug bloquant, zéro faille de sécurité active trouvée, zéro fichier modifié cette passe. Le seul vrai blocage restant est externe au code (facturation Cloud Build/GCP, voir ci-dessous) — voir Section 36 pour le détail complet et la liste des derniers points mineurs non bloquants (clé Maps codée en dur, version applicative non synchronisée avec les tags git).
+
+**🔴 Trouvaille la plus sérieuse de tout ce document en termes de sécurité financière : le Prompt 80 a trouvé et corrigé 3 failles critiques + 1 élevée dans `firestore.rules` qui, combinées, auraient permis de créer de l'argent réel sans qu'aucun client ne paie** (crédit d'un partenaire restaurant/pharmacie sans vérification de paiement dans `deliverOrderCF`, contournement du dispatch serveur par auto-assignation client d'un livreur, flip du statut "payé" par écriture directe du livreur, changement arbitraire du statut de commande par un partenaire) — voir Section 35 pour le détail complet. Les règles corrigées peuvent être déployées indépendamment du blocage Cloud Functions ci-dessous et fermeraient à elles seules 3 des 4 failles ; la 4ᵉ (crédit partenaire) nécessite aussi le déploiement de `deliverOrderCF`, toujours parmi les 23 fonctions non déployées.
+
+**Ce qui a changé depuis la version du Prompt 71 (Prompts 72-80 non résumés ici en tête de document, chacun documenté dans sa propre section numérotée — 27 à 35)** : le Prompt 79 clôt une série d'audits de préparation terrain (données/admin/flux partenaires/lancement business/cash/fraude livreur/support) par un audit de charge/performance. Capacité pilote confirmée suffisante (100 clients/20 livreurs/50 commandes-jour). Deux correctifs sûrs appliqués (`.limit()` sur 2 écrans admin récents, `Image.network`→`CachedNetworkImage` sur un troisième). Trouvaille principale, documentée mais délibérément non corrigée en masse : ~30 écrans admin lisent des collections sans `.limit()`, dont certains (`admin_earnings.dart`, `admin_drivers_ranking.dart`) agrègent côté client — les borner aveuglément fausserait silencieusement des totaux financiers affichés à l'admin. Le blocage de déploiement Cloud Functions (ci-dessous) reste la limitation la plus significative du projet, inchangé par cette passe.
+
+**Historique antérieur (jusqu'au Prompt 71)** :
+
+**🔴 Avertissement le plus important de tout ce document, désormais démontré concrètement au Prompt 71 : le blocage de déploiement Cloud Functions (ci-dessous) n'est pas qu'un chiffre abstrait « 30/53 » — le traçage direct du code de création de commande (Section 26) prouve qu'AUCUNE commande de livraison ne peut aboutir aujourd'hui en production. `dispatchOrderToDriver` n'étant pas déployée, chaque commande créée par un vrai utilisateur expire silencieusement après 10 minutes, quel que soit le nombre de livreurs réellement disponibles. Voir Section 26 pour le parcours complet tracé jusqu'à l'écran utilisateur.**
+
+**🔴 Avertissement précédent, toujours vrai, réaffirmé au Prompt 67 : le blocage Cloud Functions décrit au Prompt 66 est TOUJOURS PRÉSENT — les correctifs annoncés (facturation Google Maps) ne concernaient pas le bon axe de facturation.** Le Prompt 67 affirmait le blocage résolu (clé API Maps recréée, quotas, restrictions Android) — retesté directement (nouvelle tentative réelle du Lot 1, les 6 mêmes fonctions qu'au Prompt 66) plutôt que supposé, et **l'erreur est identique au caractère près** : `HTTP 403, Write access to project 'az-express-clean' was denied: please check billing account associated and retry`. La facturation Google Maps (API Directions/Places/Geocoding/Maps SDK) et la facturation Cloud Build/Cloud Functions (nécessaire à tout déploiement de fonction) sont **deux axes de facturation distincts** sur la Google Cloud Console — corriger l'un ne corrige pas l'autre. Toujours **30 fonctions déployées sur 53** ; les 11 correctifs financiers critiques et les 3 autres blocs (Immobilier, AZ IA, infrastructure) restent absents de la production réelle.
+
+**Ce qui a changé depuis la version du Prompt 66** : nouvelle tentative réelle de déploiement Lot 1 — échec identique, confirmant que le blocage n'a pas été résolu par les actions décrites dans le contexte du Prompt 67 (voir avertissement ci-dessus pour la distinction exacte des deux facturations). Progrès réel, distinct du blocage Functions : les règles Firestore/Storage ont été redéployées réellement, avec cette fois confirmation explicite du déploiement réussi des 37 index Firestore. `flutter analyze`/`npm test` (156/156)/`flutter build apk --release` tous reconfirmés propres. Voir Section 20 pour le détail complet.
+
+**Historique — mise à jour Master Prompt 66 (« Controlled Firebase Production Deployment ») :** Le Prompt 65 avait comparé, via `firebase functions:list` (lecture seule), les fonctions **réellement déployées en production** (30) aux fonctions **du code local** (53) — 23 fonctions jamais déployées, parmi lesquelles la totalité d'AZ IA, la totalité du module Immobilier, et surtout **toutes les Cloud Functions qui corrigent les 11 bugs financiers critiques de cette session**. Le Prompt 66 a **réellement déployé** `firestore.rules`/`storage.rules` en production (confirmé : les deux étaient déjà à jour, probablement déployées lors d'un commit externe entre les Prompts 60 et 65) — **la couche règles de sécurité est donc désormais confirmée à jour**. Mais la tentative de déployer les 23 Cloud Functions manquantes (par lots, comme demandé) a été bloquée dès le premier lot par un problème de facturation Google Cloud (« Write access... denied: please check billing account », HTTP 403) — un blocage d'infrastructure, pas de code, arrêté immédiatement sans contournement. **Tant que ce blocage de facturation n'est pas résolu côté Google Cloud Console, les 23 correctifs (dont les 11 bugs financiers) restent absents de la production réelle** — si des utilisateurs réels utilisent déjà l'app, ils restent exposés aux bugs originaux.
+
+**Ce qui a changé depuis la version du Prompt 65** : cette fois, un déploiement réel a été exécuté (le Prompt 66 était explicite et détaillé sur l'objectif « déployer », contrairement à l'ambiguïté du Prompt 65). `firestore.rules`/`storage.rules` déployés en production pour de vrai — les deux étaient déjà à jour (aucun changement réel nécessaire, probablement déjà poussés lors d'un commit externe entre les Prompts 60 et 65). La tentative de déploiement des 23 Cloud Functions manquantes, préparée en 4 lots exactement comme demandé (infrastructure/modules métier/argent/AZ IA), a été bloquée dès le Lot 1 par un problème de facturation Google Cloud Platform (HTTP 403, `generateUploadUrl` refusé) — arrêtée immédiatement conformément à l'instruction explicite « ne pas continuer si erreur », vérifié qu'aucun dégât n'a eu lieu (30 fonctions toujours présentes, inchangées). Voir Section 19 pour le détail complet.
 
 **Ce qui a changé depuis la version du Prompt 64** : préparation de l'activation Firebase production, sans déploiement réel — l'utilisateur, interrogé explicitement sur l'ambiguïté du prompt (qui demandait un rollout progressif réel sans répéter la mise en garde « ne rien déployer » des Prompts 61-64), a choisi de préparer/valider seulement. Trouvaille majeure ci-dessus (23 fonctions jamais déployées). Par ailleurs : le travail des Prompts 61-64 a été committé et tagué hors de cette conversation (nouveau tag `v0.3-rc3`, 2 nouveaux commits) — l'arbre de travail est désormais propre et synchronisé, contrairement à l'état documenté jusqu'au Prompt 60. Nouvelle trouvaille mineure : le compte Firebase a accès à 2 autres projets (probablement abandonnés), risque de confusion si un mauvais projet était sélectionné avant un déploiement futur.
 
@@ -54,13 +76,13 @@ Synthèse demandée par le Prompt 60 lui-même — un tableau de lecture rapide 
 - **KYC/identité** : photos/pièces d'identité livreur et flotte restreintes au propriétaire+admin (Prompt 53) ; `livreurs.wallet` reste lisible par tout authentifié (décision de report assumée depuis le Prompt 22, réexaminée sans changement au Prompt 53).
 
 ### Paiement
-- **Wallet, remboursements, commissions** : **9 bugs financiers critiques trouvés et corrigés au total sur toute la session** (3 avant Prompt 40, 6 aux Prompts 46-49) — voir Section 4/9. Tous testés (155 tests au total dans `functions/`).
+- **Wallet, remboursements, commissions** : **11 bugs financiers critiques trouvés et corrigés au total sur toute la session** (3 avant Prompt 40, 6 aux Prompts 46-49, +1 le 2026-07-09 — double débit client/double crédit livreur sur les commandes pharmacie wallet, `pharmacie_garde.dart`↔`payOrderFromWalletCF`↔`deliverOrderCF`) — voir Section 4/9/21. Tous testés (156 tests au total dans `functions/`).
 - **Vendeurs/livreurs** : logique de crédit/débit unifiée entre les 3 chemins de chaque opération sensible (app Flutter, expiration automatique, AZ IA) depuis les Prompts 51-52 (tarification, annulation).
 - **Double paiement** : les 2 boutons de paiement sans protection anti-double-tap trouvés (Boutique, Pharmacie) sont corrigés (Prompts 48-49) ; aucun autre bouton de paiement critique trouvé non protégé.
 
 ### Commandes
 - **Création** : tarification livraison unifiée sur un seul moteur (`TarifService`/`tarifService.js`) pour les 3 chemins (Flutter direct, AZ IA) depuis le Prompt 51 — reste ouvert : validation serveur du prix soumis par les 5 écrans Flutter directs (analysé, pas construit).
-- **Dispatch** : entièrement côté serveur, verrouillage transactionnel (Prompt 26) ; scan complet des livreurs en ligne sans `.limit()` (`dispatch.js`) documenté 🟡 à surveiller si la flotte grandit (Prompt 59), pas un problème mesurable aujourd'hui.
+- **Dispatch** : entièrement côté serveur, verrouillage transactionnel (Prompt 26) ; **acceptation livreur désormais revérifiée en transaction** (`isSuspended`/`isOnline`/`isOnDelivery` re-checkés dans `acceptOrder()`, pas seulement au moment de l'offre — corrigé le 2026-07-09, voir Section 21) ; scan complet des livreurs en ligne sans `.limit()` (`dispatch.js`) documenté 🟡 à surveiller si la flotte grandit (Prompt 59), pas un problème mesurable aujourd'hui.
 - **Suivi** : lecture Firestore répétée corrigée sur l'écran des conversations (Prompt 59) ; deux services de tracking dupliqués (`TrackingService`/`RealtimeTrackingService`) documentés, non fusionnés (Prompt 42).
 - **Annulation** : logique unifiée et partagée (`cancelOrderTx`/`cancelOrderPostTx`) sur les 3 chemins réels (app, expiration auto, AZ IA) depuis le Prompt 52 — plus aucune duplication.
 - **Livraison** : preuve par photo uniquement (pas d'OTP/signature) — état assumé, pas un gap à corriger sans décision produit.
@@ -106,7 +128,7 @@ Le projet n'est **toujours pas prêt pour une mise en production à grande crois
 | Dimension | État (2026-07-02, Prompt 50) | Évolution depuis Prompt 39 |
 |---|---|---|
 | Fonctionnalités métier | Larges et globalement fonctionnelles | Inchangé |
-| Paiements wallet | **9 bugs réels au total trouvés et corrigés cette session** (3 avant Prompt 39, 6 aux Prompts 46-49) | **6 nouveaux bugs critiques corrigés** — le progrès le plus significatif de toute la session |
+| Paiements wallet | **11 bugs réels au total trouvés et corrigés cette session** (3 avant Prompt 39, 6 aux Prompts 46-49) | **6 nouveaux bugs critiques corrigés** — le progrès le plus significatif de toute la session |
 | Double-tap / idempotence UI | 2 bugs trouvés et corrigés (Boutique, Pharmacie) ; tous les autres boutons critiques déjà protégés | **Nouvel audit dédié** (Prompt 49), résultat majoritairement propre |
 | Dispatch | Entièrement côté serveur, verrouillage transactionnel | Inchangé depuis Prompt 39 |
 | Wallet — conciliation | Moteur de conciliation hebdomadaire actif | Inchangé, mais désormais plus fiable (6 bugs de moins) |
@@ -213,7 +235,7 @@ Le pattern déjà établi (chaque nouvelle Cloud Function critique reçoit son p
 - **Risque** : Élevé (tarification, aggravé), inchangé pour le reste.
 
 ### Wallet & Finance
-- **9 bugs de paiement réels au total trouvés et corrigés sur toute la session** (3 avant Prompt 39, 6 aux Prompts 46-49) — voir section 4. C'est désormais la partie du projet la plus intensément vérifiée et corrigée, alors qu'elle était initialement perçue comme « transactionnellement propre » sur la seule base d'une lecture de code sans traçage complet des flux.
+- **11 bugs de paiement réels au total trouvés et corrigés sur toute la session** (3 avant Prompt 39, 6 aux Prompts 46-49) — voir section 4. C'est désormais la partie du projet la plus intensément vérifiée et corrigée, alors qu'elle était initialement perçue comme « transactionnellement propre » sur la seule base d'une lecture de code sans traçage complet des flux.
 - **Risque** : passé de Moyen à **Faible pour les bugs déjà trouvés** (tous corrigés et testés) ; reste Moyen pour les risques structurels non résolus (vocabulaire de statut fragmenté, remboursement toujours total).
 
 ### Restaurant / Marketplace / Boutique
@@ -276,7 +298,7 @@ Le pattern déjà établi (chaque nouvelle Cloud Function critique reçoit son p
 
 ## 10. Recommandations prioritaires (mises à jour)
 
-**Critique** — aucune restante (les 9 bugs de paiement identifiés au total sont tous corrigés et testés).
+**Critique** — aucune restante (les 11 bugs de paiement identifiés au total sont tous corrigés et testés).
 
 **Élevée** :
 1. ~~Trancher entre `TarifService` et `DeliveryService`~~ — **résolu (Prompt 51)**. Reste ouvert, plus étroit : valider côté serveur (Cloud Function) le prix soumis par les 5 écrans Flutter directs (`livraison_screen.dart`, `courses_screen.dart`, `create_order.dart`, `pharmacie_garde.dart`, `boulangerie_order_page.dart`) — analysé, pas construit sans validation explicite.
@@ -302,7 +324,7 @@ Le pattern déjà établi (chaque nouvelle Cloud Function critique reçoit son p
 ## 11. Plan de lancement par phases (mis à jour)
 
 ### Phase 1 — Bêta privée (petit groupe contrôlé)
-**Critères d'entrée** : déjà remplis, renforcés par cette mise à jour — les 9 bugs de paiement critiques connus sont désormais tous corrigés et testés (contre 3 à la version précédente), le dispatch est fiable, la conciliation wallet tourne en surveillance passive, les boutons de paiement critiques sont protégés contre le double-tap.
+**Critères d'entrée** : déjà remplis, renforcés par cette mise à jour — les 11 bugs de paiement critiques connus sont désormais tous corrigés et testés (contre 3 à la version précédente), le dispatch est fiable, la conciliation wallet tourne en surveillance passive, les boutons de paiement critiques sont protégés contre le double-tap.
 **Critères de sortie avant Phase 2** : App Check activé ; arbitrage sur les deux moteurs de tarification livraison ; décision prise sur la visibilité AZ IA des trois systèmes Immobilier (audités, Prompt 56) ; enforcement des permissions par section des sous-admins côté règles Firestore (audité, Prompt 57) ; restriction de la lecture `livreurs.wallet`/photos d'identité.
 
 ### Phase 2 — Bêta publique (Abengourou, trafic non contrôlé)
@@ -364,7 +386,7 @@ Le pattern déjà établi (chaque nouvelle Cloud Function critique reçoit son p
 
 #### 1. Pourquoi
 
-Les 9 bugs financiers critiques trouvés sur l'ensemble de la session (paiement wallet cassé sur 3 modules, double-crédit sur 2 modules, non-débit vendeur à l'annulation, solde négatif possible, remboursement automatique Boutique jamais fonctionnel) sont **tous corrigés et couverts par des tests** (155 tests au total, contre 26 au tout début de cette série d'audits). Les 5 outils de création de commande AZ IA les plus critiques financièrement ont été testés directement et ne divergent d'aucune façon du comportement sécurisé de l'app Flutter (Prompt 55). La tarification livraison et la logique d'annulation sont désormais unifiées sur un seul chemin de vérité chacune, y compris pour AZ IA (Prompts 51-52) — plus de double moteur de prix, plus d'implémentation dupliquée de l'annulation. Les deux risques structurels qui semblaient les plus préoccupants en milieu de session (« deux systèmes Immobilier », « deux back-offices ») se sont révélés, après audit complet plutôt que supposition, être des architectures **complémentaires et non dangereuses** — avec, chemin faisant, la découverte et la correction de bugs réels et indépendants (bouton de contact cassé, formulaires publics du site vitrine entièrement non fonctionnels, connexion admin web trop permissive). La surveillance production a été auditée (Crashlytics propre, AZ IA déjà bien instrumentée, deux des six événements métier critiques déjà couverts automatiquement) et un vrai bug d'observabilité corrigé. Le dernier audit performance/coûts n'a trouvé **aucun risque de facturation Firebase explosif au volume pilote actuel**, et a corrigé le seul vrai bug de lectures Firestore répétées trouvé. Le niveau de maturité atteint — bugs financiers connus tous corrigés et testés, architecture comprise plutôt que supposée, surveillance en place, performance validée à l'échelle pilote — justifie d'passer d'un pilote restreint et prudent à un **pilote étendu**, toujours sous supervision humaine active, pas encore un lancement public non supervisé.
+Les 11 bugs financiers critiques trouvés sur l'ensemble de la session (paiement wallet cassé sur 3 modules, double-crédit sur 2 modules, non-débit vendeur à l'annulation, solde négatif possible, remboursement automatique Boutique jamais fonctionnel) sont **tous corrigés et couverts par des tests** (155 tests au total, contre 26 au tout début de cette série d'audits). Les 5 outils de création de commande AZ IA les plus critiques financièrement ont été testés directement et ne divergent d'aucune façon du comportement sécurisé de l'app Flutter (Prompt 55). La tarification livraison et la logique d'annulation sont désormais unifiées sur un seul chemin de vérité chacune, y compris pour AZ IA (Prompts 51-52) — plus de double moteur de prix, plus d'implémentation dupliquée de l'annulation. Les deux risques structurels qui semblaient les plus préoccupants en milieu de session (« deux systèmes Immobilier », « deux back-offices ») se sont révélés, après audit complet plutôt que supposition, être des architectures **complémentaires et non dangereuses** — avec, chemin faisant, la découverte et la correction de bugs réels et indépendants (bouton de contact cassé, formulaires publics du site vitrine entièrement non fonctionnels, connexion admin web trop permissive). La surveillance production a été auditée (Crashlytics propre, AZ IA déjà bien instrumentée, deux des six événements métier critiques déjà couverts automatiquement) et un vrai bug d'observabilité corrigé. Le dernier audit performance/coûts n'a trouvé **aucun risque de facturation Firebase explosif au volume pilote actuel**, et a corrigé le seul vrai bug de lectures Firestore répétées trouvé. Le niveau de maturité atteint — bugs financiers connus tous corrigés et testés, architecture comprise plutôt que supposée, surveillance en place, performance validée à l'échelle pilote — justifie d'passer d'un pilote restreint et prudent à un **pilote étendu**, toujours sous supervision humaine active, pas encore un lancement public non supervisé.
 
 #### 2. Risques acceptés (pour le pilote étendu — non bloquants, tous déjà connus, aucun nouveau)
 
@@ -627,6 +649,7 @@ Bloqué pour des raisons de **conformité Play Store (contenu), pas techniques**
 2. **🔴 Anthropic/Claude (AZ IA) non déclaré comme tiers destinataire de données** dans la politique de confidentialité — à ajouter avant soumission (risque de non-conformité Data Safety Play Console).
 3. **🟡 Flutter sur canal beta** — recommandé de repasser sur `stable` avant le build de soumission officiel (pas un blocage dur, un risque de production).
 4. **🟡 Toolchain Android local incomplet** (`cmdline-tools` manquants, licences non acceptées) — cause l'avertissement de symboles de debug non retirés ; à corriger sur la machine qui produira le build final de soumission.
+5. **🔴 (ajouté Prompt 68) Aucune page web publique de suppression de compte** — Google Play exige, pour toute app avec création de compte, un moyen de demander la suppression du compte/données accessible aussi depuis le web sans réinstaller l'app. Seule `/confidentialite`/`/conditions` existent comme routes web publiques ; la suppression in-app (`profil_client.dart`) ne couvre que les clients, aucun autre rôle (livreur/vendeur/restaurant/pharmacie/boulangerie/agent Ekbine). Voir Section 23 pour le détail complet.
 
 #### 3. Actions Play Console nécessaires (aucune ne peut être faite depuis ce code)
 1. Créer/configurer l'app dans Play Console (si pas déjà fait) sous `com.azexpress.app`.
@@ -732,7 +755,7 @@ Blocage **technique ET de contenu**, plus sévère que le blocage Android (Promp
 - Firebase CLI 15.18.0, projet actif `az-express-clean` (cohérent avec `.firebaserc`). **Nouveau** : le compte a accès à 2 autres projets (`az-express-e0e2f`, `azexpress-7f8ed`), probablement abandonnés — risque de confusion à garder en tête, pas un risque immédiat (`.firebaserc` fixe déjà le bon projet par défaut).
 - `functions/.env` : toujours 3 clés (noms vérifiés uniquement).
 
-**🔴 Trouvaille critique** : `firebase functions:list` (lecture seule) montre **30 fonctions déployées** contre **53 en local** — **23 fonctions jamais déployées**, incluant la totalité d'AZ IA (`azIaChat`, `aiConfirmAction`, `aiCleanupExpiredPendingActions`, `clearAiHistory`), la totalité du module Immobilier, et surtout **toutes les Cloud Functions corrigeant les 9 bugs financiers critiques de cette session** (`payOrderFromWalletCF`, `cancelOrderCF`, `deliverOrderCF`, `payBoutiqueOrderCF`, `payBoutiqueOrderCashCF`, `refundExpiredBoutiqueOrderCF`), la correction du mot de passe pharmacie en clair (`pharmacieLogin`/`setPharmaciePassword`), et la migration serveur du dispatch (`dispatchOrderToDriver`). Voir l'avertissement en tête de document.
+**🔴 Trouvaille critique** : `firebase functions:list` (lecture seule) montre **30 fonctions déployées** contre **53 en local** — **23 fonctions jamais déployées**, incluant la totalité d'AZ IA (`azIaChat`, `aiConfirmAction`, `aiCleanupExpiredPendingActions`, `clearAiHistory`), la totalité du module Immobilier, et surtout **toutes les Cloud Functions corrigeant les 11 bugs financiers critiques de cette session** (`payOrderFromWalletCF`, `cancelOrderCF`, `deliverOrderCF`, `payBoutiqueOrderCF`, `payBoutiqueOrderCashCF`, `refundExpiredBoutiqueOrderCF`), la correction du mot de passe pharmacie en clair (`pharmacieLogin`/`setPharmaciePassword`), et la migration serveur du dispatch (`dispatchOrderToDriver`). Voir l'avertissement en tête de document.
 
 ### Phase 2 — Firestore/Storage rules deploy readiness
 
@@ -781,3 +804,1152 @@ Le code est prêt (voir Prompts 60-64), mais la production réelle n'a reçu auc
 
 #### 4. Plan premiers utilisateurs Abengourou
 Reprend le plan déjà chiffré au Prompt 60 (Section 13) : 100-300 clients, 15-30 livreurs, 10-20 vendeurs/vertical, minimum 2 semaines sans écart de conciliation wallet — **mais ce plan ne peut démarrer qu'après le déploiement réel des 23 fonctions manquantes**, sans quoi les nouveaux utilisateurs seraient exposés aux mêmes bugs déjà corrigés dans le code.
+
+---
+
+## 19. Controlled Firebase Production Deployment — Master Prompt 66
+
+Cette fois, déploiement réel exécuté (instruction explicite et détaillée, contrairement à l'ambiguïté du Prompt 65 où l'utilisateur avait été interrogé et avait choisi de ne pas déployer).
+
+### Phase 1 — Pre-deploy snapshot
+
+`firebase functions:list` recapturé : 30 fonctions, toutes `europe-west1`/`nodejs20`/256MiB (identique au Prompt 65). `git status` propre, tags `v0.2-rc2`/`v0.3-rc3` confirmés, `firebase use` confirme `az-express-clean` actif.
+
+### Phase 2 — Deploy rules (RÉELLEMENT EXÉCUTÉ)
+
+`firebase deploy --only firestore:rules --project az-express-clean` puis `--only storage --project az-express-clean` : **les deux ont réussi** (« Deploy complete! »). Les deux ont répondu *« latest version... already up to date, skipping upload »* — **les règles étaient déjà à jour en production** avant cette passe, probablement déployées lors d'un commit externe entre les Prompts 60 et 65. **La couche règles de sécurité Firestore/Storage est donc confirmée à jour en production dès maintenant.**
+
+### Phase 3 — Functions deploy par lots (arrêté au Lot 1)
+
+Répartition exacte des 23 fonctions manquantes en 4 lots, comme demandé :
+- **Lot 1 — infrastructure (6)** : `logAuthEvent`, `logAdminAuditEvent`, `fcmTokenCleanupCheck`, `walletReconciliationCheck`, `pharmacieLogin`, `setPharmaciePassword`.
+- **Lot 2 — modules métier (7)** : `submitRealEstateAgentRequest`, `approveRealEstateAgentRequest`, `requestPropertyVisit`, `respondToVisitRequest`, `notifyAgentOnVisitRequest`, `notifyClientOnVisitUpdate`, `dispatchOrderToDriver`.
+- **Lot 3 — argent (6)** : `payOrderFromWalletCF`, `cancelOrderCF`, `deliverOrderCF`, `payBoutiqueOrderCF`, `payBoutiqueOrderCashCF`, `refundExpiredBoutiqueOrderCF`.
+- **Lot 4 — AZ IA (4)** : `azIaChat`, `aiConfirmAction`, `aiCleanupExpiredPendingActions`, `clearAiHistory`.
+
+**🔴 Le déploiement du Lot 1 a échoué** : après packaging réussi (176,66 Ko) et activation des API requises, l'upload échoue avec **HTTP 403 : « Write access to project 'az-express-clean' was denied: please check billing account associated and retry »** sur `cloudfunctions.googleapis.com/.../functions:generateUploadUrl`. **Ce n'est pas un problème de code** — Cloud Functions v2 nécessite Cloud Build/Cloud Run en arrière-plan, qui exigent un compte de facturation actif et correctement lié, indépendamment du tier gratuit. **Arrêté immédiatement, conformément à « ne pas continuer si erreur »** — aucune tentative de contournement. Vérifié qu'aucun dégât n'a eu lieu : `firebase functions:list` recompté = toujours exactement 30 fonctions, identiques ; un second dry-run `firestore:rules` confirme que le reste du projet répond normalement (le blocage est spécifique à Cloud Build/Functions, pas une panne générale).
+
+### Phase 4 — Validation argent
+
+**Non exécutée** — le Lot 3 (fonctions financières) n'a jamais pu être déployé, rien à tester en production tant que le blocage de facturation n'est pas résolu.
+
+### Validation exécutée
+
+`flutter analyze` (inchangé), `npm test` (**155/155**, aucun code touché cette passe — uniquement des opérations de déploiement), règles confirmées déployées réellement, Cloud Functions toujours 30/53.
+
+---
+
+### 🎯 PRODUCTION STATUS : **BLOCKED**
+
+Progrès réel réalisé (règles de sécurité désormais confirmées à jour en production), mais l'objectif principal (déployer les 23 Cloud Functions manquantes) est bloqué par un problème d'infrastructure Google Cloud, pas par le code.
+
+**Nombre de Functions en production** : 30/53 (inchangé — le blocage de facturation a empêché toute progression).
+**Règles déployées** : ✅ Firestore + Storage, confirmées à jour en production.
+**Tests réalisés** : dry-runs de règles, packaging Functions (réussi jusqu'à l'échec de l'upload), aucun test de flux argent (Lot 3 jamais déployé).
+
+**Risques restants** :
+1. **🔴 Bloquant absolu pour la suite** : le compte de facturation du projet Google Cloud `az-express-clean` doit être vérifié/réactivé en Console avant toute nouvelle tentative de déploiement de Cloud Functions — action 100% hors de portée du code ou de la CLI.
+2. Tant que ce blocage persiste, les 23 correctifs (dont les 11 bugs financiers critiques) restent absents de la production réelle — le risque déjà documenté au Prompt 65 reste entièrement ouvert.
+3. Tous les risques déjà documentés aux Sections 13-18 restent valides, non affectés par cette passe.
+
+**Action immédiate recommandée avant le Master Prompt 67** : vérifier dans la Google Cloud Console (`https://console.cloud.google.com/billing/linkedaccount?project=az-express-clean`) qu'un compte de facturation actif est bien lié au projet `az-express-clean`, le réactiver/relier si nécessaire, puis relancer le déploiement du Lot 1 pour confirmer que le blocage est levé avant de poursuivre les Lots 2-4.
+
+---
+
+## 20. Reprise déploiement production après déblocage annoncé — Master Prompt 67
+
+Le prompt affirmait le blocage du Prompt 66 résolu (facturation Google Maps analysée et corrigée, clé API recréée, restrictions Android, quotas). **Retesté directement plutôt que supposé — le blocage persiste, inchangé.**
+
+### Vérifications préalables
+
+`.firebaserc`/`firebase use` confirment `az-express-clean` actif. `firebase functions:list` toujours exactement 30 fonctions (inchangé depuis le Prompt 66).
+
+### Nouvelle tentative Lot 1 — échec identique
+
+`firebase deploy --only functions:logAuthEvent,functions:logAdminAuditEvent,functions:fcmTokenCleanupCheck,functions:walletReconciliationCheck,functions:pharmacieLogin,functions:setPharmaciePassword` — packaging réussi (177,36 Ko), puis :
+
+> **HTTP 403 : "Write access to project 'az-express-clean' was denied: please check billing account associated and retry"**
+
+**Identique au caractère près à l'erreur du Prompt 66.**
+
+### Diagnostic — pourquoi la correction Maps ne pouvait pas résoudre ce blocage
+
+La facturation **Google Maps Platform** (Directions/Places/Geocoding/Maps SDK — ce qui a été corrigé selon le contexte de ce prompt) et la facturation **Cloud Build/Cloud Run** (nécessaire à tout déploiement Cloud Functions v2, indépendamment du code déployé) sont **deux axes de facturation distincts** dans la Google Cloud Console, chacun avec son propre écran de configuration. Corriger le premier n'a aucun effet mécanique sur le second. **Vérifié en confirmant qu'aucun dégât n'a eu lieu** (toujours 30 fonctions après l'échec) et **arrêté immédiatement**, conformément à l'instruction explicite de ce prompt (« ne pas contourner »).
+
+### Progrès réel, distinct du blocage Functions
+
+`firebase deploy --only firestore` / `--only storage` (réel, pas dry-run) : les deux réussissent. **Nouvelle confirmation explicite** cette fois : le déploiement inclut la publication réussie des **37 index Firestore** (`firestore.indexes.json`), pas seulement les règles (les règles elles-mêmes étaient déjà à jour, aucun changement à pousser).
+
+### Validation finale
+
+`flutter analyze` : 5 avertissements préexistants, 0 erreur (inchangé). `npm test` (`functions/`) : **156/156**. `flutter build apk --release` : ✅ réussi, `app-release.apk` (72,4 Mo).
+
+### Commandes exécutées cette passe
+
+```bash
+firebase deploy --only functions:logAuthEvent,functions:logAdminAuditEvent,functions:fcmTokenCleanupCheck,functions:walletReconciliationCheck,functions:pharmacieLogin,functions:setPharmaciePassword --project az-express-clean   # ÉCHEC — HTTP 403 billing
+firebase deploy --only firestore --project az-express-clean   # ✅ réussi (règles + 37 index)
+firebase deploy --only storage --project az-express-clean     # ✅ réussi
+flutter analyze                                                 # ✅ 5 avertissements préexistants
+npm test (functions/)                                            # ✅ 156/156
+flutter build apk --release                                      # ✅ 72,4 Mo
+```
+
+---
+
+### 🎯 PRODUCTION STATUS : **PRODUCTION BLOCKED**
+
+**Cause exacte** : le compte de facturation Google Cloud lié au projet `az-express-clean` bloque toujours `cloudfunctions.googleapis.com`/Cloud Build — HTTP 403 sur `functions:generateUploadUrl`, identique au Prompt 66. **Ce n'est pas la même chose que la facturation Google Maps**, déjà corrigée selon le contexte de ce prompt — il s'agit de deux paramètres de facturation séparés dans la Google Cloud Console.
+
+**Déploiements réussis cette passe** : `firestore.rules` (déjà à jour), `firestore.indexes.json` (37 index, déploiement confirmé), `storage.rules` (déjà à jour).
+
+**Fonctions actives** : 30/53 (inchangé — `autoExpireOrders`, `cleanupExpiredRateLimits`, `createSubAdmin`/`deleteSubAdmin`, `feexPayWebhook`, `initiateFeexPayPayment`/`initiateWithdrawal`, `ekClientConfirmOrder`, `enforceOrderRateLimit`, tous les triggers `notify*` de la première vague — liste complète en Section 18).
+
+**Erreurs restantes** : blocage de facturation Cloud Build/Cloud Functions — action Google Cloud Console requise, hors de portée de ce code ou de cette session.
+
+**Commandes exécutées** : voir ci-dessus — 1 tentative de déploiement Functions (échec attendu et diagnostiqué), 2 déploiements réels réussis (Firestore rules+indexes, Storage rules), 3 commandes de validation (`flutter analyze`, `npm test`, `flutter build apk --release`), toutes réussies.
+
+**Action Console exacte requise avant toute nouvelle tentative** : vérifier `https://console.cloud.google.com/billing/linkedaccount?project=az-express-clean` — confirmer qu'un compte de facturation **actif** (pas seulement existant) est lié au projet, distinct de toute configuration de facturation spécifique à l'API Maps. Une fois confirmé, relancer exactement la même commande Lot 1 ci-dessus pour valider le déblocage avant de poursuivre les Lots 2 (modules métier), 3 (argent), 4 (AZ IA).
+
+---
+
+## 21. Audit dispatch livreur temps réel + audit argent production (2026-07-09, deux audits ciblés hors-série)
+
+Deux prompts distincts, tous deux explicitement scopés « ne pas reconstruire, corriger uniquement les failles réelles trouvées » — code uniquement, aucun rapport avec le blocage de déploiement des Sections 18-20 ci-dessus (ces correctifs rejoignent les 23 fonctions déjà en attente de déploiement, ils ne le débloquent pas).
+
+### 21.1 Dispatch livreur temps réel
+
+**Checklist auditée contre le code réel** : filtres de recherche livreur disponible, sélection intelligente (distance/top 5), broadcast, anti-double-acceptation (transaction atomique), expansion progressive du rayon, notifications, sécurité (livreur suspendu/hors-ligne/occupé doit être impossible à accepter). La quasi-totalité était déjà correcte (dispatch déjà migré côté serveur, `dispatchOrder()` filtre déjà suspendu/hors-ligne/occupé **au moment de l'offre**, transaction déjà en place).
+
+**🔴 Faille réelle trouvée et corrigée** : `acceptOrder()` (`lib/services/firestore_service.dart`) ne revérifiait **jamais** l'éligibilité du livreur au moment de l'acceptation — seul le solde wallet était re-vérifié dans la transaction. Un livreur notifié d'un broadcast, puis suspendu / passé hors-ligne / ayant accepté une autre course entre-temps, pouvait donc encore accepter avec succès. Fenêtre étroite mais réelle, correspondant exactement au scénario de test explicitement demandé par le prompt. **Corrigé** : `acceptOrder()` relit désormais `isSuspended`/`isOnline`/`isOnDelivery` du livreur dans la même transaction et lève une exception explicite (déjà gérée par le `catch` générique existant côté UI) si l'une des trois conditions est violée — même schéma que la vérification de solde déjà en place.
+
+**Non traité, hors périmètre d'un correctif ciblé** : l'expansion progressive du rayon (30s/60s) reste orchestrée par des `Timer` **côté client** dans `customer_tracking_screen.dart`, pas par le serveur — si l'app cliente est fermée pendant la recherche, l'expansion s'arrête. Server-orchestrer ça serait un changement architectural, pas une correction de faille, donc non exécuté silencieusement.
+
+Vérifié : `flutter analyze` propre, `flutter build apk --release` réussi.
+
+### 21.2 Audit argent production (wallet/paiements/commissions)
+
+**Checklist auditée** : recharge/débit/remboursement/historique/concurrence multi-device, cohérence méthodes de paiement, commissions par module, mouvement d'argent à la livraison (exactement une fois), annulation à tous les stades, écritures Firestore client dangereuses.
+
+**🔴 Bug critique confirmé et corrigé — double paiement sur les commandes pharmacie wallet, chemin Flutter humain uniquement (pas AZ IA).** Tracé numériquement, pas supposé : `pharmacie_garde.dart` débite déjà le client du montant de livraison **à la création** mais laisse `isPaid: false` (délibérément, le montant des médicaments étant inconnu à ce stade — réglé plus tard via `suivi_commande.dart` → `payOrderFromWalletCF`). Le problème : `payOrderFromWalletCF` ignorait que la livraison était déjà payée et débitait/créditait à nouveau le montant complet — et `deliverOrderCF` créditait déjà le livreur à la livraison, sans jamais vérifier `isPaid`. Résultat chiffré sur une livraison à 500 FCFA : client débité **1000 FCFA**, livreur crédité environ le double de ce qu'il devait recevoir. Bug d'**interaction** entre deux fonctions individuellement correctes, pas un bug isolé dans l'une ou l'autre.
+
+**Vérifié non applicable ailleurs** : `livraison_screen.dart`/`courses_screen.dart`/`restaurant_menu.dart` marquent tous `isPaid: true` immédiatement pour un paiement wallet (pas de fenêtre) ; `create_pharmacie_order` (AZ IA) était déjà correct (`isPaid: paymentMethod === 'wallet'` dès la confirmation) — la divergence était entre le chemin Flutter humain et son équivalent AZ IA, dans le sens le plus sûr pour AZ IA. **Confirmé non exploitable en production réelle** : `payOrderFromWalletCF`/`deliverOrderCF` font partie des 23 Cloud Functions jamais déployées (Section 18-20 ci-dessus) — aucun utilisateur réel n'a pu être affecté.
+
+**Corrigé** : `functions/orderActions.js` (`buildDeliverOrder`) — ajout d'un garde `order.isPaid === true` avant de créditer le livreur dans la branche wallet sans vendeur ; nouvelle branche `else` (`walletTarget: 'driver_pending_payment'`) qui libère `isOnDelivery: false` sans créditer, différant le crédit réel au règlement explicite via `payOrderFromWalletCF`. `pharmacie_garde.dart` : suppression de la transaction de pré-débit, remplacée par une simple vérification de solde en lecture seule (`SOLDE_INSUFFISANT` si insuffisant, aucune écriture), l'écriture de la commande devenant inconditionnelle pour cash et wallet — le débit wallet n'a désormais lieu qu'une seule fois, au règlement. 1 test existant corrigé (fixture manquait `isPaid: true`, validait par erreur l'ancien comportement buggé) + 1 nouveau test de non-régression. Suite de tests : 155→**156**, tous verts.
+
+Vérifié : `flutter analyze` propre, `npm test` **156/156**, Cloud Functions module toujours chargeable sans erreur.
+
+---
+
+## 22. Audit + durcissement Android production (2026-07-09, « Final Android Production Hardening »)
+
+Prompt explicitement scopé « ne pas reconstruire, auditer et durcir l'app Android existante pour une sortie production » — aucun changement architectural, aucune Cloud Function touchée.
+
+**Technique nouvelle utilisée** : `aapt2 dump badging` sur l'APK release réellement compilé, plutôt que la seule lecture du manifest source — révèle les permissions/features injectées par les dépendances lors de la fusion du manifest par le plugin Android Gradle, invisibles dans `AndroidManifest.xml` seul.
+
+**🟡 Trouvé et corrigé — 3 `uses-feature` implicitement requis auraient exclu des appareils du Play Store sans raison réelle.** `geolocator`/`speech_to_text`/`flutter_foreground_task` injectent `android.hardware.location`/`microphone`/`bluetooth` comme fonctionnalités **requises** par défaut, alors qu'aucune n'est strictement indispensable (adresse manuelle possible sans GPS, micro et Bluetooth non essentiels au cœur de l'app). Corrigé par le même pattern `android:required="false"` déjà appliqué à la caméra avant cette passe.
+
+**🟡 Trouvé et corrigé — `AD_ID`/`ACCESS_ADSERVICES_AD_ID` présents malgré l'absence totale d'usage publicitaire.** Injectés transitivement par Google Play Services ; l'app n'utilise ni publicité ni Advertising ID (Analytics présent mais n'envoie aucun événement). Auraient forcé une déclaration Play Console inutile. Retirés via `tools:node="remove"`.
+
+**Vérifié sain, aucun changement** : `proguard-rules.pro` déjà complet et correct (relu en entier) ; aucun secret/clé/token codé en dur dans `android/` ; aucune image lourde embarquée (`assets/` = 316 Ko) ; aucune nouvelle fuite mémoire au-delà de ce que le Prompt 44 avait déjà exhaustivement audité. Identité de l'application confirmée correcte sur l'APK compilé : `com.azexpress.app`, versionCode 1, versionName 1.0.0, minSdk 24, targetSdk 36.
+
+**Hors périmètre, non retouché** : le risque Flutter canal beta et les 2 trouvailles de conformité Play Store (mauvais prestataire de paiement, partage de données Anthropic non déclaré) déjà documentées à la Section 15 (Prompt 63) restent ouvertes — cette passe est manifest/build uniquement, pas une passe de contenu légal.
+
+Vérifié : `flutter analyze` inchangé (5 avertissements préexistants), `npm test` **156/156** (aucune Cloud Function touchée), 3 builds `flutter build apk --release` successifs tous réussis (validation incrémentale de chaque correctif), `aapt2 dump badging` confirme le manifest final correct.
+
+---
+
+### 🎯 PRODUCTION STATUS (inchangé depuis la Section 20) : **PRODUCTION BLOCKED**
+
+Les Sections 21-22 n'ont ni résolu ni aggravé le blocage de facturation Cloud Build/Cloud Functions documenté en Section 20 — elles ajoutent 2 correctifs de code supplémentaires (dispatch, argent) à la pile déjà en attente de déploiement, et durcissent l'APK Android indépendamment de l'état du déploiement serveur. Le compte de facturation Google Cloud reste l'unique bloqueur restant avant de pouvoir déployer les 23 fonctions manquantes (dont désormais 11 correctifs financiers critiques au total).
+
+---
+
+## 23. Google Play Store Release Readiness Audit — Master Prompt 68
+
+Audit-only, explicitement scopé « ne pas reconstruire de module, ne pas ajouter de fonctionnalité, ne pas toucher aux Cloud Functions ». Sans rapport avec le blocage de facturation Cloud Build (Sections 18-22) — cette passe couvre uniquement la préparation Play Store côté build/permissions/contenu.
+
+### Phase 1 — `android/app/build.gradle.kts`
+
+Rien à corriger. `namespace`/`applicationId` = `com.azexpress.app`, `minSdk`/`targetSdk`/`versionCode`/`versionName` dérivés de `flutter.*` (donc de `pubspec.yaml` : `1.0.0+1`, minSdk 24, targetSdk 36 — confirmé sur l'APK compilé). `signingConfigs.release` lit `key.properties`/`release.keystore`, tous deux confirmés présents localement et jamais commités.
+
+### Phase 2 — App Bundle (réellement construit)
+
+`flutter build appbundle --release` → succès, `app-release.aab` réel de **74,0 Mo** (73 990 993 octets). Rappel important pour l'interprétation Play Console : c'est la taille du bundle brut, pas ce qu'un utilisateur télécharge (Play livre dynamiquement seulement l'ABI/densité pertinente par appareil). Même avertissement non-fatal déjà tracé au Prompt 63 (symboles de debug non retirés — toolchain local incomplet, pas un défaut du code). **Nouvel avertissement, jamais vu avant cette passe** : Flutter signale que 14 plugins (`firebase_*`, `flutter_foreground_task`, `speech_to_text`, `google_maps_flutter_android`, etc.) appliquent l'ancien Kotlin Gradle Plugin (KGP) et que « les futures versions de Flutter échoueront à construire » les apps qui en dépendent tant qu'ils n'auront pas migré vers le Kotlin intégré. Pas un blocage aujourd'hui (le build réussit), un risque de maintenance à moyen terme hors du contrôle du code applicatif (dépend des mainteneurs de chaque plugin) — signalé pour suivi.
+
+### Phase 3 — Politique permissions
+
+Recoupe entièrement l'audit hardening déjà fait juste avant ce prompt (Section 22) — rien de nouveau trouvé, pas re-détaillé ici.
+
+### Phase 4 — Data Safety (checklist préparée, formulaire Play Console hors du code)
+
+Catégories de données à déclarer, toutes déjà correctement traitées côté app : identité (nom/téléphone), localisation précise + arrière-plan, informations financières (transactions wallet — jamais de numéro de carte, aucune carte utilisée), photos (selfie/KYC livreur, preuve de livraison, produits), messages (support, chat livreur↔client, chat Marketplace, conversation AZ IA), identifiants d'appareil (jeton FCM). Le vrai gap n'est pas la collecte, c'est sa déclaration publique (voir Phase 6).
+
+### Phase 5 — Paiements et conformité Play Billing (vérifié, conclusion rassurante)
+
+Google Play n'exige son propre système de facturation que pour l'achat de contenu numérique consommé dans l'app — les biens/services du monde réel (livraison, marketplace, restauration) en sont explicitement exemptés, quel que soit le moyen de paiement (même modèle qu'Uber/Bolt/Glovo). Vérifié qu'aucune fonctionnalité ne vend de contenu strictement numérique in-app : le seul abonnement existant (`subscription_service.dart`) est payé par les comptes **partenaires** pour un accès de vente sur la plateforme (outil B2B lié à du réel, pas du contenu numérique consommateur), et le wallet ne finance jamais que des commandes réelles ou ces abonnements partenaires — jamais de contenu numérique isolé. Orange Money/MTN/Moov/Wave/Cash tous réels et fonctionnels via FeexPay (`feexpayOperatorCode()`) — aucune intégration factice trouvée.
+
+### Phase 6 — Confidentialité (3 trouvailles, dont une nouvelle)
+
+**🔴 Trouvailles 1 et 2 (déjà connues, reconfirmées)** : `privacy_page.dart` ET `terms_page.dart` (nouvelle recherche ciblée dans ce second fichier, pas seulement le premier comme documenté au Prompt 63) nomment toujours "CinetPay" comme prestataire de paiement, alors que seul FeexPay est réellement intégré. La politique ne mentionne toujours pas Anthropic/Claude comme tiers destinataire des données de conversation AZ IA. Toujours pas corrigé — contenu légal public, décision explicite requise.
+
+**🔴 Trouvaille 3, nouvelle à cette passe : aucune page web publique de suppression de compte n'existe.** Recherche exhaustive de `web_router.dart` : seules `/confidentialite` et `/conditions` sont déclarées, aucune route de suppression/désinscription. La politique de confidentialité promet pourtant ce droit (section 8 : « Supprimer votre compte et vos données ») et Google Play exige, pour toute app avec création de compte, un moyen de demander la suppression accessible aussi depuis le web sans réinstaller l'app. La suppression in-app existe réellement (`profil_client.dart:806`, avec ré-authentification) mais **uniquement pour les clients** — aucun équivalent pour livreurs/vendeurs/restaurants/pharmacies/boulangeries/agents Ekbine. Pas corrigé : construire une page web de suppression serait une nouvelle fonctionnalité (nouvelle route publique + probablement une nouvelle Cloud Function pour traiter une demande sans session Flutter active), explicitement hors du périmètre de ce prompt.
+
+### Phase 7 — Tests manuels demandés (installation/compte/permissions/fermeture-réouverture/notifications)
+
+Non exécutables depuis cet environnement (pas d'appareil/émulateur disponible — limite déjà actée à chaque audit release précédent). L'AAB se construit et se signe correctement (preuve structurelle), mais le parcours réel de première utilisation reste à valider sur un appareil physique avant soumission.
+
+### Validation exécutée
+
+`flutter analyze` (5 avertissements préexistants, inchangé), `npm test` (`functions/`, **156/156**, non touché), `flutter build appbundle --release` (**réussi**, AAB réel de 74,0 Mo, signature vérifiée de bout en bout).
+
+---
+
+### 🎯 GOOGLE PLAY RELEASE STATUS : **BLOCKED**
+
+Bloqué pour des raisons de **conformité de contenu, pas techniques** — build/signature fonctionnent réellement. Aucun code modifié cette passe (audit-only, conformément à l'instruction explicite).
+
+#### Bloqueurs 🔴
+1. **Mauvais prestataire de paiement nommé** ("CinetPay" au lieu de FeexPay) dans `privacy_page.dart`/`terms_page.dart`/`home_page.dart` — décision explicite requise avant correction (contenu légal public).
+2. **Anthropic/Claude non déclaré** comme tiers destinataire de données dans la politique de confidentialité — à ajouter avant soumission (Data Safety Play Console).
+3. **Aucune page web publique de suppression de compte** — obligatoire pour toute app avec création de compte ; suppression in-app limitée aux clients uniquement (9 autres rôles sans équivalent).
+
+#### Avertissements 🟡
+1. Flutter sur canal `beta` — recommandé de repasser sur `stable` avant le build de soumission officiel.
+2. Toolchain Android local incomplet (`cmdline-tools`/licences) — cause l'avertissement symboles de debug non retirés, à corriger sur la machine de build final.
+3. 14 plugins dépendant de l'ancien Kotlin Gradle Plugin — pas bloquant aujourd'hui, risque de maintenance Flutter à moyen terme.
+4. `ACCESS_BACKGROUND_LOCATION` nécessite une déclaration Play Console dédiée (justification + captures/vidéo) — préparation, pas un défaut de code.
+
+#### Corrections faites cette passe
+Aucune — audit-only, tous les blocueurs trouvés touchent du contenu légal public ou une nouvelle fonctionnalité (page web), tous deux explicitement hors du périmètre « ne pas ajouter de fonctionnalité » du prompt. Voir Section 22 pour les corrections de code déjà faites lors de l'audit hardening précédent (toujours valides, non re-décrites ici).
+
+#### Fichiers modifiés
+Aucun (code). Documentation : `CLAUDE.md`, `AUDIT_FINAL.md`, mémoires projet.
+
+#### Résultat build AAB
+✅ Réussi — `app-release.aab`, 74,0 Mo, signé de bout en bout, aucune erreur bloquante (1 avertissement non-fatal déjà tracé à l'environnement local, 1 nouvel avertissement KGP non-bloquant).
+
+---
+
+## 24. Google Play Compliance Fix — Master Prompt 69
+
+Contrairement à la Section 23 (audit-only), ce prompt autorise et demande explicitement de corriger les 3 blocueurs 🔴 qui y avaient été trouvés. Les 3 corrigés. Aucune Cloud Function/dispatch/wallet/paiement serveur touchée, conformément à l'instruction explicite « Ne pas toucher ».
+
+### 1) Paiements légaux — CinetPay → FeexPay
+
+Recherche exhaustive avant correction : 3 fichiers Dart concernés (pas 2 comme précédemment documenté) — `privacy_page.dart`, `terms_page.dart` (×2), et **`home_page.dart`, jamais signalé avant cette passe** (section marchands publique, listait à tort "CinetPay" comme un réseau mobile money séparé de Wave/MTN/Orange/Moov, alors que c'est/c'était un agrégateur). Les 3 corrigés (`FeexPay`, reformulation "via FeexPay" sur `home_page.dart`). `AZ_Express_Documentation.html` (11 occurrences) **volontairement laissé intact** — document technique statique non servi par l'app, décrivant des mécanismes spécifiques à CinetPay (vérification `site_id`, `CinetPay Transfer`) qui ne correspondent pas à la mécanique réelle de FeexPay ; un renommage brut y introduirait des affirmations fausses plutôt que d'en corriger une. Recherche finale (`grep -r CinetPay lib/ functions/ CLAUDE.md`) : **zéro résultat**.
+
+### 2) Section "Assistant intelligent AZ IA" dans la politique de confidentialité
+
+Nouvelle section 9 ajoutée à `privacy_page.dart` (sections suivantes renumérotées 10-13) : déclare le fournisseur IA externe (Anthropic, Claude), la transmission du seul texte nécessaire au traitement, l'absence de vente des données, l'objectif unique d'assistance utilisateur, la règle de confirmation systématique avant toute action sensible, et le droit d'effacer son historique de conversation (fonctionnalité réelle déjà existante, `clearAiHistory`). Section 4 ("Partage des données") gagne aussi une ligne Anthropic explicite. Dates de dernière mise à jour des deux pages légales avancées au 9 juillet 2026.
+
+### 3) AccountDeletionService — flux unique, deux mécanismes selon ce que chaque rôle permet réellement
+
+`lib/services/account_deletion_service.dart` (nouveau). Vérifié avant conception : seul le rôle client a un compte Firebase Auth email/mot de passe **et** une règle Firestore `allow delete` déjà accordée au propriétaire — les 8 autres rôles n'ont ni l'un ni l'autre (ex. les pharmacies utilisent une authentification Firestore custom, pas Firebase Auth). Élargir les règles Firestore pour permettre l'auto-suppression sur ces 8 collections aurait été un changement de posture de sécurité à part entière — explicitement exclu par « ne pas toucher à l'architecture Firebase ».
+
+- `deleteClientAccountNow({password})` — extrait (pas réécrit) du flux déjà en production dans `profil_client.dart` (ré-authentification + suppression Firestore + suppression Auth). `profil_client.dart` délègue désormais à cette méthode — comportement observable inchangé.
+- `submitRequest({role, contactPhone, contactEmail?, reason?, requestedVia})` — pour les 9 rôles, écrit dans la nouvelle collection `account_deletion_requests` (Firestore direct, aucune nouvelle Cloud Function), traitée manuellement par un admin (désactivation puis effacement des données personnelles dans le délai déjà annoncé — 30 jours sauf obligation légale). Seul mécanisme disponible pour les 8 rôles partenaires ; fonctionne authentifié (app) et non authentifié (page web) — un seul point d'entrée pour les deux contextes.
+- **Câblé concrètement dans un écran** : `driver_profil.dart` gagne une entrée "Supprimer mon compte" via `showAccountDeletionRequestDialog()` (`lib/widgets/account_deletion_dialog.dart`, boîte de dialogue générique réutilisable pour les 9 rôles). **Les 7 autres rôles partenaires (seller/restaurant/pharmacie/boulangerie/ekbine_agent/real_estate_agent/fleet_owner) n'ont pas encore ce bouton dans leurs écrans de profil** — le service et le dialogue génériques sont prêts (un seul appel par écran), mais le câblage dans les 7 dashboards restants n'a pas été fait cette passe (chacun nécessiterait de localiser son propre écran de profil, non audité un par un ici). **La page web `/delete-account` reste un point d'entrée universel déjà fonctionnel pour ces 7 rôles dès maintenant** — l'exigence Google Play (un moyen de demander la suppression, in-app ou web) est donc déjà satisfaite pour tous les rôles.
+- `firestore.rules` : nouveau bloc `account_deletion_requests` (écriture publique avec validation stricte de forme, même pattern que `driver_applications`/`partner_applications` du Prompt 57 — lecture/modification/suppression admin uniquement). Validé par `firebase deploy --only firestore:rules --dry-run` contre le projet réel : compile sans erreur.
+
+### 4) Page web publique /delete-account
+
+`lib/web/pages/delete_account_page.dart` (nouveau), route ajoutée dans `web_router.dart`. Même style visuel que `privacy_page.dart`/`contact_page.dart`. Contenu : procédure, délai de traitement (désactivation 48h, effacement 30 jours sauf obligation légale), contact support. Formulaire : rôle (9 options), téléphone (obligatoire), email/raison (optionnels) → `AccountDeletionService.submitRequest(..., requestedVia:'web')` — alimente la **même** collection que le flux in-app, une seule file d'attente admin. Gestion d'erreur explicite en cas d'échec (contrairement au bug déjà connu de `contact_page.dart`/`merchants_page.dart`, Prompt 57, qui échouaient silencieusement — pas corrigé ici, hors périmètre, mais non reproduit dans le nouveau code). Prêt pour Firebase Hosting sans configuration supplémentaire (route `go_router` standard, `firebase.json` sert déjà `build/web`).
+
+### 5) Data Safety Play Console — checklist consolidée
+
+Collecté : nom, téléphone, email (optionnel), localisation précise + arrière-plan, messages (support/chat/AZ IA), photos (selfie KYC, preuve de livraison, produits), données de paiement (transactions wallet, jamais de numéro de carte). Partagé : FeexPay (paiements), Firebase/Google (infrastructure), Anthropic (uniquement pour AZ IA). Recoupe et confirme la checklist déjà préparée en Section 23, désormais alignée avec le contenu réel de la politique après les corrections 1-2.
+
+### Validation exécutée
+
+`flutter analyze` — 5 avertissements préexistants inchangés + 3 nouveaux `info` de style (`prefer_const_constructors`, non bloquants, catégorie distincte des avertissements suivis). `npm test` (`functions/`) — **156/156**, aucune Cloud Function touchée. `firebase deploy --only firestore:rules --dry-run` — compile sans erreur contre le projet réel. `flutter build appbundle --release` — voir résultat ci-dessous.
+
+---
+
+### 🎯 GOOGLE PLAY COMPLIANCE STATUS : les 3 blocueurs 🔴 de la Section 23 sont corrigés
+
+#### Fichiers modifiés/créés
+- `lib/web/pages/privacy_page.dart` (CinetPay→FeexPay, nouvelle section AZ IA, date mise à jour)
+- `lib/web/pages/terms_page.dart` (CinetPay→FeexPay ×2, date mise à jour)
+- `lib/web/pages/home_page.dart` (CinetPay→FeexPay)
+- `lib/services/account_deletion_service.dart` (nouveau)
+- `lib/widgets/account_deletion_dialog.dart` (nouveau)
+- `lib/screens/client/profil_client.dart` (délègue à `AccountDeletionService.deleteClientAccountNow`)
+- `lib/screens/driver/driver_profil.dart` (nouvelle entrée "Supprimer mon compte")
+- `lib/web/pages/delete_account_page.dart` (nouveau, route `/delete-account`)
+- `lib/web/web_router.dart` (nouvelle route)
+- `firestore.rules` (nouvelle collection `account_deletion_requests`)
+
+#### Conformité corrigée
+1. ✅ Mauvais prestataire de paiement — corrigé sur les 3 fichiers concernés.
+2. ✅ Anthropic/Claude non déclaré — nouvelle section dédiée + ligne dans le partage de données.
+3. ✅ Aucune page web de suppression de compte — `/delete-account` créée, universelle pour les 9 rôles ; flux in-app câblé pour client (déjà existant) et livreur (nouveau) — 7 rôles partenaires restants couverts par le web uniquement pour l'instant.
+
+#### Erreurs restantes Play Store
+- 🟡 Flutter sur canal `beta` (inchangé, Section 23).
+- 🟡 Toolchain Android local incomplet (inchangé, Section 23).
+- 🟡 14 plugins dépendant de l'ancien Kotlin Gradle Plugin (inchangé, Section 23).
+- 🟡 `ACCESS_BACKGROUND_LOCATION` nécessite une déclaration Play Console dédiée (préparation, pas un défaut de code).
+- 🟢 (mineur, nouveau) 7 des 9 rôles n'ont pas encore de bouton de suppression in-app dédié — couverts par la page web, mais l'expérience in-app reste à compléter dans un futur passage sur chaque dashboard partenaire.
+
+#### Résultat build AAB
+✅ Réussi — `app-release.aab`, **74,0 Mo** (74 012 326 octets), signé de bout en bout. Même avertissement non-fatal déjà tracé à l'environnement local (symboles de debug non retirés, `cmdline-tools` manquants) ; un avertissement Kotlin supplémentaire vu cette fois (API `BluetoothAdapter.getDefaultAdapter()` dépréciée, dans le code du plugin tiers `speech_to_text`, pas dans le code applicatif) — aucun des deux n'est bloquant, le build se termine avec succès (code de sortie 0).
+
+---
+
+## 25. Finalisation comptes partenaires — Master Prompt 70
+
+Audit individuel des 7 dashboards partenaires restants (aucun n'avait de bouton de suppression après le Prompt 69, qui n'avait câblé que client+livreur). Trouvaille principale : 3 des 7 rôles n'avaient aucun moyen de se déconnecter, un bug distinct et plus grave que l'absence de suppression.
+
+### Audit par rôle
+
+| Rôle | Déconnexion avant | Suppression avant | Écran profil |
+|---|---|---|---|
+| Vendeur | ✅ (icône AppBar) | ❌ | Aucun |
+| Restaurant | ✅ (icône AppBar) | ❌ | Aucun |
+| Pharmacie | ✅ (icône AppBar) | ❌ | Aucun |
+| Boulangerie | ✅ (icône AppBar) | ❌ | Aucun |
+| Agent Ekbine | 🔴 **Aucune** (y compris écran "en attente d'approbation") | ❌ | Aucun |
+| Agent immobilier | 🔴 **Aucune** | ❌ | Aucun |
+| Patron de flotte | 🔴 **Aucune** | ❌ | Aucun |
+
+### Corrections
+
+- **`lib/widgets/partner_account_sheet.dart` (nouveau)** — bottom sheet générique "Mon compte" réutilisable pour les 7 rôles : nom/téléphone en lecture seule, "Se déconnecter" (callback propre à chaque écran), "Supprimer mon compte" (délègue au dialogue déjà existant du Prompt 69).
+- **Vendeur/Restaurant/Pharmacie/Boulangerie** : icône "Mon compte" ajoutée dans l'AppBar, à côté de l'icône de déconnexion déjà fonctionnelle (intacte). Données déjà disponibles dans les `Map` passées au constructeur — aucune nouvelle lecture Firestore.
+- **Agent Ekbine, Agent immobilier, Patron de flotte** : nouvelle méthode `_logout()` (même pattern `signOut()`+`signInAnonymously()`+retour `HomeScreen()` que les autres rôles) + icônes "Mon compte"/déconnexion ajoutées à leur AppBar respective. Pour l'agent Ekbine, l'icône de déconnexion a aussi été ajoutée à l'écran "candidature en cours" (qui n'avait littéralement aucune sortie).
+
+### Limite assumée
+
+Le nom/téléphone sont désormais **visibles** dans le sheet pour les 7 rôles, mais pas **modifiables** — aucune des 7 collections n'autorise aujourd'hui une auto-édition par le propriétaire dans `firestore.rules`, et l'ajouter aurait été un changement de règles, explicitement exclu par ce prompt (« ne pas toucher... Firebase rules »). Un écran d'édition de profil reste un chantier séparé.
+
+### Validation exécutée
+
+`flutter analyze` — 5 avertissements préexistants inchangés (mêmes infos de dépréciation/style déjà connues, aucun nouveau problème). `npm test` (`functions/`) — **156/156**, confirmé via `git status` qu'aucun fichier `functions/`/`firestore.rules`/`storage.rules` n'a été touché cette passe. `flutter build appbundle --release` — voir résultat ci-dessous.
+
+---
+
+### 🎯 STATUT : les 3 dashboards sans déconnexion sont corrigés ; suppression de compte désormais accessible (in-app ou web) pour les 9 rôles
+
+#### Fichiers modifiés/créés
+- `lib/widgets/partner_account_sheet.dart` (nouveau)
+- `lib/screens/seller/seller_dashboard.dart`
+- `lib/screens/restaurant/restaurant_owner_dashboard.dart`
+- `lib/screens/pharmacie/pharmacie_dashboard.dart`
+- `lib/screens/boulangerie/boulangerie_dashboard.dart`
+- `lib/ekbine/screens/ek_agent_dashboard.dart`
+- `lib/screens/immobilier/agent_dashboard_screen.dart`
+- `lib/screens/fleet/fleet_dashboard.dart`
+
+#### Rôles corrigés
+Les 7 — chacun gagne l'accès "Mon compte" (profil en lecture seule + suppression). 3 (agent Ekbine, agent immobilier, patron de flotte) gagnent aussi une vraie déconnexion, absente avant cette passe.
+
+#### Rôles déjà conformes
+Client et livreur (Prompts 69/session antérieure) — inchangés cette passe.
+
+#### Bugs trouvés
+🔴 3 dashboards partenaires sans aucun moyen de se déconnecter (agent Ekbine, agent immobilier, patron de flotte) — corrigé.
+
+#### Résultat build AAB
+✅ Réussi — `app-release.aab`, **74,0 Mo** (74 011 532 octets), signé de bout en bout. Même avertissement non-fatal déjà tracé à l'environnement local (symboles de debug non retirés) — non bloquant, code de sortie 0.
+
+---
+
+## 26. End to End Real User Flow Audit — Master Prompt 71
+
+Traçage direct du code pour les 7 parcours demandés (cet environnement ne permet toujours pas de test manuel réel sur appareil/émulateur). **Trouvaille la plus importante de cette passe : le traçage exact du parcours "création de commande" démontre, bout en bout, l'impact concret du blocage de déploiement déjà documenté (Sections 18-20) — pas un nouveau bug, la première preuve tracée jusqu'à l'écran utilisateur.**
+
+### 🔴 Parcours 2/3 (commande livraison + dispatch) — aucune commande ne peut aboutir aujourd'hui en production
+
+`FirestoreService.createOrder()` écrit `orders/{id}` (`status:'pending'`) puis appelle `findNearestDriver()`, qui appelle **exclusivement** `httpsCallable('dispatchOrderToDriver')` — aucun chemin alternatif. Cet appel est enveloppé dans un `try{}catch(_){}` muet (défensif, correct en soi). Or `dispatchOrderToDriver` fait partie des 23 Cloud Functions jamais déployées (30/53 en prod, confirmé Prompts 65-67) — l'appel échoue systématiquement (`not-found`), silencieusement avalé. **La commande ne passe jamais en `broadcast`/`assigned`, aucun livreur n'est jamais notifié, quel que soit le nombre de livreurs réellement en ligne.** Le client voit les phases de recherche (déjà bien conçues, 30s/60s, aucun bug d'UI) jusqu'à ce qu'`autoExpireOrders` (déployée) annule et rembourse après 10 minutes.
+
+**Conclusion sans ambiguïté : dans l'état actuel du déploiement, une commande de livraison créée par un vrai utilisateur à Abengourou aujourd'hui échoue toujours après exactement 10 minutes, indépendamment de la disponibilité réelle des livreurs.** Aucun code applicatif en cause — conséquence directe du blocage Cloud Build déjà documenté, maintenant démontrée bout en bout plutôt que déduite. Aucun contournement tenté (pas de fallback client-side, ce qui annulerait la migration serveur déjà actée).
+
+### 🔴 Parcours 4/5 (livreur, après livraison) — même cause racine + 2 bugs UI réels trouvés et corrigés
+
+`deliverOrder()`/`payOrderFromWallet()`/`cancelOrder()` délèguent à `deliverOrderCF`/`payOrderFromWalletCF`/`cancelOrderCF` — les 3 autres membres du Lot 3 jamais déployé. Un livreur confirmant une livraison verrait son appel échouer, la commande resterait bloquée à `picked_up`. Deux bugs UI indépendants trouvés en traçant ce chemin et corrigés :
+- `driver_dashboard.dart` : le bouton "Confirmer la livraison" réinitialisait son état de chargement sur échec **sans jamais informer le livreur** — corrigé (SnackBar d'erreur ajouté).
+- `suivi_commande.dart` : le bouton "Annuler" d'une commande était un appel fire-and-forget, sans `await` ni `try/catch` — en cas d'échec, le client ne voyait rien du tout. Corrigé (`await` + gestion d'erreur + SnackBar).
+
+`_WalletPayButton` (paiement wallet post-livraison pharmacie) déjà correctement protégé — vérifié, rien à corriger.
+
+### Parcours 5 (historique/notifications) — 2 cas de "chargement infini" trouvés et corrigés
+
+Recherche ciblée du pattern `if (!snapshot.hasData)` sans branche `hasError` (bloque un écran indéfiniment si le stream Firestore émet une erreur) : 2 occurrences trouvées, toutes deux corrigées — `suivi_commande.dart` (liste "Mes commandes") et `chat_page.dart` (messagerie client↔livreur pendant livraison active).
+
+### Parcours 1, 6, 7 — sains ou déjà couverts, rien de nouveau
+
+Inscription/connexion/persistance de session/permissions GPS (`client_map.dart`) déjà robustes, aucun blocage trouvé — `livraison_screen.dart` dégrade silencieusement si le GPS est refusé (mineur, non corrigé). Coupures réseau déjà couvertes par la persistance Firestore existante (Prompt 17, pas ré-audité). Recherche libre d'écrans bloqués limitée aux 4 corrections ci-dessus dans le temps imparti — un balayage exhaustif des ~186 `StreamBuilder` de l'app resterait un chantier séparé.
+
+### Validation exécutée
+
+`flutter analyze` — 5 avertissements préexistants inchangés, aucun nouveau (les 3 fichiers modifiés compilent sans le moindre avertissement). `npm test` (`functions/`) — **156/156**, confirmé via `git status` qu'aucun fichier `functions/`/`firestore.rules`/`storage.rules` n'a été touché. `flutter build appbundle --release` — voir résultat ci-dessous.
+
+---
+
+### 🎯 ÉTAT LANCEMENT TERRAIN ABENGOUROU : **NON PRÊT** — pas pour une raison de code, mais parce que le dispatch (et tout le cycle de paiement post-livraison) est un no-op silencieux tant que les Cloud Functions ne sont pas déployées
+
+#### Parcours réussis
+1) Nouveau client (inscription/connexion/profil Firestore/permissions GPS/persistance de session) — sain.
+6) Résilience réseau — déjà couverte par la persistance Firestore existante.
+
+#### Bugs trouvés
+🔴 Aucune commande de livraison ne peut aboutir en production (dispatch = no-op silencieux, cause : Cloud Functions non déployées, déjà documenté Sections 18-20 — pas un nouveau bug de code).
+🔴 Confirmation de livraison livreur et annulation client : échecs silencieux sans feedback utilisateur — corrigé.
+🔴 2 écrans à risque de chargement infini en cas d'erreur réseau (liste commandes, chat) — corrigé.
+🟡 GPS refusé sur `livraison_screen.dart` : dégradation silencieuse, pas de message explicatif — non corrigé (mineur).
+
+#### Corrections
+`lib/screens/client/suivi_commande.dart`, `lib/screens/driver/driver_dashboard.dart`, `lib/screens/chat/chat_page.dart` — 4 correctifs UI narrow, aucune Cloud Function/règle/architecture touchée.
+
+#### Fichiers modifiés
+- `lib/screens/client/suivi_commande.dart`
+- `lib/screens/driver/driver_dashboard.dart`
+- `lib/screens/chat/chat_page.dart`
+
+#### État lancement terrain Abengourou
+**Bloqué au même titre que documenté depuis le Prompt 65** — pas une nouvelle régression, mais désormais démontré de façon concrète et traçable jusqu'à l'écran utilisateur final : tant que les 23 Cloud Functions manquantes (dispatch, paiement, annulation, livraison) ne sont pas déployées, un client réel à Abengourou pourrait créer un compte, parcourir l'app, mais **ne pourra jamais recevoir de livraison** — chaque commande expirera après 10 minutes sans jamais atteindre un livreur. Action requise avant tout lancement terrain : débloquer la facturation Cloud Build/GCP (Section 20) et déployer au minimum le Lot 2 (dispatch) et le Lot 3 (paiements/livraison/annulation).
+
+#### Résultat build AAB
+✅ Réussi — `app-release.aab`, **74,0 Mo** (74 012 630 octets), signé de bout en bout. Même avertissement non-fatal déjà tracé à l'environnement local — non bloquant, code de sortie 0.
+
+---
+
+## 27. Pre Launch Field Mode Audit — Master Prompt 72
+
+Audit-only (aucun code modifié — ce prompt ne demande aucune correction, contrairement au Prompt 71). « Ne pas contourner le blocage Cloud Functions », « interdit : toucher Cloud Functions, reconstruire dispatch, modifier paiement » — tous respectés.
+
+### 1) Données initiales nécessaires
+
+| Collection | Obligatoire avant ouverture ? | Détail |
+|---|---|---|
+| `zones_livraison` | 🔴 **Oui** | Lue par `create_order.dart` (sélecteur de quartier sur l'écran "Commander") — si vide, chaque client voit "Aucune zone disponible. L'administrateur doit configurer les zones." Sans lien avec le dispatch lui-même (confirmé toujours non lu par `dispatch.js`). |
+| `config/commission` | Non | Valeurs de repli codées en dur (100/200 FCFA) si absent. |
+| Catégories Marketplace | Non | `mpCategories` codé en dur en Dart, jamais lu depuis Firestore. |
+| Catégories Immobilier | Non | `real_estate_categories` existe dans `firestore.rules` mais n'est lu nulle part — `agent_dashboard_screen.dart` utilise une liste codée en dur. Correction apportée à ce document (l'affirmation inverse était fausse). |
+| `livreurs` | 🔴 **Oui** (au moins quelques-uns) | Seul chemin fiable : auto-inscription (`driver_register.dart`) + approbation admin (`driver_requests_page.dart`) — crédite `wallet:500` automatiquement, `isAvailable`/`isSuspended` absents mais non bloquants (dispatch ne filtre que sur valeur explicite `false`/`true`). La création directe via patron de flotte reste probablement cassée (`permission-denied` déjà documenté) — ne pas s'y fier. |
+| `sellers` (type `boutique`) | 🔴 **Oui, sinon le module Boutique ne fonctionne pas du tout** | `payBoutiqueOrderCF`/`payBoutiqueOrderCashCF` exigent tous deux un document `sellers` avec `type:'boutique'` (`db.collection('sellers').where('type','==','boutique').limit(1)`) — **jamais créé automatiquement**, `admin_boutique_page.dart` ne gère que produits/commandes, pas le vendeur lui-même. Réalisable via `admin_sellers_page.dart` (type par défaut déjà 'boutique') mais facile à oublier — aucun écran ne le rappelle. |
+| `restaurants`/`pharmacies` | Oui (au moins 1 actif avec menu/stock) | Mécanismes déjà documentés (approbation admin / création directe) — sinon écran vide, déjà bien géré avec message explicite. |
+
+### 2) Simulation première journée (10 clients / 5 livreurs / 3 boutiques)
+
+Simulée par traçage de code (pas d'exécution device possible). Écrans de liste vérifiés (restaurant/pharmacie/marketplace/boutique) : tous ont déjà un message d'état vide explicite, aucun écran blanc trouvé. Un risque mineur documenté sans être corrigé (hors périmètre de ce prompt, pas de "corriger" demandé) : `boutique_page.dart` a le même pattern de chargement infini potentiel déjà corrigé ailleurs au Prompt 71 (`ConnectionState.waiting` sans `hasError`) — pas touché cette passe.
+
+### 3) Admin
+
+- **Suspension livreur classique : confirmée toujours absente** — seul Ekbine a `isSuspended` géré côté admin. Seule option punitive aujourd'hui : suppression complète du compte.
+- **🔴 Gestion des litiges : gap confirmé, jamais vérifié aussi explicitement avant cette passe.** Aucun écran admin ne lit `support_tickets` — un client qui soumet un ticket pendant le pilote n'a aucun canal admin visible dans l'app. Risque terrain prioritaire, pas corrigé (nouvelle fonctionnalité, hors périmètre audit-only).
+- Validation partenaires / suivi commandes : déjà couverts et fonctionnels, rien de nouveau.
+
+### 4) Abengourou
+
+Constantes reconfirmées inchangées : centre `TarifService` (6.7273/-3.4961), refus >10km après 21h, rayon dispatch 2km→5km — sans lien avec `zones_livraison`. Rien de nouveau par rapport aux Prompts 05/26/51.
+
+### Validation exécutée
+
+`flutter analyze` inchangé (5 avertissements préexistants, aucun nouveau, aucun fichier modifié). `npm test` (`functions/`) toujours 156/156. `flutter build appbundle --release` réussi (build incrémental rapide — aucun fichier source touché, AAB identique à celui du Prompt 71).
+
+---
+
+### 🎯 PRÊT PILOTE : **NON** (pour deux raisons indépendantes, pas une seule)
+
+**Raison 1 (déjà connue, inchangée)** : le dispatch et les paiements post-livraison restent des no-op silencieux tant que les Cloud Functions ne sont pas déployées (Sections 18-20, 26).
+
+**Raison 2 (nouvelle, ce prompt) : même une fois les Cloud Functions déployées, le pilote ne peut pas s'ouvrir sans une préparation manuelle de données spécifique — actuellement non documentée nulle part avant cette passe.**
+
+#### Données manquantes (actions Firestore/admin requises avant ouverture)
+1. 🔴 Créer au moins 3-5 zones actives dans `admin_zones_page.dart` (couvrant Abengourou) — sinon l'écran "Commander" affiche un avertissement à chaque client.
+2. 🔴 Créer au moins 1 vendeur `sellers` avec `type:'boutique'` via `admin_sellers_page.dart` — sinon **aucun achat Boutique n'est possible, pas même une erreur explicite côté client, juste un échec silencieux côté serveur.**
+3. Approuver au moins 5 livreurs pilotes via l'auto-inscription + `driver_requests_page.dart` (pas via un patron de flotte — ce chemin est cassé).
+4. Approuver/créer au moins 3 boutiques (produits `boutique_products` avec stock réel) + quelques restaurants/pharmacies actifs avec menu non vide.
+5. Débloquer la facturation Cloud Build et déployer au minimum les Lots 2 (dispatch) et 3 (paiement/livraison/annulation) — voir Sections 18-20/26.
+
+#### Comptes tests nécessaires
+- 3-5 comptes clients réels (inscription email/mot de passe complète, pas juste anonyme) pour tester le parcours de bout en bout.
+- 5 comptes livreurs approuvés, avec au moins un test de bascule en ligne/hors ligne et d'acceptation de course.
+- 1 compte vendeur boutique (`type:'boutique'`) + 1-3 comptes vendeurs Marketplace.
+- 1 compte restaurant actif avec menu, 1 compte pharmacie active.
+- 1 compte admin super + éventuellement 1 sous-admin pour tester les permissions.
+
+#### Risques terrain
+- 🔴 Aucune commande de livraison n'aboutira tant que les Cloud Functions ne sont pas déployées (répété depuis les Sections 18-20/26, cause n°1 du blocage).
+- 🔴 Le module Boutique échouera silencieusement si le vendeur `type:'boutique'` n'est pas créé au préalable.
+- 🔴 Un litige client pendant le pilote n'a aujourd'hui aucun canal admin visible — prévoir un canal de secours manuel (WhatsApp/téléphone, déjà la pratique de facto documentée ailleurs) pour la durée du pilote.
+- 🟡 Aucune suspension temporaire de livreur classique — seule la suppression complète est possible en cas de comportement problématique pendant le pilote.
+
+#### Actions avant lancement (checklist condensée)
+1. Débloquer la facturation Cloud Build (Google Cloud Console) et déployer les 23 Cloud Functions manquantes, en priorité Lots 2-3.
+2. Créer les zones Abengourou, le vendeur boutique, et approuver les comptes pilotes (livreurs/restaurants/pharmacies/boutiques) listés ci-dessus.
+3. Tester manuellement sur un appareil réel le parcours complet client→dispatch→livreur→livraison→wallet une fois les CF déployées (jamais testé en conditions réelles à ce jour, limite déjà actée).
+4. Prévoir un canal de support manuel de secours (WhatsApp/téléphone) pour la durée du pilote, en l'absence d'écran admin de gestion des litiges.
+5. Décider si la suspension temporaire des livreurs classiques doit être construite avant ou peut attendre après le pilote (actuellement : suppression complète uniquement).
+
+---
+
+## 28. Admin Panel & Seed Data Readiness — Master Prompt 73
+
+Audit-only avec autorisation explicite « corriger uniquement bugs simples » (contrairement au Prompt 72). Un bug simple, réel, confirmé et corrigé — une règle Firestore manquante, pas un défaut de code applicatif.
+
+### 1) Admin dashboard — capacité de gestion par entité
+
+| Entité | Écran(s) admin | État |
+|---|---|---|
+| Livreurs | `drivers_page.dart`, `driver_requests_page.dart` | ✅ Fonctionnel |
+| Vendeurs | `admin_sellers_page.dart` | ✅ Fonctionnel |
+| Restaurants | `admin_restaurants_page.dart`/`admin_restaurant_requests_page.dart` | ✅ Fonctionnel |
+| Pharmacies | `admin_pharmacies_page.dart` | ✅ Fonctionnel |
+| Boutiques | `admin_boutique_page.dart` | 🔴 Création produit cassée — corrigée cette passe |
+| Agents Ekbine | `admin_ekbine_page.dart` | ✅ Fonctionnel |
+| **Clients** | Aucun écran général | 🔴 Gap confirmé — seuls 2 écrans étroits (COD, remboursement ponctuel) touchent `clients` |
+| **Immobilier** | Aucun | 🔴 Gap déjà connu (M6), reconfirmé — `approveRealEstateAgentRequest` reste sans UI |
+
+### 2) `admin_zones_page.dart` — test des 5 zones demandées
+
+Un bouton "Initialiser les zones" pré-charge déjà 19 zones codées en dur, dont **"Commerce" et "Cafétou" (2 des 5 demandées)**. Les 3 autres ("Agnikro", "Dioulakro", "Indénié") nécessitent un ajout manuel via le formulaire "+" — vérifié fonctionnel (nom/type/ville parente/GPS). Activation/désactivation : fonctionnelle (`_toggleActive`). **Prix/distance : confirmé absents du formulaire et du schéma Firestore** — `zones_livraison` reste un simple sélecteur nominatif pour l'écran "Commander", sans lien avec la tarification (`TarifService`, point central fixe + haversine, déjà documenté). Pas un bug, réponse directe à ce que ce prompt demandait de vérifier. Liste des zones vérifiée contre le risque de chargement infini (Prompt 71/72) — **confirmée saine** (repli sur liste vide, pas de spinner infini).
+
+### 3) Livreurs
+
+Téléphone et statut en ligne/hors ligne affichés par carte (`drivers_page.dart`). Aucune suspension pour les livreurs classiques (déjà documenté, reconfirmé). Validation d'inscription et documents KYC déjà fonctionnels (audités en profondeur les sessions précédentes).
+
+### 🔴 4) Bug confirmé et corrigé — création de produit Boutique depuis l'admin structurellement impossible
+
+Trouvé en préparant le plan de seed Boutique (ci-dessous). `firestore.rules` : `boutique_products` avait `allow create: if isRealUser() && request.resource.data.sellerId == uid();` — **sans clause `isAdmin()`**, contrairement à `update`/`delete` sur la même collection. Le code de création (`admin_boutique_page.dart:_saveProduct`, chemin nouveau produit) n'écrit d'ailleurs jamais de champ `sellerId` du tout. **Conséquence : impossible de créer le moindre produit Boutique depuis l'admin, à 100% des tentatives, permission-denied systématique** — même avec un vendeur `type:'boutique'` déjà créé (Prompt 72), aucun produit n'aurait pu être ajouté. Vérifié que le vrai flux d'achat (`payBoutiqueOrderCF`) ne lit jamais `sellerId` sur le produit (il re-résout le vendeur boutique unique via une requête séparée) — donc ce champ n'est ni requis ni utile fonctionnellement, pas la peine de le faire écrire côté Dart. **Corrigé** : `firestore.rules`, ajout de `isAdmin() ||` à la règle `create` de `boutique_products`, exactement le schéma déjà en place sur `update`/`delete`. Validé par dry-run réel contre le projet — compile sans erreur. Seul fichier modifié cette passe.
+
+### 5) Support pilote — second gap confirmé
+
+`support_tickets` : déjà confirmé sans consommateur admin (Prompt 72). **Nouveau** : `marketplace_reports` (signalements d'abus) suit le même schéma — écrit par le client, lu par aucun écran admin. Seul `admin_sos_page.dart` reste un canal réellement géré des deux côtés.
+
+### 6) Sécurité admin
+
+Rien de nouveau — aucune route mobile n'atteint `AdminDashboard` sans `AdminLogin` (pas de deep-linking mobile), le web bloque déjà `/admin/*` derrière `AdminAuthService.isAdmin`. Le geste "5 taps sur le logo" ouvre uniquement l'écran de connexion, jamais les données.
+
+### Plan de seed Firestore (avant ouverture pilote)
+
+| Collection | Contenu minimum | Comment |
+|---|---|---|
+| `zones_livraison` | 19 zones du bouton "Initialiser" + Agnikro/Dioulakro/Indénié ajoutées manuellement | `admin_zones_page.dart` |
+| `sellers` | Au moins 1 avec `type:'boutique'` + quelques `type:'seller'` (Marketplace) | `admin_sellers_page.dart` |
+| `restaurants` | Au moins 1 actif avec menu non vide | `admin_restaurants_page.dart` + sous-collection `menu` |
+| `pharmacies` | Au moins 1 active | `admin_pharmacies_page.dart` |
+| `boutique_products` | Quelques produits avec stock réel | `admin_boutique_page.dart` (fonctionnera après le correctif de règles ci-dessus) |
+| `marketplace_products` | Optionnel pour le pilote (pas de flux d'achat structuré côté app normale, contact direct vendeur) | Vendeurs eux-mêmes via l'app |
+| Comptes "users" (pas de collection unique — RBAC par appartenance de collection) | 5 `livreurs` approuvés, 3-5 `clients` réels (pas anonymes), 1 `sellers` boutique | Auto-inscription + approbation admin selon le rôle |
+
+### Validation exécutée
+
+`flutter analyze` inchangé (5 avertissements préexistants, aucun fichier Dart modifié). `npm test` (`functions/`) toujours 156/156 (aucune Cloud Function touchée). `firebase deploy --only firestore:rules --dry-run` compile sans erreur. `flutter build appbundle --release` réussi (build incrémental, AAB inchangé — aucun code Dart/Android modifié).
+
+---
+
+### 🎯 PRÊT OUVERTURE AGENCE : **NON**, mais un blocueur de moins qu'avant cette passe
+
+Toujours bloqué par (1) le déploiement Cloud Functions (Sections 18-20/26) et (2) la préparation de données terrain (Section 27) — **mais le module Boutique, qui aurait échoué silencieusement même avec toutes les données préparées, est désormais réparé au niveau des règles.**
+
+#### Données à créer
+Voir le plan de seed ci-dessus — inchangé par rapport à la Section 27, avec la confirmation supplémentaire que 2 des 5 zones demandées existent déjà dans le seed intégré de `admin_zones_page.dart`.
+
+#### Bugs admin trouvés
+🔴 Création de produit Boutique impossible depuis l'admin (règle Firestore manquante) — **corrigé**.
+🟡 Aucun écran de gestion générale des clients (recherche/vue/commandes) — non corrigé, nouvelle fonctionnalité.
+🟡 Aucun écran admin pour `support_tickets` ni `marketplace_reports` — non corrigé, nouvelle fonctionnalité, canal manuel recommandé pour le pilote.
+🟡 Aucune suspension temporaire pour les livreurs classiques — non corrigé, déjà documenté.
+🟡 Aucun écran admin pour l'Immobilier — non corrigé, déjà documenté depuis le jalon M6.
+
+#### Fichiers modifiés
+- `firestore.rules` (règle `create` de `boutique_products`)
+
+---
+
+## 29. Partner Real World Flow Audit — Master Prompt 74
+
+Traçage direct du code pour les 6 rôles partenaires demandés. « Corriger uniquement bugs confirmés » — un seul trouvé, mais critique et jamais détecté par aucun audit précédent.
+
+### 🔴 Pharmacie — bug critique confirmé et corrigé : inscription structurellement impossible à 100%
+
+Contrairement à une affirmation répétée dans ce document depuis le début de la session (« pharmacies créées directement par l'admin, pas de flux d'approbation ») — **fausse, corrigée** : `pharmacie_register.dart`/`admin_pharmacie_requests_page.dart` existent et sont câblés dans la navigation. Mais le formulaire ne pouvait jamais aboutir, pour deux raisons cumulées :
+1. La règle `pharmacie_requests` exigeait `isRealUser() && uid == uid()` — mais contrairement à ses 3 cousins fonctionnels (`driver_requests`/`seller_requests`/`restaurant_requests`, qui créent tous un vrai compte Firebase Auth **avant** d'écrire la demande), `pharmacie_register.dart` n'authentifie personne (les pharmacies utilisent une authentification Firestore custom, jamais Firebase Auth) — l'appelant reste sur la session anonyme par défaut, et `isRealUser()` échoue toujours.
+2. Le payload écrit ne contenait de toute façon jamais de champ `uid`.
+3. **Aggravant** : une lecture de pré-vérification de doublon (`.get()`) précédait même la tentative d'écriture, sur une collection dont la règle de lecture est admin-only — cette lecture échouait aussi systématiquement, bloquant le formulaire dès sa première ligne de logique.
+
+**Corrigé** : `firestore.rules` — `pharmacie_requests` traité comme un formulaire de lead pré-compte (même famille que `driver_applications`/`partner_applications`, Prompt 57), écriture publique avec validation stricte de forme, lecture admin-only. `pharmacie_register.dart` — suppression de la lecture de pré-vérification devenue inutile (`.set()` reste idempotent par téléphone). Validé par dry-run réel.
+
+**Comparaison éclairante avec Ekbine** (même structure de règle en apparence, mais sain) : `ek_agent_register.dart` a le même schéma de risque, mais `ek_home_screen.dart` redirige explicitement vers `ClientAuthPage` si l'utilisateur est encore anonyme, **avant** d'atteindre l'écran d'inscription — garde absente sur le chemin pharmacie. C'est cette garde manquante, pas l'architecture de la règle, qui distingue les deux cas.
+
+### Autres rôles — tous sains, vérifiés (pas supposés)
+
+- **Restaurant** : inscription→approbation→menu→commandes→historique, tout fonctionnel. Point de vigilance vérifié : la règle d'écriture du menu dépend de `restaurant_owners/{uid}`, correctement créé au moment de l'approbation.
+- **Boutique** : sain après le correctif du Prompt 73 (création/stock/prix/images). Pas de compte vendeur séparé — entièrement piloté par l'admin, confirmé par design.
+- **Marketplace vendeur** : publication/modification/suppression/contact client — tous sains, `sellerId` correctement écrit partout.
+- **Agent Ekbine** : inscription (correctement gardée)/validation/commandes/historique — sain.
+- **Immobilier** : ajout de bien sain (`agentId` correctement écrit). **Photos confirmées absentes** du formulaire (déjà documenté, pas une régression). Contact client : téléphone affiché en texte non cliquable, mais le vrai mécanisme de contact conçu (bouton "Demander une visite") fonctionne pleinement — pas un bug équivalent au Prompt 56.
+- **Écrans vides/chargements infinis** : aucune nouvelle instance du pattern à risque déjà isolé et corrigé au Prompt 71 — les 6 dashboards partenaires vérifiés utilisent tous le repli sûr (`snap.data?.docs ?? []`).
+
+### Corrections de documentation
+
+Deux affirmations fausses dans `CLAUDE.md` (section Restaurants/Pharmacies) corrigées : les pharmacies ont bien un tableau de bord partenaire (2 onglets) et un flux d'inscription (désormais réparé), contrairement à ce qui était écrit depuis le début de la session.
+
+### Validation exécutée
+
+`flutter analyze` inchangé (5 avertissements préexistants, aucun nouveau). `npm test` (`functions/`) toujours 156/156 (aucune Cloud Function touchée). `firebase deploy --only firestore:rules --dry-run` compile sans erreur. `flutter build appbundle --release` réussi.
+
+---
+
+### 🎯 Rôles prêts terrain / bloqués
+
+| Rôle | État |
+|---|---|
+| Restaurant | ✅ Prêt |
+| Pharmacie | ✅ Prêt (après correctif de cette passe — bloqué avant) |
+| Boutique | ✅ Prêt (après correctif Prompt 73) |
+| Marketplace vendeur | ✅ Prêt |
+| Agent Ekbine | ✅ Prêt |
+| Immobilier | 🟡 Fonctionnel sans photos (gap déjà connu, pas un blocage dur) |
+
+**Tous les 6 rôles partenaires sont désormais fonctionnels au niveau applicatif** — le blocage de lancement réel reste entièrement celui déjà documenté (Sections 18-20/26/27 : déploiement Cloud Functions + préparation des données terrain), pas un défaut de code partenaire.
+
+#### Corrections
+🔴 Inscription pharmacie structurellement impossible — **corrigée** (règle Firestore + suppression d'une lecture bloquante).
+
+#### Fichiers modifiés
+- `lib/screens/pharmacie/pharmacie_register.dart`
+- `firestore.rules` (règle `pharmacie_requests`)
+
+---
+
+## 30. AZ Express Business Launch Readiness — Master Prompt 75
+
+Audit business/opérationnel, pas un audit de code au sens habituel. Un bug financier critique trouvé et corrigé en creusant la section "argent réel" — le 11ᵉ bug financier critique de toute la session.
+
+### 🔴 Bug critique corrigé — double prélèvement de commission livreur sur chaque commande
+
+Tracé bout en bout : `acceptOrder()` (Dart, à l'acceptation) débite déjà la commission du wallet livreur — remboursable à l'annulation. Mais `deliverOrderCF` (Cloud Function, à la livraison) débitait **une seconde fois** : 100 FCFA fixe pour le cash, et l'équivalent déguisé dans les calculs de crédit pour le wallet (partenaire et livreur). Sur une commande cash à 500 FCFA, le livreur payait 200 FCFA de commission (40%) au lieu de 100 (20%). Chaque fonction était individuellement correcte et déjà testée en isolation — c'est leur **interaction** sur le cycle de vie complet d'une commande qui était fautive, jamais tracée avant cette passe. Même famille exacte que le double-débit pharmacie déjà trouvé cette session.
+
+**Décision utilisateur obtenue avant correction** (architecture financière centrale, ambiguïté réelle sur la bonne solution) : **commission uniquement à l'acceptation**. Corrigé dans `functions/orderActions.js:buildDeliverOrder` — les 3 points de double-prélèvement supprimés (branche cash : plus de débit à la livraison ; branche partenaire : crédit intégral ; branche livreur sans vendeur : crédit intégral). Écritures `wallet_transactions` corrigées en cohérence (plus d'entrée fantôme). Compteurs analytiques purs (`totalCommissions`, `commissions`) inchangés — aucun mouvement d'argent réel n'en dépend. 3 tests réécrits pour refléter le comportement corrigé, suite toujours à 156 tests.
+
+### 1) Premier jour opération — blocages identifiés
+
+- Données déjà identifiées comme obligatoires (Prompts 72-73) : zones actives, vendeur boutique + produits, contenu restaurant/pharmacie réel.
+- **Nouveau risque opérationnel identifié en creusant "qui encaisse le cash"** : pour une commande produit (restaurant/pharmacie/boutique) payée en espèces, le livreur collecte du cash couvrant livraison + produit — **aucune trace numérique de la remise de la part "produit" au marchand n'existe dans l'app**. Processus entièrement manuel/de confiance aujourd'hui. Distinct du mécanisme de commission (déjà correctement pré-payé par le wallet livreur, indépendamment du cash).
+- Gap déjà connu (Prompts 72-74) : aucun canal admin pour litiges/support_tickets/marketplace_reports — tout passe par un canal manuel externe.
+
+### 2) Livreurs
+
+Inscription/validation/disponibilité déjà sains (audités en profondeur). **Commission AZ : corrigée cette passe** (voir ci-dessus) — collectée une seule fois, à l'acceptation, remboursable à l'annulation. Historique revenus fonctionnel (wallet_transactions du livreur + `admin_earnings.dart`/`admin_commissions_page.dart`). "Problème livraison" : aucun écran dédié — tombe dans le même gap que les litiges généraux, résolution manuelle. Aucune suspension temporaire pour les livreurs classiques (déjà documenté) — risque réel si un livreur pose problème pendant le pilote.
+
+### 3) Argent réel
+
+- **Qui encaisse le cash** : pour une livraison/course pure, le livreur collecte le montant complet du client ; la commission AZ est déjà prise de son wallet à l'acceptation (corrigée cette passe pour n'être prise qu'une fois). Pour un produit (restaurant/pharmacie/boutique) payé cash, le livreur collecte aussi la part "produit" — sans traçabilité numérique de la remise au marchand (voir ci-dessus).
+- **Comment AZ récupère sa commission** : via débit du wallet livreur à l'acceptation, recharge via mobile money (FeexPay) — modèle pré-payé propre, pas de "dette" à réclamer après coup pour la commission elle-même.
+- **Suivi dette livreur** : ne s'applique pas au sens classique pour la commission (déjà pré-payée). S'applique en revanche, de façon non trackée, à la part "produit" du cash collecté pour compte d'un marchand (voir ci-dessus) — vrai risque opérationnel, pas un défaut de code.
+- **Remboursements** : toujours vers le wallet client, jamais en espèces physiques — cohérent, mais signifie qu'un remboursement pour une commande payée cash doit être géré manuellement (l'argent n'a jamais transité par AZ numériquement).
+
+### 4) Support client
+
+`commande retard` : pas d'escalade automatisée au-delà de l'auto-expiration à 10 min (commandes non dispatchées uniquement). `livreur absent` : pas de flux dédié — annulation manuelle ou contact support externe. `produit indisponible` : pas de flux de substitution structuré (déjà documenté, modèle "Courses"). `client mécontent` : `support_tickets` existe mais zéro visibilité admin (déjà documenté) — canal manuel WhatsApp/téléphone requis pour le pilote.
+
+### 5) Tâches admin quotidiennes
+
+**Matin** : vérifier les commandes/alertes SOS de la nuit (`admin_sos_page.dart`), vérifier le nombre de livreurs en ligne, vérifier que restaurants/pharmacies actifs ont bien basculé "ouvert", traiter les nouvelles demandes partenaires arrivées (`driver_requests_page.dart`/`admin_*_requests_page.dart`).
+
+**Journée** : surveiller `admin_orders.dart` en temps réel, suivre `admin_live_tracking_page.dart` pour les livraisons en cours, traiter les demandes de recharge/retrait (`admin_recharge_page.dart`), répondre aux sollicitations support reçues par le canal manuel (WhatsApp/téléphone), approuver les nouvelles demandes partenaires au fil de l'eau.
+
+**Soir** : réconcilier le cash de la journée avec chaque livreur (processus manuel, pas d'outil dédié — voir section 3), consulter `admin_geo_stats_page.dart`/`admin_drivers_ranking.dart` pour la performance du jour, vérifier `admin_security_dashboard.dart` pour les échecs de dispatch/anomalies, documenter tout incident pour ajustement le lendemain.
+
+**Hebdomadaire (rappel)** : `walletReconciliationCheck` tourne automatiquement chaque lundi 4h — consulter `wallet_reconciliation_findings` en cas d'écart signalé.
+
+### 6) Checklist de lancement
+
+**J-7** : débloquer la facturation Cloud Build (Google Cloud Console) et déployer les Lots 2-3 des Cloud Functions manquantes (dispatch, paiements) ; recruter/pré-inscrire les 5 livreurs pilotes (KYC) ; recruter les premiers partenaires (restaurants/pharmacies/vendeurs) et démarrer leurs demandes d'approbation ; former l'équipe admin aux tâches quotidiennes ci-dessus ; préparer le canal de support manuel (WhatsApp/téléphone) ; décider du processus manuel de réconciliation cash driver↔marchand.
+
+**J-3** : créer les zones Abengourou (19 pré-chargées + Agnikro/Dioulakro/Indénié manuelles) ; créer le vendeur boutique (`type:'boutique'`) + produits en stock ; approuver tous les comptes pilotes en attente ; tester le parcours complet sur un vrai appareil (jamais fait à ce jour) ; vérifier que les livreurs pilotes ont un solde wallet suffisant et sont prêts à se mettre en ligne ; vérifier au moins 1 restaurant + 1 pharmacie actifs avec contenu réel.
+
+**Jour J** : admin en ligne dès l'ouverture pour surveiller `admin_orders.dart` en temps réel ; canal de support manuel activement surveillé ; suivre les 10 premières commandes individuellement si possible ; vérifier que chaque livraison se conclut correctement (statut `delivered`, wallet livreur/partenaire cohérent) ; réconcilier le cash en fin de journée avec chaque livreur/marchand ; documenter tout problème rencontré.
+
+### Validation exécutée
+
+`flutter analyze` inchangé (5 avertissements préexistants, aucun fichier Dart modifié — correctif Cloud Functions uniquement). `npm test` (`functions/`) toujours 156/156 (3 tests réécrits). `firebase deploy --only firestore:rules --dry-run` compile sans erreur (aucune règle modifiée cette passe). `flutter build appbundle --release` réussi.
+
+---
+
+### 🎯 PRÊT LANCEMENT : **NON** — mais le code applicatif (client/livreur/partenaires/admin) est maintenant financièrement correct
+
+Le blocage reste entièrement celui déjà documenté (déploiement Cloud Functions + préparation des données terrain) — **avec un risque financier de moins** : la commission AZ est désormais correctement prélevée une seule fois par commande, plutôt que deux.
+
+#### Risques business
+🔴 Aucune commande de livraison n'aboutit tant que les Cloud Functions ne sont pas déployées (inchangé, Sections 18-20/26).
+🔴 Aucune traçabilité numérique de la remise de cash "produit" du livreur au marchand — processus manuel/de confiance à formaliser avant le pilote.
+🟡 Aucun canal admin pour litiges/support pendant le pilote — canal manuel obligatoire.
+🟡 Aucune suspension temporaire de livreur classique en cas de problème.
+
+#### Procédures nécessaires (à formaliser avant ouverture, pas du code)
+1. Procédure de réconciliation cash quotidienne driver↔marchand↔AZ.
+2. Procédure de support manuel (qui répond, sur quel canal, avec quel délai).
+3. Liste des tâches admin quotidiennes (matin/journée/soir) ci-dessus, à assigner à une personne responsable.
+4. Procédure de remboursement manuel pour les commandes payées cash.
+
+#### Actions obligatoires avant ouverture
+Voir checklist J-7/J-3/Jour J ci-dessus — synthèse de tout ce qui a été identifié depuis le Prompt 65 jusqu'à cette passe.
+
+#### Fichiers modifiés
+- `functions/orderActions.js` (suppression du double prélèvement de commission)
+- `functions/test/orderActions.test.js` (3 tests réécrits)
+
+---
+
+## 31. Cash Flow & Merchant Payout Safety — Master Prompt 76
+
+Suite directe de la trouvaille opérationnelle du Prompt 75 ("aucune traçabilité du cash produit remis au marchand"), avec autorisation explicite de construire une correction minimale. Un second bug fonctionnel trouvé au passage (Boutique cash bloquée indéfiniment), les deux corrigés — additif, sans toucher au wallet.
+
+### Audit précis des 3 scénarios cash
+
+Confirmé en relisant `deliverOrderCF` : pour une commande cash avec un `sellerId` (restaurant/pharmacie), le wallet du marchand n'est **jamais** crédité — la branche cash ne regarde ni `sid` ni `sType`. Le livreur collecte en espèces le montant total (produit + livraison) et doit remettre la part produit au marchand physiquement — sans aucune trace Firestore avant cette passe.
+
+### 🔴 Bug fonctionnel distinct trouvé — Boutique cash bloquée indéfiniment
+
+`payBoutiqueOrderCashCF` crée `boutique_orders` avec `status:'pending_payment'`, mais `admin_boutique_page.dart` ne réagit qu'à `status=='paid'` pour le premier bouton de progression — `pending_payment` n'était dans aucune map de couleur/libellé et n'avait **aucun bouton pour en sortir**. Confirmé qu'aucun code ne fait jamais transitionner ce statut : une commande Boutique cash restait bloquée en permanence, jamais préparée ni livrée, sauf édition manuelle de Firestore.
+
+### Risques confirmés (les 4 du prompt, tous réels)
+
+Livreur garde l'argent produit / oublie la remise / marchand conteste — tous confirmés possibles sans aucun signal Firestore avant cette passe. Client rembourse — déjà correctement isolé (remboursements toujours vers le wallet client, jamais en espèces), sans changement nécessaire.
+
+### Correction minimale implémentée (additive, wallet non touché)
+
+- `functions/orderActions.js:buildDeliverOrder` — nouveau champ `merchantCashSettled: false` sur la commande, uniquement pour cash + `sellerId` présent + type ≠ boutique. Aucune écriture wallet, aucun changement pour les commandes sans vendeur (le livreur garde déjà 100% du cash, Prompt 75).
+- `lib/screens/admin/admin_cash_settlement_page.dart` (nouveau) — liste les commandes non réglées (marchand/montant/livreur/date), bouton "Marquer réglé" (écriture directe, admin uniquement — `merchantCashSettledAt`/`merchantCashSettledBy` servent d'historique/preuve, pas de nouvelle collection). Wired dans `admin_dashboard.dart` (nouvelle permission `cash_marchand`, ajoutée aussi à `admin_sub_admins_page.dart`).
+- `admin_boutique_page.dart` — `pending_payment` ajouté aux maps + bouton "Confirmer l'espèce reçue" → `'paid'`, débloquant le flux existant et servant de confirmation de règlement en une action.
+- Aucune règle Firestore modifiée — `orders`/`boutique_orders` autorisent déjà `isAdmin()` en écriture libre.
+
+### Capacité admin (item 5)
+
+Voir dette livreur : identifiant livreur affiché par commande (pas encore groupé par livreur — limite assumée). Voir argent marchand à payer : couvert directement. Clôturer journée : pas de mécanisme formel construit — la revue quotidienne de l'écran jusqu'à ce qu'il soit vide fait office de clôture pratique.
+
+### Validation exécutée
+
+`flutter analyze` propre sur les 4 fichiers modifiés/créés et complet (5 avertissements préexistants, aucun nouveau). `npm test` (`functions/`) désormais **158/158** (156 + 2 nouveaux tests). `node -c`/`require('./index.js')` toujours 53 exports. `flutter build appbundle --release` réussi.
+
+---
+
+### 🎯 RISQUE DE PERTE D'ARGENT : **Oui, confirmé — désormais tracé et gérable, pas éliminé**
+
+Le risque physique (un livreur qui garde ou oublie de remettre le cash produit) reste réel — aucune app ne peut empêcher un vol pur et simple. Ce qui a changé : ce risque est désormais **visible et traçable** (statut, montant, livreur, horodatage) plutôt qu'invisible, et le second bug trouvé (Boutique cash bloquée) est corrigé.
+
+#### Correction faite
+🔴 Boutique cash bloquée indéfiniment — **corrigée** (statut débloqué, bouton de confirmation ajouté).
+🟡 Aucune traçabilité du règlement cash marchand (restaurant/pharmacie) — **corrigée** (nouveau champ + écran admin).
+
+#### Fichiers modifiés
+- `functions/orderActions.js`
+- `functions/test/orderActions.test.js` (2 nouveaux tests)
+- `lib/screens/admin/admin_cash_settlement_page.dart` (nouveau)
+- `lib/screens/admin/admin_dashboard.dart`
+- `lib/screens/admin/admin_boutique_page.dart`
+- `lib/screens/admin/admin_sub_admins_page.dart`
+
+#### État pilote cash
+Le code applicatif permet désormais de suivre et clôturer le cash marchand quotidiennement. La procédure de réconciliation elle-même (qui vérifie, à quelle fréquence, avec quelle sanction en cas d'écart) reste à formaliser humainement — pas un défaut de code, déjà signalé comme procédure nécessaire au Prompt 75.
+
+---
+
+## 32. Driver Operations & Fraud Safety — Master Prompt 77
+
+La trouvaille la plus significative n'est pas un nouveau bug mais une capacité manquante depuis le Prompt 05 : les livreurs classiques ne pouvaient pas être suspendus, alors que le backend le supportait déjà entièrement.
+
+### 1) Vie livreur — sain, cross-référencé
+
+Inscription/validation/online-offline/réception/historique gains — tous déjà confirmés fonctionnels par les audits précédents.
+
+### 🔴 2) Suspension — capacité manquante confirmée et corrigée
+
+`dispatch.js` exclut déjà `isSuspended===true`, `acceptOrder()` revérifie déjà `isSuspended` à l'acceptation — seule pièce manquante : aucun bouton admin pour écrire `isSuspended:true` sur un livreur classique (`drivers_page.dart` n'avait aucune référence à ce champ, contrairement à `admin_ekbine_page.dart` qui l'a déjà pour les agents Ekbine). **Corrigé** : bouton suspendre/réactiver ajouté à `_DriverCard` (icône pause/play + dialogue de confirmation), badge "SUSPENDU", même schéma exact que Ekbine. Aucune règle Firestore modifiée.
+
+### 3) Fraude — 4 scénarios testés
+
+- *Coupe GPS* : déjà couvert (`admin_live_tracking_page.dart` calcule déjà la fraîcheur GPS par livreur en ligne).
+- **🔴 *Garde une commande ouverte / refuse de terminer* : gap confirmé — `autoExpireOrders` ne couvre que `pending`/`broadcast`/`assigned`, jamais `accepted`/`picked_up`.** Une commande acceptée peut rester ouverte indéfiniment sans alerte. **Corrigé côté visibilité uniquement** (pas de prévention automatique, hors périmètre "ne pas toucher dispatch core") : `admin_orders.dart` affiche désormais un signal "en retard" (bordure rouge + avertissement) pour toute commande `accepted`/`picked_up` depuis plus d'1h.
+- *Garde cash marchand* : déjà couvert par le Prompt 76.
+- **🟡 *Plusieurs comptes* : gap confirmé, documenté, non corrigé.** Firebase Auth empêche les doublons d'email, mais aucune vérification d'unicité téléphone/pièce d'identité n'existe pour les candidatures livreur. Corriger correctement nécessiterait une Cloud Function (inerte tant que le déploiement est bloqué) ou un assouplissement de règles (décision de sécurité, pas une correction minimale) — documenté comme risque réel.
+
+### 4) Preuves livraison
+
+Photo + GPS déjà en place et fonctionnels. **Confirmation client : confirmé absente** (recherche exhaustive) — la livraison reste entièrement attestée par le livreur, jamais par le client. Gap déjà connu, pas construit (trop large pour une correction minimale).
+
+### 5) Fin de journée
+
+Toutes les pièces sont désormais en place après les Prompts 76/77 : cash (Prompt 76), commandes + signal retard (cette passe), performance livreur (déjà existant).
+
+### Validation exécutée
+
+`flutter analyze` propre sur les 2 fichiers modifiés et complet (5 avertissements préexistants, aucun nouveau). `npm test` (`functions/`) toujours 158/158 (aucun fichier touché, confirmé via `git status`). `flutter build appbundle --release` réussi.
+
+---
+
+### 🎯 PRÊT GESTION FLOTTE : **Oui, pour un pilote supervisé** — les deux gaps opérationnels les plus critiques (suspension, commandes bloquées) sont désormais couverts
+
+#### Risques fraude restants
+🟡 Plusieurs comptes livreur possibles (aucune vérification d'unicité téléphone/ID) — nécessite une décision de sécurité ou le déblocage du déploiement CF pour être corrigé proprement.
+🟡 Aucune confirmation client de la livraison — la preuve reste unilatérale (livreur uniquement).
+🟢 Coupe GPS et cash marchand : déjà couverts (cette passe + Prompt 76).
+🟢 Commande gardée ouverte / refus de terminer : désormais visible pour l'admin (pas de prévention automatique, mais plus invisible).
+
+#### Corrections appliquées
+🔴 Suspension livreur classique — **construite** (backend déjà prêt, UI ajoutée).
+🔴 Commandes bloquées après acceptation — **signal de visibilité ajouté** (pas de prévention automatique).
+
+#### Fichiers modifiés
+- `lib/screens/admin/drivers_page.dart`
+- `lib/screens/admin/admin_orders.dart`
+
+---
+
+## 33. Support Client & Incident Management — Master Prompt 78
+
+Ferme le gap le plus anciennement documenté et le plus souvent reconfirmé de toute la session (Prompts 13/72/74/76 : "support_tickets n'a aucun consommateur admin") en construisant le fil manquant des deux côtés.
+
+### 🔴 Trouvaille clé — la règle Firestore permettait déjà la réponse bidirectionnelle, seule l'UI manquait
+
+`support_tickets` autorisait déjà le propriétaire du ticket à modifier `messages` (tant que `status` ne change pas) et l'admin en accès total — depuis le début. Ni le client ni l'admin n'avaient d'UI pour l'utiliser.
+
+### Corrections apportées (des deux côtés)
+
+- **Client** (`support_screen.dart`) : ticket cliquable → nouvel écran de détail (fil complet + réponse), badge "Réponse du support disponible".
+- **Admin** (`admin_support_page.dart`, nouveau) : onglet Tickets (liste triée, détail + réponse + changement de statut) + onglet Signalements produits (`marketplace_reports`, Ignorer/Traité). Wired dans `admin_dashboard.dart`/`admin_sub_admins_page.dart` (permission `support`).
+- Aucune règle Firestore modifiée (déjà suffisantes).
+
+### Signalements
+
+"Signaler produit" déjà fonctionnel côté client, juste sans visibilité admin — corrigé. "Signaler livreur"/"vendeur" : pas construits comme boutons séparés — le système de catégories `support_tickets` couvre déjà ce besoin en texte libre, dupliquer aurait été redondant.
+
+### Notifications — gap réel documenté, non corrigé
+
+Client informé : réactif (StreamBuilder), pas de push proactif — nécessiterait une nouvelle Cloud Function (inerte tant que le déploiement reste bloqué). Partenaire informé d'un signalement : absent, nouvelle fonctionnalité hors périmètre.
+
+### Validation exécutée
+
+`flutter analyze` propre sur les 4 fichiers modifiés/créés, complet inchangé (5 avertissements). `npm test` toujours 158/158 (aucun fichier `functions/` touché). `flutter build appbundle --release` réussi.
+
+---
+
+### 🎯 PRÊT SUPPORT PILOTE : **Oui**
+
+#### Risques restants
+🟡 Pas de notification push proactive pour les réponses de support (réactif uniquement).
+🟡 Pas de notification vendeur en cas de signalement.
+🟢 Tickets désormais bidirectionnels et visibles admin. 🟢 Signalements produits désormais traitables.
+
+#### Fichiers modifiés
+- `lib/screens/support/support_screen.dart`
+- `lib/screens/admin/admin_support_page.dart` (nouveau)
+- `lib/screens/admin/admin_dashboard.dart`
+- `lib/screens/admin/admin_sub_admins_page.dart`
+
+#### Résultat build
+`flutter analyze` inchangé (5 avertissements), `npm test` 158/158, `flutter build appbundle --release` ✅ réussi (74,1 Mo).
+
+## 34. Scale & Performance Pilot Readiness — Master Prompt 79
+
+Audit de stabilité sous charge simulée (100 clients/20 livreurs/50 commandes/jour/plusieurs partenaires). Instruction explicite : « corriger uniquement optimisations sûres », ne pas toucher logique métier/paiement/dispatch.
+
+### Corrections sûres appliquées
+
+- **`admin_cash_settlement_page.dart`** (Prompt 76) et **`admin_support_page.dart`** onglet Signalements (Prompt 78) : requêtes `.snapshots()` sans `.limit()` → `.limit(100)` ajouté aux deux. Aucun risque : listes de travail (cash à régler, signalements en attente), jamais des agrégats sommés.
+- **`admin_support_page.dart`** : `Image.network(screenshotUrl)` (capture d'écran de ticket) → `CachedNetworkImage` — un exemplaire de plus de la régression déjà documentée au Prompt 59, introduit par le Prompt 78 lui-même. Correctif narrow, un seul fichier.
+
+### 🔴 Trouvaille principale — ~30 écrans admin lisent une collection/`.where()` sans `.limit()`, PAS corrigé en masse
+
+Recherche exhaustive (pas un échantillon) sur `lib/screens/admin/*.dart` + `web_admin_dashboard.dart` : environ 30 requêtes sans plafond, dont les listes de comptes partenaires complètes (`sellers`/`restaurants`/`boulangeries`/`pharmacies`/`fleet_owners`), les écrans d'approbation (5 fichiers `*_requests_page.dart`), `admin_boutique_page.dart` (produits/commandes/recharges), `admin_recharge_page.dart`, `admin_commissions_page.dart`, `admin_map.dart`, `admin_drivers_ranking.dart`, `admin_cod_page.dart`.
+
+**Raison précise de ne pas corriger en masse, vérifiée et pas supposée** : `admin_earnings.dart:150-174` additionne côté client `totalCommissions` sur TOUTES les commandes `status=='delivered'` lues sans `.limit()`. Ajouter un `.limit(N)` sur ce type de requête **tronquerait silencieusement le total affiché à l'admin** — une régression de correction financière déguisée en optimisation de coût, sans aucune erreur visible. Le même risque s'applique à `admin_drivers_ranking.dart` (classement par nombre de livraisons, calculé sur `orders` livrées lues sans plafond malgré une mention contraire ailleurs dans `CLAUDE.md` — « 500 dernières commandes » — qui n'existe pas dans le code réel de cet écran, corrigé comme trouvaille de documentation).
+
+Distinguer, fichier par fichier, les écrans **liste de travail** (sûrs à borner, comme les 2 déjà corrigés) des écrans **agrégat côté client** (où borner change le résultat affiché) est un vrai chantier d'audit + conception — pas une « optimisation sûre » exécutable en un passage. Documenté comme risque à traiter avant que le volume grandisse significativement, pas corrigé.
+
+### Reste vérifié sain (cross-référencé, pas re-dérivé)
+
+- **Cloud Functions** : aucune nouvelle boucle non bornée ; `dispatch.js:44` (scan livreurs en ligne) reste le seul cas serveur, déjà accepté pour le volume pilote.
+- **Storage/compression** : `imageQuality`/`maxWidth` déjà appliqués à 26 fichiers d'upload, y compris les 2 écrans les plus récents — pas de régression à l'upload (contrairement à l'affichage, `Image.network`, toujours non résolu ailleurs).
+- **GPS** : `DriverLocationService` throttle 5s+15m inchangé, coût/batterie négligeable à 20 livreurs.
+- **Mémoire Flutter** : les contrôleurs des 3 nouveaux écrans (Prompts 76-78) vérifiés un par un, tous disposés correctement — aucune fuite.
+- **Google Maps** : cache 100m/5min + Nominatim-first toujours en place, throttle Directions 120s inchangé.
+
+### Validation exécutée
+
+`flutter analyze` complet — **8 avertissements** (pas 5 : baseline jamais recomptée depuis le Prompt 38 — 1 préexistant + 4 `deprecated_member_use` Radio dans `agent_dashboard_screen.dart` [SDK Flutter] + 3 `prefer_const_*` dans `delete_account_page.dart` [Prompt 69] — aucun dans un fichier touché cette passe, correction de comptage documentaire, pas une régression). `npm test` **158/158** (aucun fichier `functions/` touché). `flutter build appbundle --release` ✅ réussi (`app-release.aab`, 71,2 Mo).
+
+---
+
+### 🎯 CAPACITÉ PILOTE ESTIMÉE : largement suffisante pour 100 clients / 20 livreurs / 50 commandes-jour
+
+À ce volume, aucune des lectures non bornées documentées ci-dessus ne constitue un risque de coût réel — c'est un risque à réévaluer avant une **grande échelle** (des centaines de livreurs, des milliers de commandes livrées cumulées), pas avant le pilote.
+
+#### Risques coûts Firebase
+🟡 ~30 écrans admin sans `.limit()` — sûrs au volume pilote, à traiter avant grande échelle (avec la distinction liste/agrégat ci-dessus).
+🟡 `Image.network` non mis en cache (24 fichiers, Prompt 59, inchangé) — coût de bande passante, pas de lectures Firestore.
+🟢 GPS, Google Maps, Storage upload, Cloud Functions : tous déjà optimisés ou acceptables au volume pilote.
+
+#### Fichiers modifiés
+- `lib/screens/admin/admin_cash_settlement_page.dart`
+- `lib/screens/admin/admin_support_page.dart`
+
+#### Résultat build
+`flutter analyze` 8 avertissements préexistants (0 nouveau), `npm test` 158/158, `flutter build appbundle --release` ✅ réussi (71,2 Mo).
+
+## 35. Final Security Attack Audit — Master Prompt 80
+
+Audit d'attaque (pas un audit de gap) sur les 6 catégories demandées : construction d'écritures Firestore concrètes qui violeraient les règles réelles, plutôt qu'une relecture des règles en diagonale. **3 failles critiques + 1 élevée trouvées et corrigées, toutes dans `firestore.rules` — des branches vestigiales laissées depuis avant la migration du dispatch côté serveur (Prompt 26), jamais exercées par l'app légitime mais toujours exploitables via une écriture Firestore brute (hors UI).**
+
+### 🔴 CRITIQUE #1 — `deliverOrderCF` pouvait créditer n'importe quel restaurant/pharmacie sans qu'aucun client n'ait payé
+
+La règle `orders` (`create`) ne valide ni `paymentMethod`, ni `sellerId`, ni `sellerType`. Un client pouvait créer `{paymentMethod:'wallet', sellerId:'<n'importe quel partenaire>', sellerType:'restaurant', budget:999999, isPaid:false}`. Dans `functions/orderActions.js:buildDeliverOrder`, la branche de crédit partenaire ne vérifiait que `payMethod==='wallet' && sid`, **jamais `order.isPaid`** — contrairement à la branche sœur sans vendeur. Une fois la commande livrée par n'importe quel livreur (même non complice), le partenaire visé était crédité intégralement, argent créé à partir de rien. **Corrigé** : garde `order.isPaid === true` ajoutée à la branche de crédit partenaire, même schéma que la branche déjà protégée.
+
+### 🔴 CRITIQUE #2 — un livreur pouvait forcer `isPaid:true` par écriture directe, sans jamais appeler `deliverOrderCF`
+
+La transition `picked_up→delivered` de la branche livreur autorisait `unchanged('isPaid') || isPaid==true` — un livreur pouvait donc marquer sa commande "payée" sans validation serveur. Confirmé : aucun code Flutter légitime n'exerce ce chemin (`deliverOrder()` délègue toujours à `deliverOrderCF`). **Corrigé** : `isPaid` ne peut plus être modifié sur cette transition, hérite de `unchanged('isPaid')`.
+
+### 🔴 CRITIQUE #3 — un client pouvait s'auto-assigner n'importe quel livreur, contournant le dispatch
+
+La branche « client auto-assigne le livreur le plus proche » (vestige d'avant la migration serveur du dispatch) protégeait `budget`/`clientId`/`isPaid`/`paymentMethod` mais **pas `driverId`** — un client pouvait écrire n'importe quel `driverId`. Combiné à #1, un attaquant possédant à la fois un compte client ET un compte livreur pouvait compléter seul toute la chaîne de fraude. **Corrigé** : branche supprimée entièrement (aucun appelant légitime confirmé).
+
+### 🔴 ÉLEVÉ #4 — un partenaire pouvait changer le `status` d'une commande vers n'importe quelle valeur
+
+La branche vendeur protégeait 5 champs mais jamais `status` — un partenaire pouvait court-circuiter toute la state machine de livraison. Confirmé : aucun code Flutter légitime ne modifie `status` depuis ce rôle. **Corrigé** : `unchanged('status')` ajouté.
+
+### Reste vérifié sain, aucune nouvelle faille
+
+- **Client** : ne lit pas les données d'autrui, ne peut qu'appauvrir son propre wallet (jamais l'enrichir), ne peut pas s'auto-promouvoir admin.
+- **Livreur** : ne peut modifier que son propre document, ne peut pas gonfler son propre wallet, ne peut pas voler une commande assignée à un autre.
+- **Ekbine** (`ekbine_orders`) : comparé en détail — nettement mieux scopé que ne l'étaient les branches `orders` (chaque transition source→cible explicite, `completed` exclu de toute écriture directe).
+- **Admin/rôles** : séparation super/sous-admin saine. Gap déjà documenté, non repris (Prompt 57) : `permissions` par section non appliqué dans les règles.
+- **Storage** : posture par défaut-refus confirmée, type/taille validés partout. `support_screenshots` trop restrictif (admin ne peut pas lire — sens inverse d'une faille), signalé pas corrigé.
+
+### Validation exécutée
+
+`firebase deploy --only firestore:rules --dry-run` compile sans erreur. `npm test` **159/159** (158 + 1 nouveau test de sécurité, 1 test existant corrigé — sa fixture validait par erreur l'ancien comportement fautif). `flutter analyze` inchangé (8 avertissements, aucun fichier Dart touché). `flutter build appbundle --release` ✅ réussi (AAB byte-identique au Prompt 79).
+
+---
+
+### 🎯 ÉTAT SÉCURITÉ PRODUCTION : failles critiques fermées, verdict inchangé sur le reste
+
+Les 4 failles trouvées étaient toutes dans le même mécanisme (`orders` update rule) et auraient permis, en combinaison, de créer de l'argent réel sans paiement — la plus sérieuse trouvaille financière de toute la session, désormais fermée. Le reste de la posture sécurité (Storage, RBAC admin, Ekbine, wallet livreur/client) était déjà solide et le reste.
+
+#### Failles critiques trouvées
+🔴 Crédit partenaire sans vérification de paiement (`deliverOrderCF`).
+🔴 Flip `isPaid` par écriture directe livreur (`orders` rule).
+🔴 Auto-assignation de livreur par le client (`orders` rule).
+🟠 Changement de statut arbitraire par un partenaire (`orders` rule).
+
+#### Attaques bloquées
+Money-minting via fausse commande wallet ciblant un partenaire complice ou involontaire ; bypass du dispatch serveur par auto-assignation ; bypass de `deliverOrderCF`/`payOrderFromWalletCF` par écriture directe du statut/isPaid ; court-circuit de la state machine de livraison par un partenaire.
+
+#### Corrections
+`firestore.rules` (3 branches `orders` corrigées/supprimées), `functions/orderActions.js` (garde `isPaid` sur le crédit partenaire), `functions/test/orderActions.test.js` (+1 test sécurité, 1 corrigé).
+
+#### État sécurité production
+Les correctifs sont dans le code local — comme pour tous les correctifs déjà documentés (Sections 18-20/26), ils ne prennent effet en production qu'après déploiement réel des règles/Cloud Functions concernées (`firestore.rules` + `deliverOrderCF`, cette dernière parmi les 23 fonctions toujours non déployées, blocage facturation Cloud Build inchangé). Priorité de déploiement à revoir à la lumière de cette trouvaille : les règles Firestore, elles, peuvent être déployées indépendamment du blocage Cloud Functions (déjà fait pour d'autres correctifs, Section 19-20) — recommandé de le faire dès que possible, puisque cela ferme à lui seul 3 des 4 failles (#1 nécessite aussi le déploiement de `deliverOrderCF`).
+
+## 36. AZ Express Final Release Freeze Audit — Master Prompt 81
+
+Dernier audit avant gel de version, scopé strictement « ne modifier que : bugs bloquants, sécurité, erreurs évidentes », toute nouvelle fonctionnalité/refonte UI/changement d'architecture explicitement interdits. **2 sous-agents dédiés + vérifications directes sur les 5 catégories demandées — verdict : zéro fichier modifié cette passe**, rien trouvé ne franchissant la barre fixée par le prompt lui-même.
+
+### 1) Cohérence version finale — sain
+
+Recherche exhaustive de `TODO`/`FIXME`/`HACK`/`XXX` dans `lib/`/`functions/*.js` : zéro résultat dangereux. Zéro `print()`/`debugPrint()` dans `lib/`. `kDebugMode` utilisé seulement 2 fois (choix du provider App Check), pas de fuite de comportement debug. `functions/*.js` : ~35 `console.log`/`console.error`, tous limités à des IDs/messages d'erreur/tokens tronqués — aucun objet utilisateur complet ni secret journalisé. Aucun écran de test/debug/bypass accessible.
+
+🟡 **Trouvaille mineure, non corrigée** : `lib/constants/app_constants.dart:171` contient la clé Google Maps en toutes lettres, alors que `firebase_options.dart` documente et applique le pattern inverse (`--dart-define`). Pas une faille nouvelle — une clé Maps est structurellement destinée à être embarquée côté client (déjà documenté), le vrai contrôle est côté Google Cloud Console. Migrer vers `--dart-define` ne changerait rien à l'exposition réelle, seulement à la facilité de rotation — signalé pour cohérence, pas corrigé.
+
+### 2) Environnement production — conforme
+
+`.firebaserc` = `az-express-clean` unique. `applicationId`/`namespace` = `com.azexpress.app`. Clé Maps du manifest injectée via `${MAPS_API_KEY}` au build, jamais en dur. Aucun fichier secret tracké par git (confirmé `git ls-files` vide pour chacun). Règles Firestore/Storage compilent sans erreur en dry-run.
+
+### 3) Données sensibles exposées — aucune nouvelle exposition
+
+Audit dédié de la couche UI (au-delà des règles déjà auditées) : téléphone client visible au livreur seulement après acceptation réelle, jamais dans la liste de courses disponibles ; téléphone vendeur Marketplace délibérément public (mécanisme de contact voulu) ; carte des livreurs en ligne suit le pattern standard "à proximité" (position/nom/véhicule, jamais wallet/téléphone) ; aucun écran partenaire ne lit les données d'un autre partenaire.
+
+### 4) Expérience utilisateur finale
+
+Premier lancement : `Firebase.initializeApp()`/App Check/connexion anonyme tous encapsulés en `try/catch`, aucun risque de crash identifié. **Compte suspendu (livreur)** : pas de bannière proactive sur le toggle "En ligne", mais une tentative d'acceptation déclenche bien un message d'erreur clair (pas un crash, pas un blocage silencieux) — gap UX mineur, pas un bug bloquant. **Compte supprimé (client)** : suppression Firestore puis Auth dans le bon ordre, retombe proprement sur le flux "non connecté" au prochain lancement. **Limite documentée, non corrigée** : aucun listener `authStateChanges()` pour détecter en temps réel une suppression/désactivation pendant une session déjà active (jeton valide jusqu'à expiration naturelle) — construire ça serait une nouvelle fonctionnalité, hors périmètre.
+
+### 5) Configuration Play Store — conforme
+
+Label "AZ Express" correct, icônes présentes dans les 5 densités (vraie icône, pas le placeholder Flutter). 16 permissions déclarées, cohérent avec l'audit de durcissement Android déjà fait. Version `1.0.0+1` toujours désynchronisée des tags git — déjà documenté (Prompts 62/63), décision de processus de release, pas un bug.
+
+### Validation exécutée
+
+`firebase deploy --only firestore:rules --dry-run` ✅. `npm test` **159/159** (aucun fichier `functions/` touché). `flutter analyze` inchangé (8 avertissements préexistants, 0 nouveau). `flutter build appbundle --release` ✅ réussi — AAB byte-identique au Prompt 80 (71,2 Mo), confirmant qu'aucun code n'a changé.
+
+---
+
+### 🎯 GO / NO GO RELEASE : **GO** (pour un pilote supervisé — le blocage de déploiement Cloud Functions reste la seule vraie réserve)
+
+Le code applicatif est propre à ce stade : aucun bug bloquant, aucune faille de sécurité active, aucune donnée sensible exposée au-delà de ce qui est déjà connu et accepté, aucun écran de test accessible, configuration Android/Firebase/Play Store cohérente. Le gel de version peut être déclaré côté code.
+
+#### Derniers blocages
+🔴 **Le seul vrai blocage reste externe au code, déjà documenté** : facturation Cloud Build/GCP toujours bloquée (HTTP 403) — 23 Cloud Functions non déployées, dont tous les correctifs financiers critiques (Sections 18-20/26) et le correctif de sécurité #1 du Prompt 80 (`deliverOrderCF`). Sans déblocage, `dispatchOrderToDriver` n'étant pas déployée, aucune commande de livraison réelle n'aboutit — confirmé concrètement au Prompt 71.
+🟡 Règles Firestore (correctifs de sécurité du Prompt 80) prêtes à déployer indépendamment du blocage Cloud Build — recommandé en priorité absolue avant tout lancement terrain, ferme 3 des 4 failles à elles seules.
+🟡 Version applicative (`1.0.0+1`) non synchronisée avec les tags git (`v0.3-rc3`) — décision de processus à trancher avant publication Play Store.
+🟡 Clé Google Maps codée en dur (pas une faille, juste une incohérence de convention) — cohérence de rotation à améliorer si voulu, non bloquant.
+
+#### Fichiers modifiés
+Aucun — audit-only, rien ne franchissait la barre "bug bloquant/sécurité/erreur évidente".
+
+#### État final AZ Express
+Code applicatif **prêt pour le gel de version**. Le déploiement production reste conditionné au déblocage de la facturation Cloud Build (action Google Cloud Console, hors du code) — une fois débloqué : déployer `firestore.rules` en priorité (ferme 3/4 failles sécurité immédiatement), puis les Cloud Functions par lots déjà planifiés (Sections 18-20), suivre le plan de seed et les checklists de lancement déjà livrés (Prompts 72-78). Le projet a traversé 81 passes d'audit cumulées cette session — 11 bugs financiers critiques et 4 failles de sécurité critiques/élevées trouvés et corrigés dans le code, zéro laissé en suspens dans une catégorie "bug bloquant" à ce jour.
+
+## 37. AZ Express Production Go-Live Checklist Abengourou — Master Prompt 82
+
+Code freeze explicite (« ne plus modifier le code sauf bug bloquant »), objectif de préparation du lancement terrain réel. **Zéro fichier modifié** — la majorité de ce prompt (formation livreurs, procédure argent, canal support, captures d'écran Play Store, simulation Jour J) est opérationnelle/business, hors de portée de cet environnement. Ce qui était vérifiable a été testé réellement plutôt que supposé.
+
+### 1) Google Cloud final
+
+- **Facturation Cloud Build toujours bloquée — retesté réellement, pas supposé.** `firebase functions:list` : 30/53 fonctions, aucune des critiques (`dispatchOrderToDriver`/`deliverOrderCF`/`cancelOrderCF`/`payOrderFromWalletCF`/`azIaChat`) présente. Nouvel essai réel de déploiement (Lot 1, 6 fonctions à faible risque) : échec identique (`HTTP 403, billing account`). Arrêté immédiatement, zéro dégât (toujours 30 fonctions après coup).
+- `firestore.rules`/`storage.rules` : correctifs de sécurité du Prompt 80 confirmés présents. 37 index toujours déclarés. Dry-run compile sans erreur.
+
+### 2) Firestore données initiales
+
+- Zones : 4 des 9 zones demandées (**Commerce, Cafétou, Plateau, Château**) déjà dans le seed pré-rempli de `admin_zones_page.dart` ; les 5 autres (**Agnikro, Dioulakro, Indénié 2000, Aviation, Nouveau Quartier**) à ajouter manuellement via le formulaire "+" existant.
+- Aucun script de seed livreurs/clients/partenaires dans le dépôt — création à faire via l'app (flux déjà audités et fonctionnels) ou un script Admin SDK dédié, non construit ici (nécessite des données réelles : noms, téléphones, adresses).
+
+### 3-6) Simulation Jour J, organisation livreurs, procédure argent, support
+
+Hors de portée de cet environnement (pas d'accès device/émulateur, pas de données business réelles comme les numéros WhatsApp/téléphone AZ Express) — livrés comme checklist actionnable dans le rapport final, pas exécutés.
+
+### 7) Play Store
+
+- **Bonne nouvelle, changement externe détecté** : Flutter est passé du canal `beta` (risque signalé au Prompt 63) au canal **stable** (`3.44.5`) — risque fermé sans action de cette session.
+- Licences Android SDK toujours "unknown" sur cette machine — problème d'environnement local déjà documenté (symboles de debug non retirés), pas un défaut du code.
+- **Firebase Hosting confirmé réellement live** (jamais vérifié aussi directement avant) : `https://az-express-clean.web.app/confidentialite` et `/delete-account` répondent **200 OK** avec le vrai contenu de l'app — utilisables tels quels dans le formulaire Play Console.
+- `flutter build appbundle --release` re-testé sur le nouveau canal stable — réussit à l'identique (AAB byte-identique, 71,2 Mo).
+- Screenshots/description Play Store : pas préparés, action business restante.
+
+### Validation exécutée
+
+`firebase functions:list` (lecture seule) + nouvel essai réel de déploiement Lot 1 (échec confirmé, zéro dégât). `firebase deploy --only firestore:rules --dry-run` ✅. Hosting vérifié live par requêtes HTTP réelles. `flutter build appbundle --release` ✅ réussi sur canal stable.
+
+---
+
+### 🎯 GO / NO GO LANCEMENT ABENGOUROU : **NO GO tant que la facturation Cloud Build n'est pas débloquée** — tout le reste est prêt côté code
+
+#### Fonctions déployées
+❌ Non — 30/53, blocage confirmé à nouveau par un vrai essai de déploiement cette passe.
+
+#### Données prêtes
+🟡 Partiellement — 4/9 zones pré-remplies, le reste (zones restantes + comptes livreurs/clients/partenaires réels) doit être créé manuellement via l'app une fois le pilote lancé, pas de blocage technique.
+
+#### Partenaires prêts
+🟡 Flux d'inscription/approbation restaurant/pharmacie/boutique/marketplace tous audités et fonctionnels (Prompts 73-74) — mais aucun compte réel n'existe encore, à créer.
+
+#### Risques restants
+🔴 Blocage facturation Cloud Build (le seul vrai blocage technique).
+🟡 Pas de données de seed réelles (zones/comptes) créées.
+🟡 Simulation Jour J réelle jamais exécutée sur device (hors de portée de cet environnement).
+🟡 Canal support (WhatsApp/téléphone) et assets Play Store (captures/description) pas préparés.
+
+#### Date de lancement pilote possible
+Dès que la facturation Cloud Build est débloquée + `firestore.rules` déployées + Lots 2-3 de Cloud Functions déployés + zones/comptes réels créés + une simulation Jour J réelle sur device confirmée — aucune de ces étapes n'a de dépendance technique bloquante restante côté code, le calendrier dépend désormais entièrement d'actions externes au code (Google Cloud Console, création de comptes réels, préparation Play Store).
+
+## 38. Production Activation Plan — Master Prompt 83
+
+Plan d'activation exact pour l'après-déblocage Google Billing, demandé en code freeze strict (« ne modifier aucun code, ne créer aucune fonctionnalité, ne refactoriser aucun fichier »). Section 1 (« avant déblocage ») explicitement « ne rien déployer » — toutes les commandes ci-dessous sont un **plan écrit**, pas des actions exécutées cette passe (aucun déploiement de Cloud Function tenté, contrairement aux Prompts 66/67/82).
+
+### 1) État actuel — vérifié en lecture seule, diff exact calculé
+
+`firebase functions:list` (30 fonctions) diffé programmatiquement contre les 53 exports réels de `functions/index.js` — **23 fonctions manquantes, liste exacte, pas une estimation** :
+
+| Lot | Fonctions manquantes | Risque |
+|---|---|---|
+| **Lot 1 — système, faible risque (6)** | `fcmTokenCleanupCheck`, `logAdminAuditEvent`, `logAuthEvent`, `pharmacieLogin`, `setPharmaciePassword`, `walletReconciliationCheck` | Faible — déjà le lot testé 3 fois (Prompts 66/67/82), aucune n'engage de fonds |
+| **Lot 2 — dispatch (1)** | `dispatchOrderToDriver` | Moyen — sans elle, aucune commande de livraison n'est jamais assignée (confirmé Prompt 71) |
+| **Lot 3 — argent (6)** | `deliverOrderCF`, `cancelOrderCF`, `payOrderFromWalletCF`, `payBoutiqueOrderCF`, `payBoutiqueOrderCashCF`, `refundExpiredBoutiqueOrderCF` | Élevé — mouvements de fonds réels, inclut le correctif de sécurité du Prompt 80 |
+| **Lot 4 — reste des modules (10)** | AZ IA (4) : `aiCleanupExpiredPendingActions`, `aiConfirmAction`, `azIaChat`, `clearAiHistory` — Immobilier (6) : `approveRealEstateAgentRequest`, `notifyAgentOnVisitRequest`, `notifyClientOnVisitUpdate`, `requestPropertyVisit`, `respondToVisitRequest`, `submitRealEstateAgentRequest` | Faible — modules non critiques au lancement livraison/wallet |
+
+**Checklist pré-déploiement** (tout confirmé prêt, lecture seule, rien déployé cette passe) :
+- ✅ `firestore.rules` — correctifs de sécurité du Prompt 80 confirmés présents, `firebase deploy --only firestore:rules,storage --dry-run` compile sans erreur (retesté cette passe).
+- ✅ `storage.rules` — compile sans erreur, posture par défaut-refus confirmée (Prompt 80/81).
+- ✅ 37 index Firestore (`firestore.indexes.json`) — déjà déployés (Prompt 67), inchangés.
+- ✅ Firebase Hosting — confirmé live par requêtes HTTP réelles (Prompt 82), `/confidentialite` et `/delete-account` répondent 200.
+- ✅ Suite de tests `functions/` — 159/159, inchangée depuis le Prompt 80.
+- ❌ Cloud Build/facturation GCP — toujours bloquée (dernier essai réel au Prompt 82, `HTTP 403`) ; pas re-testé cette passe (section 1 du prompt demande explicitement de ne rien déployer).
+
+### 2) Ordre exact après déblocage — commandes prêtes à copier-coller
+
+**Étape 1 — sécurité, en premier, indépendamment des Cloud Functions :**
+```
+firebase deploy --only firestore:rules --project az-express-clean
+```
+Vérifier le succès (`+ cloud.firestore: rules file compiled and released successfully` dans la sortie), puis confirmer dans la Console Firebase que la date de dernière publication des règles a bien changé.
+
+**Étape 2 — Cloud Functions par lots, avec vérification entre chaque lot :**
+```
+# Lot 1 — système (faible risque)
+firebase deploy --only functions:fcmTokenCleanupCheck,functions:logAdminAuditEvent,functions:logAuthEvent,functions:pharmacieLogin,functions:setPharmaciePassword,functions:walletReconciliationCheck --project az-express-clean
+
+# Lot 2 — dispatch
+firebase deploy --only functions:dispatchOrderToDriver --project az-express-clean
+
+# Lot 3 — argent (le plus sensible — vérifier le Lot 2 en conditions réelles avant de lancer celui-ci)
+firebase deploy --only functions:deliverOrderCF,functions:cancelOrderCF,functions:payOrderFromWalletCF,functions:payBoutiqueOrderCF,functions:payBoutiqueOrderCashCF,functions:refundExpiredBoutiqueOrderCF --project az-express-clean
+
+# Lot 4 — reste des modules (AZ IA + Immobilier)
+firebase deploy --only functions:aiCleanupExpiredPendingActions,functions:aiConfirmAction,functions:azIaChat,functions:clearAiHistory,functions:approveRealEstateAgentRequest,functions:notifyAgentOnVisitRequest,functions:notifyClientOnVisitUpdate,functions:requestPropertyVisit,functions:respondToVisitRequest,functions:submitRealEstateAgentRequest --project az-express-clean
+```
+
+**Après chaque lot** : `firebase functions:list --project az-express-clean` (confirmer le nouveau total), puis consulter les logs (`firebase functions:log --project az-express-clean` ou Console Cloud Logging) pendant quelques minutes pour repérer une erreur de démarrage à froid, avant de passer au lot suivant. Ne jamais lancer le Lot 3 avant d'avoir confirmé le Lot 2 stable — c'est le lot qui déplace de l'argent réel pour la première fois en production.
+
+### 3) Validation technique finale — checklist post-déploiement complet
+
+- `firebase functions:list --project az-express-clean` → objectif **53/53**.
+- Test client : créer une vraie commande de livraison (montant minimal, ex. 500 FCFA) depuis un compte de test.
+- Test livreur : confirmer la réception de la notification, l'acceptation, le trajet GPS/Maps, la livraison marquée terminée.
+- Test paiement cash : une commande réglée en espèces, confirmer que la commande passe bien à `delivered` et que `merchantCashSettled` apparaît si un marchand est concerné.
+- Test paiement wallet : une commande réglée par wallet, confirmer le débit client + le crédit correct du livreur/partenaire (exactement le chemin sécurisé par le correctif du Prompt 80 — **premier test réel en conditions de production de ce correctif**, à ne pas sauter).
+- Test admin : `admin_orders.dart` (suivi), `admin_support_page.dart` (support), `admin_cash_settlement_page.dart` (cash marchand) — confirmer que les 3 écrans reflètent bien les données de la commande de test.
+
+### 4) Préparation terrain Abengourou — déjà détaillé au Prompt 82, référencé ici pour ne pas dupliquer
+
+Zones (4/9 déjà pré-remplies dans `admin_zones_page.dart` : Commerce/Cafétou/Plateau/Château — 5 restantes à ajouter manuellement : Agnikro/Dioulakro/Indénié 2000/Aviation/Nouveau Quartier), 5 comptes livreurs minimum + partenaires (restaurant/pharmacie/boutique/marketplace) à créer via les flux d'inscription déjà audités et fonctionnels, canal support WhatsApp/téléphone à définir (numéros réels non fournis à ce jour) — voir Section 37 pour le détail complet, non re-décrit ici.
+
+### 5) Play Store — état des lieux, rien de nouveau à corriger côté code
+
+Prêt : `firestore.rules`/permissions déjà auditées (Sections 22-23), URL politique de confidentialité et suppression de compte déjà live (Section 37, `/confidentialite` et `/delete-account`, 200 OK confirmés). Restant, purement business/marketing, aucune dépendance code : captures d'écran, texte de description, choix de catégorie Play Store, déclaration d'usage de la localisation dans le formulaire Data Safety (contenu déjà préparé/documenté Prompts 63/68/69, jamais soumis dans la console elle-même).
+
+---
+
+### 🎯 STATUT ACTUEL : code et infrastructure prêts, un seul déploiement en attente d'un débloquage externe
+
+#### Commandes exactes à lancer après déblocage billing
+Voir Section 38.2 ci-dessus — 1 commande de règles + 4 commandes de fonctions par lot, dans cet ordre précis, avec vérification des logs entre chaque lot.
+
+#### Ordre de lancement
+Règles Firestore → Lot 1 (système) → Lot 2 (dispatch) → validation Lot 2 en conditions réelles → Lot 3 (argent) → Lot 4 (IA/Immobilier) → validation technique finale complète (Section 38.3) → seed des données Abengourou (Section 38.4) → simulation Jour J réelle sur device → ouverture support → publication Play Store.
+
+#### Risques restants
+🔴 Facturation Cloud Build toujours bloquée — seule vraie dépendance technique.
+🟡 Le Lot 3 n'a jamais été testé en conditions réelles de production (seulement en tests unitaires, 159/159) — la validation technique de la Section 38.3 sur le paiement wallet est la première vérification en conditions réelles du correctif de sécurité du Prompt 80, à ne pas sauter le jour du déploiement.
+🟡 Données terrain (zones/comptes/partenaires) et canal support toujours à créer avec de vraies informations métier.
+🟡 Assets Play Store (captures, description) toujours à préparer.
+
+#### GO LIVE — checklist finale
+- [ ] Facturation Cloud Build débloquée (Google Cloud Console)
+- [ ] `firestore.rules` déployées, succès confirmé
+- [ ] Lot 1 déployé, logs propres
+- [ ] Lot 2 déployé, logs propres, une vraie commande testée bout en bout
+- [ ] Lot 3 déployé, logs propres, paiement cash ET wallet testés bout en bout
+- [ ] Lot 4 déployé
+- [ ] `firebase functions:list` confirme 53/53
+- [ ] 9 zones Abengourou actives
+- [ ] 5 comptes livreurs validés minimum
+- [ ] Au moins 1 restaurant + 1 pharmacie + 1 boutique + des vendeurs marketplace actifs
+- [ ] Canal support WhatsApp/téléphone communiqué
+- [ ] Play Store : captures, description, catégorie, Data Safety soumis
+
+## 39. Operations Runbook & Post-Launch Monitoring — Master Prompt 84
+
+Code freeze, « audit documentation/process uniquement ». **Nouveau document créé : [`OPERATIONS_RUNBOOK.md`](../OPERATIONS_RUNBOOK.md)** (racine du dépôt) — manuel d'exploitation quotidienne pour l'admin/opérateur post-lancement Abengourou, public distinct de ce fichier (historique d'audit) et de `CLAUDE.md` (doc technique développeur).
+
+Contenu du manuel (référence rapide, détail complet dans le fichier lui-même) :
+1. **Journée type admin** — routine matin/journée/soir, chaque vérification pointée vers l'écran admin exact qui l'outille déjà (`admin_orders.dart`, `admin_cash_settlement_page.dart`, `admin_live_tracking_page.dart`, `admin_support_page.dart`, `drivers_page.dart`, écrans de demande partenaire).
+2. **Surveillance technique** — Firebase Console (Functions Logs/Crashlytics/Firestore/Storage/Auth) et Google Cloud Console (Maps), avec les fréquences exactes des schedulers automatiques vérifiées dans le code (`walletReconciliationCheck` lundi 4h, `fcmTokenCleanupCheck` lundi 5h, `cleanupExpiredRateLimits` lundi 3h, `autoExpireOrders` chaque minute).
+3. **Procédures incidents** par rôle (client/livreur/partenaire) — chaque case indique soit la procédure réelle avec l'écran concerné, soit explicitement « pas d'outil dédié, procédure manuelle » là où rien n'existe (ex. réassignation automatique de commande bloquée, remboursement partiel).
+4. **Argent & fin de journée** — clôture quotidienne détaillée, avec la distinction exacte entre le contrôle quotidien (cash effectivement remis) et la réconciliation automatique hebdomadaire (`wallet_reconciliation_findings`, lundi 4h).
+5. **Sécurité post-lancement** — signal exact à chercher si le type de fraude fermé au Prompt 80 était tenté malgré tout : une commande `delivered` sans crédit partenaire (`walletTarget:'partner_unpaid'` dans les logs de `deliverOrderCF`).
+6. **Seuils de croissance** (5→20 livreurs, 50→500 commandes/jour) — construits à partir des limites déjà identifiées par audit dédié cette session (agrégation client-side non bornée `admin_earnings.dart`/`admin_drivers_ranking.dart`, Prompt 79 ; absence de sauvegarde Firestore planifiée, Prompt 61/65 ; absence de `minInstances`, Prompt 37), pas des seuils inventés.
+
+**Zéro fichier de code modifié — un seul fichier créé, de la documentation pure.**

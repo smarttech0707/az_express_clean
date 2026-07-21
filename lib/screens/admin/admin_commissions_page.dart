@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../widgets/stream_error_state.dart';
 
 const _kCommission = 100;
 
@@ -34,7 +35,7 @@ class _AdminCommissionsPageState extends State<AdminCommissionsPage>
       backgroundColor: const Color(0xFFF2F3F7),
       appBar: AppBar(
         title: Text('Commissions livreurs',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
@@ -45,7 +46,7 @@ class _AdminCommissionsPageState extends State<AdminCommissionsPage>
           unselectedLabelColor: Colors.white54,
           indicatorColor: Colors.white,
           labelStyle:
-              GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
+              GoogleFonts.urbanist(fontWeight: FontWeight.w600, fontSize: 13),
           tabs: const [
             Tab(text: 'Statistiques'),
             Tab(text: 'Historique'),
@@ -90,6 +91,9 @@ class _StatsTab extends StatelessWidget {
           .orderBy('createdAt', descending: true)
           .snapshots(),
       builder: (ctx, snap) {
+        if (snap.hasError) {
+          return const StreamErrorState(message: "Impossible de charger les commissions.");
+        }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -183,20 +187,20 @@ class _StatsTab extends StatelessWidget {
                   children: [
                     Text(
                       _periodLabel(filterPeriod),
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 12),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '$totalPeriod FCFA',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white,
                           fontSize: 32,
                           fontWeight: FontWeight.bold),
                     ),
                     Text(
                       '$countPeriod livraisons terminées',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.white70, fontSize: 13),
                     ),
                     const SizedBox(height: 16),
@@ -260,7 +264,7 @@ class _StatsTab extends StatelessWidget {
 
               // ── Classement livreurs ──────────────────────────────────────
               Text('Top livreurs (période)',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontWeight: FontWeight.bold, fontSize: 14)),
               const SizedBox(height: 10),
               _TopDrivers(docs: all, start: start),
@@ -325,7 +329,7 @@ class _TopDrivers extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
         ),
         child: Text('Aucune donnée pour cette période',
-            style: GoogleFonts.inter(color: Colors.grey, fontSize: 13)),
+            style: GoogleFonts.urbanist(color: Colors.grey, fontSize: 13)),
       );
     }
 
@@ -361,7 +365,7 @@ class _TopDrivers extends StatelessWidget {
                 ),
                 child: Center(
                   child: Text('$rank',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
                           color: rank <= 3 ? Colors.white : const Color(0xFF1565C0))),
@@ -373,16 +377,16 @@ class _TopDrivers extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(e.value['name'] as String,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontWeight: FontWeight.w600, fontSize: 13)),
                     Text('${e.value['count']} livraison(s)',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 11, color: Colors.grey.shade500)),
                   ],
                 ),
               ),
               Text('${e.value['total']} FCFA',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                       color: const Color(0xFF1565C0))),
@@ -436,7 +440,7 @@ class _CommissionChart extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Commissions — 7 derniers jours',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontWeight: FontWeight.bold, fontSize: 13)),
           const SizedBox(height: 16),
           SizedBox(
@@ -546,10 +550,10 @@ class _HistoryTabState extends State<_HistoryTab> {
             child: TextField(
               controller: _ctrl,
               onChanged: (v) => setState(() => _search = v.toLowerCase()),
-              style: GoogleFonts.inter(fontSize: 13.5),
+              style: GoogleFonts.urbanist(fontSize: 13.5),
               decoration: InputDecoration(
                 hintText: 'Rechercher un livreur…',
-                hintStyle: GoogleFonts.inter(fontSize: 13.5, color: Colors.grey),
+                hintStyle: GoogleFonts.urbanist(fontSize: 13.5, color: Colors.grey),
                 prefixIcon: const Icon(Icons.search_rounded,
                     color: Color(0xFF1565C0), size: 20),
                 suffixIcon: _search.isNotEmpty
@@ -575,6 +579,9 @@ class _HistoryTabState extends State<_HistoryTab> {
                 .limit(200)
                 .snapshots(),
             builder: (ctx, snap) {
+              if (snap.hasError) {
+                return const StreamErrorState(message: "Impossible de charger les commissions.");
+              }
               if (!snap.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -596,7 +603,7 @@ class _HistoryTabState extends State<_HistoryTab> {
                           size: 56, color: Colors.grey.shade300),
                       const SizedBox(height: 12),
                       Text('Aucune commission enregistrée',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               color: Colors.grey.shade500, fontSize: 14)),
                     ],
                   ),
@@ -667,11 +674,11 @@ class _CommissionTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(driverName,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontWeight: FontWeight.bold, fontSize: 13.5)),
                   const SizedBox(height: 2),
                   Text(dateStr,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 11, color: Colors.grey.shade500)),
                   const SizedBox(height: 4),
                   // Détail montants
@@ -695,7 +702,7 @@ class _CommissionTile extends StatelessWidget {
                       const SizedBox(width: 3),
                       Text(
                         payMethod == 'wallet' ? 'Paiement wallet' : 'Espèces',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 10.5, color: Colors.grey.shade400),
                       ),
                     ]),
@@ -708,12 +715,12 @@ class _CommissionTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text('$amount',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontWeight: FontWeight.bold,
                         fontSize: 18,
                         color: const Color(0xFF1565C0))),
                 Text('FCFA',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 10,
                         color: const Color(0xFF1565C0).withValues(alpha: 0.7))),
               ],
@@ -778,7 +785,7 @@ class _PeriodBtn extends StatelessWidget {
           ),
           child: Text(label,
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 11.5,
                   fontWeight: sel ? FontWeight.bold : FontWeight.normal,
                   color: sel ? Colors.white : Colors.grey.shade600)),
@@ -829,15 +836,15 @@ class _StatCard extends StatelessWidget {
           ),
           const Spacer(),
           Text(value,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
                   color: color)),
           Text(label,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 11, color: Colors.grey.shade600)),
           Text(sub,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 10, color: Colors.grey.shade400)),
         ],
       ),
@@ -856,12 +863,12 @@ class _MiniStat extends StatelessWidget {
     return Column(
       children: [
         Text(value,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 color: color,
                 fontWeight: FontWeight.bold,
                 fontSize: 15)),
         Text(label,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 color: color.withValues(alpha: 0.7), fontSize: 10.5)),
       ],
     );

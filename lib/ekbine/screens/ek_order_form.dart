@@ -90,7 +90,7 @@ class _EkOrderFormState extends State<EkOrderForm> {
         ),
         title: Text(
           _stepTitle(),
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white),
         ),
         bottom: PreferredSize(
@@ -244,11 +244,11 @@ class _StepOperator extends StatelessWidget {
       children: [
         const SizedBox(height: 8),
         Text('Quel opérateur ?',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 22, fontWeight: FontWeight.w800, color: kEkText)),
         const SizedBox(height: 6),
         Text('Choisissez le réseau du bénéficiaire',
-            style: GoogleFonts.inter(fontSize: 14, color: kEkMuted)),
+            style: GoogleFonts.urbanist(fontSize: 14, color: kEkMuted)),
         const SizedBox(height: 28),
         ...ekOperators.map((op) {
           final color = Color(op['color'] as int);
@@ -289,12 +289,12 @@ class _StepOperator extends StatelessWidget {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                     Text(op['label'] as String,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 17,
                             fontWeight: FontWeight.w800,
                             color: color)),
                     Text('${(ekServices[op['id']] as List?)?.length ?? 0} services disponibles',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 12, color: kEkMuted)),
                   ]),
                 ),
@@ -335,7 +335,7 @@ class _StepService extends StatelessWidget {
       children: [
         const SizedBox(height: 8),
         Text('Quel service ?',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 22, fontWeight: FontWeight.w800, color: kEkText)),
         const SizedBox(height: 24),
         ...services.map((svc) {
@@ -362,7 +362,7 @@ class _StepService extends StatelessWidget {
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(svc['label'] as String,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 15,
                           fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                           color: sel ? opColor : kEkText)),
@@ -414,12 +414,12 @@ class _StepBeneficiary extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const SizedBox(height: 8),
         Text('Détails',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 22, fontWeight: FontWeight.w800, color: kEkText)),
         const SizedBox(height: 24),
         // Number
         Text('Numéro bénéficiaire',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 13, fontWeight: FontWeight.w600, color: kEkText)),
         const SizedBox(height: 8),
         TextField(
@@ -427,10 +427,10 @@ class _StepBeneficiary extends StatelessWidget {
           onChanged: (_) => onChanged(),
           keyboardType: TextInputType.phone,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700),
+          style: GoogleFonts.urbanist(fontSize: 18, fontWeight: FontWeight.w700),
           decoration: InputDecoration(
             hintText: _phoneHint,
-            hintStyle: GoogleFonts.inter(color: kEkMuted),
+            hintStyle: GoogleFonts.urbanist(color: kEkMuted),
             prefixIcon: const Icon(Icons.phone_rounded, color: kEkGreen),
             filled: true,
             fillColor: Colors.white,
@@ -448,7 +448,7 @@ class _StepBeneficiary extends StatelessWidget {
         const SizedBox(height: 20),
         // Amount
         Text('Montant (FCFA)',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 13, fontWeight: FontWeight.w600, color: kEkText)),
         const SizedBox(height: 8),
         TextField(
@@ -456,10 +456,10 @@ class _StepBeneficiary extends StatelessWidget {
           onChanged: (_) => onChanged(),
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700),
+          style: GoogleFonts.urbanist(fontSize: 18, fontWeight: FontWeight.w700),
           decoration: InputDecoration(
             hintText: 'Ex: 1000',
-            hintStyle: GoogleFonts.inter(color: kEkMuted),
+            hintStyle: GoogleFonts.urbanist(color: kEkMuted),
             prefixIcon: const Icon(Icons.payments_rounded, color: kEkGreen),
             filled: true,
             fillColor: Colors.white,
@@ -489,7 +489,7 @@ class _StepBeneficiary extends StatelessWidget {
                   border: Border.all(color: kEkGreen.withValues(alpha: 0.4)),
                 ),
                 child: Text(_fmt(v),
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                         color: kEkGreen)),
@@ -511,7 +511,7 @@ class _StepBeneficiary extends StatelessWidget {
               elevation: 0,
             ),
             child: Text('Continuer',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 16, fontWeight: FontWeight.w700)),
           ),
         ),
@@ -560,7 +560,7 @@ class _StepPayment extends StatelessWidget {
       children: [
         const SizedBox(height: 8),
         Text('Mode de paiement',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 22, fontWeight: FontWeight.w800, color: kEkText)),
         const SizedBox(height: 6),
         Container(
@@ -576,7 +576,7 @@ class _StepPayment extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text('Total à payer : ${_fmt(totalPaid)}',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: kEkGreen)),
             ),
@@ -612,12 +612,12 @@ class _StepPayment extends StatelessWidget {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                     Text(m['label'] as String,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                             color: kEkText)),
                     Text(m['sub'] as String,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 11, color: kEkMuted)),
                   ]),
                 ),
@@ -666,7 +666,7 @@ class _StepConfirm extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const SizedBox(height: 8),
         Text('Résumé',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 22, fontWeight: FontWeight.w800, color: kEkText)),
         const SizedBox(height: 20),
         _SummaryCard(
@@ -694,7 +694,7 @@ class _StepConfirm extends StatelessWidget {
               child: Text(
                 'Un agent de votre communauté va exécuter cette opération. '
                 'Vous pourrez confirmer ou contester après réception de la preuve.',
-                style: GoogleFonts.inter(fontSize: 12, height: 1.5,
+                style: GoogleFonts.urbanist(fontSize: 12, height: 1.5,
                     color: const Color(0xFF5D4037)),
               ),
             ),
@@ -716,7 +716,7 @@ class _StepConfirm extends StatelessWidget {
                 child: Text(
                   'Paiement direct à l\'agent : vous devrez lui envoyer le montant total '
                   '(${_fmt(total)}) via ${_payLabelShort(paymentMethod)} avant ou après l\'opération.',
-                  style: GoogleFonts.inter(fontSize: 12, height: 1.5,
+                  style: GoogleFonts.urbanist(fontSize: 12, height: 1.5,
                       color: const Color(0xFF0D47A1)),
                 ),
               ),
@@ -742,7 +742,7 @@ class _StepConfirm extends StatelessWidget {
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5))
                 : Text('Confirmer & Commander',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 16, fontWeight: FontWeight.w700)),
           ),
         ),
@@ -833,11 +833,11 @@ class _Row extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: GoogleFonts.inter(
+        Text(label, style: GoogleFonts.urbanist(
             fontSize: isTotal ? 14 : 13,
             color: isTotal ? kEkText : kEkMuted,
             fontWeight: isTotal ? FontWeight.w700 : FontWeight.normal)),
-        Text(value, style: GoogleFonts.inter(
+        Text(value, style: GoogleFonts.urbanist(
             fontSize: isTotal ? 16 : 13,
             color: isTotal ? (opColor ?? kEkGreen) : kEkText,
             fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600)),

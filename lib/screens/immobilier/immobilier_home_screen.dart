@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/real_estate_listing.dart';
 import '../../services/real_estate_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/stream_error_state.dart';
 import 'listing_detail_screen.dart';
 import 'agent_dashboard_screen.dart';
 
@@ -128,6 +129,9 @@ class _ImmobilierHomeScreenState extends State<ImmobilierHomeScreen> {
                 : StreamBuilder<List<RealEstateListing>>(
                     stream: RealEstateService.streamActive(),
                     builder: (context, snap) {
+                      if (snap.hasError) {
+                        return const StreamErrorState(message: "Impossible de charger les annonces.");
+                      }
                       if (!snap.hasData) return const Center(child: CircularProgressIndicator());
                       return _ListingGrid(listings: snap.data!);
                     },

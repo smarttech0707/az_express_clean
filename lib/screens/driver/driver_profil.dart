@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
+import '../../widgets/account_deletion_dialog.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../services/auth_service.dart';
+import '../../theme/app_theme.dart';
 
 class DriverProfil extends StatefulWidget {
   final String driverId;
@@ -85,7 +87,7 @@ class _DriverProfilState extends State<DriverProfil> {
                     child: const Text('Annuler')),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF7A1A)),
+                      backgroundColor: AppColors.primary),
                   onPressed: loading
                       ? null
                       : () async {
@@ -160,7 +162,7 @@ class _DriverProfilState extends State<DriverProfil> {
                     child: const Text('Annuler')),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF7A1A)),
+                      backgroundColor: AppColors.primary),
                   onPressed: loading
                       ? null
                       : () async {
@@ -229,7 +231,7 @@ class _DriverProfilState extends State<DriverProfil> {
                     child: const Text('Annuler')),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF7A1A)),
+                      backgroundColor: AppColors.primary),
                   onPressed: loading
                       ? null
                       : () async {
@@ -280,7 +282,7 @@ class _DriverProfilState extends State<DriverProfil> {
         builder: (_) => Scaffold(
           appBar: AppBar(
             title: Text(title, style: const TextStyle(fontSize: 15)),
-            backgroundColor: const Color(0xFFFF7A1A),
+            backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
           ),
           body: SingleChildScrollView(
@@ -308,7 +310,7 @@ class _DriverProfilState extends State<DriverProfil> {
               child: const Text("Annuler")),
           ScaleButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF7A1A),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white),
             onPressed: () async {
               await FirebaseFirestore.instance
@@ -338,8 +340,16 @@ class _DriverProfilState extends State<DriverProfil> {
             .doc(widget.driverId)
             .snapshots(),
         builder: (context, snap) {
+          // Master Prompt "Corrections finales avant publication" — Bug
+          // Mineur #5 : avant le premier snapshot réel, `data` retombait sur
+          // une map vide et affichait "0 FCFA"/"0 livraisons" comme si
+          // c'était la vraie valeur du compte. Un indicateur de chargement
+          // le temps du premier snapshot évite d'afficher une fausse donnée.
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final data =
-              snap.hasData && snap.data!.exists
+              snap.data!.exists
                   ? snap.data!.data() as Map<String, dynamic>
                   : <String, dynamic>{};
           final photoUrl = data["photoUrl"] as String?;
@@ -353,13 +363,13 @@ class _DriverProfilState extends State<DriverProfil> {
               SliverAppBar(
                 expandedHeight: 220,
                 pinned: true,
-                backgroundColor: const Color(0xFFFF7A1A),
+                backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 flexibleSpace: FlexibleSpaceBar(
                   background: Container(
                     decoration: const BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Color(0xFFE65100), Color(0xFFFF7A1A)],
+                        colors: [Color(0xFFE65100), AppColors.primary],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
@@ -421,7 +431,7 @@ class _DriverProfilState extends State<DriverProfil> {
                         children: [
                           _statCard("Solde", "$wallet FCFA",
                               Icons.account_balance_wallet,
-                              const Color(0xFFFF7A1A)),
+                              AppColors.primary),
                           const SizedBox(width: 10),
                           _statCard("Livraisons", "$deliveries",
                               Icons.delivery_dining, Colors.green),
@@ -514,6 +524,20 @@ class _DriverProfilState extends State<DriverProfil> {
                           "À propos de AZ Express",
                           "Version 1.0.0",
                           () => _showAbout(context),
+                        ),
+                      ]),
+
+                      const SizedBox(height: 16),
+
+                      // ── COMPTE ────────────────────────────────
+                      _infoCard([
+                        _menuItem(
+                          context,
+                          Icons.person_remove_outlined,
+                          "Supprimer mon compte",
+                          "Demande de suppression de compte et de données",
+                          () => showAccountDeletionRequestDialog(context, role: 'livreur'),
+                          color: Colors.red,
                         ),
                       ]),
 
@@ -628,7 +652,7 @@ class _DriverProfilState extends State<DriverProfil> {
   }) {
     return ListTile(
       leading:
-          Icon(icon, color: color ?? const Color(0xFFFF7A1A), size: 22),
+          Icon(icon, color: color ?? AppColors.primary, size: 22),
       title: Text(title,
           style: TextStyle(
               color: color ?? Colors.black87,
@@ -655,7 +679,7 @@ class _DriverProfilState extends State<DriverProfil> {
               height: 72,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                    colors: [Color(0xFFE65100), Color(0xFFFF7A1A)]),
+                    colors: [Color(0xFFE65100), AppColors.primary]),
                 borderRadius: BorderRadius.circular(18),
               ),
               child: const Icon(Icons.delivery_dining,

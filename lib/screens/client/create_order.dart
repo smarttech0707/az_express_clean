@@ -11,13 +11,18 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../services/firestore_service.dart';
 import '../../services/delivery_service.dart';
 import '../../services/tarif_service.dart';
+import '../../services/google_routes_service.dart';
 import '../../models/order_model.dart';
+import '../../models/route_model.dart';
 import '../../widgets/scale_button.dart';
 import '../../widgets/address_picker_widget.dart';
+import '../../widgets/route_polyline.dart';
+import '../../theme/app_theme.dart';
 
 // Centre d'Abengourou — point de référence pour les calculs de distance
 const double _abgLat = 6.7273;
@@ -73,6 +78,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   // ── Prix ──────────────────────────────────────────────────────────────────
   PriceBreakdown? _breakdown;
+
+  // ── Aperçu trajet en temps réel (Master Prompt 130) ────────────────────────
+  // Auparavant cet écran n'avait aucune carte/itinéraire (contrairement à
+  // livraison_screen.dart, qui utilise déjà exactement ce même service) et
+  // le prix n'était calculé que sur un bouton "Calculer", avec une distance
+  // à vol d'oiseau plutôt que la distance réelle du trajet.
+  RouteModel _previewRoute      = RouteModel.empty();
+  bool       _previewRouteLoading = false;
+  GoogleMapController? _previewMapCtrl;
+  Timer?     _routeDebounce;
 
   // ── Audio ─────────────────────────────────────────────────────────────────
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
@@ -131,6 +146,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   void dispose() {
     _walletSub?.cancel();
     _recordingTimer?.cancel();
+    _routeDebounce?.cancel();
     _recorder.closeRecorder();
     _player.dispose();
     _nameCtrl.dispose();
@@ -204,15 +220,56 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
   }
 
-  // ── Calcul prix ───────────────────────────────────────────────────────────
+  // ── Aperçu trajet + calcul prix en temps réel (Master Prompt 130) ──────────
+  // Dès que départ ET livraison ont des coordonnées, calcule automatiquement
+  // le vrai trajet (Google Directions, déjà utilisé et éprouvé par
+  // livraison_screen.dart) — plus besoin d'attendre un appui sur "Calculer".
+  // Anti-rebond de 500 ms pour ne pas relancer un appel réseau à chaque
+  // sélection intermédiaire (Partie 13 : éviter les rechargements inutiles).
+  void _onAddressChanged() {
+    setState(() {
+      _previewRoute = RouteModel.empty();
+      _breakdown    = null;
+    });
+    _routeDebounce?.cancel();
+    if (_pickupResult == null && _deliveryResult == null) return;
+    _routeDebounce = Timer(const Duration(milliseconds: 500), _maybeCalcRoute);
+  }
+
+  Future<void> _maybeCalcRoute() async {
+    if (_deliveryResult == null) return;
+    final origin = LatLng(
+      _pickupResult?.latitude  ?? _abgLat,
+      _pickupResult?.longitude ?? _abgLng,
+    );
+    final dest = LatLng(_deliveryResult!.latitude, _deliveryResult!.longitude);
+
+    setState(() => _previewRouteLoading = true);
+    final route = await GoogleRoutesService.getRouteModel(origin: origin, destination: dest);
+    if (!mounted) return;
+    setState(() {
+      _previewRoute        = route;
+      _previewRouteLoading = false;
+    });
+    if (route.isNotEmpty) {
+      final bounds = RoutePolylineBuilder.boundsFor([origin, dest, ...route.points]);
+      if (bounds != null) {
+        _previewMapCtrl?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
+      }
+    }
+    await _calculatePrice();
+  }
+
   // Source unique de vérité tarifaire : TarifService (Master Prompt 51) —
   // c'est le moteur le plus adopté (livraison_screen.dart, courses_screen.dart,
   // pharmacie_garde.dart, boulangerie_order_page.dart) et le seul qui
   // implémente les règles officielles vérifiées (rayon 8 km depuis le centre
   // d'Abengourou, seuil nuit 20h00, refus des commandes >10 km après 21h00).
-  // `DeliveryService` reste importé uniquement pour ses utilitaires neutres de
-  // distance/ETA (`calculateDistance`/`calculateETA`), qui ne font pas partie
-  // de la formule tarifaire contestée — jamais pour `priceBreakdown()`.
+  // Master Prompt 130 — préfère désormais la distance RÉELLE du trajet
+  // (`_previewRoute`, Google Directions) quand elle est disponible ; ne
+  // retombe sur la distance à vol d'oiseau (`DeliveryService.calculateDistance`)
+  // que si le calcul d'itinéraire n'a pas encore abouti (ex. réseau lent),
+  // exactement le comportement déjà en place avant cette passe.
   Future<void> _calculatePrice() async {
     if (_deliveryResult == null) {
       _snack('Choisissez d\'abord l\'adresse de livraison');
@@ -220,10 +277,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
     final startLat = _pickupResult?.latitude  ?? _abgLat;
     final startLng = _pickupResult?.longitude ?? _abgLng;
-    final dist = DeliveryService.calculateDistance(
+    final haversine = DeliveryService.calculateDistance(
       startLat, startLng,
       _deliveryResult!.latitude, _deliveryResult!.longitude,
     );
+    final hasRealRoute = _previewRoute.isNotEmpty && _previewRoute.distanceKm > 0;
+    final dist = hasRealRoute ? _previewRoute.distanceKm : haversine;
     final tarif = TarifService.compute(
       clientLat: _deliveryResult!.latitude,
       clientLng: _deliveryResult!.longitude,
@@ -237,7 +296,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     setState(() => _breakdown = PriceBreakdown(
       total:      tarif.standardPrice,
       distanceKm: dist,
-      etaMinutes: DeliveryService.calculateETA(dist),
+      etaMinutes: hasRealRoute ? _previewRoute.etaMinutes : DeliveryService.calculateETA(dist),
       isNight:    tarif.isNight,
       detail:     tarif.isOutside
           ? 'Hors zone centrale (${dist.toStringAsFixed(1)} km)'
@@ -475,7 +534,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text('Nouvelle commande'),
-        backgroundColor: const Color(0xFFFF6D00),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
         elevation: 0,
@@ -504,12 +563,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             child: Column(children: [
               _buildMethodTabs(
                 selected:  _deliveryMethod,
-                onChanged: (m) => setState(() {
-                  _deliveryMethod = m;
-                  _deliveryResult = null;
-                  _deliveryZone   = null;
-                  _breakdown      = null;
-                }),
+                onChanged: (m) {
+                  setState(() {
+                    _deliveryMethod = m;
+                    _deliveryResult = null;
+                    _deliveryZone   = null;
+                  });
+                  _onAddressChanged();
+                },
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -523,25 +584,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         final r = await _getGpsPosition();
                         setState(() {
                           _deliveryGpsLoading = false;
-                          if (r != null) {
-                            _deliveryResult = r;
-                            _breakdown = null;
-                          }
+                          if (r != null) _deliveryResult = r;
                         });
+                        _onAddressChanged();
                       },
                     ),
                   ],
                   if (_deliveryMethod == 'zone') ...[
                     _ZoneDropdown(
                       selected: _deliveryZone,
-                      onChanged: (z, lat, lng) => setState(() {
-                        _deliveryZone = z;
-                        _breakdown    = null;
-                        if (lat != null && lng != null) {
-                          _deliveryResult = AddressResult(
-                              latitude: lat, longitude: lng, address: z);
-                        }
-                      }),
+                      onChanged: (z, lat, lng) {
+                        setState(() {
+                          _deliveryZone = z;
+                          if (lat != null && lng != null) {
+                            _deliveryResult = AddressResult(
+                                latitude: lat, longitude: lng, address: z);
+                          }
+                        });
+                        _onAddressChanged();
+                      },
                     ),
                   ],
                   if (_deliveryMethod == 'maps') ...[
@@ -550,16 +611,27 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                       hint:           'Tapez un quartier, une rue, un lieu…',
                       initialMode:    _forSelf ? AddressMode.gps : AddressMode.manual,
                       showModeToggle: !_forSelf,
-                      onChanged: (result) => setState(() {
-                        _deliveryResult = result;
-                        _breakdown = null;
-                      }),
+                      onChanged: (result) {
+                        setState(() => _deliveryResult = result);
+                        _onAddressChanged();
+                      },
                     ),
                   ],
                 ]),
               ),
             ]),
           ),
+
+          // Aperçu carte + trajet en temps réel (Master Prompt 130) — affiché
+          // dès que départ et livraison ont tous les deux des coordonnées.
+          if (_pickupResult != null && _deliveryResult != null)
+            _RoutePreviewCard(
+              pickup:        LatLng(_pickupResult!.latitude, _pickupResult!.longitude),
+              delivery:      LatLng(_deliveryResult!.latitude, _deliveryResult!.longitude),
+              route:         _previewRoute,
+              loading:       _previewRouteLoading,
+              onMapCreated:  (c) => _previewMapCtrl = c,
+            ),
 
           const SizedBox(height: 24),
 
@@ -598,17 +670,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           const SizedBox(height: 24),
 
           // ── 6. CALCULER ────────────────────────────────────────────────────
-          ElevatedButton.icon(
-            onPressed: _calculatePrice,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.black87,
-              minimumSize: const Size(double.infinity, 52),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          // Master Prompt 130 (Partie 5) — le calcul est désormais automatique
+          // dès que départ+livraison sont choisis (voir _onAddressChanged) ;
+          // ce bouton ne reste visible que si aucun prix n'a encore été
+          // obtenu (calcul en cours, ou échec réseau du calcul automatique)
+          // — un filet de sécurité manuel, plus une étape obligatoire.
+          if (_breakdown == null && _deliveryResult != null)
+            ElevatedButton.icon(
+              onPressed: _previewRouteLoading ? null : _calculatePrice,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black87,
+                minimumSize: const Size(double.infinity, 52),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.calculate_rounded, color: Colors.white),
+              label: Text(
+                  _previewRouteLoading ? 'Calcul en cours…' : 'Recalculer le prix de livraison',
+                  style: const TextStyle(color: Colors.white, fontSize: 16)),
             ),
-            icon: const Icon(Icons.calculate_rounded, color: Colors.white),
-            label: const Text('Calculer le prix de livraison',
-                style: TextStyle(color: Colors.white, fontSize: 16)),
-          ),
 
           const SizedBox(height: 16),
 
@@ -634,7 +713,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _paymentMethod == 'wallet'
                       ? const Color(0xFF1565C0)
-                      : const Color(0xFFFF6D00),
+                      : AppColors.primary,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16)),
                   elevation: 4,
@@ -686,6 +765,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             _forBusiness    = false;
             _deliveryResult = null;
             _breakdown      = null;
+            _previewRoute   = RouteModel.empty();
             _recipientNameCtrl.clear();
             _recipientPhoneCtrl.clear();
           }),
@@ -701,6 +781,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             _forBusiness    = false;
             _deliveryResult = null;
             _breakdown      = null;
+            _previewRoute   = RouteModel.empty();
           }),
         )),
         const SizedBox(width: 10),
@@ -714,6 +795,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             _forBusiness    = true;
             _deliveryResult = null;
             _breakdown      = null;
+            _previewRoute   = RouteModel.empty();
           }),
         )),
       ]),
@@ -725,14 +807,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           decoration: BoxDecoration(
             color: const Color(0xFFFFF3E0),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFFF6D00).withValues(alpha: 0.3)),
+            border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
                 const Icon(Icons.person_pin_rounded,
-                    color: Color(0xFFFF6D00), size: 18),
+                    color: AppColors.primary, size: 18),
                 const SizedBox(width: 6),
                 Text(_forBusiness ? 'Contact destinataire' : 'Informations du destinataire',
                     style: const TextStyle(
@@ -767,10 +849,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
-          color:        selected ? const Color(0xFFFF6D00).withValues(alpha: 0.08) : Colors.white,
+          color:        selected ? AppColors.primary.withValues(alpha: 0.08) : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border:       Border.all(
-            color: selected ? const Color(0xFFFF6D00) : Colors.grey.shade300,
+            color: selected ? AppColors.primary : Colors.grey.shade300,
             width: selected ? 2 : 1,
           ),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)],
@@ -780,18 +862,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           children: [
             Row(children: [
               Icon(icon,
-                  color: selected ? const Color(0xFFFF6D00) : Colors.grey.shade500, size: 20),
+                  color: selected ? AppColors.primary : Colors.grey.shade500, size: 20),
               const Spacer(),
               if (selected)
                 const Icon(Icons.check_circle_rounded,
-                    color: Color(0xFFFF6D00), size: 14),
+                    color: AppColors.primary, size: 14),
             ]),
             const SizedBox(height: 6),
             Text(label,
                 style: TextStyle(
                   fontSize:   12,
                   fontWeight: FontWeight.bold,
-                  color:      selected ? const Color(0xFFFF6D00) : Colors.black87,
+                  color:      selected ? AppColors.primary : Colors.black87,
                 )),
             Text(subtitle,
                 style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
@@ -813,12 +895,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         // Sélecteur de méthode
         _buildMethodTabs(
           selected:  _pickupMethod,
-          onChanged: (m) => setState(() {
-            _pickupMethod  = m;
-            _pickupResult  = null;
-            _pickupZone    = null;
-            _breakdown     = null;
-          }),
+          onChanged: (m) {
+            setState(() {
+              _pickupMethod  = m;
+              _pickupResult  = null;
+              _pickupZone    = null;
+            });
+            _onAddressChanged();
+          },
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
@@ -834,8 +918,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   final r = await _getGpsPosition();
                   setState(() {
                     _pickupGpsLoading = false;
-                    if (r != null) { _pickupResult = r; _breakdown = null; }
+                    if (r != null) _pickupResult = r;
                   });
+                  _onAddressChanged();
                 },
               ),
             ],
@@ -844,14 +929,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             if (_pickupMethod == 'zone') ...[
               _ZoneDropdown(
                 selected: _pickupZone,
-                onChanged: (z, lat, lng) => setState(() {
-                  _pickupZone   = z;
-                  _breakdown    = null;
-                  if (lat != null && lng != null) {
-                    _pickupResult = AddressResult(
-                        latitude: lat, longitude: lng, address: z);
-                  }
-                }),
+                onChanged: (z, lat, lng) {
+                  setState(() {
+                    _pickupZone   = z;
+                    if (lat != null && lng != null) {
+                      _pickupResult = AddressResult(
+                          latitude: lat, longitude: lng, address: z);
+                    }
+                  });
+                  _onAddressChanged();
+                },
               ),
             ],
 
@@ -864,7 +951,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   labelText:  'Marché, boutique, restaurant…',
                   hintText:   'ex : Marché central, boutique Awa…',
                   hintStyle:  TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                  prefixIcon: const Icon(Icons.store_rounded, color: Color(0xFFFF6D00)),
+                  prefixIcon: const Icon(Icons.store_rounded, color: AppColors.primary),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none),
@@ -877,8 +964,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 hint:           'Épingler le lieu de collecte sur la carte',
                 initialMode:    AddressMode.manual,
                 showModeToggle: false,
-                onChanged: (result) =>
-                    setState(() { _pickupResult = result; _breakdown = null; }),
+                onChanged: (result) {
+                  setState(() => _pickupResult = result);
+                  _onAddressChanged();
+                },
               ),
             ],
 
@@ -892,7 +981,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             Divider(height: 20, color: Colors.grey.shade100),
             Row(children: [
               const Icon(Icons.contact_phone_rounded,
-                  size: 15, color: Color(0xFFFF6D00)),
+                  size: 15, color: AppColors.primary),
               const SizedBox(width: 6),
               Text('Contact récupérateur (optionnel)',
                   style: TextStyle(
@@ -944,14 +1033,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   border: isSelected
                       ? const Border(
                           bottom: BorderSide(
-                              color: Color(0xFFFF6D00), width: 2))
+                              color: AppColors.primary, width: 2))
                       : null,
                 ),
                 child: Column(children: [
                   Icon(m.$2,
                       size: 18,
                       color: isSelected
-                          ? const Color(0xFFFF6D00)
+                          ? AppColors.primary
                           : Colors.grey.shade500),
                   const SizedBox(height: 2),
                   Text(m.$3,
@@ -961,7 +1050,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                               ? FontWeight.bold
                               : FontWeight.normal,
                           color: isSelected
-                              ? const Color(0xFFFF6D00)
+                              ? AppColors.primary
                               : Colors.grey.shade500)),
                 ]),
               ),
@@ -984,7 +1073,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: const BoxDecoration(
-            color: Color(0xFFFF6D00),
+            color: AppColors.primary,
             borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
           ),
           child: const Row(children: [
@@ -1029,7 +1118,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           labelStyle:   const TextStyle(fontSize: 14),
           hintText:     'ex : 1 500',
           prefixIcon:   const Icon(Icons.account_balance_wallet_rounded,
-              color: Color(0xFFFF6D00)),
+              color: AppColors.primary),
           suffixText:   'FCFA',
           suffixStyle:  TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.bold),
           border:       OutlineInputBorder(
@@ -1054,13 +1143,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           border:       Border.all(color: Colors.green.shade200),
         ),
         child: Row(children: [
-          GestureDetector(
-            onTap: _togglePlayback,
-            child: Container(
-              width: 44, height: 44,
-              decoration: const BoxDecoration(color: Color(0xFF25D366), shape: BoxShape.circle),
-              child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: Colors.white, size: 26),
+          Semantics(
+            label: _isPlaying ? 'Mettre en pause le message vocal' : 'Écouter le message vocal',
+            button: true,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: _togglePlayback,
+              child: Container(
+                width: 44, height: 44,
+                decoration: const BoxDecoration(color: Color(0xFF25D366), shape: BoxShape.circle),
+                child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white, size: 26),
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -1098,15 +1192,20 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ]),
           ),
           const SizedBox(width: 6),
-          GestureDetector(
-            onTap: _deleteVoice,
-            child: Container(
-              width: 44, height: 44,
-              decoration: BoxDecoration(
-                color:  Colors.red.shade50, shape: BoxShape.circle,
-                border: Border.all(color: Colors.red.shade200),
+          Semantics(
+            label: 'Supprimer le message vocal',
+            button: true,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: _deleteVoice,
+              child: Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  color:  Colors.red.shade50, shape: BoxShape.circle,
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Icon(Icons.delete_outline, color: Colors.red.shade400, size: 20),
               ),
-              child: Icon(Icons.delete_outline, color: Colors.red.shade400, size: 20),
             ),
           ),
         ]),
@@ -1143,13 +1242,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ),
           ])),
           const SizedBox(width: 10),
-          GestureDetector(
-            onTap: _stopRecording,
-            child: Container(
-              width: 44, height: 44,
-              decoration: BoxDecoration(
-                  color: Colors.red.shade400, shape: BoxShape.circle),
-              child: const Icon(Icons.stop, color: Colors.white, size: 24),
+          Semantics(
+            label: 'Arrêter l\'enregistrement vocal',
+            button: true,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: _stopRecording,
+              child: Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                    color: Colors.red.shade400, shape: BoxShape.circle),
+                child: const Icon(Icons.stop, color: Colors.white, size: 24),
+              ),
             ),
           ),
         ]),
@@ -1161,15 +1265,15 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color:        const Color(0xFFFF6D00).withValues(alpha: 0.08),
+          color:        AppColors.primary.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(14),
-          border:       Border.all(color: const Color(0xFFFF6D00).withValues(alpha: 0.3)),
+          border:       Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
         ),
         child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.mic_rounded, color: Color(0xFFFF6D00), size: 22),
+          Icon(Icons.mic_rounded, color: AppColors.primary, size: 22),
           SizedBox(width: 10),
           Text('Enregistrer un message vocal',
-              style: TextStyle(color: Color(0xFFFF6D00),
+              style: TextStyle(color: AppColors.primary,
                   fontWeight: FontWeight.w600, fontSize: 14)),
         ]),
       ),
@@ -1195,6 +1299,117 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 // ═══════════════════════════════════════════════════════════════════════════
 // WIDGETS STATELESS RÉUTILISABLES
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ── Aperçu carte + trajet en temps réel (Master Prompt 130) ─────────────────
+// Carte compacte : marqueurs départ/arrivée + polyline du trajet réel
+// (Google Directions, via GoogleRoutesService — même service déjà éprouvé
+// par livraison_screen.dart). Zoom automatique sur les bounds du trajet dès
+// qu'il est disponible (onMapCreated ne fait qu'exposer le controller, le
+// recentrage réel se fait depuis _maybeCalcRoute()).
+class _RoutePreviewCard extends StatelessWidget {
+  final LatLng    pickup;
+  final LatLng    delivery;
+  final RouteModel route;
+  final bool      loading;
+  final void Function(GoogleMapController) onMapCreated;
+
+  const _RoutePreviewCard({
+    required this.pickup,
+    required this.delivery,
+    required this.route,
+    required this.loading,
+    required this.onMapCreated,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bounds = RoutePolylineBuilder.boundsFor([pickup, delivery, ...route.points]);
+    final polylines = route.isNotEmpty
+        ? {
+            Polyline(
+              polylineId: const PolylineId('preview_route'),
+              points:     route.points,
+              color:      AppColors.primary,
+              width:      5,
+              startCap:   Cap.roundCap,
+              endCap:     Cap.roundCap,
+              jointType:  JointType.round,
+            ),
+          }
+        : <Polyline>{};
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        SizedBox(
+          height: 180,
+          child: Stack(children: [
+            GoogleMap(
+              initialCameraPosition: CameraPosition(target: pickup, zoom: 14),
+              onMapCreated: (c) {
+                onMapCreated(c);
+                if (bounds != null) {
+                  c.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
+                }
+              },
+              markers: {
+                Marker(markerId: const MarkerId('preview_pickup'), position: pickup,
+                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                    infoWindow: const InfoWindow(title: 'Départ')),
+                Marker(markerId: const MarkerId('preview_delivery'), position: delivery,
+                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                    infoWindow: const InfoWindow(title: 'Livraison')),
+              },
+              polylines: polylines,
+              zoomControlsEnabled:   false,
+              myLocationButtonEnabled: false,
+              compassEnabled:        false,
+              mapToolbarEnabled:     false,
+              liteModeEnabled:       false,
+            ),
+            if (loading)
+              Positioned(
+                top: 10, right: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                  ),
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                    SizedBox(width: 12, height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                    SizedBox(width: 8),
+                    Text('Calcul du trajet…', style: TextStyle(fontSize: 12)),
+                  ]),
+                ),
+              ),
+          ]),
+        ),
+        if (route.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(children: [
+              const Icon(Icons.route_rounded, size: 16, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Text(route.distanceText, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              const SizedBox(width: 14),
+              const Icon(Icons.access_time_rounded, size: 16, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Text('~${route.etaMinutes} min', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+      ]),
+    );
+  }
+}
 
 // ── Tuile GPS ───────────────────────────────────────────────────────────────
 class _GpsCaptureTile extends StatelessWidget {
@@ -1296,6 +1511,26 @@ class _ZoneDropdownState extends State<_ZoneDropdown> {
               'parent': data['parentName'] as String? ?? '',
             };
           }).toList();
+          // Master Prompt 130 — seule la zone de type "ville" porte des
+          // coordonnées réelles (`admin_zones_page.dart` ne demande pas de
+          // lat/lng pour un quartier/village) : sans repli, sélectionner un
+          // quartier laissait `lat`/`lng` à `null`, et `onChanged` ne
+          // renseignait alors jamais `_deliveryResult`/`_pickupResult` —
+          // le prix ne pouvait jamais être calculé, sans le moindre message
+          // clair pour l'utilisateur qui venait pourtant de choisir un lieu.
+          for (final z in _zones) {
+            if (z['lat'] != null && z['lng'] != null) continue;
+            final parentName = z['parent'] as String;
+            if (parentName.isEmpty) continue;
+            final parent = _zones.firstWhere(
+              (p) => p['name'] == parentName && p['lat'] != null && p['lng'] != null,
+              orElse: () => const {},
+            );
+            if (parent.isNotEmpty) {
+              z['lat'] = parent['lat'];
+              z['lng'] = parent['lng'];
+            }
+          }
           _loading = false;
         });
       }
@@ -1369,12 +1604,12 @@ class _ZoneDropdownState extends State<_ZoneDropdown> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: isSelect
-                      ? const Color(0xFFFF6D00)
+                      ? AppColors.primary
                       : Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: isSelect
-                        ? const Color(0xFFFF6D00)
+                        ? AppColors.primary
                         : Colors.grey.shade300,
                   ),
                 ),
@@ -1407,10 +1642,10 @@ class _SectionHeader extends StatelessWidget {
     Container(
       padding:    const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color:        const Color(0xFFFF6D00).withValues(alpha: 0.12),
+        color:        AppColors.primary.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Icon(icon, color: const Color(0xFFFF6D00), size: 18),
+      child: Icon(icon, color: AppColors.primary, size: 18),
     ),
     const SizedBox(width: 10),
     Text(title,
@@ -1437,12 +1672,12 @@ class _TotalCard extends StatelessWidget {
         gradient: LinearGradient(
           colors: isNight
               ? [const Color(0xFF1A237E), const Color(0xFF283593)]
-              : [const Color(0xFFFF6D00), const Color(0xFFFFB300)],
+              : [AppColors.primary, const Color(0xFFFFB300)],
           begin: Alignment.topLeft, end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [BoxShadow(
-          color:  (isNight ? Colors.indigo : const Color(0xFFFF6D00)).withValues(alpha: 0.4),
+          color:  (isNight ? Colors.indigo : AppColors.primary).withValues(alpha: 0.4),
           blurRadius: 16, offset: const Offset(0, 6),
         )],
       ),
@@ -1562,10 +1797,10 @@ class _PaymentMethodCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color:        const Color(0xFFFF6D00).withValues(alpha: 0.12),
+                color:        AppColors.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.payments_rounded, color: Color(0xFFFF6D00), size: 18),
+              child: const Icon(Icons.payments_rounded, color: AppColors.primary, size: 18),
             ),
             const SizedBox(width: 10),
             const Text('Mode de paiement',

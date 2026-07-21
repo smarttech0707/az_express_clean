@@ -24,6 +24,47 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
   bool _loading = false;
   bool _obscure = true;
 
+  // Master Prompt 128 — voir driver_login.dart pour le contexte complet.
+  bool _autoResuming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && !user.isAnonymous) {
+      _autoResuming = true;
+      _tryAutoResume(user);
+    }
+  }
+
+  Future<void> _tryAutoResume(User user) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('boulangeries')
+          .doc(user.uid)
+          .get();
+      if (!mounted) return;
+      if (doc.exists && (doc.data()?['isActive'] ?? false)) {
+        NotificationService().saveToken(user.uid, 'boulangeries');
+        await SubscriptionService.checkAndRenew('boulangeries', user.uid);
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BoulangerieDashboard(
+              boulangerieId: user.uid,
+              boulangerieData: doc.data()!,
+            ),
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // Retombe sur le formulaire.
+    }
+    if (mounted) setState(() => _autoResuming = false);
+  }
+
   @override
   void dispose() {
     _phoneCtrl.dispose();
@@ -118,11 +159,17 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
   @override
   Widget build(BuildContext context) {
     const brown = Color(0xFF5D4037);
+    if (_autoResuming) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F5F5),
+        body: Center(child: CircularProgressIndicator(color: brown)),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: Text('Espace Boulangerie',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
         backgroundColor: brown,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -155,10 +202,10 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
             ),
             const SizedBox(height: 20),
             Text('Connexion Boulangerie',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 22, fontWeight: FontWeight.bold)),
             Text('Gérez votre menu et vos commandes',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, color: Colors.grey.shade600)),
             const SizedBox(height: 36),
 
@@ -254,7 +301,7 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text('Se connecter',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),

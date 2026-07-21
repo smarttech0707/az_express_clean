@@ -225,7 +225,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
                 color: Colors.white, borderRadius: AppRadius.pillR,
                 boxShadow: AppShadow.md),
             child: Text('Suivi livraison',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     color: AppColors.text, fontSize: 15,
                     fontWeight: FontWeight.w700)),
           ),
@@ -305,7 +305,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
                     hasDriver
                         ? 'Livreur en route · mise à jour en temps réel'
                         : 'Localisation du livreur…',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 13, fontWeight: FontWeight.w600,
                         color: hasDriver ? AppColors.green : AppColors.textMuted),
                   )),
@@ -383,11 +383,11 @@ class _Stat extends StatelessWidget {
       Row(children: [
         Icon(icon, color: color, size: 14),
         const SizedBox(width: 4),
-        Text(label, style: GoogleFonts.inter(
+        Text(label, style: GoogleFonts.urbanist(
             fontSize: 10, color: AppColors.textMuted)),
       ]),
       const SizedBox(height: 4),
-      Text(value, style: GoogleFonts.inter(
+      Text(value, style: GoogleFonts.urbanist(
           fontSize: 16, fontWeight: FontWeight.w800, color: color)),
     ]),
   ));
@@ -406,7 +406,7 @@ class _LegendLine extends StatelessWidget {
                 borderRadius: AppRadius.pillR,
                 border: dashed ? Border.all(color: color) : null)),
         const SizedBox(width: 6),
-        Text(label, style: GoogleFonts.inter(
+        Text(label, style: GoogleFonts.urbanist(
             fontSize: 11, color: AppColors.textMuted)),
       ]);
 }
@@ -524,12 +524,12 @@ class _LegacyTrackingMapState extends State<_LegacyTrackingMap>
                     Text(s.driverPosition != null
                         ? 'Livreur en route'
                         : 'Localisation…',
-                        style: GoogleFonts.inter(fontWeight: FontWeight.w700,
+                        style: GoogleFonts.urbanist(fontWeight: FontWeight.w700,
                             fontSize: 14)),
                     if (s.driverPosition != null)
                       Text('ETA: ~${s.etaToClient} min · '
                           '${s.distanceToClient.toStringAsFixed(1)} km',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 12, color: AppColors.textMuted)),
                   ])),
             ]),

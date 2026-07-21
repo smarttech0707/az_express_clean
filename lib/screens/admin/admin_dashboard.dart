@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../services/notification_service.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/glass_kit.dart';
+import '../../widgets/logout_confirm_dialog.dart';
+import '../home/home_screen.dart';
 import 'admin_service_requests_page.dart';
 import 'admin_zones_page.dart';
 import 'admin_geo_stats_page.dart';
@@ -29,12 +33,15 @@ import 'admin_seller_requests_page.dart';
 import 'admin_boulangerie_requests_page.dart';
 import 'admin_pharmacie_requests_page.dart';
 import 'admin_cod_page.dart';
+import 'admin_cash_settlement_page.dart';
+import 'admin_support_page.dart';
 import 'admin_boulangeries_page.dart';
 import 'admin_ekbine_page.dart';
 import 'admin_sub_admins_page.dart';
 import 'admin_commissions_page.dart';
 import 'admin_live_tracking_page.dart';
 import 'admin_security_dashboard.dart';
+import 'admin_ai_dashboard.dart';
 
 class AdminDashboard extends StatefulWidget {
   final Map<String, dynamic> adminData;
@@ -69,6 +76,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
   void dispose() {
     NotificationService.unregisterTapHandler();
     super.dispose();
+  }
+
+  // Master Prompt 135 — bouton Déconnexion manquant sur ce tableau de bord
+  // (seul rôle sans aucun point de sortie, contrairement à tous les autres).
+  // Même pattern déjà établi ailleurs (confirmation → logAuthEvent → signOut
+  // → signInAnonymously → retour HomeScreen) — ne touche à aucune logique
+  // métier, ne modifie aucune vérification de rôle déjà faite avant l'accès
+  // à cet écran (admin_login.dart).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
+    AuthService().logAuthEvent('logout', 'admin');
+    await FirebaseAuth.instance.signOut();
+    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (_) => false,
+    );
   }
 
   @override
@@ -174,6 +201,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
             centerTitle: true,
             foregroundColor: Colors.white,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.logout_rounded),
+                tooltip: 'Déconnexion',
+                onPressed: _logout,
+              ),
+            ],
           ),
 
           SliverToBoxAdapter(
@@ -352,6 +386,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
         go('Anti-fraude', 'Clients bloqués COD', Icons.gpp_bad_rounded,
             const [Color(0xFFBF360C), AppColors.primary],
             const AdminCodPage()),
+      if (_has('cash_marchand'))
+        go('Cash à régler', 'Espèces dues aux marchands',
+            Icons.payments_rounded,
+            const [Color(0xFFC62828), Color(0xFFE53935)],
+            const AdminCashSettlementPage()),
+      if (_has('support'))
+        go('Support & Signalements', 'Tickets clients & abus',
+            Icons.support_agent_rounded,
+            const [Color(0xFF004D40), Color(0xFF00695C)],
+            const AdminSupportPage()),
+      if (_has('ai_dashboard'))
+        go('Tableau de bord IA', 'Conversations, coût, cache, outils',
+            Icons.smart_toy_rounded,
+            const [Color(0xFF4527A0), Color(0xFF7E57C2)],
+            AdminAiDashboard(isSuper: _isSuper)),
       if (_has('boulangeries'))
         go('Boulangeries', 'Boulangeries & cafés', Icons.bakery_dining_rounded,
             const [Color(0xFF4E342E), Color(0xFF8D6E63)],

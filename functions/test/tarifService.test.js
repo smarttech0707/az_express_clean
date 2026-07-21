@@ -15,22 +15,61 @@ const DUSK  = new Date(2026, 6, 2, 20, 30); // 20h30 — nuit, pas "late night"
 const LATE  = new Date(2026, 6, 2, 21, 0);  // 21h00 pile — "late night"
 const LATE2 = new Date(2026, 6, 2, 22, 45); // nuit tardive
 
-test('compute: jour, dans la zone centrale (≤8km) → tarif plat 500/700', () => {
+test('compute: jour, dans la zone centrale (≤8km) → tarif plat 500/1000', () => {
   const r = compute({ clientLat: CENTER_LAT, clientLng: CENTER_LNG, time: DAY });
   assert.equal(r.standardPrice, 500);
-  assert.equal(r.expressPrice, 700);
+  assert.equal(r.expressPrice, 1000);
   assert.equal(r.isNight, false);
   assert.equal(r.isOutside, false);
   assert.equal(r.canOrder, true);
 });
 
-test('compute: nuit, dans la zone centrale (≤8km) → tarif plat 1000/1000', () => {
+test('compute: nuit, dans la zone centrale (≤8km) → tarif plat 1000/1500', () => {
   const r = compute({ clientLat: CENTER_LAT, clientLng: CENTER_LNG, time: DUSK });
   assert.equal(r.standardPrice, 1000);
-  assert.equal(r.expressPrice, 1000);
+  assert.equal(r.expressPrice, 1500);
   assert.equal(r.isNight, true);
   assert.equal(r.isOutside, false);
   assert.equal(r.canOrder, true);
+});
+
+// BUSINESS RULE:
+// Livraison Express
+// Jour = 1000 FCFA
+// Nuit = 1500 FCFA
+// Ne pas modifier sans décision métier.
+//
+// Verrouillage des 6 heures pivots exactes (Master Prompt « Verrouillage du
+// tarif Express de nuit ») — zone centrale (≤8km), seul endroit où le tarif
+// Express est un montant plat directement gouverné par cette règle.
+test('Express à 10h → 1000 FCFA', () => {
+  const r = compute({ clientLat: CENTER_LAT, clientLng: CENTER_LNG, time: new Date(2026, 6, 2, 10, 0) });
+  assert.equal(r.expressPrice, 1000);
+});
+
+test('Express à 19h59 → 1000 FCFA', () => {
+  const r = compute({ clientLat: CENTER_LAT, clientLng: CENTER_LNG, time: new Date(2026, 6, 2, 19, 59) });
+  assert.equal(r.expressPrice, 1000);
+});
+
+test('Express à 20h00 → 1500 FCFA', () => {
+  const r = compute({ clientLat: CENTER_LAT, clientLng: CENTER_LNG, time: new Date(2026, 6, 2, 20, 0) });
+  assert.equal(r.expressPrice, 1500);
+});
+
+test('Express à 23h30 → 1500 FCFA', () => {
+  const r = compute({ clientLat: CENTER_LAT, clientLng: CENTER_LNG, time: new Date(2026, 6, 2, 23, 30) });
+  assert.equal(r.expressPrice, 1500);
+});
+
+test('Express à 05h59 → 1500 FCFA', () => {
+  const r = compute({ clientLat: CENTER_LAT, clientLng: CENTER_LNG, time: new Date(2026, 6, 2, 5, 59) });
+  assert.equal(r.expressPrice, 1500);
+});
+
+test('Express à 06h00 → 1000 FCFA', () => {
+  const r = compute({ clientLat: CENTER_LAT, clientLng: CENTER_LNG, time: new Date(2026, 6, 2, 6, 0) });
+  assert.equal(r.expressPrice, 1000);
 });
 
 test('compute: jour, hors zone, courte distance (10 km) → tarif kilométrique', () => {

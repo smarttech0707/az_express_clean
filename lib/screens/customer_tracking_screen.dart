@@ -457,7 +457,7 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
                       ? Icons.navigation_rounded
                       : Icons.navigation_outlined,
                   bgColor:   _tracking.followDriver
-                      ? const Color(0xFFFF6D00) : Colors.white,
+                      ? AppColors.primary : Colors.white,
                   iconColor: _tracking.followDriver ? Colors.white : Colors.black87,
                   onTap: () {
                     _tracking.setFollowDriver(!_tracking.followDriver);
@@ -520,15 +520,15 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
     ),
     child: Row(children: [
       const SizedBox(width: 14),
-      const Icon(Icons.search_rounded, color: Color(0xFFFF6D00), size: 20),
+      const Icon(Icons.search_rounded, color: AppColors.primary, size: 20),
       const SizedBox(width: 10),
       Expanded(child: TextField(
         controller:  _searchCtrl,
         focusNode:   _searchFocus,
-        style:       GoogleFonts.inter(fontSize: 14),
+        style:       GoogleFonts.urbanist(fontSize: 14),
         decoration:  InputDecoration(
           hintText:       'Rechercher une destination…',
-          hintStyle:      GoogleFonts.inter(fontSize: 13, color: Colors.grey.shade400),
+          hintStyle:      GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade400),
           border:         InputBorder.none,
           isDense:        true,
           contentPadding: EdgeInsets.zero,
@@ -564,13 +564,13 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(children: [
-              const Icon(Icons.place_rounded, color: Color(0xFFFF6D00), size: 18),
+              const Icon(Icons.place_rounded, color: AppColors.primary, size: 18),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(s.mainText, style: GoogleFonts.inter(
+                Text(s.mainText, style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w600)),
                 if (s.secondaryText.isNotEmpty)
-                  Text(s.secondaryText, style: GoogleFonts.inter(
+                  Text(s.secondaryText, style: GoogleFonts.urbanist(
                       fontSize: 11, color: Colors.grey.shade500)),
               ])),
             ]),
@@ -651,7 +651,7 @@ class _WaitBanner extends StatelessWidget {
       ),
       const SizedBox(width: 8),
       Text('Recherche d\'un livreur…',
-          style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.text)),
+          style: GoogleFonts.urbanist(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.text)),
     ]),
   );
 }
@@ -672,7 +672,7 @@ class _StaleBanner extends StatelessWidget {
       const Icon(Icons.gps_off_rounded, size: 14, color: AppColors.primary),
       const SizedBox(width: 6),
       Text('GPS livreur indisponible',
-          style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.primary)),
+          style: GoogleFonts.urbanist(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.primary)),
     ]),
   );
 }
@@ -703,7 +703,7 @@ class _WeakConnectionBanner extends StatelessWidget {
           timeStr != null
               ? 'Connexion faible — Dernière position à $timeStr'
               : 'Connexion faible',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.urbanist(
               fontSize: 12, fontWeight: FontWeight.w500,
               color: Colors.orange.shade800),
         ),
@@ -742,11 +742,11 @@ class _DeliveredOverlay extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           Text('Livraison terminée !',
-            style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.text)),
+            style: GoogleFonts.urbanist(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.text)),
           const SizedBox(height: 8),
           Text('Votre colis a été livré avec succès.',
             textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textMuted)),
+            style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.textMuted)),
           const SizedBox(height: 24),
           GestureDetector(
             onTap: onClose,
@@ -762,7 +762,7 @@ class _DeliveredOverlay extends StatelessWidget {
                 boxShadow: [BoxShadow(color: AppColors.primary35, blurRadius: 12, offset: Offset(0, 4))],
               ),
               child: Text('Retour', textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
+                style: GoogleFonts.urbanist(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
             ),
           ),
         ]),

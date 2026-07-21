@@ -83,7 +83,7 @@ class _AdminDriversRankingState extends State<AdminDriversRanking> {
       appBar: AppBar(
         title: Text(
           'Classement Livreurs',
-          style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+          style: GoogleFonts.urbanist(fontWeight: FontWeight.bold),
         ),
         backgroundColor: const Color(0xFFFF5A3C),
         foregroundColor: Colors.white,
@@ -147,7 +147,7 @@ class _AdminDriversRankingState extends State<AdminDriversRanking> {
                       ? SliverFillRemaining(
                           child: Center(
                             child: Text('Aucun livreur',
-                                style: GoogleFonts.inter(color: Colors.grey)),
+                                style: GoogleFonts.urbanist(color: Colors.grey)),
                           ),
                         )
                       : SliverPadding(
@@ -177,7 +177,7 @@ class _AdminDriversRankingState extends State<AdminDriversRanking> {
         const SizedBox(height: 4),
         Text(
           value,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
             color: Colors.white,
             fontWeight: FontWeight.bold,
             fontSize: 20,
@@ -284,7 +284,7 @@ class _RankCard extends StatelessWidget {
                         style: const TextStyle(fontSize: 24))
                     : Text(
                         '#$rank',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
                           color: Colors.grey.shade600,
@@ -305,7 +305,7 @@ class _RankCard extends StatelessWidget {
                       Expanded(
                         child: Text(
                           entry.name,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                             fontWeight: FontWeight.bold,
                             fontSize: 15,
                             color: Colors.black87,
@@ -350,7 +350,7 @@ class _RankCard extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     entry.phone,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.grey.shade400, fontSize: 11),
                   ),
                 ],
@@ -367,7 +367,7 @@ class _RankCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   '${entry.wallet} F',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                     color: entry.wallet < 200

@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../l10n/app_text.dart';
 import '../../services/firestore_service.dart';
 import 'client_wallet_page.dart';
+import '../../theme/app_theme.dart';
 
 class BoutiquePage extends StatefulWidget {
   const BoutiquePage({super.key});
@@ -228,11 +229,11 @@ class _BoutiquePageState extends State<BoutiquePage>
                       width: 60,
                       height: 60,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6D00).withValues(alpha: 0.1),
+                        color: AppColors.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Icon(Icons.shopping_bag,
-                          color: Color(0xFFFF6D00), size: 30),
+                          color: AppColors.primary, size: 30),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -249,7 +250,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                           Text(
                             "${product['price']} ${ctx.tr('per_unit')}",
                             style: const TextStyle(
-                                color: Color(0xFFFF6D00),
+                                color: AppColors.primary,
                                 fontWeight: FontWeight.bold),
                           ),
                         ],
@@ -299,7 +300,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                           ? () => setS(() => qty--)
                           : null,
                       icon: const Icon(Icons.remove_circle_outline),
-                      color: const Color(0xFFFF6D00),
+                      color: AppColors.primary,
                       iconSize: 30,
                     ),
                     const SizedBox(width: 16),
@@ -320,7 +321,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                           ? () => setS(() => qty++)
                           : null,
                       icon: const Icon(Icons.add_circle_outline),
-                      color: const Color(0xFFFF6D00),
+                      color: AppColors.primary,
                       iconSize: 30,
                     ),
                   ],
@@ -425,7 +426,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                             if (ctx.mounted) setS(() => buying = false);
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6D00),
+                      backgroundColor: AppColors.primary,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
                     ),
@@ -463,7 +464,7 @@ class _BoutiquePageState extends State<BoutiquePage>
           SliverAppBar(
             expandedHeight: (MediaQuery.of(context).size.height * 0.22).clamp(160.0, 240.0),
             pinned: true,
-            backgroundColor: const Color(0xFFFF6D00),
+            backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             actions: [
               // Wallet button
@@ -662,12 +663,12 @@ class _ProductsTab extends StatelessWidget {
                                 horizontal: 16, vertical: 6),
                             decoration: BoxDecoration(
                               color: selectedCategory == cat
-                                  ? const Color(0xFFFF6D00)
+                                  ? AppColors.primary
                                   : Colors.white,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
                                 color: selectedCategory == cat
-                                    ? const Color(0xFFFF6D00)
+                                    ? AppColors.primary
                                     : Colors.grey.shade300,
                               ),
                             ),
@@ -770,7 +771,7 @@ class _ProductsTab extends StatelessWidget {
                                 const SizedBox(height: 4),
                                 Text("${data['price']} FCFA",
                                     style: const TextStyle(
-                                        color: Color(0xFFFF6D00),
+                                        color: AppColors.primary,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 14)),
                                 const SizedBox(height: 4),
@@ -802,10 +803,10 @@ class _ProductsTab extends StatelessWidget {
 
   Widget _placeholder() => Container(
         height: 120,
-        color: const Color(0xFFFF6D00).withValues(alpha: 0.08),
+        color: AppColors.primary.withValues(alpha: 0.08),
         child: const Center(
           child: Icon(Icons.shopping_bag_outlined,
-              size: 40, color: Color(0xFFFF6D00)),
+              size: 40, color: AppColors.primary),
         ),
       );
 }

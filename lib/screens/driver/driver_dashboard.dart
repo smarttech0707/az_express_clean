@@ -37,7 +37,7 @@ class DriverDashboard extends StatefulWidget {
   State<DriverDashboard> createState() => _DriverDashboardState();
 }
 
-class _DriverDashboardState extends State<DriverDashboard> {
+class _DriverDashboardState extends State<DriverDashboard> with WidgetsBindingObserver {
   final FirestoreService _firestore = FirestoreService();
   final AudioPlayer _player = AudioPlayer();
 
@@ -59,6 +59,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _getLocation();
     _setOnline(true);
     DriverLocationService.instance.startTracking(widget.driverId);
@@ -256,6 +257,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     NotificationService.unregisterTapHandler();
     _driverSub?.cancel();
     _pendingSub?.cancel();
@@ -263,6 +265,20 @@ class _DriverDashboardState extends State<DriverDashboard> {
     _player.dispose();
     DriverLocationService.instance.stopTracking();
     super.dispose();
+  }
+
+  // Master Prompt 129 — cause racine confirmée : `DriverLocationService`
+  // exposait déjà `resumeIfNeeded()` (pensé explicitement pour ce retour
+  // depuis l'arrière-plan), mais aucun code ne l'appelait nulle part dans
+  // l'app — un flux GPS tué par l'OS pendant que l'app est en arrière-plan
+  // (mise en veille écran, gestion agressive de la batterie de certains
+  // fabricants) ne reprenait donc jamais tout seul, laissant le livreur
+  // "En ligne" dans l'UI mais invisible au dispatch (GPS non rafraîchi).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _isOnline) {
+      DriverLocationService.instance.resumeIfNeeded();
+    }
   }
 
   Future<void> _getLocation() async {
@@ -504,6 +520,14 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                 order.id, order.clientId ?? '');
                           } catch (e) {
                             setS(() => confirming = false);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                    "Échec de la confirmation. Vérifiez votre connexion et réessayez."),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
                           }
                         },
                   child: confirming
@@ -572,7 +596,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       appBar: AppBar(
         title: Text("Bonjour, ${widget.driverName}"),
-        backgroundColor: const Color(0xFFFF6B00),
+        backgroundColor: AppColors.primary,
         centerTitle:     true,
         elevation:       0,
         leading: IconButton(
@@ -752,7 +776,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
   }
 
   Widget _buildOnlineToggle() {
-    const accent = Color(0xFFFF6B00);
+    const accent = AppColors.primary;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 350),
       margin:   const EdgeInsets.fromLTRB(15, 12, 15, 0),
@@ -808,7 +832,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
               children: [
                 Text(
                   _isOnline ? "En ligne" : "Hors ligne",
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     fontWeight: FontWeight.bold,
                     fontSize: 15,
                     color: _isOnline ? Colors.white : Colors.black87,
@@ -818,7 +842,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                   _isOnline
                       ? "Disponible pour des courses"
                       : "Activez pour recevoir des commandes",
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                     fontSize: 11,
                     color: _isOnline
                         ? Colors.white70
@@ -868,7 +892,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
   }
 
   Widget _statCard(String title, String value, IconData icon) {
-    const accent = Color(0xFFFF6B00);
+    const accent = AppColors.primary;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       child: PremiumCard(
@@ -888,7 +912,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
             const SizedBox(height: 8),
             Text(
               value,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 14, fontWeight: FontWeight.w800,
                   color: AppColors.text),
               textAlign: TextAlign.center,
@@ -898,7 +922,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
             const SizedBox(height: 1),
             Text(
               title,
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   color: AppColors.textMuted, fontSize: 11,
                   fontWeight: FontWeight.w500),
               textAlign: TextAlign.center,
@@ -910,7 +934,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
   }
 
   Widget _buildIdleState() {
-    const accent = Color(0xFFFF6B00);
+    const accent = AppColors.primary;
     return Expanded(
       child: Center(
         child: Padding(
@@ -957,7 +981,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 _isOnline
                     ? "En attente d'une commande..."
                     : "Vous êtes hors ligne",
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                   fontSize:   17,
                   fontWeight: FontWeight.w700,
                   color:      AppColors.text,
@@ -969,7 +993,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 _isOnline
                     ? "Restez connecté, une course arrive bientôt"
                     : "Activez le toggle pour recevoir des commandes",
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                   fontSize: 13,
                   color:    AppColors.textMuted,
                   height:   1.4,
@@ -985,7 +1009,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
 
   Widget _buildActiveOrderCard(OrderModel order) {
     final bool isPickedUp = order.status == "picked_up";
-    const accent = Color(0xFFFF6B00);
+    const accent = AppColors.primary;
 
     return Expanded(
       child: SingleChildScrollView(
@@ -1133,7 +1157,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: isPickedUp
                               ? const Color(0xFF2E7D32)
-                              : const Color(0xFFFF6B00),
+                              : AppColors.primary,
                           shape: const RoundedRectangleBorder(
                               borderRadius: AppRadius.lgR),
                           elevation: 0,
@@ -1168,7 +1192,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       const SizedBox(height: 8),
                       TextButton.icon(
                         icon: const Icon(Icons.play_circle_fill,
-                            color: Color(0xFFFF7A1A)),
+                            color: AppColors.primary),
                         label: const Text("Message vocal du client"),
                         onPressed: () =>
                             _player.play(UrlSource(order.voiceMessage!)),
@@ -1220,11 +1244,11 @@ Widget _buildModeBadge(String deliveryMode) {
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
     decoration: BoxDecoration(
       color: isExpress
-          ? const Color(0xFFFF6B00).withValues(alpha: 0.12)
+          ? AppColors.primary.withValues(alpha: 0.12)
           : Colors.green.shade50,
       borderRadius: BorderRadius.circular(20),
       border: Border.all(
-        color: isExpress ? const Color(0xFFFF6B00) : Colors.green.shade400,
+        color: isExpress ? AppColors.primary : Colors.green.shade400,
         width: 1.2,
       ),
     ),
@@ -1241,7 +1265,7 @@ Widget _buildModeBadge(String deliveryMode) {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: isExpress ? const Color(0xFFFF6B00) : Colors.green.shade700,
+            color: isExpress ? AppColors.primary : Colors.green.shade700,
           ),
         ),
       ],
@@ -1547,7 +1571,7 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
                     backgroundColor: Colors.grey.shade200,
                     valueColor: AlwaysStoppedAnimation<Color>(
                       _secondsLeft > 10
-                          ? const Color(0xFFFF6B00)
+                          ? AppColors.primary
                           : Colors.red,
                     ),
                   ),
@@ -1558,7 +1582,7 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                     color: _secondsLeft > 10
-                        ? const Color(0xFFFF6B00)
+                        ? AppColors.primary
                         : Colors.red,
                   ),
                 ),
@@ -1572,7 +1596,7 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
               style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFFFF7A1A)),
+                  color: AppColors.primary),
             ),
 
             const SizedBox(height: 10),
@@ -1851,15 +1875,15 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
             ),
             const SizedBox(height: 20),
             Text('Rapport de livraison',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 18, fontWeight: FontWeight.w700)),
             Text('Aidez-nous à améliorer l\'expérience client',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 12, color: Colors.grey.shade600)),
             const SizedBox(height: 20),
 
             Text('Comment s\'est passée la livraison ?',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w600)),
             const SizedBox(height: 10),
             Row(
@@ -1886,7 +1910,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                       ),
                       child: Text(label,
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 12,
                               fontWeight: sel
                                   ? FontWeight.w700
@@ -1900,7 +1924,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
             const SizedBox(height: 20),
 
             Text('Problèmes rencontrés (optionnel)',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w600)),
             const SizedBox(height: 10),
             Wrap(
@@ -1922,22 +1946,22 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                         horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
                       color: sel
-                          ? const Color(0xFFFF6B00).withValues(alpha: 0.1)
+                          ? AppColors.primary.withValues(alpha: 0.1)
                           : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                           color: sel
-                              ? const Color(0xFFFF6B00)
+                              ? AppColors.primary
                               : Colors.grey.shade300,
                           width: sel ? 1.5 : 1),
                     ),
                     child: Text(issue,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 12,
                             fontWeight:
                                 sel ? FontWeight.w700 : FontWeight.normal,
                             color: sel
-                                ? const Color(0xFFFF6B00)
+                                ? AppColors.primary
                                 : Colors.grey.shade700)),
                   ),
                 );
@@ -1946,17 +1970,17 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
             const SizedBox(height: 20),
 
             Text('Commentaire (optionnel)',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             TextField(
               controller: _noteCtrl,
               maxLines: 3,
-              style: GoogleFonts.inter(fontSize: 13),
+              style: GoogleFonts.urbanist(fontSize: 13),
               decoration: InputDecoration(
                 hintText:
                     'Décrivez le problème ou laissez un commentaire...',
-                hintStyle: GoogleFonts.inter(
+                hintStyle: GoogleFonts.urbanist(
                     fontSize: 12, color: Colors.grey.shade400),
                 filled: true,
                 fillColor: Colors.grey.shade50,
@@ -1971,7 +1995,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(
-                        color: Color(0xFFFF7A1A), width: 1.5)),
+                        color: AppColors.primary, width: 1.5)),
               ),
             ),
             const SizedBox(height: 20),
@@ -1987,7 +2011,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                         borderRadius: BorderRadius.circular(12)),
                   ),
                   child: Text('Passer',
-                      style: GoogleFonts.inter(color: Colors.grey)),
+                      style: GoogleFonts.urbanist(color: Colors.grey)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1996,7 +2020,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                 child: ScaleButton(
                   onPressed: _submitting ? null : _submit,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF6B00),
+                    backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 48),
                     shape: RoundedRectangleBorder(
@@ -2010,7 +2034,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                           child: CircularProgressIndicator(
                               color: Colors.white, strokeWidth: 2))
                       : Text('Envoyer le rapport',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontWeight: FontWeight.w700)),
                 ),
               ),

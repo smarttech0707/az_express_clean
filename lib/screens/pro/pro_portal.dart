@@ -8,6 +8,7 @@ import '../seller/seller_login.dart';
 import '../restaurant/restaurant_owner_login.dart';
 import '../pharmacie/pharmacie_login.dart';
 import '../boulangerie/boulangerie_login.dart';
+import '../../theme/app_theme.dart';
 
 class ProPortal extends StatelessWidget {
   const ProPortal({super.key});
@@ -26,7 +27,7 @@ class ProPortal extends StatelessWidget {
         ),
         title: Text(
           'Espace Professionnel',
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               color: Colors.white,
               fontWeight: FontWeight.bold,
               fontSize: 17),
@@ -53,11 +54,11 @@ class ProPortal extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6D00).withValues(alpha: 0.15),
+                      color: AppColors.primary.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(Icons.business_center_rounded,
-                        color: Color(0xFFFF6D00), size: 24),
+                        color: AppColors.primary, size: 24),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -65,13 +66,13 @@ class ProPortal extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Accès réservé aux partenaires',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14)),
                         Text(
                             'Comptes créés par l\'administrateur AZ Express uniquement.',
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 color: Colors.white54,
                                 fontSize: 11)),
                       ],
@@ -85,7 +86,7 @@ class ProPortal extends StatelessWidget {
 
             Text(
               'Choisissez votre espace',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   color: Colors.white54,
                   fontSize: 12,
                   letterSpacing: 1.2),
@@ -162,7 +163,7 @@ class ProPortal extends StatelessWidget {
             Center(
               child: Text(
                 'AZ Express — Abengourou',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     color: Colors.white24, fontSize: 11),
               ),
             ),
@@ -243,12 +244,12 @@ class _ProCardState extends State<_ProCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(widget.title,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                             fontSize: 16)),
                     Text(widget.subtitle,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             color: Colors.white70,
                             fontSize: 12)),
                   ],

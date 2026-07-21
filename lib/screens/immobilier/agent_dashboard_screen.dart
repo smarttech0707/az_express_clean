@@ -1,12 +1,20 @@
+import 'dart:io';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../models/real_estate_agent.dart';
 import '../../models/real_estate_listing.dart';
 import '../../models/real_estate_visit_request.dart';
 import '../../services/real_estate_service.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
+import '../home/home_screen.dart';
+import '../../widgets/partner_account_sheet.dart';
+import '../../widgets/stream_error_state.dart';
+import '../../widgets/logout_confirm_dialog.dart';
 
 class AgentDashboardScreen extends StatefulWidget {
   const AgentDashboardScreen({super.key});
@@ -36,6 +44,23 @@ class _AgentDashboardScreenState extends State<AgentDashboardScreen> {
     if (mounted) setState(() { _agent = agent; _loading = false; });
   }
 
+  // Master Prompt 135 — _logout() affiche désormais une confirmation avant
+  // d'appeler _doLogout(), qui porte l'intégralité de la logique déjà
+  // existante et inchangée (signOut, redirection).
+  void _logout() => showLogoutConfirmDialog(context, onConfirm: _doLogout);
+
+  Future<void> _doLogout() async {
+    AuthService().logAuthEvent('logout', 'real_estate_agent');
+    await FirebaseAuth.instance.signOut();
+    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (_) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -45,6 +70,26 @@ class _AgentDashboardScreenState extends State<AgentDashboardScreen> {
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
+        actions: [
+          if (_agent != null)
+            IconButton(
+              icon: const Icon(Icons.account_circle_outlined),
+              tooltip: 'Mon compte',
+              onPressed: () => showPartnerAccountSheet(
+                context,
+                role: 'real_estate_agent',
+                roleLabel: 'Agent immobilier',
+                name: _agent!.name,
+                phone: _agent!.phone,
+                onLogout: _logout,
+              ),
+            ),
+          IconButton(
+            icon: const Icon(Icons.logout_rounded),
+            tooltip: 'Déconnexion',
+            onPressed: _logout,
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -228,6 +273,9 @@ class _MyListingsTab extends StatelessWidget {
       body: StreamBuilder<List<RealEstateListing>>(
         stream: RealEstateService.streamByAgent(agentId),
         builder: (context, snap) {
+          if (snap.hasError) {
+            return const StreamErrorState(message: "Impossible de charger vos annonces.");
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final listings = snap.data!;
           if (listings.isEmpty) {
@@ -275,6 +323,8 @@ class _ListingFormScreenState extends State<_ListingFormScreen> {
   String _propertyType = 'Maison';
   String _priceType = 'sale';
   bool _saving = false;
+  final List<XFile> _pickedImages = [];
+  String? _uploadStatus;
 
   static const _propertyTypes = [
     'Maison', 'Villa', 'Appartement', 'Studio', 'Chambre', 'Terrain',
@@ -290,6 +340,20 @@ class _ListingFormScreenState extends State<_ListingFormScreen> {
     super.dispose();
   }
 
+  Future<void> _pickImages() async {
+    try {
+      final files = await ImagePicker().pickMultiImage(imageQuality: 70, maxWidth: 1600);
+      if (files.isEmpty) return;
+      setState(() => _pickedImages.addAll(files.take(10 - _pickedImages.length)));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Impossible d\'accéder à la galerie.'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _save() async {
     final title = _titleCtrl.text.trim();
     final price = int.tryParse(_priceCtrl.text.trim());
@@ -299,7 +363,10 @@ class _ListingFormScreenState extends State<_ListingFormScreen> {
       );
       return;
     }
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _uploadStatus = null;
+    });
     try {
       Position? position;
       try {
@@ -319,7 +386,19 @@ class _ListingFormScreenState extends State<_ListingFormScreen> {
         lat: position?.latitude ?? 0,
         lng: position?.longitude ?? 0,
       );
-      await RealEstateService.addListing(listing.toMap());
+      final listingId = await RealEstateService.addListing(listing.toMap());
+
+      if (_pickedImages.isNotEmpty) {
+        final urls = <String>[];
+        for (var i = 0; i < _pickedImages.length; i++) {
+          if (mounted) {
+            setState(() => _uploadStatus = 'Envoi des photos ${i + 1}/${_pickedImages.length}…');
+          }
+          urls.add(await RealEstateService.uploadImage(_pickedImages[i], listingId, i));
+        }
+        await RealEstateService.updateListing(listingId, {'images': urls});
+      }
+
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -374,6 +453,69 @@ class _ListingFormScreenState extends State<_ListingFormScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 16),
+            Text('Photos (${_pickedImages.length}/10)',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 90,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (var i = 0; i < _pickedImages.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.file(File(_pickedImages[i].path),
+                                width: 90, height: 90, fit: BoxFit.cover),
+                          ),
+                          Positioned(
+                            top: 2,
+                            right: 2,
+                            child: GestureDetector(
+                              onTap: () => setState(() => _pickedImages.removeAt(i)),
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: const BoxDecoration(
+                                    color: Colors.black54, shape: BoxShape.circle),
+                                child: const Icon(Icons.close_rounded,
+                                    size: 16, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_pickedImages.length < 10)
+                    GestureDetector(
+                      onTap: _pickImages,
+                      child: Container(
+                        width: 90,
+                        height: 90,
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryBg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+                        ),
+                        child: Icon(Icons.add_a_photo_rounded, color: AppColors.primary),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (_uploadStatus != null) ...[
+              const SizedBox(height: 10),
+              Row(children: [
+                const SizedBox(
+                    width: 16, height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 10),
+                Text(_uploadStatus!, style: const TextStyle(fontSize: 13)),
+              ]),
+            ],
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -416,6 +558,9 @@ class _VisitRequestsTab extends StatelessWidget {
     return StreamBuilder<List<RealEstateVisitRequest>>(
       stream: RealEstateService.visitRequestsAsAgent(agentId),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return const StreamErrorState(message: "Impossible de charger les demandes de visite.");
+        }
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
         final requests = snap.data!;
         if (requests.isEmpty) {

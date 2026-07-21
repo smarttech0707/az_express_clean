@@ -5,18 +5,34 @@ const { getClient, MODEL, MAX_TOKENS, SYSTEM_PROMPT_BLOCKS } = require('./claude
 const { getRecentMessages, appendMessage, clearHistory } = require('./conversationStore');
 const { buildRegistry } = require('./toolRegistry');
 const { buildConfirmAction, buildCleanupScheduler } = require('./pendingActions');
+const { createAIProviderService } = require('./AIProviderService');
+const { buildUserContext } = require('./contextBuilder');
+const { buildTurnResponse } = require('./responseBuilder');
+const { buildReminderScheduler } = require('./reminderScheduler');
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_TOOL_TURNS     = 6; // plafond d'aller-retours outils par message utilisateur
+const MAX_IMAGE_BASE64_LENGTH = 6 * 1024 * 1024; // ~4.5 Mo réels une fois décodé, marge sous la limite Anthropic (5 Mo)
+const ALLOWED_IMAGE_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 // Factory : reçoit les dépendances déjà initialisées par functions/index.js
 // (db, admin, onCall, onSchedule, checkRateLimit, logAudit, HttpsError) au
 // lieu de les redéfinir — évite de dupliquer la logique de rate-limiting/audit
-// existante.
+// existante. `sendToToken` ajouté (Master Prompt 118) pour le scheduler de
+// rappels — même helper FCM déjà utilisé partout ailleurs dans l'app.
 module.exports = function createAzIa({
   db, admin, onCall, onSchedule, checkRateLimit, logAudit, HttpsError,
   axios, feexpayOperatorCode, FEEXPAY_TOKEN, FEEXPAY_API_URL, WEBHOOK_URL,
+  sendToToken,
 }) {
+
+  // Master Prompt 108 — orchestrateur multi-fournisseurs IA. La boucle
+  // d'appel d'outils Claude ci-dessous n'est PAS routée à travers ce service
+  // (voir en-tête d'AIProviderService.js pour pourquoi) ; seul son
+  // recordUsage() est réutilisé pour journaliser l'appel Claude déjà
+  // effectué dans ai_usage/ai_logs/ai_daily_stats, en plus (pas à la place)
+  // de logAiObservability() déjà existant.
+  const aiProviderService = createAIProviderService({ db, admin });
 
   const tools = buildRegistry({
     db, admin, logAudit, checkRateLimit, HttpsError,
@@ -85,6 +101,35 @@ module.exports = function createAzIa({
       throw new HttpsError('invalid-argument', `Message trop long (${MAX_MESSAGE_LENGTH} caractères max)`);
     }
 
+    // Vision (Master Prompt 113, section 13) — image jointe au message
+    // (ordonnance, colis, produit, reçu...), attachée nativement au premier
+    // bloc du message utilisateur envoyé à Claude. Pas un outil séparé ni un
+    // appel routé via AIProviderService.generateVision() : la frontière déjà
+    // actée (Prompt 108) est que la boucle d'outils Claude reste spécifique à
+    // Claude — l'image fait donc partie du même appel messages.create(), pas
+    // d'un chemin parallèle.
+    let imageBlock = null;
+    const imageBase64 = request.data?.imageBase64;
+    if (imageBase64) {
+      const mediaType = String(request.data?.imageMediaType || 'image/jpeg').toLowerCase();
+      if (!ALLOWED_IMAGE_MEDIA_TYPES.includes(mediaType)) {
+        throw new HttpsError('invalid-argument', 'Format image non supporté (jpeg, png, webp ou gif).');
+      }
+      if (String(imageBase64).length > MAX_IMAGE_BASE64_LENGTH) {
+        throw new HttpsError('invalid-argument', 'Image trop volumineuse.');
+      }
+      imageBlock = { type: 'image', source: { type: 'base64', media_type: mediaType, data: String(imageBase64) } };
+    }
+
+    // Localisation GPS (Master Prompt 113, section 3) — transmise par le
+    // client uniquement si déjà autorisée côté app ; jamais demandée par ce
+    // endpoint lui-même. Reste optionnelle et best-effort, comme tout le
+    // reste du contexte injecté par buildUserContext().
+    const location = request.data?.location;
+    const safeLocation = (location && typeof location.latitude === 'number' && typeof location.longitude === 'number')
+      ? { latitude: location.latitude, longitude: location.longitude, address: location.address ? String(location.address).slice(0, 200) : null }
+      : null;
+
     await checkRateLimit(uid, 'ai_chat', 20, 60);
 
     let conversationId = request.data?.conversationId;
@@ -96,12 +141,29 @@ module.exports = function createAzIa({
     // (pas les allers-retours tool_use/tool_result, qui restent internes à
     // cette invocation) — suffisant pour le contexte conversationnel futur,
     // sans avoir à rejouer la mécanique d'outils entre deux appels.
-    const history  = await getRecentMessages(db, uid, conversationId);
-    const messages = [...history, { role: 'user', content: message }];
+    const history = await getRecentMessages(db, uid, conversationId);
+    const userContent = imageBlock ? [imageBlock, { type: 'text', text: message }] : message;
+    const messages = [...history, { role: 'user', content: userContent }];
+
+    // ContextManager (Master Prompt 113) — bloc système dynamique, non
+    // mis en cache (contrairement à SYSTEM_PROMPT_BLOCKS ci-dessous, qui lui
+    // est strictement identique à chaque appel) puisqu'il varie par
+    // utilisateur/session. Coût Firestore : 1-2 lectures ciblées, avant tout
+    // appel Claude — remplace ce qui aurait sinon nécessité un aller-retour
+    // d'outil dédié pour la même information (section 18 du prompt).
+    const userContextText = await buildUserContext(db, uid, safeLocation);
+    const system = userContextText
+      ? [...SYSTEM_PROMPT_BLOCKS, { type: 'text', text: userContextText }]
+      : SYSTEM_PROMPT_BLOCKS;
 
     const anthropic = getClient();
 
     const toolsUsed = [];
+    // Réponses structurées (Master Prompt 117) — trace de chaque appel
+    // d'outil réellement exécuté ce tour (nom + résultat réel), utilisée
+    // après coup pour construire `response` de façon déterministe, jamais
+    // en reparsant le texte de Claude.
+    const toolCalls = [];
     let turnsTaken       = 0;
     let inputTokens       = 0;
     let outputTokens      = 0;
@@ -111,7 +173,7 @@ module.exports = function createAzIa({
         const response = await anthropic.messages.create({
           model:      MODEL,
           max_tokens: MAX_TOKENS,
-          system:     SYSTEM_PROMPT_BLOCKS,
+          system,
           messages,
           ...(withTools ? { tools: toolSchemas } : {}),
         });
@@ -147,6 +209,7 @@ module.exports = function createAzIa({
         for (const block of toolUseBlocks) {
           toolsUsed.push(block.name);
           const result = await executeTool(uid, block.name, block.input, conversationId);
+          toolCalls.push({ name: block.name, input: block.input, result });
           toolResults.push({
             type:        'tool_result',
             tool_use_id: block.id,
@@ -176,13 +239,43 @@ module.exports = function createAzIa({
         userId: uid, status: 'success', durationMs: Date.now() - startTime,
         toolsUsed, turnCount: turnsTaken, inputTokens, outputTokens, hitTurnCap,
       });
+      aiProviderService.recordUsage({
+        uid, provider: 'claude', model: MODEL,
+        inputTokens, outputTokens, responseTimeMs: Date.now() - startTime,
+        success: true,
+      });
 
-      return { conversationId, reply: finalText, hitTurnCap };
+      // Réponse structurée (Master Prompt 117) — `amount` n'est pas toujours
+      // réechoé par le handler qui a créé l'action en attente ; relu depuis
+      // le document Firestore fraîchement créé (source de vérité), une
+      // seule lecture ciblée, uniquement quand une confirmation est
+      // effectivement en jeu ce tour.
+      let pendingActionAmount = null;
+      const lastAwaiting = [...toolCalls].reverse().find(c => c.result && c.result.status === 'awaiting_confirmation');
+      if (lastAwaiting?.result?.actionId) {
+        try {
+          const pendingSnap = await db.collection('ai_pending_actions').doc(lastAwaiting.result.actionId).get();
+          if (pendingSnap.exists) pendingActionAmount = pendingSnap.data().amount ?? null;
+        } catch (err) {
+          console.error('azIaChat: failed to re-read pending action amount:', err.message);
+        }
+      }
+      const response = buildTurnResponse({ finalText, toolCalls, pendingActionAmount });
+
+      // `reply` reste inchangé (compatibilité descendante totale — tout
+      // client qui ne connaît pas encore `response` continue de fonctionner
+      // à l'identique) ; `response` est un ajout pur.
+      return { conversationId, reply: finalText, hitTurnCap, response };
     } catch (err) {
       logAiObservability({
         userId: uid, status: 'error', durationMs: Date.now() - startTime,
         toolsUsed, turnCount: turnsTaken, inputTokens, outputTokens,
         errorCode: err.code || 'internal', errorMessage: err.message || null,
+      });
+      aiProviderService.recordUsage({
+        uid, provider: 'claude', model: MODEL,
+        inputTokens, outputTokens, responseTimeMs: Date.now() - startTime,
+        success: false, errorMessage: err.message || null,
       });
       throw err;
     }
@@ -190,10 +283,14 @@ module.exports = function createAzIa({
 
   const aiConfirmAction = buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByName });
   const aiCleanupExpiredPendingActions = buildCleanupScheduler({ db, admin, onSchedule });
+  // Rappels (Master Prompt 118) — même famille que le scheduler ci-dessus.
+  const aiSendDueReminders = buildReminderScheduler({ db, admin, onSchedule, sendToToken });
 
   // Contrôle utilisateur sur son historique de conversation (Prompt 33) —
   // ai_conversations n'était jamais géré/effacé nulle part avant ce jour.
-  const clearAiHistory = onCall(async (request) => {
+  // Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
+  // légère de maxInstances uniquement.
+  const clearAiHistory = onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     }
@@ -209,5 +306,5 @@ module.exports = function createAzIa({
     return { success: true, deletedCount };
   });
 
-  return { azIaChat, aiConfirmAction, aiCleanupExpiredPendingActions, clearAiHistory };
+  return { azIaChat, aiConfirmAction, aiCleanupExpiredPendingActions, clearAiHistory, aiSendDueReminders };
 };

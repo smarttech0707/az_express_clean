@@ -5,6 +5,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../services/places_service.dart';
 import 'destination_picker.dart';
+import '../theme/app_theme.dart';
 
 // ── Résultat de la sélection d'adresse ─────────────────────────────────────
 class AddressResult {
@@ -198,7 +199,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color:        sel ? const Color(0xFFFF6D00) : Colors.transparent,
+            color:        sel ? AppColors.primary : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Text(
@@ -221,7 +222,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
       return Row(children: [
         const SizedBox(
           width: 20, height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFF6D00)),
+          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
         ),
         const SizedBox(width: 12),
         Text('Localisation GPS en cours…',
@@ -281,7 +282,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
             border:       Border.all(color: Colors.grey.shade300),
           ),
           child: Row(children: [
-            const Icon(Icons.search_rounded, color: Color(0xFFFF6D00), size: 22),
+            const Icon(Icons.search_rounded, color: AppColors.primary, size: 22),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -297,10 +298,10 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
 
     return _buildResultCard(
       icon:  Icons.place_rounded,
-      color: const Color(0xFFFF6D00),
+      color: AppColors.primary,
       trailing: IconButton(
         icon: const Icon(Icons.edit_rounded, size: 18),
-        color: const Color(0xFFFF6D00),
+        color: AppColors.primary,
         tooltip: 'Modifier',
         onPressed: _openPicker,
       ),
@@ -356,7 +357,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
         border:       Border.all(color: Colors.grey.shade300),
       ),
       child: Row(children: [
-        Icon(icon, color: const Color(0xFFFF6D00), size: 22),
+        Icon(icon, color: AppColors.primary, size: 22),
         const SizedBox(width: 12),
         Expanded(child: Text(label, style: TextStyle(color: Colors.grey.shade500, fontSize: 14))),
         Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),

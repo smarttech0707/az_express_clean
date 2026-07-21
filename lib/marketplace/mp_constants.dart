@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 
 // ── Categories ─────────────────────────────────────────────────────────────────
 const mpCategories = [
@@ -76,10 +77,11 @@ const mpCities = [
   'Daloa', 'Korhogo', 'Man', 'Gagnoa', 'Divo', 'Autre',
 ];
 
-// ── App theme ─────────────────────────────────────────────────────────────────
-const kMpOrange   = Color(0xFFFF6D00);
-const kMpBg       = Color(0xFFF5F5F5);
-const kMpCard     = Colors.white;
-const kMpText     = Color(0xFF1A1A2E);
-const kMpMuted    = Color(0xFF9E9E9E);
-const kMpDivider  = Color(0xFFEEEEEE);
+// ── App theme (Master Prompt 120 — repointé vers la palette centrale,
+// aucune identité de marque distincte pour le Marketplace) ─────────────────
+const kMpOrange   = AppColors.primary;
+const kMpBg       = AppColors.bg;
+const kMpCard     = AppColors.card;
+const kMpText     = AppColors.text;
+const kMpMuted    = AppColors.textMuted;
+const kMpDivider  = AppColors.divider;

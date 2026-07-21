@@ -75,6 +75,10 @@ function buildFcmTokenCleanup({ db, admin, onSchedule }) {
     timeZone:       'Africa/Abidjan',
     timeoutSeconds: 300,
     memory:         '256MiB',
+    // Master Prompt 122 — quota CPU Cloud Run régional : scheduler
+    // hebdomadaire, tâche de nettoyage légère, une seule instance nécessaire.
+    maxInstances:   1,
+    cpu:            0.5,
   }, async () => {
     try {
       const result = await runFcmTokenCleanup(db, admin);

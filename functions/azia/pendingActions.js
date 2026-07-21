@@ -1,5 +1,7 @@
 'use strict';
 
+const { buildConfirmResponse } = require('./responseBuilder');
+
 // 5 minutes pour toutes les actions (décision validée avec l'utilisateur —
 // pas de durée différenciée par type d'action).
 const DEFAULT_EXPIRY_MS = 5 * 60 * 1000;
@@ -109,7 +111,13 @@ function buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByNa
       metadata: { source: 'ai_chat' },
     });
 
-    return { status: 'completed', ...finalResult };
+    // Réponse structurée (Master Prompt 117) — ajoutée à côté des champs
+    // déjà retournés par chaque outil (jamais à leur place) : tout
+    // consommateur existant qui lit directement `.message`/`.orderId`/etc.
+    // continue de fonctionner à l'identique.
+    const response = buildConfirmResponse({ toolName: outcome.toolName, result: finalResult });
+
+    return { status: 'completed', ...finalResult, response };
   });
 }
 
@@ -121,6 +129,12 @@ function buildCleanupScheduler({ db, admin, onSchedule }) {
     timeoutSeconds: 120,
     memory:         '256MiB',
     region:         'europe-west1',
+    // Master Prompt 122 — quota CPU Cloud Run régional : un scheduler ne
+    // tourne jamais qu'en une seule instance à la fois (déclenché par cron,
+    // pas par des requêtes concurrentes) ; cpu réduit, tâche de nettoyage
+    // légère (lecture/écriture Firestore, pas de calcul lourd).
+    maxInstances:   1,
+    cpu:            0.5,
   }, async () => {
     const now  = admin.firestore.Timestamp.now();
     const snap = await db.collection('ai_pending_actions')

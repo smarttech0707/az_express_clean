@@ -56,7 +56,7 @@ class _NotificationCenterContent extends StatelessWidget {
       child: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFFFF8C42), Color(0xFFFF6B00)],
+            colors: [Color(0xFFFF8C42), AppColors.primary],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -76,7 +76,7 @@ class _NotificationCenterContent extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Notifications',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.urbanist(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
                     fontSize: 18,
@@ -88,7 +88,7 @@ class _NotificationCenterContent extends StatelessWidget {
                 icon: const Icon(Icons.done_all_rounded, color: Colors.white70, size: 18),
                 label: Text(
                   'Tout lire',
-                  style: GoogleFonts.poppins(
+                  style: GoogleFonts.urbanist(
                       color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
                 ),
               ),
@@ -159,14 +159,14 @@ class _NotificationCenterContent extends StatelessWidget {
         const SizedBox(height: 20),
         Text(
           'Aucune notification',
-          style: GoogleFonts.poppins(
+          style: GoogleFonts.urbanist(
               fontSize: 17, fontWeight: FontWeight.w600, color: Colors.black87),
         ),
         const SizedBox(height: 6),
         Text(
           'Vos mises à jour de commandes\napparaîtront ici.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(fontSize: 13.5, color: AppColors.textMuted),
+          style: GoogleFonts.urbanist(fontSize: 13.5, color: AppColors.textMuted),
         ),
       ]),
     );
@@ -185,7 +185,7 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8, top: 4),
       child: Text(
         label,
-        style: GoogleFonts.poppins(
+        style: GoogleFonts.urbanist(
           fontSize: 12,
           fontWeight: FontWeight.w600,
           color: AppColors.textMuted,
@@ -278,7 +278,7 @@ class _NotifCard extends StatelessWidget {
                         Expanded(
                           child: Text(
                             title,
-                            style: GoogleFonts.poppins(
+                            style: GoogleFonts.urbanist(
                               fontWeight: isRead ? FontWeight.w500 : FontWeight.w700,
                               fontSize: 13.5,
                               color: Colors.black87,
@@ -303,7 +303,7 @@ class _NotifCard extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(
                         body,
-                        style: GoogleFonts.poppins(
+                        style: GoogleFonts.urbanist(
                           fontSize: 12.5,
                           color: AppColors.textMuted,
                           height: 1.35,
@@ -314,7 +314,7 @@ class _NotifCard extends StatelessWidget {
                       const SizedBox(height: 5),
                       Text(
                         timeStr,
-                        style: GoogleFonts.poppins(
+                        style: GoogleFonts.urbanist(
                           fontSize: 11,
                           color: AppColors.textMuted.withValues(alpha: 0.7),
                         ),

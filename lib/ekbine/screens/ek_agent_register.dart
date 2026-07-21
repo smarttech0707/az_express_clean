@@ -70,7 +70,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text('Devenir Agent E-Kbine',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
       ),
       body: Form(
@@ -91,7 +91,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('💚 Rejoignez la communauté',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         color: Colors.white,
                         fontSize: 16,
                         fontWeight: FontWeight.w800)),
@@ -108,7 +108,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(t,
-                              style: GoogleFonts.inter(
+                              style: GoogleFonts.urbanist(
                                   color: Colors.white.withValues(alpha: 0.9),
                                   fontSize: 12)),
                         ),
@@ -138,7 +138,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
 
             // City dropdown
             Text('Ville d\'activité',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, fontWeight: FontWeight.w600,
                     color: kEkText)),
             const SizedBox(height: 8),
@@ -160,7 +160,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                         color: kEkGreen, width: 2)),
               ),
               hint: Text('Sélectionner votre ville',
-                  style: GoogleFonts.inter(color: kEkMuted)),
+                  style: GoogleFonts.urbanist(color: kEkMuted)),
               validator: (v) => v == null ? 'Choisissez une ville' : null,
               items: _cities
                   .map((c) =>
@@ -177,7 +177,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
             const SizedBox(height: 6),
             Text(
                 'Sélectionnez uniquement les opérateurs sur lesquels vous pouvez effectuer des opérations.',
-                style: GoogleFonts.inter(fontSize: 12, color: kEkMuted,
+                style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted,
                     height: 1.5)),
             const SizedBox(height: 14),
             ...ekOperators.map((op) {
@@ -218,7 +218,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                       const SizedBox(width: 14),
                       Expanded(
                         child: Text(op['label'] as String,
-                            style: GoogleFonts.inter(
+                            style: GoogleFonts.urbanist(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,
                                 color: color)),
@@ -262,7 +262,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                       controller: _opNumCtrl[id],
                       keyboardType: TextInputType.phone,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 15, fontWeight: FontWeight.w700),
                       decoration: InputDecoration(
                         labelText: 'Votre numéro ${op['label']}',
@@ -270,8 +270,8 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                             : op['id'] == 'mtn'    ? '05XXXXXXXX'
                             : op['id'] == 'moov'   ? '01XXXXXXXX'
                             : '07XXXXXXXX',
-                        labelStyle: GoogleFonts.inter(color: color, fontSize: 13),
-                        hintStyle: GoogleFonts.inter(color: kEkMuted),
+                        labelStyle: GoogleFonts.urbanist(color: color, fontSize: 13),
+                        hintStyle: GoogleFonts.urbanist(color: kEkMuted),
                         prefixIcon: Icon(Icons.phone_android_rounded,
                             color: color),
                         filled: true,
@@ -304,7 +304,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text('Sélectionnez au moins un opérateur',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 11,
                         color: Colors.red.shade400)),
               ),
@@ -322,7 +322,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                 'En vous inscrivant, vous acceptez d\'exécuter les services de manière '
                 'honnête et professionnelle. Toute fraude entraîne une suspension définitive. '
                 'Votre inscription sera examinée par l\'équipe AZ Express avant activation.',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 11, color: kEkMuted, height: 1.6),
               ),
             ),
@@ -346,7 +346,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2.5))
                     : Text('Soumettre ma candidature',
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 16, fontWeight: FontWeight.w700)),
               ),
             ),
@@ -368,7 +368,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
   }) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 13, fontWeight: FontWeight.w600, color: kEkText)),
       const SizedBox(height: 8),
       TextFormField(
@@ -378,7 +378,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
         validator: validator,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: GoogleFonts.inter(color: kEkMuted),
+          hintStyle: GoogleFonts.urbanist(color: kEkMuted),
           prefixIcon: Icon(icon, color: kEkGreen),
           filled: true,
           fillColor: Colors.white,
@@ -412,7 +412,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
             const Text('🎉', style: TextStyle(fontSize: 72)),
             const SizedBox(height: 24),
             Text('Candidature envoyée !',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 24,
                     fontWeight: FontWeight.w900,
                     color: kEkGreen),
@@ -421,7 +421,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
             Text(
                 'Notre équipe examinera votre profil sous 24–48h. '
                 'Vous serez notifié par SMS dès que votre compte est activé.',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 14, color: kEkMuted, height: 1.6),
                 textAlign: TextAlign.center),
             const SizedBox(height: 32),
@@ -438,7 +438,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                   elevation: 0,
                 ),
                 child: Text('Retour à l\'accueil',
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontWeight: FontWeight.w700)),
               ),
             ),
@@ -496,7 +496,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(text,
-        style: GoogleFonts.inter(
+        style: GoogleFonts.urbanist(
             fontSize: 15, fontWeight: FontWeight.w800, color: kEkText));
   }
 }

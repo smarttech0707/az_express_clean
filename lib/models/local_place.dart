@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../theme/app_theme.dart';
 
 /// Lieu local stocké dans Firestore (collection `places`).
 class LocalPlace {
@@ -99,7 +100,7 @@ class LocalPlace {
       case 'marche':        return Colors.amber.shade700;
       case 'banque':        return Colors.indigo;
       case 'quartier':      return const Color(0xFF37474F);
-      default:              return const Color(0xFFFF6D00);
+      default:              return AppColors.primary;
     }
   }
 

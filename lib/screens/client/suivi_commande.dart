@@ -12,6 +12,9 @@ import '../chat/chat_page.dart';
 import '../../widgets/order_status_stepper.dart';
 import '../../widgets/rating_dialog.dart';
 import 'order_tracking_map.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/fade_slide_in.dart';
+import '../../widgets/glass_kit.dart';
 
 class SuiviCommandePage extends StatelessWidget {
   const SuiviCommandePage({super.key});
@@ -21,7 +24,7 @@ class SuiviCommandePage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Mes commandes"),
-        backgroundColor: const Color(0xFFFF7A1A),
+        backgroundColor: AppColors.primary,
         centerTitle: true,
       ),
       body: SafeArea(
@@ -29,8 +32,29 @@ class SuiviCommandePage extends StatelessWidget {
           stream: FirestoreService().clientOrders(
               FirebaseAuth.instance.currentUser?.uid ?? ''),
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    "Impossible de charger vos commandes. Vérifiez votre connexion.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 15, color: Colors.grey),
+                  ),
+                ),
+              );
+            }
             if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
+              // Master Prompt 124 — squelette shimmer plutôt qu'un spinner
+              // plein écran (Partie 6/13).
+              return ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                itemCount: 4,
+                itemBuilder: (_, __) => const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: AzShimmerRow(iconSize: 48, maxWidth: 220),
+                ),
+              );
             }
 
             final orders = snapshot.data!
@@ -48,8 +72,10 @@ class SuiviCommandePage extends StatelessWidget {
               physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: orders.length,
-              itemBuilder: (context, index) =>
-                  _OrderCard(order: orders[index]),
+              itemBuilder: (context, index) => FadeSlideIn(
+                index: index,
+                child: _OrderCard(order: orders[index]),
+              ),
             );
           },
         ),
@@ -215,7 +241,7 @@ class _OrderCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text("${order.budget} FCFA",
                     style: const TextStyle(
-                        fontSize: 14, color: Color(0xFFFF7A1A))),
+                        fontSize: 14, color: AppColors.primary)),
                 if (order.items != null && order.items!.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   ...order.items!.map((item) => Padding(
@@ -292,7 +318,7 @@ class _OrderCard extends StatelessWidget {
                                 : null,
                             child: CircleAvatar(
                               radius: 26,
-                              backgroundColor: const Color(0xFFFF7A1A),
+                              backgroundColor: AppColors.primary,
                               backgroundImage:
                                   driverPhoto != null && driverPhoto.isNotEmpty
                                       ? NetworkImage(driverPhoto)
@@ -616,7 +642,7 @@ class _OrderCard extends StatelessWidget {
                   _actionButton(
                     icon: Icons.map,
                     label: "Suivre",
-                    color: const Color(0xFFFF7A1A),
+                    color: AppColors.primary,
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -678,9 +704,20 @@ class _OrderCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                    ).then((confirmed) {
-                      if (confirmed == true) {
-                        FirestoreService().cancelOrder(order.id);
+                    ).then((confirmed) async {
+                      if (confirmed != true) return;
+                      try {
+                        await FirestoreService().cancelOrder(order.id);
+                      } catch (_) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  "Échec de l'annulation. Réessayez dans quelques instants."),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
                       }
                     }),
                   ),
@@ -803,11 +840,11 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF6D00).withValues(alpha: 0.1),
+                        color: AppColors.primary.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Icon(Icons.account_balance_wallet_rounded,
-                          color: Color(0xFFFF6D00), size: 22),
+                          color: AppColors.primary, size: 22),
                     ),
                     const SizedBox(width: 12),
                     Column(
@@ -831,7 +868,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                   icon: Icons.delivery_dining_rounded,
                   label: 'Frais de livraison',
                   amount: deliveryFee,
-                  color: const Color(0xFFFF6D00),
+                  color: AppColors.primary,
                 ),
 
                 // Médicaments (pharmacie)
@@ -908,7 +945,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
                               color: hasEnough
-                                  ? const Color(0xFFFF6D00)
+                                  ? AppColors.primary
                                   : Colors.red.shade700)),
                     ],
                   ),
@@ -977,7 +1014,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF6D00),
+                          backgroundColor: AppColors.primary,
                           padding:
                               const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
@@ -1056,14 +1093,14 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              colors: [Color(0xFFFF6D00), Color(0xFFFF8F00)],
+              colors: [AppColors.primary, Color(0xFFFF8F00)],
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
             ),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFFF6D00).withValues(alpha: 0.35),
+                color: AppColors.primary.withValues(alpha: 0.35),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -1291,7 +1328,7 @@ class _OrderMapPageState extends State<OrderMapPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Suivi de la commande"),
-        backgroundColor: const Color(0xFFFF7A1A),
+        backgroundColor: AppColors.primary,
       ),
       body: GoogleMap(
         initialCameraPosition: CameraPosition(

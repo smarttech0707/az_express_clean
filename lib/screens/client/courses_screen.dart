@@ -13,6 +13,7 @@ import '../../services/tarif_service.dart';
 import '../../widgets/address_picker_widget.dart';
 import '../../widgets/scale_button.dart';
 import 'order_wait_screen.dart';
+import '../../theme/app_theme.dart';
 
 class CoursesScreen extends StatefulWidget {
   const CoursesScreen({super.key});
@@ -228,13 +229,13 @@ class _CoursesScreenState extends State<CoursesScreen> {
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Modifier l\'article',
-            style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+            style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(
             controller: nameCtrl,
             autofocus: true,
             textCapitalization: TextCapitalization.sentences,
-            style: GoogleFonts.inter(fontSize: 15),
+            style: GoogleFonts.urbanist(fontSize: 15),
             decoration: InputDecoration(
               labelText: 'Article',
               hintText: 'Ex : Huile, Tomates…',
@@ -246,7 +247,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           TextField(
             controller: priceCtrl,
             keyboardType: TextInputType.number,
-            style: GoogleFonts.inter(fontSize: 15),
+            style: GoogleFonts.urbanist(fontSize: 15),
             decoration: InputDecoration(
               labelText: 'Prix unitaire (optionnel)',
               hintText: 'Ex : 500',
@@ -263,7 +264,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text('Annuler',
-                style: GoogleFonts.inter(color: Colors.grey.shade600)),
+                style: GoogleFonts.urbanist(color: Colors.grey.shade600)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -282,7 +283,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
               }
               Navigator.pop(context);
             },
-            child: Text('Valider', style: GoogleFonts.inter(color: Colors.white)),
+            child: Text('Valider', style: GoogleFonts.urbanist(color: Colors.white)),
           ),
         ],
       ),
@@ -331,10 +332,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(children: [
           const Icon(Icons.warning_amber_rounded,
-              color: Color(0xFFFF6D00), size: 22),
+              color: AppColors.primary, size: 22),
           const SizedBox(width: 8),
           Text('Informations manquantes',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 15, fontWeight: FontWeight.w700)),
         ]),
         content: Column(
@@ -342,7 +343,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Veuillez renseigner :',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 13, color: Colors.grey.shade600)),
             const SizedBox(height: 10),
             ...missing.map((m) => Padding(
@@ -352,7 +353,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                     child: Text(m,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 13, fontWeight: FontWeight.w600))),
               ]),
             )),
@@ -366,7 +367,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                   borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(context),
-            child: Text('OK', style: GoogleFonts.inter(color: Colors.white)),
+            child: Text('OK', style: GoogleFonts.urbanist(color: Colors.white)),
           ),
         ],
       ),
@@ -544,7 +545,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           const SizedBox(height: 6),
           Text(
             'Ajoutez le prix pour un calcul auto · ex : "Huile 500 FCFA"',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 11, color: Colors.grey.shade500),
           ),
           const SizedBox(height: 10),
@@ -559,11 +560,11 @@ class _CoursesScreenState extends State<CoursesScreen> {
               const SizedBox(width: 10),
               Expanded(child: TextField(
                 controller: _itemCtrl,
-                style: GoogleFonts.inter(fontSize: 15),
+                style: GoogleFonts.urbanist(fontSize: 15),
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
                   hintText: 'Huile 500 FCFA, Tomates, Pain…',
-                  hintStyle: GoogleFonts.inter(
+                  hintStyle: GoogleFonts.urbanist(
                       fontSize: 14, color: Colors.grey.shade400),
                   border: InputBorder.none,
                   contentPadding:
@@ -571,36 +572,48 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 ),
                 onSubmitted: (_) => _addManualItem(),
               )),
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(24),
-                  onTap: _addManualItem,
-                  child: Container(
-                    width: 40, height: 40,
-                    alignment: Alignment.center,
-                    child: const Icon(Icons.add_circle_rounded,
-                        color: Color(0xFF2E7D32), size: 28),
+              Semantics(
+                label: 'Ajouter l\'article',
+                button: true,
+                excludeSemantics: true,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: _addManualItem,
+                    child: Container(
+                      width: 40, height: 40,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.add_circle_rounded,
+                          color: Color(0xFF2E7D32), size: 28),
+                    ),
                   ),
                 ),
               ),
               const SizedBox(width: 4),
-              GestureDetector(
-                onTap: _toggleListening,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(
-                    color: _listening
-                        ? Colors.red.shade500
-                        : const Color(0xFF2E7D32),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    _listening
-                        ? Icons.stop_rounded
-                        : Icons.mic_rounded,
-                    color: Colors.white, size: 22,
+              Semantics(
+                label: _listening
+                    ? 'Arrêter la dictée vocale'
+                    : 'Dicter la liste de courses au micro',
+                button: true,
+                excludeSemantics: true,
+                child: GestureDetector(
+                  onTap: _toggleListening,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(
+                      color: _listening
+                          ? Colors.red.shade500
+                          : const Color(0xFF2E7D32),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      _listening
+                          ? Icons.stop_rounded
+                          : Icons.mic_rounded,
+                      color: Colors.white, size: 22,
+                    ),
                   ),
                 ),
               ),
@@ -621,7 +634,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 Icon(Icons.mic_rounded, color: Colors.red.shade400, size: 14),
                 const SizedBox(width: 8),
                 Expanded(child: Text(_liveWords,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 13, fontStyle: FontStyle.italic))),
               ]),
             ),
@@ -630,7 +643,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           if (!_listening && _speechAvailable) ...[
             const SizedBox(height: 6),
             Text('🎙 Dictez vos articles séparés par des virgules',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 11, color: Colors.grey.shade500)),
           ],
 
@@ -654,7 +667,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                         Expanded(child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(item, style: GoogleFonts.inter(
+                            Text(item, style: GoogleFonts.urbanist(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
                                 color: Colors.black87)),
@@ -663,14 +676,14 @@ class _CoursesScreenState extends State<CoursesScreen> {
                                 qty > 1
                                     ? '${_fmt(price)} × $qty = ${_fmt(price * qty)}'
                                     : _fmt(price),
-                                style: GoogleFonts.inter(
+                                style: GoogleFonts.urbanist(
                                     fontSize: 11,
                                     color: const Color(0xFF2E7D32),
                                     fontWeight: FontWeight.w600),
                               )
                             else
                               Text('Quantité : $qty',
-                                  style: GoogleFonts.inter(
+                                  style: GoogleFonts.urbanist(
                                       fontSize: 11,
                                       color: Colors.grey.shade500)),
                           ],
@@ -682,7 +695,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                         ),
                         Container(
                           width: 32, alignment: Alignment.center,
-                          child: Text('$qty', style: GoogleFonts.inter(
+                          child: Text('$qty', style: GoogleFonts.urbanist(
                               fontSize: 14, fontWeight: FontWeight.w700)),
                         ),
                         _QtyBtn(
@@ -724,10 +737,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
                       size: 40, color: Colors.grey.shade300),
                   const SizedBox(height: 8),
                   Text('Aucun article pour l\'instant',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.grey.shade400, fontSize: 13)),
                   Text('Tapez ou dictez vos courses',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           color: Colors.grey.shade400, fontSize: 11)),
                 ]),
               ),
@@ -740,12 +753,12 @@ class _CoursesScreenState extends State<CoursesScreen> {
             const _Section(
               icon: Icons.account_balance_wallet_rounded,
               title: 'Budget maximum pour les courses',
-              color: Color(0xFFFF6D00),
+              color: AppColors.primary,
             ),
             const SizedBox(height: 6),
             Text(
               'Indiquez combien dépenser pour les articles (hors frais de livraison)',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 11, color: Colors.grey.shade500),
             ),
             const SizedBox(height: 10),
@@ -754,15 +767,15 @@ class _CoursesScreenState extends State<CoursesScreen> {
               child: TextField(
                 controller:   _budgetCtrl,
                 keyboardType: TextInputType.number,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 18, fontWeight: FontWeight.bold),
                 decoration: InputDecoration(
                   hintText: 'ex : 2 500',
-                  hintStyle: GoogleFonts.inter(
+                  hintStyle: GoogleFonts.urbanist(
                       fontSize: 16, color: Colors.grey.shade400),
                   prefixIcon: const Icon(
                       Icons.account_balance_wallet_rounded,
-                      color: Color(0xFFFF6D00)),
+                      color: AppColors.primary),
                   suffixText: 'FCFA',
                   suffixStyle: TextStyle(
                       color: Colors.grey.shade500,
@@ -810,7 +823,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                     color: Color(0xFF1565C0), size: 18),
                 const SizedBox(width: 10),
                 Expanded(child: Text(_deliveryAddress!.address,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: const Color(0xFF1565C0)))),
@@ -826,7 +839,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           const _Section(
             icon: Icons.electric_bike_rounded,
             title: 'Mode de livraison',
-            color: Color(0xFFFF7A1A),
+            color: AppColors.primary,
           ),
           const SizedBox(height: 10),
           _CourseModeCard(
@@ -848,7 +861,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
             subtitle:   'Mission dédiée uniquement pour vous',
             etaText:    '15 – 30 min',
             priceText:  _fmt(_expressFee),
-            iconColor:  const Color(0xFFFF7A1A),
+            iconColor:  AppColors.primary,
             isSelected: _deliveryMode == 'express',
             onTap:      () => setState(() => _deliveryMode = 'express'),
             badge:      'Prioritaire',
@@ -873,11 +886,11 @@ class _CoursesScreenState extends State<CoursesScreen> {
             child: TextField(
               controller: _notesCtrl,
               maxLines:   4,
-              style:      GoogleFonts.inter(fontSize: 14),
+              style:      GoogleFonts.urbanist(fontSize: 14),
               decoration: InputDecoration(
                 hintText:
                     'Ne pas sonner, appeler avant d\'arriver,\nmonter au 2e étage, laisser au gardien…',
-                hintStyle: GoogleFonts.inter(
+                hintStyle: GoogleFonts.urbanist(
                     fontSize: 13, color: Colors.grey.shade400),
                 prefixIcon: const Padding(
                   padding: EdgeInsets.only(
@@ -953,7 +966,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
               child: TextField(
                 controller:   _mobilePhoneCtrl,
                 keyboardType: TextInputType.phone,
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 15, fontWeight: FontWeight.w500),
                 decoration: InputDecoration(
                   hintText: _payment == 'orange_money'
@@ -961,7 +974,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                       : _payment == 'mtn_money'
                           ? 'Numéro MTN MoMo (ex : 05 XX XX XX XX)'
                           : 'Numéro Wave (ex : 01 XX XX XX XX)',
-                  hintStyle: GoogleFonts.inter(
+                  hintStyle: GoogleFonts.urbanist(
                       fontSize: 13, color: Colors.grey.shade400),
                   prefixIcon: Icon(
                     Icons.phone_rounded,
@@ -1032,7 +1045,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
             ),
             const SizedBox(width: 10),
             Text('Récapitulatif de commande',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: Colors.black87)),
@@ -1055,13 +1068,13 @@ class _CoursesScreenState extends State<CoursesScreen> {
           ),
           Row(children: [
             Expanded(child: Text('TOTAL',
-                style: GoogleFonts.inter(
+                style: GoogleFonts.urbanist(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                     color: Colors.black87))),
             Text(
               _items.isNotEmpty ? _fmt(total) : '—',
-              style: GoogleFonts.inter(
+              style: GoogleFonts.urbanist(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
                   color: const Color(0xFF2E7D32)),
@@ -1078,15 +1091,15 @@ class _CoursesScreenState extends State<CoursesScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            const Color(0xFFFF6D00).withValues(alpha: 0.08),
-            const Color(0xFFFF6D00).withValues(alpha: 0.03),
+            AppColors.primary.withValues(alpha: 0.08),
+            AppColors.primary.withValues(alpha: 0.03),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-            color: const Color(0xFFFF6D00).withValues(alpha: 0.25)),
+            color: AppColors.primary.withValues(alpha: 0.25)),
       ),
       child: Column(children: [
         // En-tête
@@ -1094,16 +1107,16 @@ class _CoursesScreenState extends State<CoursesScreen> {
           Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF6D00).withValues(alpha: 0.12),
+              color: AppColors.primary.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Icons.calculate_rounded,
-                color: Color(0xFFFF6D00), size: 16),
+                color: AppColors.primary, size: 16),
           ),
           const SizedBox(width: 10),
           Text(
             'Estimation du coût total${_tarifResult.isNight ? " 🌙" : ""}',
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
                 color: Colors.black87),
@@ -1130,7 +1143,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           icon:       Icons.rocket_launch_rounded,
           total:      budget > 0 ? budget + _expressFee : 0,
           isSelected: _deliveryMode == 'express',
-          color:      const Color(0xFFFF7A1A),
+          color:      AppColors.primary,
         ),
       ]),
     );
@@ -1139,12 +1152,12 @@ class _CoursesScreenState extends State<CoursesScreen> {
   Widget _recapLine({required String label, required String value}) {
     return Row(children: [
       Expanded(child: Text(label,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 13,
               fontWeight: FontWeight.w500,
               color: Colors.grey.shade700))),
       Text(value,
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 13,
               fontWeight: FontWeight.w700,
               color: Colors.black87)),
@@ -1177,14 +1190,14 @@ class _CoursesScreenState extends State<CoursesScreen> {
             color: isSelected ? color : Colors.grey.shade400),
         const SizedBox(width: 8),
         Expanded(child: Text(label,
-            style: GoogleFonts.inter(
+            style: GoogleFonts.urbanist(
                 fontSize: 13,
                 fontWeight:
                     isSelected ? FontWeight.w700 : FontWeight.w500,
                 color: isSelected ? color : Colors.grey.shade600))),
         Text(
           total > 0 ? _fmt(total) : '—',
-          style: GoogleFonts.inter(
+          style: GoogleFonts.urbanist(
               fontSize: 14,
               fontWeight: FontWeight.w700,
               color: isSelected ? color : Colors.grey.shade500),
@@ -1236,7 +1249,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                           color: Colors.white, size: 20),
                       const SizedBox(width: 10),
                       Text('Commander maintenant',
-                          style: GoogleFonts.inter(
+                          style: GoogleFonts.urbanist(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
                               color: Colors.white)),
@@ -1246,7 +1259,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                     const SizedBox(height: 2),
                     Text(
                       'Total estimé : ${_fmt(_orderTotal)}',
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 11, color: Colors.white70),
                     ),
                   ],
@@ -1286,7 +1299,7 @@ class _Section extends StatelessWidget {
     ),
     const SizedBox(width: 10),
     Text(title,
-        style: GoogleFonts.inter(
+        style: GoogleFonts.urbanist(
             fontSize: 14,
             fontWeight: FontWeight.w700,
             color: Colors.black87)),
@@ -1377,12 +1390,12 @@ class _PayRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: Colors.black87)),
               Text(subtitle,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 11, color: Colors.grey.shade500)),
             ],
           )),
@@ -1466,7 +1479,7 @@ class _CourseModeCard extends StatelessWidget {
             children: [
               Row(children: [
                 Text(title,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
                         color: isSelected
@@ -1482,7 +1495,7 @@ class _CourseModeCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(badge!,
-                        style: GoogleFonts.inter(
+                        style: GoogleFonts.urbanist(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
                             color: iconColor)),
@@ -1491,7 +1504,7 @@ class _CourseModeCard extends StatelessWidget {
               ]),
               const SizedBox(height: 2),
               Text(subtitle,
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.urbanist(
                       fontSize: 11, color: Colors.grey.shade600)),
               const SizedBox(height: 2),
               Row(children: [
@@ -1499,7 +1512,7 @@ class _CourseModeCard extends StatelessWidget {
                     size: 12, color: Colors.grey),
                 const SizedBox(width: 3),
                 Text(etaText,
-                    style: GoogleFonts.inter(
+                    style: GoogleFonts.urbanist(
                         fontSize: 11,
                         color: Colors.grey.shade500,
                         fontWeight: FontWeight.w600)),
@@ -1509,7 +1522,7 @@ class _CourseModeCard extends StatelessWidget {
                       size: 12, color: Colors.grey),
                   const SizedBox(width: 3),
                   Text(priceText!,
-                      style: GoogleFonts.inter(
+                      style: GoogleFonts.urbanist(
                           fontSize: 11,
                           color: Colors.grey.shade500,
                           fontWeight: FontWeight.w600)),
