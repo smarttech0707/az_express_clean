@@ -4,9 +4,12 @@ import 'dart:io';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import '../screens/ai/az_ia_offline_engine.dart';
 import '../services/az_ia_service.dart';
@@ -20,11 +23,13 @@ class AzIaMessage {
   final AzIaSender sender;
   final String text;
   final bool hasImage;
+
   /// Marqué `true` une fois que l'effet machine-à-écrire (Master Prompt 116)
   /// a fini de se dérouler pour ce message — évite de le réanimer si le
   /// widget est reconstruit (scroll, retour sur l'écran, etc.). Mutable
   /// volontairement : c'est un flag de présentation, pas une donnée métier.
   bool animated;
+
   /// Enveloppe structurée (Master Prompt 117) — `null` uniquement pour les
   /// messages utilisateur (jamais affichés en carte) ; toujours non-null
   /// pour un message assistant, avec repli automatique en `type: 'generic'`
@@ -42,7 +47,11 @@ class AzIaMessage {
 
 /// État de la conversation avec AZ IA (M0 : texte seul, sans outils).
 class AzIaProvider extends ChangeNotifier {
-  final AzIaService _service = AzIaService();
+  static const maxImageBytes = 4 * 1024 * 1024;
+
+  static bool isImageTooLarge(int byteLength) => byteLength > maxImageBytes;
+  final AzIaService _service;
+  final Stream<String?> _authUidChanges;
 
   final List<AzIaMessage> _messages = [];
   String? _conversationId;
@@ -55,21 +64,24 @@ class AzIaProvider extends ChangeNotifier {
   // jamais réellement s'exécuter : AZ IA décrivait la nécessité d'une
   // confirmation "via l'interface" sans qu'aucune interface n'existe.
   StreamSubscription<AzIaPendingAction?>? _pendingActionSub;
+  StreamSubscription<String?>? _authSub;
   AzIaPendingAction? _pendingAction;
   bool _confirming = false;
+  String? _activeUid;
 
   AzIaPendingAction? get pendingAction => _pendingAction;
   bool get confirming => _confirming;
 
-  AzIaProvider() {
-    _pendingActionSub = _service.streamLatestPendingAction().listen((action) {
-      _pendingAction = action;
-      notifyListeners();
-    });
+  AzIaProvider({AzIaService? service, Stream<String?>? authUidChanges})
+      : _service = service ?? AzIaService(),
+        _authUidChanges = authUidChanges ??
+            FirebaseAuth.instance.authStateChanges().map((user) => user?.uid) {
+    _authSub = _authUidChanges.listen(_onAuthChanged);
   }
 
   @override
   void dispose() {
+    _authSub?.cancel();
     _pendingActionSub?.cancel();
     super.dispose();
   }
@@ -77,6 +89,96 @@ class AzIaProvider extends ChangeNotifier {
   List<AzIaMessage> get messages => List.unmodifiable(_messages);
   bool get isSending => _isSending;
   String? get error => _error;
+
+  String _conversationKey(String uid) => 'az_ia_current_conversation_$uid';
+
+  Future<void> _onAuthChanged(String? uid) async {
+    if (uid == _activeUid) return;
+    debugPrint('[AZ_IA_AUTH_UID] ancien=$_activeUid nouveau=$uid');
+    _activeUid = uid;
+    debugPrint(
+        '[AZ_IA_PENDING_CANCEL] annulation de l\'abonnement pending pour uid=$_activeUid');
+    await _pendingActionSub?.cancel();
+    // Deux événements Auth peuvent se succéder pendant l'annulation
+    // asynchrone. Seul le dernier UID recrée un abonnement.
+    if (_activeUid != uid) return;
+    _pendingActionSub = null;
+    _pendingAction = null;
+    _messages.clear();
+    _conversationId = null;
+    _error = null;
+    _confirming = false;
+    notifyListeners();
+    if (uid == null) return;
+
+    debugPrint(
+        '[AZ_IA_PENDING_SUBSCRIBE] nouvel abonnement ai_pending_actions pour uid=$uid');
+    _pendingActionSub =
+        _service.streamLatestPendingAction(uid).listen((action) {
+      if (_activeUid != uid) return;
+      _pendingAction = action;
+      notifyListeners();
+    }, onError: (Object e, StackTrace st) {
+      debugPrint('[AZ_IA_ERROR] flux ai_pending_actions uid=$uid : $e');
+      debugPrintStack(stackTrace: st);
+    });
+    await _restoreConversation(uid);
+  }
+
+  Future<void> _restoreConversation(String uid) async {
+    final prefs = await SharedPreferences.getInstance();
+    final conversationId = prefs.getString(_conversationKey(uid));
+    if (_activeUid != uid || conversationId == null || conversationId.isEmpty) {
+      return;
+    }
+    await openConversation(conversationId);
+  }
+
+  Future<void> _persistConversation(String uid, String conversationId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_conversationKey(uid), conversationId);
+  }
+
+  Future<void> startNewConversation() async {
+    final uid = _activeUid;
+    if (uid == null) return;
+    final id = const Uuid().v4();
+    debugPrint(
+        '[AZ_IA_NEW_CONVERSATION] uid=$uid ancienConversationId=$_conversationId nouveauConversationId=$id');
+    _conversationId = id;
+    _messages.clear();
+    _error = null;
+    await _persistConversation(uid, id);
+    if (_activeUid == uid) notifyListeners();
+  }
+
+  Future<void> openConversation(String conversationId) async {
+    final uid = _activeUid;
+    if (uid == null || conversationId.isEmpty) return;
+    final stored = await _service.loadConversation(uid, conversationId);
+    if (_activeUid != uid) return;
+    _conversationId = conversationId;
+    _messages
+      ..clear()
+      ..addAll(stored.map((message) => AzIaMessage(
+            sender:
+                message.role == 'user' ? AzIaSender.user : AzIaSender.assistant,
+            text: message.content,
+            animated: true,
+            response: message.role == 'user'
+                ? null
+                : AzIaStructuredResponse.generic(message.content),
+          )));
+    await _persistConversation(uid, conversationId);
+    if (_activeUid == uid) notifyListeners();
+  }
+
+  Future<List<AzIaConversationSummary>> loadConversationSummaries() async {
+    final uid = _activeUid;
+    if (uid == null) return const [];
+    final summaries = await _service.loadConversationSummaries(uid);
+    return _activeUid == uid ? summaries : const [];
+  }
 
   /// Position GPS best-effort (Master Prompt 113, section 3) — ne déclenche
   /// JAMAIS de demande de permission depuis ce provider : lit uniquement une
@@ -118,9 +220,18 @@ class AzIaProvider extends ChangeNotifier {
     if ((trimmed.isEmpty && image == null) || _isSending) return null;
     // Un message purement image doit quand même porter un texte non vide
     // côté serveur (azIaChat exige `message`) — légende neutre par défaut.
-    final effectiveText = trimmed.isEmpty ? 'Voici une image, peux-tu l\'analyser ?' : trimmed;
+    final effectiveText =
+        trimmed.isEmpty ? 'Voici une image, peux-tu l\'analyser ?' : trimmed;
+    // Phase 12 (nettoyage) — jamais le contenu réel du message (peut contenir
+    // adresse, numéro, demande financière...), seulement sa longueur.
+    debugPrint(
+        '[AZ_IA_SEND_MESSAGE] uid=$_activeUid conversationId=$_conversationId image=${image != null} longueurTexte=${effectiveText.length}');
 
-    _messages.add(AzIaMessage(sender: AzIaSender.user, text: effectiveText, hasImage: image != null, animated: true));
+    _messages.add(AzIaMessage(
+        sender: AzIaSender.user,
+        text: effectiveText,
+        hasImage: image != null,
+        animated: true));
     _isSending = true;
     _error = null;
     notifyListeners();
@@ -149,6 +260,16 @@ class AzIaProvider extends ChangeNotifier {
         String? imageBase64;
         String? imageMediaType;
         if (image != null) {
+          final length = await File(image.path).length();
+          if (isImageTooLarge(length)) {
+            _error = 'L’image dépasse 4 Mo. Choisissez une image plus légère.';
+            _messages.add(AzIaMessage(
+              sender: AzIaSender.assistant,
+              text: _error!,
+              response: AzIaStructuredResponse.generic(_error!),
+            ));
+            return _error;
+          }
           final bytes = await File(image.path).readAsBytes();
           imageBase64 = base64Encode(bytes);
           imageMediaType = _guessMediaType(image.path);
@@ -164,22 +285,32 @@ class AzIaProvider extends ChangeNotifier {
         );
         _conversationId = result.conversationId;
         replyText = result.reply;
-        _messages.add(AzIaMessage(sender: AzIaSender.assistant, text: replyText, response: result.response));
+        _messages.add(AzIaMessage(
+            sender: AzIaSender.assistant,
+            text: replyText,
+            response: result.response));
       }
-    } catch (e) {
+    } catch (e, st) {
       // Master Prompt 121 — le message générique masquait des cas
       // distincts (délai dépassé, IA temporairement indisponible, réseau) ;
       // le détail technique brut reste en log, jamais affiché à l'utilisateur.
-      debugPrint('[AZ IA] sendMessage a échoué : $e');
+      debugPrint(
+          '[AZ_IA_ERROR] sendMessage uid=$_activeUid conversationId=$_conversationId exception=$e');
+      debugPrintStack(stackTrace: st);
       if (e is TimeoutException) {
-        _error = "AZ IA met plus de temps que prévu à répondre. Réessayez dans un instant.";
+        _error =
+            "AZ IA met plus de temps que prévu à répondre. Réessayez dans un instant.";
       } else if (e is FirebaseFunctionsException &&
           (e.code == 'deadline-exceeded' || e.code == 'unavailable')) {
-        _error = "AZ IA est momentanément indisponible. Réessayez dans un instant.";
-      } else if (e is FirebaseFunctionsException && e.code == 'resource-exhausted') {
-        _error = "Trop de messages envoyés d'un coup — patientez quelques secondes puis réessayez.";
+        _error =
+            "AZ IA est momentanément indisponible. Réessayez dans un instant.";
+      } else if (e is FirebaseFunctionsException &&
+          e.code == 'resource-exhausted') {
+        _error =
+            "Trop de messages envoyés d'un coup — patientez quelques secondes puis réessayez.";
       } else {
-        _error = "AZ IA n'a pas pu répondre. Vérifiez votre connexion et réessayez.";
+        _error =
+            "AZ IA n'a pas pu répondre. Vérifiez votre connexion et réessayez.";
       }
       replyText = _error;
       _messages.add(AzIaMessage(
@@ -212,11 +343,14 @@ class AzIaProvider extends ChangeNotifier {
   Future<void> _resolvePendingAction(bool confirm) async {
     final action = _pendingAction;
     if (action == null || _confirming) return;
+    debugPrint(
+        '[AZ_IA_CONFIRM_ACTION] uid=$_activeUid actionId=${action.id} outil=${action.toolName} confirm=$confirm');
     _confirming = true;
     notifyListeners();
 
     try {
-      final result = await _service.confirmAction(actionId: action.id, confirm: confirm);
+      final result =
+          await _service.confirmAction(actionId: action.id, confirm: confirm);
       final message = result['message'] as String? ??
           result['error'] as String? ??
           (confirm ? 'Action confirmée ✅' : 'Action annulée.');
@@ -224,10 +358,15 @@ class AzIaProvider extends ChangeNotifier {
       // — une annulation (decision:'cancel') reste un simple message texte,
       // pas une carte structurée, cohérent avec l'absence de payload à afficher.
       final response = result['response'] != null
-          ? AzIaStructuredResponse.fromJson(result['response'], fallbackMessage: message)
+          ? AzIaStructuredResponse.fromJson(result['response'],
+              fallbackMessage: message)
           : AzIaStructuredResponse.generic(message);
-      _messages.add(AzIaMessage(sender: AzIaSender.assistant, text: message, response: response));
-    } catch (e) {
+      _messages.add(AzIaMessage(
+          sender: AzIaSender.assistant, text: message, response: response));
+    } catch (e, st) {
+      debugPrint(
+          '[AZ_IA_ERROR] confirmAction uid=$_activeUid actionId=${action.id} confirm=$confirm exception=$e');
+      debugPrintStack(stackTrace: st);
       final errorText = confirm
           ? "La confirmation a échoué. Réessayez dans un instant."
           : "L'annulation a échoué. Réessayez dans un instant.";

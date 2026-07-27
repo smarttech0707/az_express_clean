@@ -24,6 +24,7 @@ import 'marketplace/providers/mp_provider.dart';
 import 'marketplace/providers/mp_favorites_provider.dart';
 import 'ekbine/providers/ek_provider.dart';
 import 'providers/az_ia_provider.dart';
+import 'widgets/az_ia/az_ia_floating_assistant.dart';
 
 // ignore: unused_element
 final _analytics = FirebaseAnalytics.instance;
@@ -56,18 +57,21 @@ void main() async {
     try {
       await FirebaseAppCheck.instance.activate(
         // ignore: deprecated_member_use
-        androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+        androidProvider:
+            kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
         // App Attest exige iOS 14+ ; ce projet cible iOS 13.0
         // (IPHONEOS_DEPLOYMENT_TARGET, ios/Runner.xcodeproj) — DeviceCheck
         // (iOS 11+) reste une vraie attestation native Apple, juste moins
         // avancée, sans avoir à relever le plancher iOS silencieusement.
         // ignore: deprecated_member_use
-        appleProvider:   kDebugMode ? AppleProvider.debug   : AppleProvider.deviceCheck,
+        appleProvider:
+            kDebugMode ? AppleProvider.debug : AppleProvider.deviceCheck,
       );
     } catch (e) {
       // Ne doit jamais bloquer le démarrage — sans enforcement serveur actif,
       // un échec d'activation n'a aucun impact fonctionnel immédiat.
-      FirebaseCrashlytics.instance.recordError(e, null, reason: 'App Check activation failed');
+      FirebaseCrashlytics.instance
+          .recordError(e, null, reason: 'App Check activation failed');
     }
   }
   // Web : nécessite une clé de site reCAPTCHA v3/Enterprise réelle, obtenue
@@ -79,8 +83,13 @@ void main() async {
 
   // ── Crashlytics (mobile only — not supported on web) ─────────────
   if (!kIsWeb) {
-    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    };
     PlatformDispatcher.instance.onError = (error, stack) {
+      debugPrint('ERREUR ASYNCHRONE NON CAPTURÉE : $error');
+      debugPrintStack(stackTrace: stack);
       FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
       return true;
     };
@@ -95,10 +104,12 @@ void main() async {
   // ── Connexion anonyme (mobile only) ──────────────────────────────
   if (!kIsWeb && FirebaseAuth.instance.currentUser == null) {
     try {
-      await FirebaseAuth.instance.signInAnonymously()
+      await FirebaseAuth.instance
+          .signInAnonymously()
           .timeout(const Duration(seconds: 5));
     } catch (e) {
-      FirebaseCrashlytics.instance.recordError(e, null, reason: 'Anonymous auth failed');
+      FirebaseCrashlytics.instance
+          .recordError(e, null, reason: 'Anonymous auth failed');
     }
   }
 
@@ -169,6 +180,9 @@ class _AZExpressAppState extends State<AZExpressApp> {
           theme: AppTheme.light,
           darkTheme: AppTheme.dark,
           themeMode: ThemeMode.system,
+          builder: (context, child) => AzIaFloatingAssistant(
+            child: child ?? const SizedBox.shrink(),
+          ),
           home: const HomeScreen(),
         ),
         builder: (_, child) => child ?? const SizedBox.shrink(),

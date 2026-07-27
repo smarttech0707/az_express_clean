@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -14,6 +15,10 @@ import '../../services/az_ia_service.dart'
 import '../../services/voice/voice_manager.dart';
 import '../../services/voice/voice_text_processor.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/az_ia_theme.dart';
+import '../../widgets/az_ia/az_ia_logo.dart';
+import '../../widgets/az_ia/az_ia_splash_screen.dart';
+import '../../widgets/az_ia/az_ia_suggestion_chip.dart';
 import 'az_ia_message_parser.dart';
 import 'az_ia_response_widgets.dart';
 import 'az_ia_rich_message.dart';
@@ -30,6 +35,7 @@ class AzIaChatScreen extends StatefulWidget {
 class _AzIaChatScreenState extends State<AzIaChatScreen> {
   final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
+  bool _showSplash = true;
 
   // ── Reconnaissance vocale (M7) — même pattern que
   // lib/screens/client/courses_screen.dart, déjà éprouvé en production.
@@ -91,7 +97,8 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
     _loadVoicePreference();
     _scrollCtrl.addListener(() {
       if (!_scrollCtrl.hasClients) return;
-      final distanceFromBottom = _scrollCtrl.position.maxScrollExtent - _scrollCtrl.position.pixels;
+      final distanceFromBottom =
+          _scrollCtrl.position.maxScrollExtent - _scrollCtrl.position.pixels;
       _userScrolledUp = distanceFromBottom > 80;
     });
   }
@@ -148,17 +155,24 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
       } catch (e) {
         debugPrint('[AZ IA micro] échec systemLocale()/locales(): $e');
       }
-      _selectedLocaleId = _pickBestFrenchLocale(_availableLocales, _systemLocale);
+      _selectedLocaleId =
+          _pickBestFrenchLocale(_availableLocales, _systemLocale);
 
-      debugPrint('[AZ IA micro] locale système : ${_systemLocale?.localeId} (${_systemLocale?.name})');
-      debugPrint('[AZ IA micro] ${_availableLocales.length} locales disponibles sur cet appareil :');
+      debugPrint(
+          '[AZ IA micro] locale système : ${_systemLocale?.localeId} (${_systemLocale?.name})');
+      debugPrint(
+          '[AZ IA micro] ${_availableLocales.length} locales disponibles sur cet appareil :');
       for (final l in _availableLocales) {
         debugPrint('[AZ IA micro]   - ${l.localeId} (${l.name})');
       }
-      final fr = _availableLocales.where((l) => l.localeId.toLowerCase().startsWith('fr'));
-      debugPrint('[AZ IA micro] fr_FR présent : ${_availableLocales.any((l) => l.localeId == 'fr_FR')}');
-      debugPrint('[AZ IA micro] variantes françaises présentes : ${fr.map((l) => l.localeId).join(', ')}');
-      debugPrint('[AZ IA micro] locale réellement sélectionnée pour listen() : $_selectedLocaleId');
+      final fr = _availableLocales
+          .where((l) => l.localeId.toLowerCase().startsWith('fr'));
+      debugPrint(
+          '[AZ IA micro] fr_FR présent : ${_availableLocales.any((l) => l.localeId == 'fr_FR')}');
+      debugPrint(
+          '[AZ IA micro] variantes françaises présentes : ${fr.map((l) => l.localeId).join(', ')}');
+      debugPrint(
+          '[AZ IA micro] locale réellement sélectionnée pour listen() : $_selectedLocaleId');
     }
 
     if (!mounted) return;
@@ -184,7 +198,8 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
   }
 
   void _onSpeechError(SpeechRecognitionError e) {
-    debugPrint('[AZ IA micro] onError: errorMsg=${e.errorMsg} permanent=${e.permanent}');
+    debugPrint(
+        '[AZ IA micro] onError: errorMsg=${e.errorMsg} permanent=${e.permanent}');
     if (!mounted) return;
     setState(() => _listening = false);
 
@@ -198,7 +213,8 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
       // un bug de ce code : detectable ici, mais pas réparable depuis
       // l'application (c'est un réglage au niveau du téléphone).
       _consecutiveNoMatchWithSound++;
-      debugPrint('[AZ IA micro] error_no_match consécutifs : $_consecutiveNoMatchWithSound (dernier niveau sonore capté : $_soundLevel)');
+      debugPrint(
+          '[AZ IA micro] error_no_match consécutifs : $_consecutiveNoMatchWithSound (dernier niveau sonore capté : $_soundLevel)');
       if (_consecutiveNoMatchWithSound >= 2) {
         _snack(
           "AZ IA ne comprend aucun mot malgré le micro actif — le moteur de "
@@ -242,7 +258,8 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
     // propre voix d'AZ IA.
     await _voice.stop();
     setState(() => _listening = true);
-    debugPrint('[AZ IA micro] listen() démarré avec localeId=$_selectedLocaleId');
+    debugPrint(
+        '[AZ IA micro] listen() démarré avec localeId=$_selectedLocaleId');
     try {
       final started = await _speech.listen(
         onResult: _onSpeechResult,
@@ -292,7 +309,8 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
   }
 
   void _onSpeechResult(SpeechRecognitionResult result) {
-    debugPrint('[AZ IA micro] ${result.finalResult ? "résultat final" : "résultat partiel"} : '
+    debugPrint(
+        '[AZ IA micro] ${result.finalResult ? "résultat final" : "résultat partiel"} : '
         '"${result.recognizedWords}" (confiance: ${result.confidence})');
     // Un résultat (même partiel) prouve que le moteur reconnaît bien la
     // locale utilisée — on ne compte plus les error_no_match précédents.
@@ -324,15 +342,18 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
       _analyzing = false;
       _textCtrl.text = correction.text;
       if (correction.hasFuzzyMatch) {
-        _voiceConfirmHint = 'Vouliez-vous dire « ${correction.fuzzyMatches.first.suggestion} » ?';
+        _voiceConfirmHint =
+            'Vouliez-vous dire « ${correction.fuzzyMatches.first.suggestion} » ?';
       } else if (lowConfidence) {
-        _voiceConfirmHint = 'Vérifiez le texte avant d\'envoyer — reconnaissance incertaine.';
+        _voiceConfirmHint =
+            'Vérifiez le texte avant d\'envoyer — reconnaissance incertaine.';
       } else {
         _voiceConfirmHint = null;
       }
     });
 
-    if (_voiceConfirmHint != null) return; // attend une action explicite de l'utilisateur
+    if (_voiceConfirmHint != null)
+      return; // attend une action explicite de l'utilisateur
 
     _lastMessageWasVoice = true;
     final provider = context.read<AzIaProvider>();
@@ -462,12 +483,21 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
         source: source,
         imageQuality: 75,
         maxWidth: 1600,
+        maxHeight: 1600,
       );
       if (picked == null || !mounted) return;
+      if (AzIaProvider.isImageTooLarge(await File(picked.path).length())) {
+        if (mounted) {
+          _snack('L’image dépasse 4 Mo. Choisissez une image plus légère.',
+              Colors.red);
+        }
+        return;
+      }
       await _send(provider, image: picked);
     } catch (e) {
       debugPrint('[AZ IA] Erreur sélection image : $e');
-      if (mounted) _snack('Impossible de charger cette image. Réessayez.', Colors.red);
+      if (mounted)
+        _snack('Impossible de charger cette image. Réessayez.', Colors.red);
     }
   }
 
@@ -475,28 +505,38 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
   Widget build(BuildContext context) {
     // AzIaProvider vit au niveau du MultiProvider de main.dart, pas ici —
     // la conversation survit à la fermeture/réouverture de cet écran.
+    if (_showSplash) {
+      return AzIaSplashScreen(
+        onFinished: () {
+          if (mounted) setState(() => _showSplash = false);
+        },
+      );
+    }
     return Scaffold(
-      backgroundColor: const Color(0xFFEDE7DC),
+      backgroundColor: AzIaTheme.night,
+      // Le redimensionnement est géré explicitement par l'AnimatedPadding du
+      // body. Cela évite un double déplacement lorsque le clavier apparaît.
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
-        backgroundColor: AppColors.primary,
+        backgroundColor: AzIaTheme.deepBlue,
         foregroundColor: Colors.white,
-        centerTitle: true,
+        centerTitle: false,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 32, height: 32,
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFFFFB74D), Color(0xFFEF6C00)],
-                  begin: Alignment.topLeft, end: Alignment.bottomRight,
-                ),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.auto_awesome, color: Colors.white, size: 17),
-            ),
+            const AzIaLogo(size: 38, variant: AzIaLogoVariant.avatar),
             const SizedBox(width: 10),
-            const Text('AZ IA', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('AZ IA',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                Text('Assistant AZ Express',
+                    style: TextStyle(
+                        fontSize: 11, color: AzIaTheme.textSecondary)),
+              ],
+            ),
           ],
         ),
         actions: [
@@ -504,7 +544,8 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
             tooltip: _voiceRepliesEnabled
                 ? 'Désactiver les réponses vocales'
                 : 'Activer les réponses vocales',
-            icon: Icon(_voiceRepliesEnabled ? Icons.volume_up : Icons.volume_off),
+            icon:
+                Icon(_voiceRepliesEnabled ? Icons.volume_up : Icons.volume_off),
             onPressed: _toggleVoiceReplies,
           ),
           PopupMenuButton<String>(
@@ -527,121 +568,211 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
           ),
         ],
       ),
-      body: Consumer<AzIaProvider>(
-        builder: (context, provider, _) {
-          WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      body: AnimatedPadding(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: AzIaTheme.backgroundGradient,
+          ),
+          child: SafeArea(
+            top: false,
+            child: Consumer<AzIaProvider>(
+              builder: (context, provider, _) {
+            WidgetsBinding.instance
+                .addPostFrameCallback((_) => _scrollToBottom());
 
-          // Suggestions rapides (Master Prompt 117) : déclarées par le
-          // serveur dans `response.actions` (responseBuilder.js), plus
-          // aucune devinée côté client — uniquement sous la toute dernière
-          // réponse d'AZ IA, jamais pendant l'envoi ni s'il y a déjà une
-          // carte de confirmation à traiter (évite d'empiler deux blocs
-          // d'action en même temps), et seulement si le serveur en a
-          // déclaré au moins une pour ce type de réponse.
-          final lastMsg = provider.messages.isNotEmpty ? provider.messages.last : null;
-          final lastActions = lastMsg?.response?.actions ?? const [];
-          final showQuickReplies = !provider.isSending &&
-              provider.pendingAction == null &&
-              lastMsg != null &&
-              lastMsg.sender == AzIaSender.assistant &&
-              lastActions.isNotEmpty;
+            // Suggestions rapides (Master Prompt 117) : déclarées par le
+            // serveur dans `response.actions` (responseBuilder.js), plus
+            // aucune devinée côté client — uniquement sous la toute dernière
+            // réponse d'AZ IA, jamais pendant l'envoi ni s'il y a déjà une
+            // carte de confirmation à traiter (évite d'empiler deux blocs
+            // d'action en même temps), et seulement si le serveur en a
+            // déclaré au moins une pour ce type de réponse.
+            final lastMsg =
+                provider.messages.isNotEmpty ? provider.messages.last : null;
+            final lastActions = lastMsg?.response?.actions ?? const [];
+            final showQuickReplies = !provider.isSending &&
+                provider.pendingAction == null &&
+                lastMsg != null &&
+                lastMsg.sender == AzIaSender.assistant &&
+                lastActions.isNotEmpty;
 
-          return Column(
-            children: [
-              Expanded(
-                child: provider.messages.isEmpty
-                    ? _EmptyState()
-                    : ListView.builder(
-                        controller: _scrollCtrl,
-                        padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
-                        itemCount:
-                            provider.messages.length + (provider.isSending ? 1 : 0),
-                        itemBuilder: (context, i) {
-                          if (i >= provider.messages.length) {
-                            return _ThinkingIndicator(
-                              key: const ValueKey('thinking'),
-                              voiceOrigin: _lastMessageWasVoice,
-                            );
-                          }
-                          final msg = provider.messages[i];
-                          return _AnimatedEntrance(
-                            key: ValueKey(msg.id),
-                            child: _MessageBubble(message: msg),
-                          );
-                        },
-                      ),
+            return Column(
+              children: [
+                Expanded(
+                  child: CustomScrollView(
+                    controller: _scrollCtrl,
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    slivers: [
+                      if (provider.messages.isEmpty)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _EmptyState(
+                            onSuggestion: (text) =>
+                                _sendQuickReply(provider, text),
+                          ),
+                        )
+                      else
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                          sliver: SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, i) {
+                                if (i >= provider.messages.length) {
+                                  return _ThinkingIndicator(
+                                    key: const ValueKey('thinking'),
+                                    voiceOrigin: _lastMessageWasVoice,
+                                  );
+                                }
+                                final msg = provider.messages[i];
+                                return _AnimatedEntrance(
+                                  key: ValueKey(msg.id),
+                                  child: _MessageBubble(message: msg),
+                                );
+                              },
+                              childCount: provider.messages.length +
+                                  (provider.isSending ? 1 : 0),
+                            ),
+                          ),
+                        ),
+                if (showQuickReplies)
+                  SliverToBoxAdapter(
+                    child: _QuickReplyChips(
+                      response: lastMsg.response!,
+                      actions: lastActions,
+                      onTap: (text) => _sendQuickReply(provider, text),
+                    ),
+                  ),
+                if (provider.pendingAction != null)
+                  SliverToBoxAdapter(
+                    child: _PendingActionCard(
+                      action: provider.pendingAction!,
+                      confirming: provider.confirming,
+                      onConfirm: provider.confirmPendingAction,
+                      onCancel: provider.cancelPendingAction,
+                    ),
+                  ),
+                // Master Prompt 127 (Partie 11) — phases "Analyse..."/
+                // "Réponse..." de la compréhension vocale ; "Écoute..." est
+                // déjà porté par le hint du champ de texte (_InputBar).
+                if (_analyzing)
+                  const SliverToBoxAdapter(
+                    child: _VoicePhaseBanner(
+                      label: 'Analyse...',
+                      icon: Icons.psychology_outlined,
+                    ),
+                  ),
+                if (!_analyzing && _voiceConfirmHint != null)
+                  SliverToBoxAdapter(
+                    child: _VoiceConfirmBanner(
+                      hint: _voiceConfirmHint!,
+                      onSend: () => _send(context.read<AzIaProvider>()),
+                      onDismiss: _dismissVoiceConfirmHint,
+                    ),
+                  ),
+                if (_speaking)
+                  const SliverToBoxAdapter(
+                    child: _VoicePhaseBanner(
+                      label: 'Réponse...', icon: Icons.volume_up_rounded),
+                  ),
+                ],
               ),
-              if (showQuickReplies)
-                _QuickReplyChips(
-                  response: lastMsg.response!,
-                  actions: lastActions,
-                  onTap: (text) => _sendQuickReply(provider, text),
+            ),
+                _InputBar(
+                  controller: _textCtrl,
+                  enabled: !provider.isSending,
+                  listening: _listening,
+                  speechAvailable: _speechAvailable,
+                  onSend: () {
+                    // Un envoi déclenché manuellement (bouton/clavier) n'est
+                    // jamais "d'origine vocale", même si le champ contient
+                    // encore le texte d'une dictée précédente non envoyée.
+                    _lastMessageWasVoice = false;
+                    _voiceConfirmHint = null;
+                    _send(provider);
+                  },
+                  onMicTap: () => _toggleListening(provider),
+                  onAttachTap: () => _attachImage(provider),
                 ),
-              if (provider.pendingAction != null)
-                _PendingActionCard(
-                  action: provider.pendingAction!,
-                  confirming: provider.confirming,
-                  onConfirm: provider.confirmPendingAction,
-                  onCancel: provider.cancelPendingAction,
-                ),
-              // Master Prompt 127 (Partie 11) — phases "Analyse..."/
-              // "Réponse..." de la compréhension vocale ; "Écoute..." est
-              // déjà porté par le hint du champ de texte (_InputBar).
-              if (_analyzing) const _VoicePhaseBanner(label: 'Analyse...', icon: Icons.psychology_outlined),
-              if (!_analyzing && _voiceConfirmHint != null)
-                _VoiceConfirmBanner(
-                  hint: _voiceConfirmHint!,
-                  onSend: () => _send(context.read<AzIaProvider>()),
-                  onDismiss: _dismissVoiceConfirmHint,
-                ),
-              if (_speaking) const _VoicePhaseBanner(label: 'Réponse...', icon: Icons.volume_up_rounded),
-              _InputBar(
-                controller: _textCtrl,
-                enabled: !provider.isSending,
-                listening: _listening,
-                speechAvailable: _speechAvailable,
-                onSend: () {
-                  // Un envoi déclenché manuellement (bouton/clavier) n'est
-                  // jamais "d'origine vocale", même si le champ contient
-                  // encore le texte d'une dictée précédente non envoyée.
-                  _lastMessageWasVoice = false;
-                  _voiceConfirmHint = null;
-                  _send(provider);
-                },
-                onMicTap: () => _toggleListening(provider),
-                onAttachTap: () => _attachImage(provider),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+              },
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
+  final ValueChanged<String> onSuggestion;
+  const _EmptyState({required this.onSuggestion});
+
   @override
   Widget build(BuildContext context) {
+    // `SingleChildScrollView` (Phase 3 — durcissement réel) : sans lui, ce
+    // contenu (logo + textes + puces de suggestion) déborde de quelques
+    // pixels dès que le clavier réduit l'espace vertical disponible pendant
+    // la frappe — confirmé en conditions réelles sur appareil (bande jaune/
+    // noire « BOTTOM OVERFLOWED BY 7.3 PIXELS »). `Center` continue de
+    // centrer le contenu quand il tient dans l'espace disponible ; il ne
+    // fait plus que défiler légèrement quand ce n'est pas le cas.
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.auto_awesome, size: 56, color: AppColors.primary.withValues(alpha: 0.4)),
-            const SizedBox(height: 16),
-            const Text(
-              'Parlez. AZ s\'occupe du reste.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Posez une question à AZ IA pour commencer.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-            ),
-          ],
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const AzIaLogo(size: 92, variant: AzIaLogoVariant.full),
+              const SizedBox(height: 16),
+              const Text(
+                'Parlez. AZ s\'occupe du reste.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: AzIaTheme.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Posez une question à AZ IA pour commencer.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AzIaTheme.textSecondary, fontSize: 13),
+              ),
+              const SizedBox(height: 20),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  AzIaSuggestionChip(
+                      icon: Icons.local_shipping_outlined,
+                      label: 'Suivre ma commande',
+                      onTap: () => onSuggestion('Suivre ma commande')),
+                  AzIaSuggestionChip(
+                      icon: Icons.restaurant_outlined,
+                      label: 'Trouver un restaurant',
+                      onTap: () => onSuggestion('Trouver un restaurant')),
+                  AzIaSuggestionChip(
+                      icon: Icons.account_balance_wallet_outlined,
+                      label: 'Solde wallet',
+                      onTap: () => onSuggestion('Voir mon solde wallet')),
+                  AzIaSuggestionChip(
+                      icon: Icons.support_agent_outlined,
+                      label: 'Aide et support',
+                      onTap: () => onSuggestion('Aide et support')),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -656,19 +787,24 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!isUser)
+      return const AzIaLogo(size: 28, variant: AzIaLogoVariant.avatar);
     return Container(
-      width: 28, height: 28,
+      width: 28,
+      height: 28,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: isUser
-              ? [AppColors.primary, AppColors.primary.withValues(alpha: 0.75)]
-              : const [Color(0xFFFFB74D), Color(0xFFEF6C00)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [
+            AzIaTheme.electricBlue,
+            AzIaTheme.electricBlue.withValues(alpha: 0.75)
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
         shape: BoxShape.circle,
       ),
       child: Icon(
-        isUser ? Icons.person : Icons.auto_awesome,
+        Icons.person,
         color: Colors.white,
         size: 14,
       ),
@@ -704,12 +840,17 @@ class _MessageBubble extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         children: [
-          if (!isUser) ...[const _Avatar(isUser: false), const SizedBox(width: 8)],
+          if (!isUser) ...[
+            const _Avatar(isUser: false),
+            const SizedBox(width: 8)
+          ],
           Flexible(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
+              constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.76),
               child: _TypewriterReveal(
                 message: message,
                 builder: (context, revealedText) {
@@ -725,7 +866,10 @@ class _MessageBubble extends StatelessWidget {
               ),
             ),
           ),
-          if (isUser) ...[const SizedBox(width: 8), const _Avatar(isUser: true)],
+          if (isUser) ...[
+            const SizedBox(width: 8),
+            const _Avatar(isUser: true)
+          ],
         ],
       ),
     );
@@ -736,8 +880,9 @@ class _MessageBubble extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [AppColors.primary, AppColors.primary.withValues(alpha: 0.85)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [AzIaTheme.electricBlue, const Color(0xFF174FCF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(20),
@@ -745,24 +890,36 @@ class _MessageBubble extends StatelessWidget {
           bottomLeft: Radius.circular(20),
           bottomRight: Radius.circular(6),
         ),
-        boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: 0.25), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.25),
+              blurRadius: 10,
+              offset: const Offset(0, 4))
+        ],
       ),
-      child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4)),
+      child: Text(text,
+          style:
+              const TextStyle(color: Colors.white, fontSize: 14, height: 1.4)),
     );
   }
 
   Widget _buildLegacyBubble(String text) {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: AzIaTheme.surface,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(20),
           topRight: Radius.circular(20),
           bottomLeft: Radius.circular(6),
           bottomRight: Radius.circular(20),
         ),
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 3))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.24),
+              blurRadius: 8,
+              offset: const Offset(0, 3))
+        ],
       ),
       child: AzIaRichBlocks(blocks: AzIaMessageParser.parseBlocks(text)),
     );
@@ -838,13 +995,17 @@ class _AnimatedEntrance extends StatefulWidget {
   State<_AnimatedEntrance> createState() => _AnimatedEntranceState();
 }
 
-class _AnimatedEntranceState extends State<_AnimatedEntrance> with SingleTickerProviderStateMixin {
+class _AnimatedEntranceState extends State<_AnimatedEntrance>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl = AnimationController(
-    vsync: this, duration: const Duration(milliseconds: 260),
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
   )..forward();
-  late final Animation<double> _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-  late final Animation<Offset> _slide = Tween(begin: const Offset(0, 0.06), end: Offset.zero)
-      .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+  late final Animation<double> _fade =
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+  late final Animation<Offset> _slide =
+      Tween(begin: const Offset(0, 0.06), end: Offset.zero)
+          .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
 
   @override
   void dispose() {
@@ -877,9 +1038,11 @@ class _ThinkingIndicator extends StatefulWidget {
   State<_ThinkingIndicator> createState() => _ThinkingIndicatorState();
 }
 
-class _ThinkingIndicatorState extends State<_ThinkingIndicator> with SingleTickerProviderStateMixin {
+class _ThinkingIndicatorState extends State<_ThinkingIndicator>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl = AnimationController(
-    vsync: this, duration: const Duration(milliseconds: 1100),
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
   )..repeat();
 
   // Master Prompt 121 — sans ce délai, une attente jusqu'à 90s (timeout
@@ -916,7 +1079,8 @@ class _ThinkingIndicatorState extends State<_ThinkingIndicator> with SingleTicke
 
   String get _label {
     if (_slow) return 'Cela prend plus de temps que prévu…';
-    if (widget.voiceOrigin && !_pastUnderstandingPhase) return 'Compréhension...';
+    if (widget.voiceOrigin && !_pastUnderstandingPhase)
+      return 'Compréhension...';
     return 'AZ IA réfléchit';
   }
 
@@ -933,19 +1097,25 @@ class _ThinkingIndicatorState extends State<_ThinkingIndicator> with SingleTicke
           Container(
             padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
             decoration: const BoxDecoration(
-              color: Colors.white,
+              color: AzIaTheme.surface,
               borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(20), topRight: Radius.circular(20),
-                bottomLeft: Radius.circular(6), bottomRight: Radius.circular(20),
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+                bottomLeft: Radius.circular(6),
+                bottomRight: Radius.circular(20),
               ),
-              boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 3))],
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black12, blurRadius: 8, offset: Offset(0, 3))
+              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   _label,
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                  style: const TextStyle(
+                      color: AzIaTheme.textSecondary, fontSize: 13),
                 ),
                 const SizedBox(width: 6),
                 ...List.generate(3, (i) {
@@ -953,14 +1123,20 @@ class _ThinkingIndicatorState extends State<_ThinkingIndicator> with SingleTicke
                     animation: _ctrl,
                     builder: (context, _) {
                       final phase = (_ctrl.value * 3 - i) % 3;
-                      final opacity = phase < 1 ? (0.3 + 0.7 * (1 - (phase - 0.5).abs() * 2)).clamp(0.3, 1.0) : 0.3;
+                      final opacity = phase < 1
+                          ? (0.3 + 0.7 * (1 - (phase - 0.5).abs() * 2))
+                              .clamp(0.3, 1.0)
+                          : 0.3;
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 1.5),
                         child: Opacity(
                           opacity: opacity,
                           child: Container(
-                            width: 5, height: 5,
-                            decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
+                            width: 5,
+                            height: 5,
+                            decoration: const BoxDecoration(
+                                color: AzIaTheme.electricBlue,
+                                shape: BoxShape.circle),
                           ),
                         ),
                       );
@@ -984,7 +1160,8 @@ class _QuickReplyChips extends StatelessWidget {
   final AzIaStructuredResponse response;
   final List<AzIaResponseAction> actions;
   final ValueChanged<String> onTap;
-  const _QuickReplyChips({required this.response, required this.actions, required this.onTap});
+  const _QuickReplyChips(
+      {required this.response, required this.actions, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1010,11 +1187,14 @@ class _QuickReplyChips extends StatelessWidget {
             // invisible. AppColors.text est une constante toujours foncée,
             // garantissant le contraste quel que soit le thème.
             label: Text(action.label,
-                style: const TextStyle(fontSize: 12.5, color: AppColors.text)),
+                style: const TextStyle(
+                    fontSize: 12.5, color: AzIaTheme.textPrimary)),
             avatar: Icon(icon, size: 14, color: color),
-            backgroundColor: Colors.white,
-            side: BorderSide(color: color.withValues(alpha: 0.25)),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            backgroundColor: AzIaTheme.surface,
+            side: BorderSide(
+                color: AzIaTheme.electricBlue.withValues(alpha: 0.8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             onPressed: () => onTap(action.message),
           );
         },
@@ -1048,28 +1228,36 @@ class _PendingActionCard extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
+        color: AzIaTheme.surfaceSoft,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.orange.shade200),
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
+        border: Border.all(color: AzIaTheme.azOrange.withValues(alpha: 0.55)),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.shield_outlined, color: Colors.orange.shade800, size: 20),
+              Icon(Icons.shield_outlined,
+                  color: Colors.orange.shade800, size: 20),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
                   'Confirmation requise',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                  style: TextStyle(
+                      color: AzIaTheme.textPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(action.summaryFr, style: const TextStyle(fontSize: 13.5, height: 1.35)),
+          Text(action.summaryFr,
+              style: const TextStyle(
+                  color: AzIaTheme.textPrimary, fontSize: 13.5, height: 1.35)),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1092,7 +1280,8 @@ class _PendingActionCard extends StatelessWidget {
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
                         )
                       : const Text('Confirmer'),
                 ),
@@ -1127,13 +1316,19 @@ class _VoicePhaseBanner extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(
-            width: 14, height: 14,
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: AppColors.primary),
           ),
           const SizedBox(width: 10),
           Icon(icon, size: 16, color: AppColors.primary),
           const SizedBox(width: 6),
-          Text(label, style: const TextStyle(fontSize: 13, color: AppColors.primary, fontWeight: FontWeight.w600)),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -1161,22 +1356,29 @@ class _VoiceConfirmBanner extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
+        color: AzIaTheme.surfaceSoft,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.orange.shade200),
+        border: Border.all(color: AzIaTheme.azOrange.withValues(alpha: 0.65)),
       ),
       child: Row(
         children: [
-          Icon(Icons.mic_outlined, color: Colors.orange.shade800, size: 20),
+          const Icon(Icons.mic_outlined,
+              color: AzIaTheme.azOrangeLight, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(hint, style: const TextStyle(fontSize: 13, height: 1.3)),
+            child: Text(hint,
+                style: const TextStyle(
+                    color: AzIaTheme.textPrimary, fontSize: 13, height: 1.3)),
           ),
-          TextButton(onPressed: onDismiss, child: const Text('Corriger')),
+          TextButton(
+            onPressed: onDismiss,
+            style: TextButton.styleFrom(foregroundColor: AzIaTheme.textPrimary),
+            child: const Text('Corriger'),
+          ),
           ElevatedButton(
             onPressed: onSend,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: AzIaTheme.electricBlue,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 14),
             ),
@@ -1195,15 +1397,18 @@ class _MicButton extends StatefulWidget {
   final bool listening;
   final bool enabled;
   final VoidCallback onTap;
-  const _MicButton({required this.listening, required this.enabled, required this.onTap});
+  const _MicButton(
+      {required this.listening, required this.enabled, required this.onTap});
 
   @override
   State<_MicButton> createState() => _MicButtonState();
 }
 
-class _MicButtonState extends State<_MicButton> with SingleTickerProviderStateMixin {
+class _MicButtonState extends State<_MicButton>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl = AnimationController(
-    vsync: this, duration: const Duration(milliseconds: 900),
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
   )..repeat(reverse: true);
 
   @override
@@ -1235,7 +1440,8 @@ class _MicButtonState extends State<_MicButton> with SingleTickerProviderStateMi
                       height: 48,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.red.withValues(alpha: 0.25 * (1 - _ctrl.value)),
+                        color: Colors.red
+                            .withValues(alpha: 0.25 * (1 - _ctrl.value)),
                       ),
                     ),
                   ),
@@ -1245,14 +1451,18 @@ class _MicButtonState extends State<_MicButton> with SingleTickerProviderStateMi
                   decoration: BoxDecoration(
                     color: widget.listening
                         ? Colors.red
-                        : (widget.enabled ? Colors.grey.shade300 : Colors.grey.shade100),
+                        : (widget.enabled
+                            ? AzIaTheme.surfaceSoft
+                            : AzIaTheme.surface),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     widget.listening ? Icons.mic : Icons.mic_none,
                     color: widget.listening
                         ? Colors.white
-                        : (widget.enabled ? Colors.black54 : Colors.grey.shade400),
+                        : (widget.enabled
+                            ? AzIaTheme.textPrimary
+                            : AzIaTheme.textPlaceholder),
                     size: 22,
                   ),
                 ),
@@ -1287,11 +1497,16 @@ class _InputBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.fromLTRB(8, 8, 8, 8 + MediaQuery.of(context).padding.bottom),
+      padding: EdgeInsets.fromLTRB(
+          8, 8, 8, 8 + MediaQuery.of(context).padding.bottom),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, -2))],
+        color: AzIaTheme.deepBlue,
+        border: Border(
+            top: BorderSide(
+                color: AzIaTheme.electricBlue.withValues(alpha: 0.18))),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, -2))
+        ],
       ),
       child: Row(
         children: [
@@ -1301,12 +1516,14 @@ class _InputBar extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: enabled ? Colors.grey.shade100 : Colors.grey.shade50,
+                color: enabled ? AzIaTheme.surfaceSoft : AzIaTheme.surface,
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.add_photo_alternate_outlined,
-                color: enabled ? Colors.black54 : Colors.grey.shade400,
+                color: enabled
+                    ? AzIaTheme.textSecondary
+                    : AzIaTheme.textSecondary.withValues(alpha: 0.45),
                 size: 22,
               ),
             ),
@@ -1315,21 +1532,48 @@ class _InputBar extends StatelessWidget {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: const Color(0xFFF5F5F5),
-                borderRadius: BorderRadius.circular(24),
+                color: AzIaTheme.surface,
+                borderRadius: AzIaTheme.inputRadius,
               ),
               child: TextField(
                 controller: controller,
                 enabled: enabled,
                 minLines: 1,
                 maxLines: 4,
+                style: const TextStyle(color: AzIaTheme.textPrimary),
+                cursorColor: AzIaTheme.electricBlue,
+                keyboardAppearance: Brightness.dark,
                 textCapitalization: TextCapitalization.sentences,
                 onSubmitted: (_) => onSend(),
                 decoration: InputDecoration(
-                  hintText: listening ? 'Je vous écoute...' : 'Écrivez à AZ IA...',
-                  hintStyle: const TextStyle(color: Colors.grey),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  filled: true,
+                  fillColor: AzIaTheme.surface,
+                  hintText:
+                      listening ? 'Je vous écoute...' : 'Écrivez à AZ IA...',
+                  hintStyle: const TextStyle(color: AzIaTheme.textPlaceholder),
+                  border: const OutlineInputBorder(
+                    borderRadius: AzIaTheme.inputRadius,
+                    borderSide: BorderSide(color: AzIaTheme.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: AzIaTheme.inputRadius,
+                    borderSide: const BorderSide(color: AzIaTheme.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: AzIaTheme.inputRadius,
+                    borderSide: const BorderSide(
+                      color: AzIaTheme.electricBlue,
+                      width: 1.5,
+                    ),
+                  ),
+                  disabledBorder: OutlineInputBorder(
+                    borderRadius: AzIaTheme.inputRadius,
+                    borderSide: BorderSide(
+                      color: AzIaTheme.border.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
             ),
@@ -1344,7 +1588,7 @@ class _InputBar extends StatelessWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: enabled ? AppColors.primary : Colors.grey.shade300,
+                color: enabled ? AzIaTheme.electricBlue : AzIaTheme.surfaceSoft,
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.send, color: Colors.white, size: 22),
