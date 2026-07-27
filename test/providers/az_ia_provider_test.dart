@@ -9,6 +9,7 @@ class _FakeAzIaService extends AzIaService {
   final subscribedUids = <String>[];
   final streams = <String, StreamController<AzIaPendingAction?>>{};
   final conversations = <String, List<AzIaStoredMessage>>{};
+  var clearHistoryCalls = 0;
 
   @override
   Stream<AzIaPendingAction?> streamLatestPendingAction(String uid) {
@@ -23,6 +24,11 @@ class _FakeAzIaService extends AzIaService {
   Future<List<AzIaStoredMessage>> loadConversation(
       String uid, String conversationId) async {
     return conversations[conversationId] ?? const [];
+  }
+
+  @override
+  Future<void> clearHistory() async {
+    clearHistoryCalls++;
   }
 
   Future<void> close() async {
@@ -183,5 +189,96 @@ void main() {
     expect(AzIaProvider.isImageTooLarge(AzIaProvider.maxImageBytes), isFalse);
     expect(
         AzIaProvider.isImageTooLarge(AzIaProvider.maxImageBytes + 1), isTrue);
+  });
+
+  test('un double appel à nouvelle conversation ne crée qu’un seul identifiant',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final auth = StreamController<String?>.broadcast();
+    final provider = AzIaProvider(
+      service: _FakeAzIaService(),
+      authUidChanges: auth.stream,
+    );
+    auth.add('user-a');
+    await _settle();
+
+    await Future.wait([
+      provider.startNewConversation(),
+      provider.startNewConversation(),
+    ]);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('az_ia_current_conversation_user-a'), isNotEmpty);
+
+    provider.dispose();
+    await auth.close();
+  });
+
+  test('supprime la référence locale après effacement de l’historique',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final auth = StreamController<String?>.broadcast();
+    final service = _FakeAzIaService();
+    final provider =
+        AzIaProvider(service: service, authUidChanges: auth.stream);
+    auth.add('user-a');
+    await _settle();
+    await provider.startNewConversation();
+
+    await provider.clearHistory();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(service.clearHistoryCalls, 1);
+    expect(prefs.getString('az_ia_current_conversation_user-a'), isNull);
+
+    provider.dispose();
+    await auth.close();
+  });
+
+  test('nettoie une référence persistée vers une conversation inexistante',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'az_ia_current_conversation_user-a': 'missing-conversation',
+    });
+    final auth = StreamController<String?>.broadcast();
+    final provider = AzIaProvider(
+      service: _FakeAzIaService(),
+      authUidChanges: auth.stream,
+    );
+    auth.add('user-a');
+    await _settle();
+    await _settle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('az_ia_current_conversation_user-a'), isNull);
+    expect(provider.messages, isEmpty);
+
+    provider.dispose();
+    await auth.close();
+  });
+
+  test('n’émet plus de notification après dispose', () async {
+    SharedPreferences.setMockInitialValues({});
+    final auth = StreamController<String?>.broadcast();
+    final service = _FakeAzIaService();
+    final provider =
+        AzIaProvider(service: service, authUidChanges: auth.stream);
+    var notifications = 0;
+    provider.addListener(() => notifications++);
+
+    auth.add('user-a');
+    await _settle();
+    provider.dispose();
+    final countAtDispose = notifications;
+    service.streams['user-a']!.add(const AzIaPendingAction(
+      id: 'late',
+      toolName: 'wallet',
+      summaryFr: 'Action tardive',
+    ));
+    await _settle();
+
+    expect(notifications, countAtDispose);
+    await auth.close();
+    await service.close();
   });
 }

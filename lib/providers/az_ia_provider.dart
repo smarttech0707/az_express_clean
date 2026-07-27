@@ -68,6 +68,10 @@ class AzIaProvider extends ChangeNotifier {
   AzIaPendingAction? _pendingAction;
   bool _confirming = false;
   String? _activeUid;
+  bool _disposed = false;
+  bool _creatingConversation = false;
+  int _sessionEpoch = 0;
+  int _conversationLoadEpoch = 0;
 
   AzIaPendingAction? get pendingAction => _pendingAction;
   bool get confirming => _confirming;
@@ -81,6 +85,8 @@ class AzIaProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _sessionEpoch++;
     _authSub?.cancel();
     _pendingActionSub?.cancel();
     super.dispose();
@@ -92,8 +98,16 @@ class AzIaProvider extends ChangeNotifier {
 
   String _conversationKey(String uid) => 'az_ia_current_conversation_$uid';
 
+  bool _isCurrentSession(String? uid, int epoch) =>
+      !_disposed && _activeUid == uid && _sessionEpoch == epoch;
+
+  void _safeNotify() {
+    if (!_disposed) notifyListeners();
+  }
+
   Future<void> _onAuthChanged(String? uid) async {
-    if (uid == _activeUid) return;
+    if (_disposed || uid == _activeUid) return;
+    final epoch = ++_sessionEpoch;
     debugPrint('[AZ_IA_AUTH_UID] ancien=$_activeUid nouveau=$uid');
     _activeUid = uid;
     debugPrint(
@@ -101,37 +115,44 @@ class AzIaProvider extends ChangeNotifier {
     await _pendingActionSub?.cancel();
     // Deux événements Auth peuvent se succéder pendant l'annulation
     // asynchrone. Seul le dernier UID recrée un abonnement.
-    if (_activeUid != uid) return;
+    if (!_isCurrentSession(uid, epoch)) return;
     _pendingActionSub = null;
     _pendingAction = null;
     _messages.clear();
     _conversationId = null;
     _error = null;
     _confirming = false;
-    notifyListeners();
+    _creatingConversation = false;
+    _conversationLoadEpoch++;
+    _safeNotify();
     if (uid == null) return;
 
     debugPrint(
         '[AZ_IA_PENDING_SUBSCRIBE] nouvel abonnement ai_pending_actions pour uid=$uid');
     _pendingActionSub =
         _service.streamLatestPendingAction(uid).listen((action) {
-      if (_activeUid != uid) return;
+      if (!_isCurrentSession(uid, epoch)) return;
       _pendingAction = action;
-      notifyListeners();
+      _safeNotify();
     }, onError: (Object e, StackTrace st) {
       debugPrint('[AZ_IA_ERROR] flux ai_pending_actions uid=$uid : $e');
       debugPrintStack(stackTrace: st);
     });
-    await _restoreConversation(uid);
+    await _restoreConversation(uid, epoch);
   }
 
-  Future<void> _restoreConversation(String uid) async {
+  Future<void> _restoreConversation(String uid, int epoch) async {
     final prefs = await SharedPreferences.getInstance();
     final conversationId = prefs.getString(_conversationKey(uid));
-    if (_activeUid != uid || conversationId == null || conversationId.isEmpty) {
+    if (!_isCurrentSession(uid, epoch) ||
+        conversationId == null ||
+        conversationId.isEmpty) {
       return;
     }
-    await openConversation(conversationId);
+    final opened = await openConversation(conversationId);
+    if (!opened && _isCurrentSession(uid, epoch)) {
+      await prefs.remove(_conversationKey(uid));
+    }
   }
 
   Future<void> _persistConversation(String uid, String conversationId) async {
@@ -141,22 +162,35 @@ class AzIaProvider extends ChangeNotifier {
 
   Future<void> startNewConversation() async {
     final uid = _activeUid;
-    if (uid == null) return;
-    final id = const Uuid().v4();
-    debugPrint(
-        '[AZ_IA_NEW_CONVERSATION] uid=$uid ancienConversationId=$_conversationId nouveauConversationId=$id');
-    _conversationId = id;
-    _messages.clear();
-    _error = null;
-    await _persistConversation(uid, id);
-    if (_activeUid == uid) notifyListeners();
+    final epoch = _sessionEpoch;
+    if (uid == null || _creatingConversation) return;
+    _creatingConversation = true;
+    _conversationLoadEpoch++;
+    try {
+      final id = const Uuid().v4();
+      debugPrint(
+          '[AZ_IA_NEW_CONVERSATION] uid=$uid ancienConversationId=$_conversationId nouveauConversationId=$id');
+      if (!_isCurrentSession(uid, epoch)) return;
+      _conversationId = id;
+      _messages.clear();
+      _error = null;
+      await _persistConversation(uid, id);
+      if (_isCurrentSession(uid, epoch)) _safeNotify();
+    } finally {
+      if (_isCurrentSession(uid, epoch)) _creatingConversation = false;
+    }
   }
 
-  Future<void> openConversation(String conversationId) async {
+  Future<bool> openConversation(String conversationId) async {
     final uid = _activeUid;
-    if (uid == null || conversationId.isEmpty) return;
+    if (uid == null || conversationId.isEmpty) return false;
+    final epoch = _sessionEpoch;
+    final loadEpoch = ++_conversationLoadEpoch;
     final stored = await _service.loadConversation(uid, conversationId);
-    if (_activeUid != uid) return;
+    if (!_isCurrentSession(uid, epoch) || loadEpoch != _conversationLoadEpoch) {
+      return false;
+    }
+    if (stored.isEmpty) return false;
     _conversationId = conversationId;
     _messages
       ..clear()
@@ -170,7 +204,11 @@ class AzIaProvider extends ChangeNotifier {
                 : AzIaStructuredResponse.generic(message.content),
           )));
     await _persistConversation(uid, conversationId);
-    if (_activeUid == uid) notifyListeners();
+    if (_isCurrentSession(uid, epoch) && loadEpoch == _conversationLoadEpoch) {
+      _safeNotify();
+      return true;
+    }
+    return false;
   }
 
   Future<List<AzIaConversationSummary>> loadConversationSummaries() async {
@@ -202,13 +240,13 @@ class AzIaProvider extends ChangeNotifier {
     }
   }
 
-  String? _guessMediaType(String path) {
+  String? _mediaTypeForImage(String path) {
     final lower = path.toLowerCase();
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
     if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-    return 'image/jpeg';
+    return null;
   }
 
   /// Retourne le texte de la réponse d'AZ IA (succès ou message d'erreur) —
@@ -217,7 +255,14 @@ class AzIaProvider extends ChangeNotifier {
   /// colis, produit... analysés directement par Claude dans le même appel.
   Future<String?> sendMessage(String text, {XFile? image}) async {
     final trimmed = text.trim();
-    if ((trimmed.isEmpty && image == null) || _isSending) return null;
+    final uid = _activeUid;
+    final epoch = _sessionEpoch;
+    if (uid == null ||
+        (trimmed.isEmpty && image == null) ||
+        _isSending ||
+        _disposed) {
+      return null;
+    }
     // Un message purement image doit quand même porter un texte non vide
     // côté serveur (azIaChat exige `message`) — légende neutre par défaut.
     final effectiveText =
@@ -227,6 +272,7 @@ class AzIaProvider extends ChangeNotifier {
     debugPrint(
         '[AZ_IA_SEND_MESSAGE] uid=$_activeUid conversationId=$_conversationId image=${image != null} longueurTexte=${effectiveText.length}');
 
+    final conversationIdAtSend = _conversationId;
     _messages.add(AzIaMessage(
         sender: AzIaSender.user,
         text: effectiveText,
@@ -234,7 +280,7 @@ class AzIaProvider extends ChangeNotifier {
         animated: true));
     _isSending = true;
     _error = null;
-    notifyListeners();
+    _safeNotify();
 
     String? replyText;
     try {
@@ -243,6 +289,7 @@ class AzIaProvider extends ChangeNotifier {
       // clairement absente ; répond localement à quelques questions
       // simples plutôt que de laisser l'utilisateur face à une erreur sèche.
       final connectivity = await Connectivity().checkConnectivity();
+      if (!_isCurrentSession(uid, epoch)) return null;
       final isOffline = connectivity.every((r) => r == ConnectivityResult.none);
 
       if (isOffline) {
@@ -251,6 +298,7 @@ class AzIaProvider extends ChangeNotifier {
                 "En attendant, je peux répondre à quelques questions simples "
                 "(horaires, wallet, suivi de commande, contact).";
         replyText = offlineAnswer;
+        if (!_isCurrentSession(uid, epoch)) return null;
         _messages.add(AzIaMessage(
           sender: AzIaSender.assistant,
           text: offlineAnswer,
@@ -260,7 +308,31 @@ class AzIaProvider extends ChangeNotifier {
         String? imageBase64;
         String? imageMediaType;
         if (image != null) {
-          final length = await File(image.path).length();
+          final file = File(image.path);
+          if (!await file.exists()) {
+            if (!_isCurrentSession(uid, epoch)) return null;
+            _error =
+                'Cette image n’est plus disponible. Choisissez-en une autre.';
+            _messages.add(AzIaMessage(
+              sender: AzIaSender.assistant,
+              text: _error!,
+              response: AzIaStructuredResponse.generic(_error!),
+            ));
+            return _error;
+          }
+          imageMediaType = _mediaTypeForImage(image.path);
+          if (imageMediaType == null) {
+            _error =
+                'Format d’image non pris en charge. Utilisez JPG, PNG, WEBP ou GIF.';
+            _messages.add(AzIaMessage(
+              sender: AzIaSender.assistant,
+              text: _error!,
+              response: AzIaStructuredResponse.generic(_error!),
+            ));
+            return _error;
+          }
+          final length = await file.length();
+          if (!_isCurrentSession(uid, epoch)) return null;
           if (isImageTooLarge(length)) {
             _error = 'L’image dépasse 4 Mo. Choisissez une image plus légère.';
             _messages.add(AzIaMessage(
@@ -270,20 +342,24 @@ class AzIaProvider extends ChangeNotifier {
             ));
             return _error;
           }
-          final bytes = await File(image.path).readAsBytes();
+          final bytes = await file.readAsBytes();
+          if (!_isCurrentSession(uid, epoch)) return null;
           imageBase64 = base64Encode(bytes);
-          imageMediaType = _guessMediaType(image.path);
         }
         final location = await _tryGetLocation();
+        if (!_isCurrentSession(uid, epoch)) return null;
 
         final result = await _service.sendMessage(
           message: effectiveText,
-          conversationId: _conversationId,
+          conversationId: conversationIdAtSend,
           location: location,
           imageBase64: imageBase64,
           imageMediaType: imageMediaType,
         );
+        if (!_isCurrentSession(uid, epoch)) return null;
         _conversationId = result.conversationId;
+        await _persistConversation(uid, result.conversationId);
+        if (!_isCurrentSession(uid, epoch)) return null;
         replyText = result.reply;
         _messages.add(AzIaMessage(
             sender: AzIaSender.assistant,
@@ -291,6 +367,7 @@ class AzIaProvider extends ChangeNotifier {
             response: result.response));
       }
     } catch (e, st) {
+      if (!_isCurrentSession(uid, epoch)) return null;
       // Master Prompt 121 — le message générique masquait des cas
       // distincts (délai dépassé, IA temporairement indisponible, réseau) ;
       // le détail technique brut reste en log, jamais affiché à l'utilisateur.
@@ -319,8 +396,10 @@ class AzIaProvider extends ChangeNotifier {
         response: AzIaStructuredResponse.generic(_error!),
       ));
     } finally {
-      _isSending = false;
-      notifyListeners();
+      if (_isCurrentSession(uid, epoch)) {
+        _isSending = false;
+        _safeNotify();
+      }
     }
     return replyText;
   }
@@ -328,11 +407,18 @@ class AzIaProvider extends ChangeNotifier {
   /// Efface l'historique côté serveur (`ai_conversations`) et réinitialise
   /// l'état local — après appel, la conversation repart de zéro.
   Future<void> clearHistory() async {
+    final uid = _activeUid;
+    final epoch = _sessionEpoch;
+    if (uid == null || _disposed) return;
     await _service.clearHistory();
+    if (!_isCurrentSession(uid, epoch)) return;
     _messages.clear();
     _conversationId = null;
     _error = null;
-    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (!_isCurrentSession(uid, epoch)) return;
+    await prefs.remove(_conversationKey(uid));
+    if (_isCurrentSession(uid, epoch)) _safeNotify();
   }
 
   /// Confirme ou annule l'action AZ IA actuellement en attente
@@ -342,15 +428,18 @@ class AzIaProvider extends ChangeNotifier {
   /// exactement comme une réponse normale d'AZ IA.
   Future<void> _resolvePendingAction(bool confirm) async {
     final action = _pendingAction;
-    if (action == null || _confirming) return;
+    final uid = _activeUid;
+    final epoch = _sessionEpoch;
+    if (action == null || uid == null || _confirming || _disposed) return;
     debugPrint(
         '[AZ_IA_CONFIRM_ACTION] uid=$_activeUid actionId=${action.id} outil=${action.toolName} confirm=$confirm');
     _confirming = true;
-    notifyListeners();
+    _safeNotify();
 
     try {
       final result =
           await _service.confirmAction(actionId: action.id, confirm: confirm);
+      if (!_isCurrentSession(uid, epoch)) return;
       final message = result['message'] as String? ??
           result['error'] as String? ??
           (confirm ? 'Action confirmée ✅' : 'Action annulée.');
@@ -364,6 +453,7 @@ class AzIaProvider extends ChangeNotifier {
       _messages.add(AzIaMessage(
           sender: AzIaSender.assistant, text: message, response: response));
     } catch (e, st) {
+      if (!_isCurrentSession(uid, epoch)) return;
       debugPrint(
           '[AZ_IA_ERROR] confirmAction uid=$_activeUid actionId=${action.id} confirm=$confirm exception=$e');
       debugPrintStack(stackTrace: st);
@@ -380,9 +470,11 @@ class AzIaProvider extends ChangeNotifier {
       // déjà disparaître _pendingAction via le stream — ce reset local évite
       // juste un court affichage résiduel de la carte le temps que le
       // stream se mette à jour.
-      _pendingAction = null;
-      _confirming = false;
-      notifyListeners();
+      if (_isCurrentSession(uid, epoch)) {
+        _pendingAction = null;
+        _confirming = false;
+        _safeNotify();
+      }
     }
   }
 

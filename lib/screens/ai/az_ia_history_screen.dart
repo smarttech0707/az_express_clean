@@ -100,10 +100,10 @@ class _AzIaHistoryScreenState extends State<AzIaHistoryScreen> {
                   trailing: const Icon(Icons.chevron_right,
                       color: AzIaTheme.textSecondary),
                   onTap: () async {
-                    await context
+                    final opened = await context
                         .read<AzIaProvider>()
                         .openConversation(conversation.id);
-                    if (context.mounted) Navigator.pop(context, true);
+                    if (context.mounted && opened) Navigator.pop(context, true);
                   },
                 ),
               );
