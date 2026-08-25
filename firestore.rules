@@ -39,6 +39,19 @@ service cloud.firestore {
     function notPresent(field) {
       return !(field in request.resource.data);
     }
+    function walletDebitMatchesPaidOrder() {
+      let client = /databases/$(database)/documents/clients/$(uid());
+      let amount = request.resource.data.get('sellerType', '') == 'boulangerie'
+        ? request.resource.data.get('totalAmount', -1)
+        : request.resource.data.budget + request.resource.data.get('shoppingBudget', 0);
+      return exists(client)
+        && get(client).data.wallet is int
+        && getAfter(client).data.wallet is int
+        && request.resource.data.get('shoppingBudget', 0) is int
+        && amount is int
+        && getAfter(client).data.wallet == get(client).data.wallet
+          - amount;
+    }
 
     // Vérifie que la session courante correspond à la pharmacie propriétaire de la commande.
     // Nécessite que pharmacies/{id}.currentUid soit sauvegardé par l'app Flutter après connexion.
@@ -52,11 +65,12 @@ service cloud.firestore {
     match /admins/{adminId} {
       allow read:  if isOwner(adminId) || isAdmin();
       // Super admin peut tout modifier (permissions, rôle, isActive…)
-      // Tout admin peut mettre à jour uniquement ses propres champs OTP (2FA login)
+      // Tout admin peut mettre à jour uniquement ses propres champs OTP (2FA
+      // login) et sa propre photo de profil (Master Prompt "photos manquantes").
       allow write: if isSuperAdmin()
         || (isOwner(adminId) && isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['otpHash', 'otpCode', 'otpExpiry', 'otpAttempts', 'fcmToken']));
+              .hasOnly(['otpHash', 'otpCode', 'otpExpiry', 'otpAttempts', 'fcmToken', 'photoUrl']));
     }
 
     match /clients/{clientId} {
@@ -133,7 +147,12 @@ service cloud.firestore {
     match /sellers/{sellerId} {
       allow read:   if isOwner(sellerId) || isAdmin();
       allow create: if isAdmin();
-      allow update: if isAdmin() || (isOwner(sellerId) && unchanged('wallet'));
+      allow update: if isAdmin() || (isOwner(sellerId)
+        && unchanged('wallet')
+        && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
+        && unchanged('vipStatus') && unchanged('vipExpiresAt')
+        && unchanged('vipStartedAt') && unchanged('plan')
+        && unchanged('priorityLevel') && unchanged('paymentStatus'));
       allow delete: if isAdmin();
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(sellerId) || isAdmin();
@@ -209,7 +228,9 @@ service cloud.firestore {
           && unchanged('subscriptionExpiresAt')
           && unchanged('vipStatus')
           && unchanged('vipExpiresAt')
-          && unchanged('vipStartedAt'));
+          && unchanged('vipStartedAt')
+          && unchanged('plan') && unchanged('priorityLevel')
+          && unchanged('paymentStatus'));
       allow delete: if isAdmin();
       match /menu_items/{itemId} {
         allow read:  if isAuth();
@@ -265,6 +286,28 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Tours de garde publics, distincts des comptes pharmacies partenaires.
+    // Le client ne voit que les entrées actives et vérifiées. Les écritures
+    // restent exclusivement administratives ; les synchronisations serveur
+    // utilisent l'Admin SDK et ne dépendent pas de ces règles.
+    match /pharmacy_guards/{guardId} {
+      allow read: if isAdmin() || (isAuth()
+        && resource.data.isActive == true
+        && resource.data.isVerified == true);
+      allow create, update: if isAdmin()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.city is string
+        && request.resource.data.city.size() > 0
+        && request.resource.data.guardStartAt is timestamp
+        && request.resource.data.guardEndAt is timestamp
+        && request.resource.data.guardEndAt > request.resource.data.guardStartAt
+        && request.resource.data.sourceType in ['manual', 'external', 'partner']
+        && request.resource.data.isVerified is bool
+        && request.resource.data.isActive is bool;
+      allow delete: if isAdmin();
+    }
+
     // Contrairement à driver_requests/seller_requests/restaurant_requests
     // (qui créent un vrai compte Firebase Auth email/mot de passe AVANT
     // d'écrire la demande, donc uid() == leur propre uid trivialement),
@@ -299,7 +342,9 @@ service cloud.firestore {
           && unchanged('subscriptionStatus')
           && unchanged('subscriptionExpiresAt')
           && unchanged('vipStatus')
-          && unchanged('vipExpiresAt'));
+          && unchanged('vipExpiresAt')
+          && unchanged('vipStartedAt') && unchanged('plan')
+          && unchanged('priorityLevel') && unchanged('paymentStatus'));
       allow delete: if isAdmin();
     }
 
@@ -330,7 +375,8 @@ service cloud.firestore {
         // dont isPaid est devenu true.
         && (request.resource.data.isPaid == false
             || (request.resource.data.isPaid == true
-                && request.resource.data.get('paymentMethod', '') == 'wallet'))
+                && request.resource.data.get('paymentMethod', '') == 'wallet'
+                && walletDebitMatchesPaidOrder()))
         && request.resource.data.status == 'pending';
       allow update: if isAdmin() ||
         (isAuth() && resource.data.driverId == uid()
@@ -348,7 +394,27 @@ service cloud.firestore {
             || (resource.data.status == request.resource.data.status)
           )
         ) ||
+        // Une boulangerie ne pilote que la préparation : elle ne peut jamais
+        // réécrire le prix, les articles, le client, l'adresse ou les
+        // coordonnées d'une commande déjà créée. Le tableau de bord ne fait
+        // que ces deux transitions sellerStatus (voir
+        // boulangerie_dashboard.dart:_updateSellerStatus).
         (isAuth() && resource.data.sellerId == uid()
+          && resource.data.get('sellerType', '') == 'boulangerie'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['sellerStatus'])
+          && (
+            ((resource.data.get('sellerStatus', null) == null
+                || resource.data.get('sellerStatus', '') == '')
+              && request.resource.data.sellerStatus == 'preparing')
+            || (resource.data.get('sellerStatus', '') == 'preparing'
+              && request.resource.data.sellerStatus == 'ready')
+          )) ||
+        // Les autres partenaires conservent leur flux existant ; le
+        // resserrement ci-dessus est volontairement limité au module
+        // Boulangerie audité.
+        (isAuth() && resource.data.sellerId == uid()
+          && resource.data.get('sellerType', '') != 'boulangerie'
           && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
           && unchanged('paymentMethod') && unchanged('driverId') && unchanged('status')) ||
         // Client annule sa commande en attente
@@ -415,33 +481,53 @@ service cloud.firestore {
         && request.resource.data.amount >= 100;
       allow update: if isAdmin() ||
         (isAuth() && (
+          // Assignment is server-only: it snapshots the agent's number for
+          // the requested operator and rejects suspended/unsubscribed agents.
           (resource.data.status == 'pending'
-            && request.resource.data.status in ['assigned', 'awaiting_deposit']
+            && request.resource.data.status == 'server_assigned_only'
             && request.resource.data.agentId == uid()
             && unchanged('clientId') && unchanged('amount') && unchanged('fee')
             && unchanged('totalPaid') && unchanged('paymentMethod')) ||
           (resource.data.status == 'assigned' && resource.data.agentId == uid()
             && request.resource.data.status == 'in_progress'
             && unchanged('clientId') && unchanged('agentId')) ||
-          (resource.data.status == 'awaiting_deposit' && resource.data.agentId == uid()
+          // Deposit confirmation is Cloud Function only; an agent cannot
+          // directly promote awaiting_deposit to in_progress.
+          (resource.data.status == 'deposit_confirmed' && resource.data.agentId == uid()
             && request.resource.data.status == 'in_progress'
-            && unchanged('clientId') && unchanged('agentId') && unchanged('amount')) ||
+            && unchanged('clientId') && unchanged('agentId') && unchanged('amount')
+            && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
+            && unchanged('agentDepositAccountId')
+            && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.isVerified == true
+            && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.isSuspended != true
+            && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.subscriptionStatus in ['trial', 'active']) ||
           (resource.data.status == 'in_progress' && resource.data.agentId == uid()
             && request.resource.data.status == 'proof_sent'
-            && unchanged('clientId') && unchanged('agentId') && unchanged('amount'))
+            && unchanged('clientId') && unchanged('agentId') && unchanged('amount')
+            && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
+            && unchanged('agentDepositAccountId'))
         )) ||
         (isAuth() && resource.data.clientId == uid() && (
           // completed : interdit en direct — passe obligatoirement par ekClientConfirmOrder (CF)
           // pour créditer le wallet agent atomiquement
+          // agentDepositNumber/Operator/AccountId : figés dès l'acceptation
+          // (snapshot immuable écrit par ekbineAcceptOrder) — le client ne
+          // doit jamais pouvoir les modifier, y compris en profitant d'une
+          // transition par ailleurs légitime (annulation, litige).
           ((resource.data.status == 'pending' || resource.data.status == 'awaiting_deposit')
             && request.resource.data.status == 'cancelled'
-            && unchanged('agentId') && unchanged('amount')) ||
+            && unchanged('agentId') && unchanged('amount')
+            && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
+            && unchanged('agentDepositAccountId')) ||
+          // Deposit proof is written only by ekbineSubmitDepositProof.
           (resource.data.status == 'awaiting_deposit'
-            && request.resource.data.status == 'awaiting_deposit'
+            && request.resource.data.status == 'server_deposit_proof_only'
             && unchanged('agentId') && unchanged('amount') && unchanged('agentEarning')) ||
           (resource.data.status == 'proof_sent'
             && request.resource.data.status == 'disputed'
-            && unchanged('agentId') && unchanged('amount'))
+            && unchanged('agentId') && unchanged('amount')
+            && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
+            && unchanged('agentDepositAccountId'))
         ));
       allow delete: if isAdmin();
     }
@@ -452,11 +538,20 @@ service cloud.firestore {
         && request.resource.data.isVerified  == false
         && request.resource.data.isSuspended == false
         && request.resource.data.walletBalance  == 0
-        && request.resource.data.totalCompleted == 0;
+        && request.resource.data.totalCompleted == 0
+        && !request.resource.data.keys().hasAny([
+          'subscriptionStatus', 'subscriptionExpiresAt',
+          'vipStatus', 'vipExpiresAt', 'vipStartedAt',
+          'plan', 'priorityLevel', 'paymentStatus'
+        ]);
       allow update: if isAdmin() ||
         (isOwner(agentId) && unchanged('walletBalance') && unchanged('isVerified')
           && unchanged('isSuspended') && unchanged('rating') && unchanged('ratingCount')
-          && unchanged('totalCompleted')) ||
+          && unchanged('totalCompleted')
+          && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
+          && unchanged('vipStatus') && unchanged('vipExpiresAt')
+          && unchanged('vipStartedAt') && unchanged('plan')
+          && unchanged('priorityLevel') && unchanged('paymentStatus')) ||
         // Wallet crédité uniquement via Cloud Function ekClientConfirmOrder
         // Écriture directe depuis le client interdite pour éviter l'injection de montants arbitraires
         // Client note l'agent après service — lié à une commande completed de cet agent
@@ -499,14 +594,18 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (isRealUser() && resource.data.sellerId == uid())
         || (isAuth() && resource.data.get('status', 'active') == 'active');
-      allow create: if isRealUser()
-        && request.resource.data.sellerId == uid()
-        && request.resource.data.status in ['active', 'hidden']
-        && request.resource.data.price is int && request.resource.data.price > 0;
+      // Création exclusivement via publishMarketplaceProduct : les règles ne
+      // peuvent pas compter atomiquement les annonces actives d'un vendeur.
+      allow create: if isAdmin();
       allow update: if isAdmin()
         // Propriétaire modifie son annonce (sans toucher views/favoritesCount)
         || (isRealUser() && resource.data.sellerId == uid()
-          && unchanged('sellerId') && unchanged('views') && unchanged('favoritesCount'))
+          && unchanged('sellerId') && unchanged('views') && unchanged('favoritesCount')
+          && unchanged('expiresAt') && unchanged('sellerVerified')
+          && unchanged('sellerVipStatus') && unchanged('priorityLevel')
+          && (unchanged('status')
+            || (resource.data.status == 'active'
+              && request.resource.data.status in ['hidden', 'sold'])))
         // N'importe quel utilisateur peut incrémenter les vues uniquement
         || (isAuth()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views']))
@@ -584,20 +683,61 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // GPS privé/confidentialité réelle V2 — les champs de localisation
+    // sensibles (coordonnées exactes/publiques calculées, drapeau de
+    // confidentialité) ne sont plus jamais écrits directement par le
+    // client : uniquement via la Cloud Function upsertRealEstateLocation
+    // (functions/realEstateLocation.js), qui dérive elle-même le geohash et
+    // l'approximation côté serveur. La liste ci-dessous couvre aussi les
+    // anciens noms de champs hérités (lat/lng/latitude/longitude) — plus
+    // aucun n'est autorisé en écriture directe, qu'ils soient exacts ou non.
+    function locationFieldsUnchanged() {
+      return unchanged('publicLatitude') && unchanged('publicLongitude')
+        && unchanged('publicGeohash') && unchanged('hasExactLocation')
+        && unchanged('locationUpdatedAt') && unchanged('locationPrivacy')
+        && unchanged('lat') && unchanged('lng')
+        && unchanged('latitude') && unchanged('longitude');
+    }
+    function noDirectLocationFieldsOnCreate() {
+      return notPresent('publicLatitude') && notPresent('publicLongitude')
+        && notPresent('publicGeohash') && notPresent('hasExactLocation')
+        && notPresent('locationUpdatedAt') && notPresent('locationPrivacy')
+        && notPresent('lat') && notPresent('lng')
+        && notPresent('latitude') && notPresent('longitude');
+    }
+
     match /real_estate_listings/{listingId} {
       allow read: if isAdmin()
         || (isRealUser() && resource.data.agentId == uid())
         || (isAuth() && resource.data.get('status', 'active') == 'active');
       allow create: if isRealUser()
         && request.resource.data.agentId == uid()
+        && exists(/databases/$(database)/documents/real_estate_agents/$(uid()))
+        && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isVerified == true
+        && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isActive == true
         && request.resource.data.status in ['active', 'hidden']
-        && request.resource.data.price is int && request.resource.data.price > 0;
+        && request.resource.data.price is int && request.resource.data.price > 0
+        && noDirectLocationFieldsOnCreate();
       allow update: if isAdmin()
+        // Master Prompt "Immobilier V6.2" — Mission 11 : `createdAt` n'était
+        // jusqu'ici protégé par aucune règle — seuls `agentId`/`views`
+        // l'étaient — un `.update()` normal du propriétaire aurait donc pu
+        // réécrire silencieusement la date de création. Durci ici, seul
+        // ajout de cette mission (le reste de la règle était déjà correct :
+        // agentId immuable, GPS jamais modifiable en écriture directe).
         || (isRealUser() && resource.data.agentId == uid()
-          && unchanged('agentId') && unchanged('views'))
+          && exists(/databases/$(database)/documents/real_estate_agents/$(uid()))
+          && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isVerified == true
+          && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isActive == true
+          && unchanged('agentId') && unchanged('views') && unchanged('createdAt')
+          && locationFieldsUnchanged())
         || (isAuth()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views']));
-      allow delete: if isAdmin() || (isRealUser() && resource.data.agentId == uid());
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])
+          && request.resource.data.views == resource.data.views + 1);
+      allow delete: if isAdmin() || (isRealUser() && resource.data.agentId == uid()
+        && exists(/databases/$(database)/documents/real_estate_agents/$(uid()))
+        && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isVerified == true
+        && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isActive == true);
     }
 
     // Demandes de visite — écriture exclusivement via requestPropertyVisit()/
@@ -605,6 +745,29 @@ service cloud.firestore {
     match /real_estate_visit_requests/{requestId} {
       allow read: if isAdmin()
         || (isAuth() && (resource.data.clientId == uid() || resource.data.agentId == uid()));
+      allow write: if false;
+    }
+
+    // Coordonnées EXACTES d'une annonce — jamais lues par un utilisateur
+    // anonyme, un client sans visite confirmée, ou un autre agent. Écriture
+    // exclusivement via upsertRealEstateLocation (Admin SDK, contourne ces
+    // règles), jamais depuis le client.
+    match /real_estate_private_locations/{listingId} {
+      allow read: if isAdmin()
+        || (isRealUser() && resource.data.agentId == uid())
+        || (isAuth()
+          && exists(/databases/$(database)/documents/real_estate_location_access/$(listingId + '_' + uid()))
+          && get(/databases/$(database)/documents/real_estate_location_access/$(listingId + '_' + uid())).data.isActive == true);
+      allow write: if false;
+    }
+
+    // Autorisation d'accès à la localisation exacte, accordée uniquement par
+    // respondToVisitRequest() lors d'une confirmation réelle de visite
+    // (jamais sur un refus/une annulation — voir functions/realestate.js).
+    // Clé de document : {listingId}_{clientId}, pour un get() direct et
+    // fiable depuis les Rules ci-dessus (une query n'y est pas possible).
+    match /real_estate_location_access/{accessId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.clientId == uid());
       allow write: if false;
     }
 
@@ -741,9 +904,22 @@ service cloud.firestore {
     match /places/{placeId} {
       allow read:   if isAuth();
       allow create: if isAdmin() || (isAuth()
-        && request.resource.data.keys().hasAll(['name','latitude','longitude'])
+        && request.resource.data.keys().hasAll(
+          ['name','latitude','longitude','source'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
         && request.resource.data.latitude is number
-        && request.resource.data.longitude is number);
+        && request.resource.data.longitude is number
+        && request.resource.data.source is string
+        && request.resource.data.source.size() > 0
+        && request.resource.data.get('verified', false) == false
+        && (!('cityId' in request.resource.data)
+          || request.resource.data.cityId is string)
+        && (!('normalizedName' in request.resource.data)
+          || request.resource.data.normalizedName is string)
+        && (!('aliases' in request.resource.data)
+          || request.resource.data.aliases is list)
+        && !('coordinateSource' in request.resource.data));
       allow update: if isAdmin()
         || (isAuth() && request.resource.data.diff(resource.data)
               .affectedKeys().hasOnly(['searchCount', 'updatedAt']));
@@ -978,6 +1154,207 @@ service cloud.firestore {
     match /ai_reminders/{reminderId} {
       allow read:  if isAuth() && (resource.data.uid == uid() || isAdmin());
       allow write: if false;
+    }
+
+    // ── Événementiel : boutiques, catalogue et réservations multi-prestations
+    match /event_providers/{providerId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.ownerId == uid())
+        || (isAuth() && resource.data.status == 'approved'
+          && resource.data.get('isSuspended', false) == false);
+      allow create: if isRealUser()
+        && providerId == uid()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.get('isSuspended', false) == false
+        && request.resource.data.requestedPlan in ['standard', 'premium', 'vvip']
+        && request.resource.data.get('planStatus', 'pending') == 'pending'
+        && !('plan' in request.resource.data)
+        && !('priorityLevel' in request.resource.data)
+        && !('planStartedAt' in request.resource.data)
+        && !('trialStartedAt' in request.resource.data)
+        && !('trialEndsAt' in request.resource.data)
+        && !('planEndsAt' in request.resource.data)
+        && !('monthlyPrice' in request.resource.data)
+        && !('isLaunchPrice' in request.resource.data)
+        && !('paymentStatus' in request.resource.data)
+        && !('documents' in request.resource.data);
+      allow update: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && unchanged('status') && unchanged('isSuspended')
+          && unchanged('rating') && unchanged('reviewCount')
+          && unchanged('plan') && unchanged('priorityLevel')
+          && unchanged('planStatus') && unchanged('planStartedAt')
+          && unchanged('trialStartedAt') && unchanged('trialEndsAt')
+          && unchanged('planEndsAt') && unchanged('monthlyPrice')
+          && unchanged('isLaunchPrice') && unchanged('paymentStatus'));
+      allow delete: if isAdmin();
+
+      match /history/{historyId} {
+        allow read: if isAdmin()
+          || (isAuth()
+            && get(/databases/$(database)/documents/event_providers/$(providerId)).data.ownerId == uid());
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    match /event_provider_documents/{providerId} {
+      allow read: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid());
+      allow create: if isRealUser()
+        && providerId == uid()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.providerId == providerId;
+      allow update: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.providerId == resource.data.providerId);
+      allow delete: if isAdmin();
+    }
+
+    match /event_offers/{offerId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.ownerId == uid())
+        || (isAuth() && resource.data.get('isActive', false) == true);
+      allow create: if isRealUser()
+        && request.resource.data.ownerId == uid()
+        && existsAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId))
+        && getAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.ownerId == uid()
+        && (
+          (getAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.status == 'approved'
+            && getAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.get('isSuspended', false) == false)
+          || (getAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.status == 'pending'
+            && request.resource.data.get('isActive', false) == false)
+        )
+        && request.resource.data.unitPrice is int
+        && request.resource.data.unitPrice >= 0
+        && request.resource.data.availableQuantity is int
+        && request.resource.data.availableQuantity > 0
+        // Correction ciblée "Protection à la création des event_offers" :
+        // aucun champ administratif/tarifaire/priorité ne peut être injecté
+        // par le client à la création (symétrique à event_providers ci-dessus).
+        && !('plan' in request.resource.data)
+        && !('planStatus' in request.resource.data)
+        && !('priorityLevel' in request.resource.data)
+        && !('featuredUntil' in request.resource.data)
+        && !('paymentStatus' in request.resource.data)
+        && !('monthlyPrice' in request.resource.data)
+        && !('isLaunchPrice' in request.resource.data)
+        && !('planStartedAt' in request.resource.data)
+        && !('trialStartedAt' in request.resource.data)
+        && !('trialEndsAt' in request.resource.data)
+        && !('planEndsAt' in request.resource.data);
+      allow update: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.providerId == resource.data.providerId
+          && unchanged('priorityLevel') && unchanged('plan')
+          && unchanged('planStatus') && unchanged('featuredUntil')
+          && request.resource.data.unitPrice is int
+          && request.resource.data.unitPrice >= 0
+          && request.resource.data.availableQuantity is int
+          && request.resource.data.availableQuantity > 0);
+      allow delete: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid());
+    }
+
+    match /event_reservations/{reservationId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.clientId == uid())
+        || (isAuth() && uid() in resource.data.providerIds);
+      allow create: if isAuth()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.items.size() <= 50
+        && request.resource.data.totalAmount is int
+        && request.resource.data.totalAmount >= 0
+        && request.resource.data.paymentMethod in ['wallet', 'cash', 'future']
+        && (
+          (request.resource.data.paymentMethod == 'wallet'
+            && request.resource.data.isPaid == true
+            && exists(/databases/$(database)/documents/clients/$(uid()))
+            && getAfter(/databases/$(database)/documents/clients/$(uid())).data.wallet
+              == get(/databases/$(database)/documents/clients/$(uid())).data.wallet
+                - request.resource.data.totalAmount)
+          || (request.resource.data.paymentMethod != 'wallet'
+            && request.resource.data.isPaid == false)
+        );
+      allow update: if isAdmin()
+        || (isAuth() && resource.data.clientId == uid()
+          && resource.data.status in ['pending', 'confirmed']
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status == 'cancelled')
+        || (isRealUser() && uid() in resource.data.providerIds
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in ['confirmed', 'completed', 'cancelled']);
+      allow delete: if isAdmin();
+    }
+
+    match /event_reviews/{reviewId} {
+      allow read: if isAuth();
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && exists(/databases/$(database)/documents/event_reservations/$(request.resource.data.reservationId))
+        && get(/databases/$(database)/documents/event_reservations/$(request.resource.data.reservationId)).data.clientId == uid()
+        && get(/databases/$(database)/documents/event_reservations/$(request.resource.data.reservationId)).data.status == 'completed';
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /event_reports/{reportId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.reporterId == uid());
+      allow create: if isAuth()
+        && request.resource.data.reporterId == uid()
+        && request.resource.data.status == 'open';
+      allow update, delete: if isAdmin();
+    }
+
+    match /event_chats/{chatId} {
+      allow read: if isAdmin()
+        || (isAuth() && uid() in resource.data.participantIds);
+        allow create: if isAuth()
+          && uid() in request.resource.data.participantIds
+          && request.resource.data.participantIds.size() == 2
+          && request.resource.data.clientId == uid()
+          && exists(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId))
+          && get(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.ownerId
+              in request.resource.data.participantIds;
+      allow update: if isAuth() && uid() in resource.data.participantIds
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['lastMessage', 'lastSenderId', 'updatedAt'])
+          && (
+            request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['updatedAt'])
+            || (
+              request.resource.data.lastSenderId == uid()
+              && request.resource.data.lastMessage is string
+              && request.resource.data.lastMessage.size() <= 2000
+            )
+          );
+      allow delete: if isAdmin();
+      match /messages/{messageId} {
+        allow read: if isAdmin()
+          || (isAuth()
+            && uid() in get(/databases/$(database)/documents/event_chats/$(chatId)).data.participantIds);
+        allow create: if isAuth()
+          && request.resource.data.senderId == uid()
+          && request.resource.data.keys()
+              .hasOnly(['senderId', 'text', 'createdAt'])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000
+          && uid() in get(/databases/$(database)/documents/event_chats/$(chatId)).data.participantIds;
+        allow update, delete: if false;
+      }
     }
   }
 }

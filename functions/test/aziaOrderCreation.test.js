@@ -293,7 +293,13 @@ test('AZ IA create_marketplace_order: confirmHandler debits the client AND credi
 
   const result = await db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', {
     productId: 'p1', quantity: 1, budget: 15000, title: 'iPhone 11',
-    sellerId: 's1', sellerName: 'Vendeur X', deliveryLat: 6.7, deliveryLng: -3.5,
+    sellerId: 's1', sellerName: 'Vendeur X',
+    pickupLat: 6.71, pickupLng: -3.51,
+    deliveryLat: 6.7, deliveryLng: -3.5,
+    pickupCityId: 'abengourou', pickupZoneId: 'zone-vendeur',
+    deliveryCityId: 'abengourou', deliveryZoneId: 'zone-client',
+    pickupCoordinateSource: 'local_place', deliveryCoordinateSource: 'gps',
+    cityResolutionStatus: 'resolved',
     paymentMethod: 'wallet',
   }));
 
@@ -303,6 +309,12 @@ test('AZ IA create_marketplace_order: confirmHandler debits the client AND credi
   const order = findOrder(store);
   assert.equal(order[1].sellerType, 'seller');
   assert.equal(order[1].isPaid, true);
+  assert.equal(order[1].latitude, 6.71);
+  assert.equal(order[1].longitude, -3.51);
+  assert.equal(order[1].destLat, 6.7);
+  assert.equal(order[1].destLng, -3.5);
+  assert.equal(order[1].pickupCityId, 'abengourou');
+  assert.equal(order[1].deliveryCityId, 'abengourou');
 });
 
 test('AZ IA create_marketplace_order: confirmHandler rejects a product that is no longer active (commande impossible)', async () => {

@@ -19,11 +19,10 @@ class AdminLiveTrackingPage extends StatefulWidget {
 }
 
 class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
-
   // ── Carte ──────────────────────────────────────────────────────────────────
   GoogleMapController? _mapCtrl;
-  Set<Marker>          _markers = {};
-  BitmapDescriptor?    _motoIcon;
+  Set<Marker> _markers = {};
+  BitmapDescriptor? _motoIcon;
 
   // ── Données livreurs ───────────────────────────────────────────────────────
   final List<_DriverStatus> _drivers = [];
@@ -71,16 +70,16 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
           ? DateTime.now().difference(updatedAt).inSeconds
           : 9999;
       return _DriverStatus(
-        id:        doc.id,
-        name:      d['name']  as String? ?? 'Livreur',
-        phone:     d['phone'] as String? ?? '',
-        lat:       lat,
-        lng:       lng,
-        heading:   (d['heading'] as num?)?.toDouble() ?? 0,
-        speed:     (d['speed']  as num?)?.toDouble() ?? 0,
+        id: doc.id,
+        name: d['name'] as String? ?? 'Livreur',
+        phone: d['phone'] as String? ?? '',
+        lat: lat,
+        lng: lng,
+        heading: (d['heading'] as num?)?.toDouble() ?? 0,
+        speed: (d['speed'] as num?)?.toDouble() ?? 0,
         updatedAt: updatedAt,
         secsSince: secsSince,
-        gpsOk:     lat != null && lng != null && secsSince < 60,
+        gpsOk: lat != null && lng != null && secsSince < 60,
       );
     }).toList();
 
@@ -100,20 +99,19 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
     for (final d in _drivers) {
       if (d.lat == null || d.lng == null) continue;
       markers.add(Marker(
-        markerId:   MarkerId(d.id),
-        position:   LatLng(d.lat!, d.lng!),
-        icon:       _motoIcon ?? BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueOrange),
+        markerId: MarkerId(d.id),
+        position: LatLng(d.lat!, d.lng!),
+        icon: _motoIcon ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
         infoWindow: InfoWindow(
-          title:   d.name,
-          snippet: d.gpsOk
-              ? '${d.speedKmh.toStringAsFixed(0)} km/h'
-              : 'GPS inactif',
+          title: d.name,
+          snippet:
+              d.gpsOk ? '${d.speedKmh.toStringAsFixed(0)} km/h' : 'GPS inactif',
         ),
-        rotation:   d.heading,
-        flat:       true,
-        anchor:     const Offset(0.5, 0.5),
-        zIndexInt:  d.gpsOk ? 2 : 1,
+        rotation: d.heading,
+        flat: true,
+        anchor: const Offset(0.5, 0.5),
+        zIndexInt: d.gpsOk ? 2 : 1,
       ));
     }
     setState(() => _markers = markers);
@@ -121,14 +119,14 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
 
   void _centerOn(_DriverStatus d) {
     if (d.lat == null || d.lng == null || _mapCtrl == null) return;
-    _mapCtrl!.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(d.lat!, d.lng!), 16));
+    _mapCtrl!
+        .animateCamera(CameraUpdate.newLatLngZoom(LatLng(d.lat!, d.lng!), 16));
   }
 
   @override
   Widget build(BuildContext context) {
     final online = _drivers.where((d) => d.gpsOk).length;
-    final total  = _drivers.length;
+    final total = _drivers.length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
@@ -143,15 +141,17 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
             padding: const EdgeInsets.only(right: 16),
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color:        Colors.white24,
+                  color: Colors.white24,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   '$online / $total en ligne',
                   style: GoogleFonts.urbanist(
-                      fontSize: 13, fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                       color: Colors.white),
                 ),
               ),
@@ -160,19 +160,20 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
         ],
       ),
       body: Column(children: [
-
         if (_streamError)
           Container(
             width: double.infinity,
             color: Colors.orange.shade100,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(children: [
-              const Icon(Icons.wifi_off_rounded, size: 16, color: Colors.deepOrange),
+              const Icon(Icons.wifi_off_rounded,
+                  size: 16, color: Colors.deepOrange),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Connexion perdue — les positions affichées peuvent être obsolètes.',
-                  style: GoogleFonts.urbanist(fontSize: 12, color: Colors.deepOrange.shade900),
+                  style: GoogleFonts.urbanist(
+                      fontSize: 12, color: Colors.deepOrange.shade900),
                 ),
               ),
             ]),
@@ -182,14 +183,14 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
         SizedBox(
           height: 280,
           child: GoogleMap(
-            initialCameraPosition: const CameraPosition(
-                target: _abengourou, zoom: 13),
-            markers:             _markers,
+            initialCameraPosition:
+                const CameraPosition(target: _abengourou, zoom: 13),
+            markers: _markers,
             zoomControlsEnabled: false,
-            compassEnabled:      true,
-            mapToolbarEnabled:   false,
-            myLocationEnabled:   false,
-            onMapCreated:        (ctrl) => _mapCtrl = ctrl,
+            compassEnabled: true,
+            mapToolbarEnabled: false,
+            myLocationEnabled: false,
+            onMapCreated: (ctrl) => _mapCtrl = ctrl,
           ),
         ),
 
@@ -198,11 +199,12 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
           child: total == 0
               ? _buildEmpty()
               : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                   itemCount: _drivers.length,
                   itemBuilder: (_, i) => _DriverTile(
                     driver: _drivers[i],
-                    onTap:  () => _centerOn(_drivers[i]),
+                    onTap: () => _centerOn(_drivers[i]),
                   ),
                 ),
         ),
@@ -210,15 +212,17 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
     );
   }
 
-  Widget _buildEmpty() => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-    Icon(Icons.delivery_dining_rounded,
-        size: 56, color: Colors.grey.shade300),
-    const SizedBox(height: 12),
-    Text('Aucun livreur en ligne',
-        style: GoogleFonts.urbanist(
-            fontSize: 15, fontWeight: FontWeight.w600,
-            color: Colors.grey.shade400)),
-  ]));
+  Widget _buildEmpty() => Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.delivery_dining_rounded,
+            size: 56, color: Colors.grey.shade300),
+        const SizedBox(height: 12),
+        Text('Aucun livreur en ligne',
+            style: GoogleFonts.urbanist(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade400)),
+      ]));
 
   @override
   void dispose() {
@@ -231,12 +235,12 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
 // ── Modèle interne ────────────────────────────────────────────────────────────
 
 class _DriverStatus {
-  final String   id, name, phone;
-  final double?  lat, lng;
-  final double   heading, speed;
+  final String id, name, phone;
+  final double? lat, lng;
+  final double heading, speed;
   final DateTime? updatedAt;
-  final int      secsSince;
-  final bool     gpsOk;
+  final int secsSince;
+  final bool gpsOk;
 
   const _DriverStatus({
     required this.id,
@@ -255,7 +259,7 @@ class _DriverStatus {
 
   String get lastUpdateStr {
     if (updatedAt == null) return 'jamais';
-    if (secsSince < 60)  return 'il y a ${secsSince}s';
+    if (secsSince < 60) return 'il y a ${secsSince}s';
     if (secsSince < 3600) return 'il y a ${secsSince ~/ 60} min';
     return DateFormat('HH:mm').format(updatedAt!);
   }
@@ -265,12 +269,12 @@ class _DriverStatus {
 
 class _DriverTile extends StatelessWidget {
   final _DriverStatus driver;
-  final VoidCallback  onTap;
+  final VoidCallback onTap;
   const _DriverTile({required this.driver, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final ok    = driver.gpsOk;
+    final ok = driver.gpsOk;
     final color = ok ? const Color(0xFF22C55E) : Colors.orange;
 
     return GestureDetector(
@@ -279,31 +283,37 @@ class _DriverTile extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 5),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color:        Colors.white,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           boxShadow: const [
-            BoxShadow(color: Color(0x10000000), blurRadius: 6, offset: Offset(0, 2)),
+            BoxShadow(
+                color: Color(0x10000000), blurRadius: 6, offset: Offset(0, 2)),
           ],
           border: Border.all(
-            color: ok ? const Color(0xFFDCFCE7) : const Color(0xFFFFF3E0)),
+              color: ok ? const Color(0xFFDCFCE7) : const Color(0xFFFFF3E0)),
         ),
         child: Row(children: [
-
           // Indicateur GPS
           Container(
-            width: 10, height: 10,
+            width: 10,
+            height: 10,
             decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 12),
 
           // Nom + téléphone
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(driver.name, style: GoogleFonts.urbanist(
-                fontSize: 14, fontWeight: FontWeight.w700)),
-            if (driver.phone.isNotEmpty)
-              Text(driver.phone, style: GoogleFonts.urbanist(
-                  fontSize: 11, color: Colors.grey.shade500)),
-          ])),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(driver.name,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 14, fontWeight: FontWeight.w700)),
+                if (driver.phone.isNotEmpty)
+                  Text(driver.phone,
+                      style: GoogleFonts.urbanist(
+                          fontSize: 11, color: Colors.grey.shade500)),
+              ])),
 
           // Stats
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [

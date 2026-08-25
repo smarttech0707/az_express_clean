@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -36,8 +36,10 @@ class _FleetRegisterState extends State<FleetRegister> {
   }
 
   Future<void> _pickIdPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
-    if (picked != null && mounted) setState(() => _idPhotoFile = File(picked.path));
+    final picked =
+        await ImagePicker().pickImage(source: source, imageQuality: 80);
+    if (picked != null && mounted)
+      setState(() => _idPhotoFile = File(picked.path));
   }
 
   void _showIdPhotoSource() {
@@ -53,12 +55,19 @@ class _FleetRegisterState extends State<FleetRegister> {
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFF6A1B9A)),
               title: const Text("Photographier la pièce d'identité"),
-              onTap: () { Navigator.pop(context); _pickIdPhoto(ImageSource.camera); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickIdPhoto(ImageSource.camera);
+              },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF6A1B9A)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF6A1B9A)),
               title: const Text("Importer depuis la galerie"),
-              onTap: () { Navigator.pop(context); _pickIdPhoto(ImageSource.gallery); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickIdPhoto(ImageSource.gallery);
+              },
             ),
             const SizedBox(height: 8),
           ],
@@ -94,8 +103,8 @@ class _FleetRegisterState extends State<FleetRegister> {
     setState(() => _loading = true);
 
     try {
-      final credential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
+      final credential =
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: "$id@az-fleet.ci",
         password: pass,
       );
@@ -103,24 +112,21 @@ class _FleetRegisterState extends State<FleetRegister> {
       final uid = credential.user!.uid;
 
       // Upload selfie
-      final selfieRef = FirebaseStorage.instance
-          .ref("fleet_selfies/$uid/selfie.jpg");
+      final selfieRef =
+          FirebaseStorage.instance.ref("fleet_selfies/$uid/selfie.jpg");
       await selfieRef.putFile(_selfieFile!);
       final selfieUrl = await selfieRef.getDownloadURL();
 
       // Upload pièce d'identité (si fournie)
       String idPhotoUrl = "";
       if (_idPhotoFile != null) {
-        final idRef = FirebaseStorage.instance
-            .ref("fleet_id_photos/$uid/id.jpg");
+        final idRef =
+            FirebaseStorage.instance.ref("fleet_id_photos/$uid/id.jpg");
         await idRef.putFile(_idPhotoFile!);
         idPhotoUrl = await idRef.getDownloadURL();
       }
 
-      await FirebaseFirestore.instance
-          .collection("fleet_owners")
-          .doc(uid)
-          .set({
+      await FirebaseFirestore.instance.collection("fleet_owners").doc(uid).set({
         "name": name,
         "phone": phone,
         "identifiant": id,
@@ -139,7 +145,8 @@ class _FleetRegisterState extends State<FleetRegister> {
         context: context,
         barrierDismissible: false,
         builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Row(
             children: [
               Icon(Icons.hourglass_top, color: Color(0xFF6A1B9A)),
@@ -369,8 +376,7 @@ class _FleetRegisterState extends State<FleetRegister> {
                         border: Border.all(
                           color: _idPhotoFile != null
                               ? Colors.green
-                              : const Color(0xFF6A1B9A)
-                                  .withValues(alpha: 0.4),
+                              : const Color(0xFF6A1B9A).withValues(alpha: 0.4),
                           width: 2,
                         ),
                       ),

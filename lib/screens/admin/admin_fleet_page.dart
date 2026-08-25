@@ -31,8 +31,8 @@ class _AdminFleetPageState extends State<AdminFleetPage>
       body: NestedScrollView(
         headerSliverBuilder: (context, _) => [
           SliverAppBar(
-            expandedHeight: (MediaQuery.of(context).size.height * 0.18)
-                .clamp(130.0, 190.0),
+            expandedHeight:
+                (MediaQuery.of(context).size.height * 0.18).clamp(130.0, 190.0),
             floating: false,
             pinned: true,
             backgroundColor: const Color(0xFF6A1B9A),
@@ -348,8 +348,7 @@ class _FleetCardState extends State<_FleetCard> {
                     size: 13, color: Colors.grey),
                 const SizedBox(width: 4),
                 Text(dateStr,
-                    style: const TextStyle(
-                        fontSize: 12, color: Colors.grey)),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
               ],
             ),
 
@@ -371,8 +370,7 @@ class _FleetCardState extends State<_FleetCard> {
                               side: const BorderSide(color: Colors.red),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
@@ -393,8 +391,7 @@ class _FleetCardState extends State<_FleetCard> {
                               backgroundColor: const Color(0xFF6A1B9A),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
@@ -464,9 +461,7 @@ class _StatusBadge extends StatelessWidget {
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
-                  color: color,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold)),
+                  color: color, fontSize: 11, fontWeight: FontWeight.bold)),
         ],
       ),
     );

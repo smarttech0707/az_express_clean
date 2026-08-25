@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -11,25 +11,29 @@ import '../../widgets/tap_effect.dart';
 import '../../theme/app_theme.dart';
 
 // ─── Constantes visuelles ───────────────────────────────────────────────────
-const _kOrange  = AppColors.primary;
+const _kOrange = AppColors.primary;
 const _kOrangeL = Color(0xFFFF8F00);
-const _kBg      = Color(0xFFF5F5F5);
+const _kBg = Color(0xFFF5F5F5);
 
 // ─── Opérateurs ─────────────────────────────────────────────────────────────
 class _Operator {
   final String id;
   final String label;
-  final Color  color;
+  final Color color;
   final String hint;
   final String logo;
   const _Operator(this.id, this.label, this.color, this.hint, this.logo);
 }
 
 const _operators = [
-  _Operator('mtn',    'MTN',    Color(0xFFFFBB00), 'Ex: 05 00 00 00 00', 'assets/payment/mtn.png'),
-  _Operator('orange', 'Orange', Color(0xFFFF6600), 'Ex: 07 00 00 00 00', 'assets/payment/orange.png'),
-  _Operator('moov',   'Moov',   Color(0xFF005EB8), 'Ex: 01 00 00 00 00', 'assets/payment/moov.png'),
-  _Operator('wave',   'Wave',   Color(0xFF00B9F1), 'Ex: 07 00 00 00 00', 'assets/payment/wave.png'),
+  _Operator('mtn', 'MTN', Color(0xFFFFBB00), 'Ex: 05 00 00 00 00',
+      'assets/payment/mtn.png'),
+  _Operator('orange', 'Orange', Color(0xFFFF6600), 'Ex: 07 00 00 00 00',
+      'assets/payment/orange.png'),
+  _Operator('moov', 'Moov', Color(0xFF005EB8), 'Ex: 01 00 00 00 00',
+      'assets/payment/moov.png'),
+  _Operator('wave', 'Wave', Color(0xFF00B9F1), 'Ex: 07 00 00 00 00',
+      'assets/payment/wave.png'),
 ];
 
 const _presets = [500, 1000, 2000, 5000, 10000, 25000];
@@ -47,16 +51,16 @@ class RechargeWalletScreen extends StatefulWidget {
 
 class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
   // ── Formulaire ──────────────────────────────────────────────────────────
-  int     _selectedPreset  = 1000;
-  bool    _useCustomAmount = false;
-  String  _selectedOp      = 'mtn';
-  int     _walletBalance   = 0;
+  int _selectedPreset = 1000;
+  bool _useCustomAmount = false;
+  String _selectedOp = 'mtn';
+  int _walletBalance = 0;
 
   final _amountCtrl = TextEditingController();
-  final _phoneCtrl  = TextEditingController();
+  final _phoneCtrl = TextEditingController();
 
   // ── États paiement ──────────────────────────────────────────────────────
-  bool    _loading      = false;
+  bool _loading = false;
   String? _txId;
   FeexPayTransaction? _tx;
   String? _errorMsg;
@@ -78,11 +82,11 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
 
   String get _collection {
     const map = {
-      'driver':      'livreurs',
-      'seller':      'sellers',
-      'restaurant':  'restaurants',
+      'driver': 'livreurs',
+      'seller': 'sellers',
+      'restaurant': 'restaurants',
       'boulangerie': 'boulangeries',
-      'pharmacie':   'pharmacies',
+      'pharmacie': 'pharmacies',
     };
     return map[widget.userType] ?? 'clients';
   }
@@ -97,13 +101,11 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
     }
   }
 
-  int get _amount =>
-      _useCustomAmount
-          ? (int.tryParse(_amountCtrl.text.trim()) ?? 0)
-          : _selectedPreset;
+  int get _amount => _useCustomAmount
+      ? (int.tryParse(_amountCtrl.text.trim()) ?? 0)
+      : _selectedPreset;
 
-  _Operator get _currentOp =>
-      _operators.firstWhere((o) => o.id == _selectedOp);
+  _Operator get _currentOp => _operators.firstWhere((o) => o.id == _selectedOp);
 
   // ── Lancer le paiement ──────────────────────────────────────────────────
   Future<void> _startPayment() async {
@@ -119,21 +121,21 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
     }
 
     setState(() {
-      _loading  = true;
+      _loading = true;
       _errorMsg = null;
     });
 
     try {
       final txId = await FeexPayService.initiatePayment(
-        amount:   _amount,
-        phone:    phone,
+        amount: _amount,
+        phone: phone,
         operator: _selectedOp,
         userType: widget.userType,
       );
 
       if (!mounted) return;
       setState(() {
-        _txId    = txId;
+        _txId = txId;
         _loading = false;
       });
 
@@ -149,7 +151,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loading  = false;
+        _loading = false;
         _errorMsg = e.toString().replaceAll('Exception: ', '');
       });
     }
@@ -164,8 +166,8 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
   void _reset() {
     _txSub?.cancel();
     setState(() {
-      _txId    = null;
-      _tx      = null;
+      _txId = null;
+      _tx = null;
       _errorMsg = null;
     });
   }
@@ -259,13 +261,13 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
           runSpacing: 10,
           children: [
             ..._presets.map((p) => _AmountChip(
-              amount:   p,
-              selected: !_useCustomAmount && _selectedPreset == p,
-              onTap: () => setState(() {
-                _selectedPreset  = p;
-                _useCustomAmount = false;
-              }),
-            )),
+                  amount: p,
+                  selected: !_useCustomAmount && _selectedPreset == p,
+                  onTap: () => setState(() {
+                    _selectedPreset = p;
+                    _useCustomAmount = false;
+                  }),
+                )),
             _CustomChip(
               selected: _useCustomAmount,
               onTap: () => setState(() => _useCustomAmount = true),
@@ -275,10 +277,10 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
         if (_useCustomAmount) ...[
           const SizedBox(height: 12),
           _inputField(
-            ctrl:  _amountCtrl,
-            hint:  'Montant personnalisé (min 100 FCFA)',
-            icon:  Icons.edit_rounded,
-            type:  TextInputType.number,
+            ctrl: _amountCtrl,
+            hint: 'Montant personnalisé (min 100 FCFA)',
+            icon: Icons.edit_rounded,
+            type: TextInputType.number,
             onChange: (_) => setState(() {}),
           ),
         ],
@@ -309,16 +311,20 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
                       width: selected ? 2 : 1,
                     ),
                     boxShadow: selected
-                        ? [BoxShadow(
-                            color: op.color.withValues(alpha: 0.25),
-                            blurRadius: 8, offset: const Offset(0, 3))]
+                        ? [
+                            BoxShadow(
+                                color: op.color.withValues(alpha: 0.25),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3))
+                          ]
                         : null,
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        width: 40, height: 40,
+                        width: 40,
+                        height: 40,
                         decoration: BoxDecoration(
                           color: op.color.withValues(alpha: 0.12),
                           shape: BoxShape.circle,
@@ -341,9 +347,8 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
                       Text(op.label,
                           style: GoogleFonts.urbanist(
                             fontSize: 10.5,
-                            fontWeight: selected
-                                ? FontWeight.bold
-                                : FontWeight.w500,
+                            fontWeight:
+                                selected ? FontWeight.bold : FontWeight.w500,
                             color: selected ? op.color : Colors.black87,
                           )),
                     ],
@@ -360,10 +365,10 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
         _sectionTitle('Numéro ${_currentOp.label}'),
         const SizedBox(height: 12),
         _inputField(
-          ctrl:  _phoneCtrl,
-          hint:  _currentOp.hint,
-          icon:  Icons.phone_rounded,
-          type:  TextInputType.phone,
+          ctrl: _phoneCtrl,
+          hint: _currentOp.hint,
+          icon: Icons.phone_rounded,
+          type: TextInputType.phone,
         ),
 
         const SizedBox(height: 8),
@@ -399,7 +404,8 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
             ),
             child: _loading
                 ? const SizedBox(
-                    width: 22, height: 22,
+                    width: 22,
+                    height: 22,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5))
                 : Text(
@@ -438,14 +444,15 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
       ),
       child: Column(
         children: [
-          _summaryRow('Montant',   '${_fmtAmount(_amount)} FCFA'),
+          _summaryRow('Montant', '${_fmtAmount(_amount)} FCFA'),
           const Divider(height: 16),
           _summaryRow('Opérateur', _currentOp.label),
           const Divider(height: 16),
-          _summaryRow('Téléphone', _phoneCtrl.text.trim().isEmpty
-              ? '—' : _phoneCtrl.text.trim()),
+          _summaryRow('Téléphone',
+              _phoneCtrl.text.trim().isEmpty ? '—' : _phoneCtrl.text.trim()),
           const Divider(height: 16),
-          _summaryRow('Nouveau solde',
+          _summaryRow(
+            'Nouveau solde',
             '${_fmtAmount(_walletBalance + _amount)} FCFA',
             bold: true,
           ),
@@ -455,41 +462,49 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
   }
 
   Widget _summaryRow(String label, String value, {bool bold = false}) => Row(
-    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-    children: [
-      Text(label,
-          style: GoogleFonts.urbanist(
-              fontSize: 13, color: Colors.grey.shade600)),
-      Text(value,
-          style: GoogleFonts.urbanist(
-              fontSize: 13,
-              fontWeight: bold ? FontWeight.bold : FontWeight.w600,
-              color: bold ? _kOrange : Colors.black87)),
-    ],
-  );
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: GoogleFonts.urbanist(
+                  fontSize: 13, color: Colors.grey.shade600)),
+          Text(value,
+              style: GoogleFonts.urbanist(
+                  fontSize: 13,
+                  fontWeight: bold ? FontWeight.bold : FontWeight.w600,
+                  color: bold ? _kOrange : Colors.black87)),
+        ],
+      );
 
   // ══════════════════════════════════════════════════════════════════════════
   // STATUT PAIEMENT
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildPaymentStatus() {
-    final isDone     = _tx?.isCompleted  ?? false;
-    final isFailed   = _tx?.isFailed     ?? false;
+    final isDone = _tx?.isCompleted ?? false;
+    final isFailed = _tx?.isFailed ?? false;
     final isCancelled = _tx?.isCancelled ?? false;
-    final isPending  = !isDone && !isFailed && !isCancelled;
+    final isPending = !isDone && !isFailed && !isCancelled;
 
-    final icon  = isDone      ? Icons.check_circle_rounded
-        : isFailed            ? Icons.cancel_rounded
-        : isCancelled         ? Icons.cancel_outlined
-        : Icons.hourglass_top_rounded;
+    final icon = isDone
+        ? Icons.check_circle_rounded
+        : isFailed
+            ? Icons.cancel_rounded
+            : isCancelled
+                ? Icons.cancel_outlined
+                : Icons.hourglass_top_rounded;
 
-    final color = isDone      ? const Color(0xFF2E7D32)
-        : isFailed || isCancelled ? Colors.red
-        : _kOrange;
+    final color = isDone
+        ? const Color(0xFF2E7D32)
+        : isFailed || isCancelled
+            ? Colors.red
+            : _kOrange;
 
-    final title = isDone      ? 'Wallet crédité  ✓'
-        : isFailed            ? 'Paiement échoué'
-        : isCancelled         ? 'Paiement annulé'
-        : 'En attente de confirmation…';
+    final title = isDone
+        ? 'Wallet crédité  ✓'
+        : isFailed
+            ? 'Paiement échoué'
+            : isCancelled
+                ? 'Paiement annulé'
+                : 'En attente de confirmation…';
 
     final subtitle = isDone
         ? 'Votre wallet a été crédité de ${_fmtAmount(_amount)} FCFA.\nNouvel solde : ${_fmtAmount(_walletBalance)} FCFA.'
@@ -509,18 +524,18 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
           child: isPending
               ? SizedBox(
                   key: const ValueKey('spin'),
-                  width: 80, height: 80,
-                  child: CircularProgressIndicator(
-                      color: color, strokeWidth: 3))
-              : Icon(icon,
-                  key: ValueKey(icon), color: color, size: 80),
+                  width: 80,
+                  height: 80,
+                  child:
+                      CircularProgressIndicator(color: color, strokeWidth: 3))
+              : Icon(icon, key: ValueKey(icon), color: color, size: 80),
         ),
 
         const SizedBox(height: 24),
 
         Text(title,
             style: GoogleFonts.urbanist(
-              fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+                fontSize: 22, fontWeight: FontWeight.bold, color: color)),
 
         const SizedBox(height: 12),
 
@@ -702,8 +717,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
               borderSide: BorderSide(color: Colors.grey.shade300)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide:
-                  const BorderSide(color: _kOrange, width: 1.8)),
+              borderSide: const BorderSide(color: _kOrange, width: 1.8)),
         ),
       );
 }
@@ -715,7 +729,8 @@ class _AmountChip extends StatelessWidget {
   final int amount;
   final bool selected;
   final VoidCallback onTap;
-  const _AmountChip({required this.amount, required this.selected, required this.onTap});
+  const _AmountChip(
+      {required this.amount, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -726,8 +741,8 @@ class _AmountChip extends StatelessWidget {
           decoration: BoxDecoration(
             color: selected ? _kOrange : Colors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected ? _kOrange : Colors.grey.shade300),
+            border:
+                Border.all(color: selected ? _kOrange : Colors.grey.shade300),
           ),
           child: Text(
             '${_fmtAmount(amount)} F',
@@ -755,8 +770,8 @@ class _CustomChip extends StatelessWidget {
           decoration: BoxDecoration(
             color: selected ? _kOrange : Colors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected ? _kOrange : Colors.grey.shade300),
+            border:
+                Border.all(color: selected ? _kOrange : Colors.grey.shade300),
           ),
           child: Text(
             'Autre montant',
@@ -781,7 +796,7 @@ class _TxTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isOk = tx.isCompleted;
     final color = isOk ? const Color(0xFF2E7D32) : Colors.red;
-    final icon  = isOk
+    final icon = isOk
         ? Icons.add_circle_rounded
         : tx.isCancelled
             ? Icons.cancel_rounded
@@ -812,7 +827,8 @@ class _TxTile extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.10),
               shape: BoxShape.circle,
@@ -830,11 +846,13 @@ class _TxTile extends StatelessWidget {
                       fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 Text(dateStr,
-                    style: GoogleFonts.urbanist(
-                        color: Colors.grey, fontSize: 11)),
+                    style:
+                        GoogleFonts.urbanist(color: Colors.grey, fontSize: 11)),
                 Text(statusLabel,
                     style: GoogleFonts.urbanist(
-                        color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+                        color: color,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -856,4 +874,3 @@ String _fmtAmount(int v) {
   }
   return v.toString();
 }
-

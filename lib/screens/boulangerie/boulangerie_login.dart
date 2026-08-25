@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -20,7 +20,7 @@ class BoulangerieLogin extends StatefulWidget {
 
 class _BoulangerieLoginState extends State<BoulangerieLogin> {
   final _phoneCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
+  final _passCtrl = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
 
@@ -74,7 +74,7 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
 
   Future<void> _login() async {
     final phone = _phoneCtrl.text.trim().replaceAll(' ', '');
-    final pass  = _passCtrl.text;
+    final pass = _passCtrl.text;
 
     if (phone.isEmpty || pass.isEmpty) {
       _snack('Veuillez remplir tous les champs', Colors.orange);
@@ -84,8 +84,7 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
     setState(() => _loading = true);
 
     try {
-      final credential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: '$phone@az-boulangerie.ci',
         password: pass,
       );
@@ -98,7 +97,9 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
 
       if (!doc.exists || !(doc.data()?['isActive'] ?? false)) {
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
         if (!mounted) return;
 
         final req = await FirebaseFirestore.instance
@@ -109,14 +110,18 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
         if (req.exists) {
           final status = req.data()?['status'] ?? '';
           if (status == 'pending') {
-            _snack('Votre demande est en cours d\'examen par l\'administrateur.', Colors.orange);
+            _snack(
+                'Votre demande est en cours d\'examen par l\'administrateur.',
+                Colors.orange);
           } else if (status == 'rejected') {
-            _snack('Votre demande a été refusée. Contactez l\'administrateur.', Colors.red);
+            _snack('Votre demande a été refusée. Contactez l\'administrateur.',
+                Colors.red);
           } else {
             _snack('Compte inactif. Contactez l\'administrateur.', Colors.red);
           }
         } else {
-          _snack('Compte introuvable. Contactez l\'administrateur.', Colors.red);
+          _snack(
+              'Compte introuvable. Contactez l\'administrateur.', Colors.red);
         }
         return;
       }
@@ -208,15 +213,14 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
                 style: GoogleFonts.urbanist(
                     fontSize: 13, color: Colors.grey.shade600)),
             const SizedBox(height: 36),
-
             TextField(
               controller: _phoneCtrl,
               keyboardType: TextInputType.phone,
               decoration: InputDecoration(
                 labelText: 'Numéro de téléphone',
                 prefixIcon: const Icon(Icons.phone_outlined, color: brown),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: const BorderSide(color: brown, width: 2),
@@ -226,7 +230,6 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
               ),
             ),
             const SizedBox(height: 16),
-
             TextField(
               controller: _passCtrl,
               obscureText: _obscure,
@@ -242,8 +245,8 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
                   ),
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: const BorderSide(color: brown, width: 2),
@@ -272,9 +275,9 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
                     context,
                     MaterialPageRoute(
                       builder: (_) => const GenericForgotPasswordPage(
-                        userType:    'boulangerie',
+                        userType: 'boulangerie',
                         accentColor: Color(0xFF5D4037),
-                        title:       'Mot de passe oublié',
+                        title: 'Mot de passe oublié',
                       ),
                     ),
                   ),
@@ -286,7 +289,6 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
               ],
             ),
             const SizedBox(height: 12),
-
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -313,4 +315,3 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
     );
   }
 }
-

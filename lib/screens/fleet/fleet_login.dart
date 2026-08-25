@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -49,7 +49,8 @@ class _FleetLoginState extends State<FleetLogin> {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
-              builder: (_) => FleetDashboard(ownerId: user.uid, ownerName: ownerName),
+              builder: (_) =>
+                  FleetDashboard(ownerId: user.uid, ownerName: ownerName),
             ),
           );
           return;
@@ -94,14 +95,16 @@ class _FleetLoginState extends State<FleetLogin> {
         return;
       }
 
-      final data   = doc.data() as Map<String, dynamic>;
+      final data = doc.data() as Map<String, dynamic>;
       final status = (data['status'] as String?) ?? 'approved';
 
       if (status == 'pending') {
         await FirebaseAuth.instance.signOut();
         if (!mounted) return;
         setState(() => _loading = false);
-        _snack("Votre compte est en attente d'approbation par l'administrateur.", Colors.orange);
+        _snack(
+            "Votre compte est en attente d'approbation par l'administrateur.",
+            Colors.orange);
         return;
       }
 
@@ -109,7 +112,8 @@ class _FleetLoginState extends State<FleetLogin> {
         await FirebaseAuth.instance.signOut();
         if (!mounted) return;
         setState(() => _loading = false);
-        _snack("Votre demande a été refusée. Contactez l'administrateur.", Colors.red);
+        _snack("Votre demande a été refusée. Contactez l'administrateur.",
+            Colors.red);
         return;
       }
 
@@ -158,7 +162,8 @@ class _FleetLoginState extends State<FleetLogin> {
     if (_autoResuming) {
       return const Scaffold(
         backgroundColor: Color(0xFFF5F5F5),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF6A1B9A))),
+        body:
+            Center(child: CircularProgressIndicator(color: Color(0xFF6A1B9A))),
       );
     }
     return Scaffold(
@@ -209,8 +214,8 @@ class _FleetLoginState extends State<FleetLogin> {
                 labelText: "Identifiant",
                 hintText: "Votre ID de connexion",
                 prefixIcon: const Icon(Icons.badge),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
                 fillColor: Colors.white,
               ),
@@ -223,12 +228,12 @@ class _FleetLoginState extends State<FleetLogin> {
                 labelText: "Mot de passe",
                 prefixIcon: const Icon(Icons.lock),
                 suffixIcon: IconButton(
-                  icon: Icon(
-                      _showPass ? Icons.visibility_off : Icons.visibility),
+                  icon:
+                      Icon(_showPass ? Icons.visibility_off : Icons.visibility),
                   onPressed: () => setState(() => _showPass = !_showPass),
                 ),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
                 fillColor: Colors.white,
               ),
@@ -241,9 +246,9 @@ class _FleetLoginState extends State<FleetLogin> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => const GenericForgotPasswordPage(
-                      userType:    'fleet',
+                      userType: 'fleet',
                       accentColor: Color(0xFF6A1B9A),
-                      title:       'Mot de passe oublié',
+                      title: 'Mot de passe oublié',
                     ),
                   ),
                 ),

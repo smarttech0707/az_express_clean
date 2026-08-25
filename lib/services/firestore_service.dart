@@ -1,11 +1,10 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import '../models/order_model.dart';
 import '../models/driver_earnings_summary.dart';
 
 class FirestoreService {
-
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
   // ==============================
@@ -13,9 +12,9 @@ class FirestoreService {
   // ==============================
 
   // Commission tiered : 100 FCFA pour 500-1000 FCFA, 200 FCFA au-delà
-  static int _commissionBasic    = 100; // courses 500–1000 FCFA
+  static int _commissionBasic = 100; // courses 500–1000 FCFA
   static int _commissionStandard = 200; // courses > 1000 FCFA
-  static int _threshold          = 1000;
+  static int _threshold = 1000;
 
   /// Charge la config commission depuis Firestore (appelé au démarrage).
   Future<void> loadCommissionConfig() async {
@@ -23,12 +22,12 @@ class FirestoreService {
       final doc = await db.collection('config').doc('commission').get();
       if (doc.exists) {
         final data = doc.data()!;
-        final basic    = data['commissionBasic'];
+        final basic = data['commissionBasic'];
         final standard = data['commissionStandard'];
-        final thresh   = data['threshold'];
-        if (basic    != null) _commissionBasic    = (basic    as num).toInt();
+        final thresh = data['threshold'];
+        if (basic != null) _commissionBasic = (basic as num).toInt();
         if (standard != null) _commissionStandard = (standard as num).toInt();
-        if (thresh   != null) _threshold          = (thresh   as num).toInt();
+        if (thresh != null) _threshold = (thresh as num).toInt();
       }
     } catch (_) {}
   }
@@ -45,9 +44,12 @@ class FirestoreService {
   // CRÉER COMMANDE
   // ==============================
 
-  Future<void> createOrder(OrderModel order) async {
+  Future<void> createOrder(OrderModel order,
+      {bool alreadyCreated = false}) async {
     final orderRef = db.collection("orders").doc(order.id);
-    await orderRef.set(order.toMap());
+    if (!alreadyCreated) {
+      await orderRef.set(order.toMap());
+    }
     // Tente l'assignation auto du livreur le plus proche.
     // Volontairement non bloquant pour la création de commande (déjà réussie
     // à ce stade) — mais l'échec est désormais loggé plutôt qu'avalé en
@@ -55,8 +57,8 @@ class FirestoreService {
     // laissait jusqu'ici la commande "pending" sans aucune trace exploitable
     // avant l'expiration automatique 10 min plus tard (autoExpireOrders).
     try {
-      await findNearestDriver(
-          order.latitude, order.longitude, order.id, budget: order.budget);
+      await findNearestDriver(order.latitude, order.longitude, order.id,
+          budget: order.budget);
     } catch (e) {
       debugPrint('[FirestoreService.createOrder] dispatch initial échoué pour '
           '${order.id} : $e — la commande reste pending, '
@@ -128,9 +130,9 @@ class FirestoreService {
         .limit(1)
         .snapshots()
         .map((snap) {
-      if (snap.docs.isEmpty) return null;
-      return OrderModel.fromMap(snap.docs.first.id, snap.docs.first.data());
-    });
+          if (snap.docs.isEmpty) return null;
+          return OrderModel.fromMap(snap.docs.first.id, snap.docs.first.data());
+        });
   }
 
   /// Nombre de livraisons complétées par ce livreur (count aggregation — no doc reads)
@@ -160,13 +162,13 @@ class FirestoreService {
   Future<bool> findNearestDriver(
       double clientLat, double clientLng, String orderId,
       {int budget = 0, double radiusKm = 2.0}) async {
-    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
-        .httpsCallable(
-          'dispatchOrderToDriver',
-          options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
-        );
+    final callable =
+        FirebaseFunctions.instanceFor(region: 'europe-west1').httpsCallable(
+      'dispatchOrderToDriver',
+      options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+    );
     final result = await callable.call(<String, dynamic>{
-      'orderId':  orderId,
+      'orderId': orderId,
       'radiusKm': radiusKm,
     });
     final data = Map<String, dynamic>.from(result.data as Map);
@@ -183,21 +185,21 @@ class FirestoreService {
     String? acceptanceSelfieUrl,
     String? driverPhotoUrl,
   }) async {
-    final orderRef  = db.collection("orders").doc(orderId);
+    final orderRef = db.collection("orders").doc(orderId);
     final driverRef = db.collection("livreurs").doc(driverId);
 
     String? commissionDescription;
-    int     commissionAmount = 0;
+    int commissionAmount = 0;
     List<String> otherDriverIds = [];
 
     await db.runTransaction((transaction) async {
-      final orderSnapshot  = await transaction.get(orderRef);
+      final orderSnapshot = await transaction.get(orderRef);
       final driverSnapshot = await transaction.get(driverRef);
 
       if (!orderSnapshot.exists || !driverSnapshot.exists) return;
 
       final orderData = orderSnapshot.data() as Map<String, dynamic>;
-      final status    = orderData["status"] as String? ?? '';
+      final status = orderData["status"] as String? ?? '';
 
       // Accepte à la fois les assignations directes et les broadcasts
       if (status != "assigned" && status != "broadcast") return;
@@ -222,11 +224,13 @@ class FirestoreService {
       // `.data()` (un Map, dont l'opérateur [] retourne bien `null` sur une
       // clé absente, sans exception) avant de lire les champs individuels.
       final driverData = driverSnapshot.data() ?? {};
-      final bool driverSuspended  = driverData["isSuspended"]  as bool? ?? false;
-      final bool driverOnline     = driverData["isOnline"]     as bool? ?? false;
-      final bool driverOnDelivery = driverData["isOnDelivery"] as bool? ?? false;
+      final bool driverSuspended = driverData["isSuspended"] as bool? ?? false;
+      final bool driverOnline = driverData["isOnline"] as bool? ?? false;
+      final bool driverOnDelivery =
+          driverData["isOnDelivery"] as bool? ?? false;
       if (driverSuspended) {
-        throw Exception("Votre compte a été suspendu, vous ne pouvez plus accepter de commandes.");
+        throw Exception(
+            "Votre compte a été suspendu, vous ne pouvez plus accepter de commandes.");
       }
       if (!driverOnline) {
         throw Exception("Vous devez être en ligne pour accepter une commande.");
@@ -235,8 +239,8 @@ class FirestoreService {
         throw Exception("Vous avez déjà une livraison en cours.");
       }
 
-      final int price      = (orderData["budget"] as num? ?? 0).toInt();
-      commissionAmount     = calculateCommission(price);
+      final int price = (orderData["budget"] as num? ?? 0).toInt();
+      commissionAmount = calculateCommission(price);
 
       final int wallet = (driverSnapshot["wallet"] as num? ?? 0).toInt();
       if (wallet < commissionAmount) {
@@ -244,21 +248,23 @@ class FirestoreService {
       }
 
       // Livreurs à notifier de l'annulation (pour broadcast)
-      final notified  = List<String>.from(orderData["notifiedDriverIds"] as List? ?? []);
-      otherDriverIds  = notified.where((id) => id != driverId).toList();
+      final notified =
+          List<String>.from(orderData["notifiedDriverIds"] as List? ?? []);
+      otherDriverIds = notified.where((id) => id != driverId).toList();
 
       // Commission déduite + flag isOnDelivery
       transaction.update(driverRef, {
-        "wallet":       wallet - commissionAmount,
+        "wallet": wallet - commissionAmount,
         "isOnDelivery": true,
       });
 
       transaction.update(orderRef, {
-        "status":   "accepted",
+        "status": "accepted",
         "driverId": driverId,
         "notifiedDriverIds": FieldValue.delete(),
-        if (acceptanceSelfieUrl != null) "driverAcceptanceSelfie": acceptanceSelfieUrl,
-        if (driverPhotoUrl      != null) "driverPhotoUrl":         driverPhotoUrl,
+        if (acceptanceSelfieUrl != null)
+          "driverAcceptanceSelfie": acceptanceSelfieUrl,
+        if (driverPhotoUrl != null) "driverPhotoUrl": driverPhotoUrl,
       });
 
       commissionDescription =
@@ -296,29 +302,30 @@ class FirestoreService {
   ///   Si dernier livreur → reset pending + re-cherche à rayon élargi.
   /// — Assignation directe : reset pending + re-cherche.
   Future<void> declineOrder(String orderId, String driverId) async {
-    final orderRef  = db.collection("orders").doc(orderId);
+    final orderRef = db.collection("orders").doc(orderId);
     final driverRef = db.collection("livreurs").doc(driverId);
 
     // Effacer pendingOrderId chez ce livreur immédiatement
     await driverRef.update({"pendingOrderId": FieldValue.delete()});
 
     List<String> remaining = [];
-    String currentStatus   = '';
+    String currentStatus = '';
 
     await db.runTransaction((tx) async {
       final snap = await tx.get(orderRef);
       if (!snap.exists) return;
-      final data    = snap.data()!;
+      final data = snap.data()!;
       currentStatus = data["status"] as String? ?? '';
 
       if (currentStatus == "broadcast") {
-        final notified = List<String>.from(data["notifiedDriverIds"] as List? ?? []);
+        final notified =
+            List<String>.from(data["notifiedDriverIds"] as List? ?? []);
         remaining = notified.where((id) => id != driverId).toList();
 
         if (remaining.isEmpty) {
           // Tous ont refusé → reset
           tx.update(orderRef, {
-            "status":            "pending",
+            "status": "pending",
             "notifiedDriverIds": FieldValue.delete(),
           });
         } else {
@@ -328,7 +335,7 @@ class FirestoreService {
       } else if (currentStatus == "assigned") {
         // Assignation directe refusée
         tx.update(orderRef, {
-          "status":   "pending",
+          "status": "pending",
           "driverId": FieldValue.delete(),
         });
       }
@@ -341,10 +348,10 @@ class FirestoreService {
       if (!snap.exists) return;
       final d = snap.data()!;
       await findNearestDriver(
-        (d["latitude"]  ?? 0).toDouble(),
+        (d["latitude"] ?? 0).toDouble(),
         (d["longitude"] ?? 0).toDouble(),
         orderId,
-        budget:   (d["budget"] as num? ?? 0).toInt(),
+        budget: (d["budget"] as num? ?? 0).toInt(),
         radiusKm: 5.0,
       );
     }
@@ -415,12 +422,11 @@ class FirestoreService {
   /// vérifie que l'appelant est bien le livreur assigné ; [driverId]/[price]
   /// restent dans la signature pour ne pas casser l'appelant
   /// (driver_dashboard.dart) mais sont ignorés côté serveur.
-  Future<void> deliverOrder(
-      String orderId, String driverId, int price,
+  Future<void> deliverOrder(String orderId, String driverId, int price,
       {bool markCashPaid = false,
-       double? deliveredLat,
-       double? deliveredLng,
-       String? deliveryPhotoUrl}) async {
+      double? deliveredLat,
+      double? deliveredLng,
+      String? deliveryPhotoUrl}) async {
     final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
         .httpsCallable('deliverOrderCF');
     await callable.call(<String, dynamic>{
@@ -481,14 +487,14 @@ class FirestoreService {
   Future<void> assignDriverToFleet(
       String driverId, String ownerId, String ownerName) async {
     await db.collection('livreurs').doc(driverId).update({
-      'ownerId':   ownerId,
+      'ownerId': ownerId,
       'ownerName': ownerName,
     });
   }
 
   Future<void> makeDriverIndependent(String driverId) async {
     await db.collection('livreurs').doc(driverId).update({
-      'ownerId':   FieldValue.delete(),
+      'ownerId': FieldValue.delete(),
       'ownerName': FieldValue.delete(),
     });
   }
@@ -570,10 +576,14 @@ class FirestoreService {
       if (driverId != null) {
         final driverRef = db.collection("livreurs").doc(driverId);
         final driverSnap = await tx.get(driverRef);
-        final currentAvg   = (driverSnap.data()?['avgRating']   as num? ?? 0).toDouble();
-        final currentCount = (driverSnap.data()?['ratingCount'] as num? ?? 0).toInt();
+        final currentAvg =
+            (driverSnap.data()?['avgRating'] as num? ?? 0).toDouble();
+        final currentCount =
+            (driverSnap.data()?['ratingCount'] as num? ?? 0).toInt();
         final newCount = currentCount + 1;
-        final newAvg   = double.parse(((currentAvg * currentCount + rating) / newCount).toStringAsFixed(1));
+        final newAvg = double.parse(
+            ((currentAvg * currentCount + rating) / newCount)
+                .toStringAsFixed(1));
         tx.update(driverRef, {'avgRating': newAvg, 'ratingCount': newCount});
       }
     });
@@ -594,12 +604,10 @@ class FirestoreService {
   // STATS LIVREUR (patron de flotte)
   // ==============================
 
-  Future<DriverEarningsSummary> driverEarningsSummary(
-      String driverId) async {
+  Future<DriverEarningsSummary> driverEarningsSummary(String driverId) async {
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
-    final weekStart =
-        todayStart.subtract(Duration(days: now.weekday - 1));
+    final weekStart = todayStart.subtract(Duration(days: now.weekday - 1));
     final monthStart = DateTime(now.year, now.month, 1);
 
     final snap = await db
@@ -701,9 +709,12 @@ class FirestoreService {
 
   String _col(String userType) {
     switch (userType) {
-      case 'driver': return 'livreurs';
-      case 'seller': return 'sellers';
-      default: return 'clients';
+      case 'driver':
+        return 'livreurs';
+      case 'seller':
+        return 'sellers';
+      default:
+        return 'clients';
     }
   }
 
@@ -749,8 +760,8 @@ class FirestoreService {
     });
   }
 
-  Future<void> approveRecharge(
-      String requestId, String userId, String userType, int amount, String method) async {
+  Future<void> approveRecharge(String requestId, String userId, String userType,
+      int amount, String method) async {
     final colName = _col(userType);
     final batch = db.batch();
     batch.update(db.collection('recharge_requests').doc(requestId), {
@@ -760,11 +771,16 @@ class FirestoreService {
     batch.update(db.collection(colName).doc(userId), {
       'wallet': FieldValue.increment(amount),
     });
-    final txRef = db.collection(colName).doc(userId).collection('wallet_transactions').doc();
+    final txRef = db
+        .collection(colName)
+        .doc(userId)
+        .collection('wallet_transactions')
+        .doc();
     batch.set(txRef, {
       'type': 'recharge',
       'amount': amount,
-      'description': 'Recharge ${method == "wave" ? "Wave" : "Orange Money"} — $amount FCFA',
+      'description':
+          'Recharge ${method == "wave" ? "Wave" : "Orange Money"} — $amount FCFA',
       'createdAt': FieldValue.serverTimestamp(),
     });
     await batch.commit();
@@ -781,11 +797,11 @@ class FirestoreService {
   Future<void> approveWithdrawal(
       String requestId, String userId, String userType, int amount) async {
     final colName = _col(userType);
-    final userRef  = db.collection(colName).doc(userId);
+    final userRef = db.collection(colName).doc(userId);
 
     final batch = db.batch();
     batch.update(db.collection('withdrawal_requests').doc(requestId), {
-      'status':      'processed',
+      'status': 'processed',
       'processedAt': FieldValue.serverTimestamp(),
     });
     // Débiter le wallet de l'utilisateur
@@ -793,23 +809,24 @@ class FirestoreService {
     // Logger la transaction
     final txRef = userRef.collection('wallet_transactions').doc();
     batch.set(txRef, {
-      'type':        'withdrawal',
-      'amount':      amount,
+      'type': 'withdrawal',
+      'amount': amount,
       'description': 'Retrait approuvé — $amount FCFA',
-      'createdAt':   FieldValue.serverTimestamp(),
+      'createdAt': FieldValue.serverTimestamp(),
     });
     await batch.commit();
   }
 
   /// Admin rejette un retrait pending_manual → rembourse le wallet (déjà débité).
   Future<void> rejectWithdrawal(String requestId) async {
-    final wdSnap = await db.collection('withdrawal_requests').doc(requestId).get();
+    final wdSnap =
+        await db.collection('withdrawal_requests').doc(requestId).get();
     if (!wdSnap.exists) return;
     final data = wdSnap.data()!;
-    final userId   = data['userId']   as String?;
+    final userId = data['userId'] as String?;
     final userType = data['userType'] as String? ?? 'client';
-    final amount   = (data['amount']  as num?)?.toInt() ?? 0;
-    final colName  = _col(userType);
+    final amount = (data['amount'] as num?)?.toInt() ?? 0;
+    final colName = _col(userType);
 
     final batch = db.batch();
     batch.update(db.collection('withdrawal_requests').doc(requestId), {
@@ -820,8 +837,11 @@ class FirestoreService {
       batch.update(db.collection(colName).doc(userId), {
         'wallet': FieldValue.increment(amount),
       });
-      final txRef = db.collection(colName).doc(userId)
-          .collection('wallet_transactions').doc();
+      final txRef = db
+          .collection(colName)
+          .doc(userId)
+          .collection('wallet_transactions')
+          .doc();
       batch.set(txRef, {
         'type': 'refund',
         'amount': amount,
@@ -853,4 +873,3 @@ class FirestoreService {
       .where('status', isEqualTo: status)
       .snapshots();
 }
-

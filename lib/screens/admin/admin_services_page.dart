@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+import 'dart:async';
+import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,6 +7,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'admin_service_requests_page.dart';
+import '../../utils/storage_cleanup.dart';
 
 // ── DONNÉES STATIQUES (miroir de services_hub_page) ───────────
 
@@ -14,26 +16,46 @@ const _subcatOptions = [
   {"id": "vente_maison", "label": "Vente de maison", "cat": "immobilier"},
   {"id": "local_commercial", "label": "Local commercial", "cat": "immobilier"},
   {"id": "terrain", "label": "Terrain", "cat": "immobilier"},
-  {"id": "macon",                "label": "Maçon",                    "cat": "artisan"},
-  {"id": "plombier",             "label": "Plombier",                 "cat": "artisan"},
-  {"id": "electricien",          "label": "Électricien",               "cat": "artisan"},
-  {"id": "ferronnier",           "label": "Ferronnier",                "cat": "artisan"},
-  {"id": "menuisier",            "label": "Menuisier",                 "cat": "artisan"},
-  {"id": "carreleur",            "label": "Carreleur",                 "cat": "artisan"},
-  {"id": "peintre",              "label": "Peintre",                   "cat": "artisan"},
-  {"id": "decoration",           "label": "Décoration intérieure",     "cat": "artisan"},
-  {"id": "reparateur_portable",  "label": "Réparateur portable",       "cat": "artisan"},
-  {"id": "vitrier",              "label": "Vitrier",                   "cat": "artisan"},
-  {"id": "reparateur_tv",        "label": "Réparateur TV",             "cat": "artisan"},
-  {"id": "installation_camera",  "label": "Installation Caméra",       "cat": "artisan"},
-  {"id": "salon_coiffure_homme", "label": "Salon coiffure homme",      "cat": "artisan"},
-  {"id": "barber_shop",          "label": "Barber Shop",               "cat": "artisan"},
-  {"id": "salon_coiffure_femme", "label": "Salon coiffure femme",      "cat": "artisan"},
-  {"id": "onglerie",             "label": "Onglerie",                  "cat": "artisan"},
-  {"id": "mecanicien_voiture",  "label": "Mécanicien Voiture",     "cat": "mecanique"},
-  {"id": "mecanicien_moto",     "label": "Mécanicien Moto",        "cat": "mecanique"},
-  {"id": "electrique_auto",     "label": "Électrique Auto",        "cat": "mecanique"},
-  {"id": "carrosserie",         "label": "Carrosserie",            "cat": "mecanique"},
+  {"id": "macon", "label": "Maçon", "cat": "artisan"},
+  {"id": "plombier", "label": "Plombier", "cat": "artisan"},
+  {"id": "electricien", "label": "Électricien", "cat": "artisan"},
+  {"id": "ferronnier", "label": "Ferronnier", "cat": "artisan"},
+  {"id": "menuisier", "label": "Menuisier", "cat": "artisan"},
+  {"id": "carreleur", "label": "Carreleur", "cat": "artisan"},
+  {"id": "peintre", "label": "Peintre", "cat": "artisan"},
+  {"id": "decoration", "label": "Décoration intérieure", "cat": "artisan"},
+  {
+    "id": "reparateur_portable",
+    "label": "Réparateur portable",
+    "cat": "artisan"
+  },
+  {"id": "vitrier", "label": "Vitrier", "cat": "artisan"},
+  {"id": "reparateur_tv", "label": "Réparateur TV", "cat": "artisan"},
+  {
+    "id": "installation_camera",
+    "label": "Installation Caméra",
+    "cat": "artisan"
+  },
+  {
+    "id": "salon_coiffure_homme",
+    "label": "Salon coiffure homme",
+    "cat": "artisan"
+  },
+  {"id": "barber_shop", "label": "Barber Shop", "cat": "artisan"},
+  {
+    "id": "salon_coiffure_femme",
+    "label": "Salon coiffure femme",
+    "cat": "artisan"
+  },
+  {"id": "onglerie", "label": "Onglerie", "cat": "artisan"},
+  {
+    "id": "mecanicien_voiture",
+    "label": "Mécanicien Voiture",
+    "cat": "mecanique"
+  },
+  {"id": "mecanicien_moto", "label": "Mécanicien Moto", "cat": "mecanique"},
+  {"id": "electrique_auto", "label": "Électrique Auto", "cat": "mecanique"},
+  {"id": "carrosserie", "label": "Carrosserie", "cat": "mecanique"},
   {"id": "eau_pack", "label": "Eau en pack", "cat": "construction"},
   {"id": "ciment_briques", "label": "Ciment & Briques", "cat": "construction"},
   {"id": "telephone", "label": "Téléphones portables", "cat": "telephonie"},
@@ -45,9 +67,8 @@ const _subcatOptions = [
 ];
 
 String _labelForSubcat(String id) {
-  return _subcatOptions
-      .firstWhere((s) => s["id"] == id,
-          orElse: () => {"label": id})["label"]!;
+  return _subcatOptions.firstWhere((s) => s["id"] == id,
+      orElse: () => {"label": id})["label"]!;
 }
 
 // ── PAGE PRINCIPALE ADMIN ─────────────────────────────────────
@@ -98,8 +119,7 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
                         ),
                         Text(
                           "Gérer les prestataires",
-                          style:
-                              TextStyle(color: Colors.white70, fontSize: 13),
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                       ],
                     ),
@@ -122,13 +142,13 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
                     alignment: Alignment.center,
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.inbox_rounded, color: Colors.white),
+                        icon: const Icon(Icons.inbox_rounded,
+                            color: Colors.white),
                         tooltip: 'Demandes prestataires',
                         onPressed: () => Navigator.push(
                           ctx,
                           MaterialPageRoute(
-                              builder: (_) =>
-                                  const AdminServiceRequestsPage()),
+                              builder: (_) => const AdminServiceRequestsPage()),
                         ),
                       ),
                       if (count > 0)
@@ -139,8 +159,7 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
                             width: 18,
                             height: 18,
                             decoration: const BoxDecoration(
-                                color: Colors.red,
-                                shape: BoxShape.circle),
+                                color: Colors.red, shape: BoxShape.circle),
                             child: Center(
                               child: Text(
                                 '$count',
@@ -176,8 +195,7 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
                   ..._subcatOptions.map((s) => _FilterChip(
                         label: s["label"]!,
                         selected: _filterSubcat == s["id"],
-                        onTap: () =>
-                            setState(() => _filterSubcat = s["id"]!),
+                        onTap: () => setState(() => _filterSubcat = s["id"]!),
                       )),
                 ],
               ),
@@ -235,8 +253,7 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
               }
 
               return SliverPadding(
-                padding:
-                    const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, i) {
@@ -247,8 +264,14 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
                         data: data,
                         onEdit: () =>
                             _openForm(context, docId: doc.id, data: data),
-                        onDelete: () => _confirmDelete(context, doc.id, data["name"] ?? ""),
-                        onToggle: () => _toggleAvailability(doc.id, data["isAvailable"] ?? true),
+                        onDelete: () => _confirmDelete(
+                            context,
+                            doc.id,
+                            data["name"] ?? "",
+                            (data["photos"] as List?)?.cast<String>() ??
+                                const []),
+                        onToggle: () => _toggleAvailability(
+                            doc.id, data["isAvailable"] ?? true),
                       );
                     },
                     childCount: docs.length,
@@ -278,13 +301,12 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
     } catch (_) {}
   }
 
-  Future<void> _confirmDelete(
-      BuildContext context, String docId, String name) async {
+  Future<void> _confirmDelete(BuildContext context, String docId, String name,
+      [List<String> photos = const []]) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text("Supprimer"),
         content: Text("Supprimer \"$name\" ? Cette action est irréversible."),
         actions: [
@@ -293,8 +315,7 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
               child: const Text("Annuler")),
           ScaleButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white),
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(context, true),
             child: const Text("Supprimer"),
           ),
@@ -307,6 +328,7 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
             .collection("service_providers")
             .doc(docId)
             .delete();
+        await deleteStorageUrls(photos);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -368,8 +390,7 @@ class _AdminProviderCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
         ],
       ),
       child: Column(
@@ -403,8 +424,7 @@ class _AdminProviderCard extends StatelessWidget {
                     Expanded(
                       child: Text(name,
                           style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15)),
+                              fontWeight: FontWeight.bold, fontSize: 15)),
                     ),
                     // Toggle disponibilité
                     GestureDetector(
@@ -418,17 +438,13 @@ class _AdminProviderCard extends StatelessWidget {
                               : Colors.grey.shade100,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: isAvailable
-                                ? Colors.green
-                                : Colors.grey,
+                            color: isAvailable ? Colors.green : Colors.grey,
                           ),
                         ),
                         child: Text(
                           isAvailable ? "Actif" : "Masqué",
                           style: TextStyle(
-                            color: isAvailable
-                                ? Colors.green
-                                : Colors.grey,
+                            color: isAvailable ? Colors.green : Colors.grey,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),
@@ -442,8 +458,8 @@ class _AdminProviderCard extends StatelessWidget {
 
                 // Sous-catégorie badge
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                   decoration: BoxDecoration(
                     color: const Color(0xFF1565C0).withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(20),
@@ -462,8 +478,7 @@ class _AdminProviderCard extends StatelessWidget {
                 if (phone.isNotEmpty)
                   Row(
                     children: [
-                      const Icon(Icons.phone,
-                          size: 13, color: Colors.grey),
+                      const Icon(Icons.phone, size: 13, color: Colors.grey),
                       const SizedBox(width: 4),
                       Text(phone,
                           style: const TextStyle(
@@ -492,12 +507,11 @@ class _AdminProviderCard extends StatelessWidget {
                     padding: EdgeInsets.only(top: 2),
                     child: Row(
                       children: [
-                        Icon(Icons.gps_fixed,
-                            size: 13, color: Colors.green),
+                        Icon(Icons.gps_fixed, size: 13, color: Colors.green),
                         SizedBox(width: 4),
                         Text("GPS enregistré",
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.green)),
+                            style:
+                                TextStyle(fontSize: 11, color: Colors.green)),
                       ],
                     ),
                   ),
@@ -514,8 +528,7 @@ class _AdminProviderCard extends StatelessWidget {
                         label: const Text("Modifier"),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF1565C0),
-                          side: const BorderSide(
-                              color: Color(0xFF1565C0)),
+                          side: const BorderSide(color: Color(0xFF1565C0)),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10)),
                           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -564,16 +577,12 @@ class _FilterChip extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         margin: const EdgeInsets.only(right: 8),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color:
-              selected ? const Color(0xFF1565C0) : Colors.white,
+          color: selected ? const Color(0xFF1565C0) : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected
-                ? const Color(0xFF1565C0)
-                : Colors.grey.shade300,
+            color: selected ? const Color(0xFF1565C0) : Colors.grey.shade300,
           ),
         ),
         child: Text(
@@ -613,6 +622,7 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
 
   String _subcategory = _subcatOptions.first["id"]!;
   List<String> _photos = [];
+  final List<String> _removedPhotos = [];
   final List<File> _newPhotoFiles = [];
   File? _idPhotoFile;
   String? _existingIdPhotoUrl;
@@ -660,7 +670,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
     try {
       await Geolocator.requestPermission();
       final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.high));
       setState(() {
         _latCtrl.text = pos.latitude.toStringAsFixed(7);
         _lngCtrl.text = pos.longitude.toStringAsFixed(7);
@@ -699,7 +710,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF1565C0)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF1565C0)),
               title: const Text("Choisir depuis la galerie"),
               onTap: () {
                 Navigator.pop(context);
@@ -738,7 +750,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF1565C0)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF1565C0)),
               title: const Text("Importer depuis la galerie"),
               onTap: () {
                 Navigator.pop(context);
@@ -756,8 +769,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
     final uploaded = <String>[..._photos];
     for (int i = 0; i < _newPhotoFiles.length; i++) {
       try {
-        final ref = FirebaseStorage.instance
-            .ref("service_providers/$docId/photo_${DateTime.now().millisecondsSinceEpoch}_$i.jpg");
+        final ref = FirebaseStorage.instance.ref(
+            "service_providers/$docId/photo_${DateTime.now().millisecondsSinceEpoch}_$i.jpg");
         await ref.putFile(_newPhotoFiles[i]);
         uploaded.add(await ref.getDownloadURL());
       } catch (_) {}
@@ -768,8 +781,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
   Future<String?> _uploadIdPhoto(String docId) async {
     if (_idPhotoFile == null) return _existingIdPhotoUrl;
     try {
-      final ref = FirebaseStorage.instance
-          .ref("service_providers/$docId/id_photo.jpg");
+      final ref =
+          FirebaseStorage.instance.ref("service_providers/$docId/id_photo.jpg");
       await ref.putFile(_idPhotoFile!);
       return await ref.getDownloadURL();
     } catch (_) {}
@@ -822,13 +835,16 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
         if (mounted) _snack("Prestataire mis à jour", Colors.green);
       } else {
         payload["createdAt"] = FieldValue.serverTimestamp();
-        payload["status"]    = "approved";
+        payload["status"] = "approved";
         payload["isVerified"] = true;
         await FirebaseFirestore.instance
             .collection("service_providers")
             .doc(docId)
             .set(payload);
         if (mounted) _snack("Prestataire ajouté avec succès", Colors.green);
+      }
+      if (_removedPhotos.isNotEmpty) {
+        unawaited(deleteStorageUrls(_removedPhotos));
       }
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -844,8 +860,7 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
         content: Text(msg),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -857,7 +872,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F2F5),
       appBar: AppBar(
-        title: Text(isEdit ? "Modifier le prestataire" : "Ajouter un prestataire",
+        title: Text(
+            isEdit ? "Modifier le prestataire" : "Ajouter un prestataire",
             style: const TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
@@ -874,8 +890,7 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
               children: [
                 // Sous-catégorie
                 const Text("Type de service",
-                    style:
-                        TextStyle(fontSize: 13, color: Colors.grey)),
+                    style: TextStyle(fontSize: 13, color: Colors.grey)),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<String>(
                   initialValue: _subcategory,
@@ -899,11 +914,9 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
                 _field(_phoneCtrl, "Numéro de téléphone", Icons.phone,
                     type: TextInputType.phone),
                 const SizedBox(height: 14),
-                _field(_addressCtrl, "Adresse / Quartier",
-                    Icons.location_on),
+                _field(_addressCtrl, "Adresse / Quartier", Icons.location_on),
                 const SizedBox(height: 14),
-                _field(_descCtrl, "Description (optionnel)",
-                    Icons.description,
+                _field(_descCtrl, "Description (optionnel)", Icons.description,
                     maxLines: 3),
                 const SizedBox(height: 14),
                 _field(_artisanPinCtrl, "Code PIN artisan (accès photos)",
@@ -1014,7 +1027,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: _showPhotoSourceDialog,
-                    icon: const Icon(Icons.add_a_photo, color: Color(0xFF1565C0)),
+                    icon:
+                        const Icon(Icons.add_a_photo, color: Color(0xFF1565C0)),
                     label: const Text("Ajouter une photo",
                         style: TextStyle(color: Color(0xFF1565C0))),
                     style: OutlinedButton.styleFrom(
@@ -1025,7 +1039,6 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
                     ),
                   ),
                 ),
-
                 if (_photos.isNotEmpty || _newPhotoFiles.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   SizedBox(
@@ -1035,66 +1048,77 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
                       children: [
                         // Photos existantes (URLs)
                         ..._photos.asMap().entries.map((e) => Stack(
-                          children: [
-                            Container(
-                              width: 90,
-                              height: 90,
-                              margin: const EdgeInsets.only(right: 8),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                color: Colors.grey.shade200,
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: Image.network(e.value,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) =>
-                                      const Icon(Icons.broken_image,
+                              children: [
+                                Container(
+                                  width: 90,
+                                  height: 90,
+                                  margin: const EdgeInsets.only(right: 8),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                    color: Colors.grey.shade200,
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: Image.network(e.value,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => const Icon(
+                                          Icons.broken_image,
                                           color: Colors.grey)),
-                            ),
-                            Positioned(
-                              top: 4, right: 12,
-                              child: GestureDetector(
-                                onTap: () => setState(() => _photos.removeAt(e.key)),
-                                child: Container(
-                                  padding: const EdgeInsets.all(3),
-                                  decoration: const BoxDecoration(
-                                      color: Colors.red, shape: BoxShape.circle),
-                                  child: const Icon(Icons.close,
-                                      color: Colors.white, size: 12),
                                 ),
-                              ),
-                            ),
-                          ],
-                        )),
+                                Positioned(
+                                  top: 4,
+                                  right: 12,
+                                  child: GestureDetector(
+                                    onTap: () => setState(() {
+                                      // Nettoyage Storage différé à _save() —
+                                      // ne jamais supprimer le fichier tant que
+                                      // l'édition n'est pas réellement enregistrée.
+                                      _removedPhotos.add(_photos[e.key]);
+                                      _photos.removeAt(e.key);
+                                    }),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: const BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle),
+                                      child: const Icon(Icons.close,
+                                          color: Colors.white, size: 12),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )),
                         // Nouvelles photos locales
                         ..._newPhotoFiles.asMap().entries.map((e) => Stack(
-                          children: [
-                            Container(
-                              width: 90,
-                              height: 90,
-                              margin: const EdgeInsets.only(right: 8),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                color: Colors.grey.shade200,
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: Image.file(e.value, fit: BoxFit.cover),
-                            ),
-                            Positioned(
-                              top: 4, right: 12,
-                              child: GestureDetector(
-                                onTap: () => setState(() => _newPhotoFiles.removeAt(e.key)),
-                                child: Container(
-                                  padding: const EdgeInsets.all(3),
-                                  decoration: const BoxDecoration(
-                                      color: Colors.red, shape: BoxShape.circle),
-                                  child: const Icon(Icons.close,
-                                      color: Colors.white, size: 12),
+                              children: [
+                                Container(
+                                  width: 90,
+                                  height: 90,
+                                  margin: const EdgeInsets.only(right: 8),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                    color: Colors.grey.shade200,
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: Image.file(e.value, fit: BoxFit.cover),
                                 ),
-                              ),
-                            ),
-                          ],
-                        )),
+                                Positioned(
+                                  top: 4,
+                                  right: 12,
+                                  child: GestureDetector(
+                                    onTap: () => setState(
+                                        () => _newPhotoFiles.removeAt(e.key)),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: const BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle),
+                                      child: const Icon(Icons.close,
+                                          color: Colors.white, size: 12),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )),
                       ],
                     ),
                   ),
@@ -1119,7 +1143,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
                       color: Colors.grey.shade50,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: _idPhotoFile != null || (_existingIdPhotoUrl?.isNotEmpty ?? false)
+                        color: _idPhotoFile != null ||
+                                (_existingIdPhotoUrl?.isNotEmpty ?? false)
                             ? Colors.green
                             : const Color(0xFF1565C0).withValues(alpha: 0.4),
                         width: 2,
@@ -1156,8 +1181,8 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
               child: SwitchListTile(
                 title: const Text("Prestataire actif",
                     style: TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: const Text(
-                    "Visible par les clients dans l'application"),
+                subtitle:
+                    const Text("Visible par les clients dans l'application"),
                 value: _isAvailable,
                 onChanged: (v) => setState(() => _isAvailable = v),
                 activeThumbColor: const Color(0xFF1565C0),
@@ -1184,7 +1209,9 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
                     ? const CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5)
                     : Text(
-                        isEdit ? "Enregistrer les modifications" : "Ajouter le prestataire",
+                        isEdit
+                            ? "Enregistrer les modifications"
+                            : "Ajouter le prestataire",
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 16,
@@ -1201,16 +1228,14 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
     );
   }
 
-  Widget _sectionCard(
-      {required String title, required List<Widget> children}) {
+  Widget _sectionCard({required String title, required List<Widget> children}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)
         ],
       ),
       child: Column(
@@ -1242,15 +1267,12 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
     return InputDecoration(
       labelText: label,
       prefixIcon: Icon(icon, color: const Color(0xFF1565C0), size: 20),
-      border:
-          OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide:
-            const BorderSide(color: Color(0xFF1565C0), width: 2),
+        borderSide: const BorderSide(color: Color(0xFF1565C0), width: 2),
       ),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
     );
   }
 

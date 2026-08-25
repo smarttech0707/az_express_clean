@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'chat_page.dart';
@@ -33,7 +33,8 @@ class ConversationsPage extends StatelessWidget {
                   .snapshots(),
               builder: (context, snap) {
                 if (snap.hasError) {
-                  return const StreamErrorState(message: "Impossible de charger vos conversations.");
+                  return const StreamErrorState(
+                      message: "Impossible de charger vos conversations.");
                 }
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
@@ -55,15 +56,13 @@ class ConversationsPage extends StatelessWidget {
                         const SizedBox(height: 16),
                         const Text(
                           "Aucune conversation",
-                          style: TextStyle(
-                              fontSize: 16, color: Colors.grey),
+                          style: TextStyle(fontSize: 16, color: Colors.grey),
                         ),
                         const SizedBox(height: 8),
                         const Text(
                           "Les chats apparaissent quand\nun livreur accepte votre commande",
                           textAlign: TextAlign.center,
-                          style:
-                              TextStyle(fontSize: 13, color: Colors.grey),
+                          style: TextStyle(fontSize: 13, color: Colors.grey),
                         ),
                       ],
                     ),
@@ -72,11 +71,10 @@ class ConversationsPage extends StatelessWidget {
 
                 return ListView.builder(
                   physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(12),
                   itemCount: orders.length,
                   itemBuilder: (context, i) {
-                    final data =
-                        orders[i].data() as Map<String, dynamic>;
+                    final data = orders[i].data() as Map<String, dynamic>;
                     final orderId = orders[i].id;
                     final status = data["status"] ?? "";
                     final desc = data["description"] ?? "Commande";
@@ -119,8 +117,7 @@ class _ConversationTile extends StatefulWidget {
 }
 
 class _ConversationTileState extends State<_ConversationTile> {
-  late final Future<DocumentSnapshot> _driverFuture = FirebaseFirestore
-      .instance
+  late final Future<DocumentSnapshot> _driverFuture = FirebaseFirestore.instance
       .collection("livreurs")
       .doc(widget.driverId)
       .get();
@@ -165,9 +162,7 @@ class _ConversationTileState extends State<_ConversationTile> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 6)
-            ],
+            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
           ),
           child: ListTile(
             contentPadding:
@@ -179,8 +174,8 @@ class _ConversationTileState extends State<_ConversationTile> {
                 color: AppColors.primary.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.delivery_dining,
-                  color: AppColors.primary),
+              child:
+                  const Icon(Icons.delivery_dining, color: AppColors.primary),
             ),
             title: Text(
               driverName,
@@ -197,8 +192,8 @@ class _ConversationTileState extends State<_ConversationTile> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: _statusColor(widget.status).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
@@ -213,8 +208,7 @@ class _ConversationTileState extends State<_ConversationTile> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Icon(Icons.chevron_right,
-                    color: Colors.grey, size: 18),
+                const Icon(Icons.chevron_right, color: Colors.grey, size: 18),
               ],
             ),
             onTap: () => Navigator.push(

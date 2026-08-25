@@ -2,11 +2,11 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class RouteModel {
   final List<LatLng> points;
-  final double       distanceKm;
-  final int          etaMinutes;
-  final String       distanceText;
-  final String       etaText;
-  final int          estimatedPrice; // FCFA
+  final double distanceKm;
+  final int etaMinutes;
+  final String distanceText;
+  final String etaText;
+  final int estimatedPrice; // FCFA
 
   const RouteModel({
     required this.points,
@@ -17,33 +17,34 @@ class RouteModel {
     required this.estimatedPrice,
   });
 
-  bool get isEmpty  => points.isEmpty;
+  bool get isEmpty => points.isEmpty;
   bool get isNotEmpty => points.isNotEmpty;
 
   static RouteModel empty() => const RouteModel(
-    points:         [],
-    distanceKm:     0,
-    etaMinutes:     0,
-    distanceText:   '--',
-    etaText:        '--',
-    estimatedPrice: 0,
-  );
+        points: [],
+        distanceKm: 0,
+        etaMinutes: 0,
+        distanceText: '--',
+        etaText: '--',
+        estimatedPrice: 0,
+      );
 
   RouteModel copyWith({
     List<LatLng>? points,
-    double?       distanceKm,
-    int?          etaMinutes,
-    String?       distanceText,
-    String?       etaText,
-    int?          estimatedPrice,
-  }) => RouteModel(
-    points:         points         ?? this.points,
-    distanceKm:     distanceKm     ?? this.distanceKm,
-    etaMinutes:     etaMinutes     ?? this.etaMinutes,
-    distanceText:   distanceText   ?? this.distanceText,
-    etaText:        etaText        ?? this.etaText,
-    estimatedPrice: estimatedPrice ?? this.estimatedPrice,
-  );
+    double? distanceKm,
+    int? etaMinutes,
+    String? distanceText,
+    String? etaText,
+    int? estimatedPrice,
+  }) =>
+      RouteModel(
+        points: points ?? this.points,
+        distanceKm: distanceKm ?? this.distanceKm,
+        etaMinutes: etaMinutes ?? this.etaMinutes,
+        distanceText: distanceText ?? this.distanceText,
+        etaText: etaText ?? this.etaText,
+        estimatedPrice: estimatedPrice ?? this.estimatedPrice,
+      );
 
   // ── Formatage ─────────────────────────────────────────────────────────────
 
@@ -56,14 +57,14 @@ class RouteModel {
   }
 
   static String formatDistance(double km) {
-    if (km <= 0)  return '0 m';
-    if (km < 1)   return '${(km * 1000).round()} m';
+    if (km <= 0) return '0 m';
+    if (km < 1) return '${(km * 1000).round()} m';
     return '${km.toStringAsFixed(1)} km';
   }
 
   /// Prix estimé en FCFA (base 500 + 200 FCFA/km, arrondi à 50)
   static int estimatePrice(double distanceKm) {
-    const base  = 500;
+    const base = 500;
     const perKm = 200;
     if (distanceKm <= 0) return base;
     final raw = base + (distanceKm * perKm).round();

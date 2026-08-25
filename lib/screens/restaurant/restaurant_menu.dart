@@ -1,11 +1,14 @@
-﻿import 'dart:async';
+import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
+import '../../providers/active_city_provider.dart';
 
 class RestaurantMenu extends StatefulWidget {
   final String restaurantId;
@@ -49,8 +52,8 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      setState(() =>
-          _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
+      setState(
+          () => _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
     });
   }
 
@@ -113,13 +116,46 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
           .join(", ");
 
       final id = const Uuid().v4();
+      final restaurantDoc = await FirebaseFirestore.instance
+          .collection('restaurants')
+          .doc(widget.restaurantId)
+          .get();
+      final restaurantData = restaurantDoc.data();
+      final pickupLat = (restaurantData?['lat'] as num?)?.toDouble();
+      final pickupLng = (restaurantData?['lng'] as num?)?.toDouble();
+      if (pickupLat == null ||
+          pickupLng == null ||
+          (pickupLat == 0 && pickupLng == 0)) {
+        throw StateError(
+          'Les coordonnées du restaurant ne sont pas renseignées. '
+          'La commande ne peut pas être envoyée.',
+        );
+      }
+      final clientPosition = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+      if (!mounted) return;
+      final cityProvider = context.read<ActiveCityProvider>();
+      final cityService = cityProvider.service;
+      final geography = await cityService.resolveDispatchGeography(
+        pickupLatitude: pickupLat,
+        pickupLongitude: pickupLng,
+        deliveryLatitude: clientPosition.latitude,
+        deliveryLongitude: clientPosition.longitude,
+      );
       final order = OrderModel(
         id: id,
         description: "🍽️ ${widget.restaurantName} : $description",
         budget: _totalPrice,
         status: "pending",
-        latitude: 0,
-        longitude: 0,
+        latitude: pickupLat,
+        longitude: pickupLng,
+        destLat: clientPosition.latitude,
+        destLng: clientPosition.longitude,
+        deliveryAddress: 'Ma position actuelle',
         type: "restaurant",
         clientId: uid,
         sellerId: widget.restaurantId,
@@ -127,6 +163,16 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
         sellerType: "restaurant",
         paymentMethod: _paymentMethod,
         isPaid: _paymentMethod == 'wallet',
+        pickupCityId: geography.pickupCityId,
+        pickupZoneId: geography.pickupZoneId,
+        deliveryCityId: geography.deliveryCityId,
+        deliveryZoneId: geography.deliveryZoneId,
+        pickupCoordinateSource: 'local_place',
+        deliveryCoordinateSource: 'gps',
+        gpsDetectedCityId: cityService.gpsDetectedCityId,
+        activeCityId: cityService.activeCityId,
+        citySelectionSource: cityService.citySelectionSource,
+        cityResolutionStatus: geography.cityResolutionStatus,
       );
 
       if (_paymentMethod == 'wallet') {
@@ -286,22 +332,20 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.account_balance_wallet,
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.account_balance_wallet,
+                          color: _paymentMethod == 'wallet'
+                              ? Colors.white
+                              : Colors.grey,
+                          size: 18),
+                      const SizedBox(width: 6),
+                      Text("Wallet",
+                          style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
                                   : Colors.grey,
-                              size: 18),
-                          const SizedBox(width: 6),
-                          Text("Wallet",
-                              style: TextStyle(
-                                  color: _paymentMethod == 'wallet'
-                                      ? Colors.white
-                                      : Colors.grey,
-                                  fontWeight: FontWeight.bold)),
-                        ]),
+                              fontWeight: FontWeight.bold)),
+                    ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
@@ -383,8 +427,7 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
               ),
             ),
             title: Text(widget.restaurantName,
-                style:
-                    const TextStyle(color: Colors.white, fontSize: 18)),
+                style: const TextStyle(color: Colors.white, fontSize: 18)),
             centerTitle: true,
           ),
 
@@ -431,6 +474,7 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                       final name = data["name"] ?? "";
                       final price = (data["price"] as num? ?? 0).toInt();
                       final desc = data["description"] ?? "";
+                      final imageUrl = data["imageUrl"] as String?;
                       final qty = _cart[doc.id] ?? 0;
 
                       return Container(
@@ -450,18 +494,30 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                           padding: const EdgeInsets.all(14),
                           child: Row(
                             children: [
-                              Container(
-                                width: 64,
-                                height: 64,
-                                decoration: BoxDecoration(
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: Container(
+                                  width: 64,
+                                  height: 64,
                                   color: const Color(0xFF1565C0)
                                       .withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: const Icon(
-                                  Icons.fastfood_rounded,
-                                  color: Color(0xFF1565C0),
-                                  size: 30,
+                                  child:
+                                      (imageUrl != null && imageUrl.isNotEmpty)
+                                          ? Image.network(
+                                              imageUrl,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  const Icon(
+                                                Icons.fastfood_rounded,
+                                                color: Color(0xFF1565C0),
+                                                size: 30,
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.fastfood_rounded,
+                                              color: Color(0xFF1565C0),
+                                              size: 30,
+                                            ),
                                 ),
                               ),
                               const SizedBox(width: 14),
@@ -502,15 +558,13 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                               ),
                               if (qty == 0)
                                 GestureDetector(
-                                  onTap: () =>
-                                      _increment(doc.id, name, price),
+                                  onTap: () => _increment(doc.id, name, price),
                                   child: Container(
                                     width: 44,
                                     height: 44,
                                     decoration: BoxDecoration(
                                       color: const Color(0xFF1565C0),
-                                      borderRadius:
-                                          BorderRadius.circular(10),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: const Icon(Icons.add,
                                         color: Colors.white, size: 22),
@@ -529,8 +583,8 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                                           borderRadius:
                                               BorderRadius.circular(8),
                                         ),
-                                        child: const Icon(Icons.remove,
-                                            size: 18),
+                                        child:
+                                            const Icon(Icons.remove, size: 18),
                                       ),
                                     ),
                                     Padding(
@@ -663,4 +717,3 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
     );
   }
 }
-

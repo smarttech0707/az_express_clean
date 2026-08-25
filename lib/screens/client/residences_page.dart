@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -16,7 +16,14 @@ class _ResidencesPageState extends State<ResidencesPage> {
   String _search = '';
   String _filterType = 'tous';
 
-  static const _types = ['tous', 'Studio', '1 pièce', '2 pièces', '3 pièces', 'Villa'];
+  static const _types = [
+    'tous',
+    'Studio',
+    '1 pièce',
+    '2 pièces',
+    '3 pièces',
+    'Villa'
+  ];
 
   @override
   void dispose() {
@@ -65,8 +72,8 @@ class _ResidencesPageState extends State<ResidencesPage> {
                         const SizedBox(height: 4),
                         Text(
                           context.tr('find_residence'),
-                          style:
-                              const TextStyle(color: Colors.white70, fontSize: 13),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13),
                         ),
                       ],
                     ),
@@ -135,9 +142,8 @@ class _ResidencesPageState extends State<ResidencesPage> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 6),
                       decoration: BoxDecoration(
-                        color: selected
-                            ? const Color(0xFF4A148C)
-                            : Colors.white,
+                        color:
+                            selected ? const Color(0xFF4A148C) : Colors.white,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                           color: selected
@@ -184,8 +190,7 @@ class _ResidencesPageState extends State<ResidencesPage> {
                 final matchSearch = _search.isEmpty ||
                     title.contains(_search) ||
                     address.contains(_search);
-                final matchType =
-                    _filterType == 'tous' || type == _filterType;
+                final matchType = _filterType == 'tous' || type == _filterType;
                 return matchSearch && matchType;
               }).toList();
 
@@ -214,8 +219,7 @@ class _ResidencesPageState extends State<ResidencesPage> {
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, i) {
-                      final data =
-                          filtered[i].data() as Map<String, dynamic>;
+                      final data = filtered[i].data() as Map<String, dynamic>;
                       return _FadeInItem(
                         index: i,
                         child: _ResidenceCard(
@@ -352,16 +356,12 @@ class _ResidenceCard extends StatelessWidget {
                   Row(
                     children: [
                       if (priceNight != null && priceNight > 0) ...[
-                        _priceChip(
-                            '$priceNight FCFA',
-                            context.tr('per_night'),
+                        _priceChip('$priceNight FCFA', context.tr('per_night'),
                             const Color(0xFF4A148C)),
                         const SizedBox(width: 8),
                       ],
                       if (priceMonth != null && priceMonth > 0)
-                        _priceChip(
-                            '$priceMonth FCFA',
-                            context.tr('per_month'),
+                        _priceChip('$priceMonth FCFA', context.tr('per_month'),
                             Colors.orange.shade700),
                     ],
                   ),
@@ -377,7 +377,8 @@ class _ResidenceCard extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF4A148C).withValues(alpha: 0.08),
+                            color:
+                                const Color(0xFF4A148C).withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -435,14 +436,12 @@ class _ResidenceCard extends StatelessWidget {
             TextSpan(
               text: amount,
               style: TextStyle(
-                  color: color,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold),
+                  color: color, fontSize: 14, fontWeight: FontWeight.bold),
             ),
             TextSpan(
               text: period,
-              style: TextStyle(
-                  color: color.withValues(alpha: 0.7), fontSize: 11),
+              style:
+                  TextStyle(color: color.withValues(alpha: 0.7), fontSize: 11),
             ),
           ],
         ),
@@ -604,7 +603,8 @@ class _ResidenceDetail extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 7),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF4A148C).withValues(alpha: 0.08),
+                            color:
+                                const Color(0xFF4A148C).withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
                                 color: const Color(0xFF4A148C)
@@ -614,8 +614,7 @@ class _ResidenceDetail extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(icon,
-                                  size: 14,
-                                  color: const Color(0xFF4A148C)),
+                                  size: 14, color: const Color(0xFF4A148C)),
                               const SizedBox(width: 5),
                               Text(
                                 a,
@@ -715,9 +714,7 @@ class _ResidenceDetail extends StatelessWidget {
           const SizedBox(width: 6),
           Text(label,
               style: TextStyle(
-                  color: color,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600)),
+                  color: color, fontSize: 13, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -743,11 +740,15 @@ class _ResidenceDetail extends StatelessWidget {
     if (a.contains('wifi') || a.contains('internet')) return Icons.wifi_rounded;
     if (a.contains('clim') || a.contains('ac')) return Icons.ac_unit_rounded;
     if (a.contains('tv') || a.contains('télé')) return Icons.tv_rounded;
-    if (a.contains('cuisine') || a.contains('kitchen')) return Icons.kitchen_rounded;
-    if (a.contains('parking') || a.contains('garage')) return Icons.local_parking_rounded;
-    if (a.contains('eau') || a.contains('water')) return Icons.water_drop_rounded;
+    if (a.contains('cuisine') || a.contains('kitchen'))
+      return Icons.kitchen_rounded;
+    if (a.contains('parking') || a.contains('garage'))
+      return Icons.local_parking_rounded;
+    if (a.contains('eau') || a.contains('water'))
+      return Icons.water_drop_rounded;
     if (a.contains('élec') || a.contains('electric')) return Icons.bolt_rounded;
-    if (a.contains('sécur') || a.contains('guard')) return Icons.security_rounded;
+    if (a.contains('sécur') || a.contains('guard'))
+      return Icons.security_rounded;
     if (a.contains('piscine') || a.contains('pool')) return Icons.pool_rounded;
     return Icons.check_circle_outline_rounded;
   }
@@ -791,9 +792,8 @@ class _FadeInItemState extends State<_FadeInItem>
     return FadeTransition(
       opacity: _anim,
       child: SlideTransition(
-        position:
-            Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero)
-                .animate(_anim),
+        position: Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero)
+            .animate(_anim),
         child: widget.child,
       ),
     );

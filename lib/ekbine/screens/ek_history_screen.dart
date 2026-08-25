@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -58,8 +58,7 @@ class EkHistoryScreen extends StatelessWidget {
                 return ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: orders.length,
-                  itemBuilder: (_, i) =>
-                      _HistoryCard(order: orders[i]),
+                  itemBuilder: (_, i) => _HistoryCard(order: orders[i]),
                 );
               },
             ),
@@ -85,11 +84,11 @@ class _HistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final statusColor = ekStatusColor(order.status);
-    final opColor     = EkService.operatorColor(order.operator);
+    final opColor = EkService.operatorColor(order.operator);
 
     return GestureDetector(
-      onTap: () => Navigator.push(context, MaterialPageRoute(
-          builder: (_) => EkOrderTracking(order: order))),
+      onTap: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => EkOrderTracking(order: order))),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(14),
@@ -98,14 +97,15 @@ class _HistoryCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: kEkDivider),
           boxShadow: const [
-            BoxShadow(color: Color(0x06000000), blurRadius: 6,
-                offset: Offset(0, 2))
+            BoxShadow(
+                color: Color(0x06000000), blurRadius: 6, offset: Offset(0, 2))
           ],
         ),
         child: Row(children: [
           // Operator circle
           Container(
-            width: 46, height: 46,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               color: opColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
@@ -113,7 +113,8 @@ class _HistoryCard extends StatelessWidget {
             child: Center(
               child: Text(order.operator[0].toUpperCase(),
                   style: GoogleFonts.urbanist(
-                      fontSize: 18, fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
                       color: opColor)),
             ),
           ),
@@ -124,24 +125,24 @@ class _HistoryCard extends StatelessWidget {
               children: [
                 Text(order.serviceLabel,
                     style: GoogleFonts.urbanist(
-                        fontSize: 14, fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                         color: kEkText)),
                 Text(order.beneficiaryNumber,
-                    style: GoogleFonts.urbanist(
-                        fontSize: 12, color: kEkMuted)),
+                    style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
                 if (order.createdAt != null)
                   Text(_dateStr(order.createdAt!),
-                      style: GoogleFonts.urbanist(
-                          fontSize: 10, color: kEkMuted)),
+                      style:
+                          GoogleFonts.urbanist(fontSize: 10, color: kEkMuted)),
               ],
             ),
           ),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(_fmt(order.totalPaid),
                 style: GoogleFonts.urbanist(
-                    fontSize: 14, fontWeight: FontWeight.w800,
-                    color: order.status == 'completed'
-                        ? kEkGreen : kEkMuted)),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: order.status == 'completed' ? kEkGreen : kEkMuted)),
             const SizedBox(height: 4),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -152,7 +153,8 @@ class _HistoryCard extends StatelessWidget {
               child: Text(
                 ekStatusLabels[order.status] ?? order.status,
                 style: GoogleFonts.urbanist(
-                    fontSize: 9, fontWeight: FontWeight.w700,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
                     color: statusColor),
               ),
             ),

@@ -44,16 +44,16 @@ class ServiceProvidersPage extends StatefulWidget {
 
 class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
   final _searchCtrl = TextEditingController();
-  String   _search     = '';
-  _SortBy  _sortBy     = _SortBy.distance;
-  double?  _userLat;
-  double?  _userLng;
+  String _search = '';
+  _SortBy _sortBy = _SortBy.distance;
+  double? _userLat;
+  double? _userLng;
   Set<String> _favorites = {};
 
   // Filtres
-  double _minRating    = 0;
-  bool   _gpsOnly      = false;
-  bool   _availableOnly = true;
+  double _minRating = 0;
+  bool _gpsOnly = false;
+  bool _availableOnly = true;
 
   final String? _uid = FirebaseAuth.instance.currentUser?.uid;
 
@@ -81,7 +81,7 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
 
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy:  LocationAccuracy.medium,
+          accuracy: LocationAccuracy.medium,
           timeLimit: Duration(seconds: 8),
         ),
       );
@@ -101,12 +101,14 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
   }
 
   double _calcDistance(double lat1, double lng1, double lat2, double lng2) {
-    const r   = 6371.0;
+    const r = 6371.0;
     final dLat = (lat2 - lat1) * pi / 180;
     final dLng = (lng2 - lng1) * pi / 180;
     final a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(lat1 * pi / 180) * cos(lat2 * pi / 180) *
-            sin(dLng / 2) * sin(dLng / 2);
+        cos(lat1 * pi / 180) *
+            cos(lat2 * pi / 180) *
+            sin(dLng / 2) *
+            sin(dLng / 2);
     return r * 2 * atan2(sqrt(a), sqrt(1 - a));
   }
 
@@ -150,8 +152,8 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
     var p = phone.replaceAll(RegExp(r'[\s\-()]'), '');
     if (p.startsWith('0')) p = p.substring(1);
     if (!p.startsWith('225')) p = '225$p';
-    final msg = Uri.encodeComponent(
-        'Bonjour $name, je vous contacte via AZ Express.');
+    final msg =
+        Uri.encodeComponent('Bonjour $name, je vous contacte via AZ Express.');
     final uri = Uri.parse('https://wa.me/$p?text=$msg');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -159,8 +161,8 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
   }
 
   Future<void> _openMaps(double lat, double lng) async {
-    final uri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    final uri =
+        Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
@@ -168,25 +170,22 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
 
   // ── Traitement des données ─────────────────────────────────────────────────
   List<ServiceProvider> _process(List<DocumentSnapshot> docs) {
-    final list = docs
-        .where((d) {
-          final data = d.data() as Map<String, dynamic>?;
-          final status = data?['status'] as String?;
-          // Hide pending and rejected self-registrations; show admin-created (no status)
-          return status == null || status == 'approved';
-        })
-        .map((d) {
-          final p = ServiceProvider.fromFirestore(d);
-          p.distanceKm = _distanceTo(p);
-          return p;
-        })
-        .toList();
+    final list = docs.where((d) {
+      final data = d.data() as Map<String, dynamic>?;
+      final status = data?['status'] as String?;
+      // Hide pending and rejected self-registrations; show admin-created (no status)
+      return status == null || status == 'approved';
+    }).map((d) {
+      final p = ServiceProvider.fromFirestore(d);
+      p.distanceKm = _distanceTo(p);
+      return p;
+    }).toList();
 
     // Filtres
     final filtered = list.where((p) {
       if (_availableOnly && !p.isAvailable) return false;
       if (_minRating > 0 && p.rating < _minRating) return false;
-      if (_gpsOnly   && !p.hasGps) return false;
+      if (_gpsOnly && !p.hasGps) return false;
       if (_search.isNotEmpty) {
         final q = _search.toLowerCase();
         if (!p.name.toLowerCase().contains(q) &&
@@ -235,8 +234,8 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: widget.gradient,
-                    begin:  Alignment.topLeft,
-                    end:    Alignment.bottomRight,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
                 ),
                 child: SafeArea(
@@ -248,15 +247,14 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                       children: [
                         Row(
                           children: [
-                            Icon(widget.icon,
-                                color: Colors.white70, size: 26),
+                            Icon(widget.icon, color: Colors.white70, size: 26),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 widget.title,
                                 style: GoogleFonts.urbanist(
-                                  color:      Colors.white,
-                                  fontSize:   20,
+                                  color: Colors.white,
+                                  fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -301,22 +299,22 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                   // Barre de recherche
                   Container(
                     decoration: BoxDecoration(
-                      color:        Colors.white,
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
-                          color:      Colors.black.withValues(alpha: 0.06),
+                          color: Colors.black.withValues(alpha: 0.06),
                           blurRadius: 8,
-                          offset:     const Offset(0, 2),
+                          offset: const Offset(0, 2),
                         ),
                       ],
                     ),
                     child: TextField(
                       controller: _searchCtrl,
-                      onChanged:  (v) => setState(() => _search = v),
-                      style:      GoogleFonts.urbanist(fontSize: 13.5),
+                      onChanged: (v) => setState(() => _search = v),
+                      style: GoogleFonts.urbanist(fontSize: 13.5),
                       decoration: InputDecoration(
-                        hintText:  context.tr('search_provider'),
+                        hintText: context.tr('search_provider'),
                         hintStyle: GoogleFonts.urbanist(
                             fontSize: 13.5, color: Colors.grey),
                         prefixIcon: Icon(Icons.search_rounded,
@@ -330,7 +328,7 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                                 },
                               )
                             : null,
-                        border:         InputBorder.none,
+                        border: InputBorder.none,
                         contentPadding:
                             const EdgeInsets.symmetric(vertical: 13),
                       ),
@@ -346,57 +344,54 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                       children: [
                         _SortChip(
                           label: 'Distance',
-                          icon:  Icons.near_me_rounded,
+                          icon: Icons.near_me_rounded,
                           active: _sortBy == _SortBy.distance,
-                          color:  widget.color,
+                          color: widget.color,
                           onTap: () =>
                               setState(() => _sortBy = _SortBy.distance),
                         ),
                         const SizedBox(width: 8),
                         _SortChip(
                           label: 'Note',
-                          icon:  Icons.star_rounded,
+                          icon: Icons.star_rounded,
                           active: _sortBy == _SortBy.rating,
-                          color:  widget.color,
-                          onTap: () =>
-                              setState(() => _sortBy = _SortBy.rating),
+                          color: widget.color,
+                          onTap: () => setState(() => _sortBy = _SortBy.rating),
                         ),
                         const SizedBox(width: 8),
                         _SortChip(
                           label: 'Nom A-Z',
-                          icon:  Icons.sort_by_alpha_rounded,
+                          icon: Icons.sort_by_alpha_rounded,
                           active: _sortBy == _SortBy.name,
-                          color:  widget.color,
-                          onTap: () =>
-                              setState(() => _sortBy = _SortBy.name),
+                          color: widget.color,
+                          onTap: () => setState(() => _sortBy = _SortBy.name),
                         ),
                         if (_minRating > 0 || _gpsOnly) ...[
                           const SizedBox(width: 8),
                           GestureDetector(
                             onTap: () => setState(() {
                               _minRating = 0;
-                              _gpsOnly   = false;
+                              _gpsOnly = false;
                             }),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                color:        Colors.orange.shade50,
+                                color: Colors.orange.shade50,
                                 borderRadius: BorderRadius.circular(20),
-                                border:       Border.all(
-                                    color: Colors.orange.shade300),
+                                border:
+                                    Border.all(color: Colors.orange.shade300),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(Icons.filter_list_off_rounded,
-                                      size: 14,
-                                      color: Colors.orange.shade700),
+                                      size: 14, color: Colors.orange.shade700),
                                   const SizedBox(width: 4),
                                   Text('Effacer filtres',
                                       style: GoogleFonts.urbanist(
                                           fontSize: 11.5,
-                                          color:     Colors.orange.shade700,
+                                          color: Colors.orange.shade700,
                                           fontWeight: FontWeight.w600)),
                                 ],
                               ),
@@ -432,7 +427,7 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
               if (providers.isEmpty) {
                 return SliverFillRemaining(
                   child: _EmptyState(
-                    icon:   widget.icon,
+                    icon: widget.icon,
                     search: _search,
                   ),
                 );
@@ -445,15 +440,15 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                     (ctx, i) {
                       final p = providers[i];
                       return _ProviderCard(
-                        provider:    p,
-                        color:       widget.color,
-                        gradient:    widget.gradient,
-                        isFavorite:  _favorites.contains(p.id),
-                        onFavorite:  () => _toggleFavorite(p.id),
-                        onCall:      () => _call(p.phone),
-                        onWhatsApp:  () => _whatsapp(p.phone, p.name),
-                        onGps:       () => _openMaps(p.lat, p.lng),
-                        onTap:       () => _showDetail(ctx, p),
+                        provider: p,
+                        color: widget.color,
+                        gradient: widget.gradient,
+                        isFavorite: _favorites.contains(p.id),
+                        onFavorite: () => _toggleFavorite(p.id),
+                        onCall: () => _call(p.phone),
+                        onWhatsApp: () => _whatsapp(p.phone, p.name),
+                        onGps: () => _openMaps(p.lat, p.lng),
+                        onTap: () => _showDetail(ctx, p),
                       );
                     },
                     childCount: providers.length,
@@ -474,14 +469,14 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => _FilterSheet(
-        color:        widget.color,
-        minRating:    _minRating,
-        gpsOnly:      _gpsOnly,
+        color: widget.color,
+        minRating: _minRating,
+        gpsOnly: _gpsOnly,
         availableOnly: _availableOnly,
         onApply: (minR, gps, avail) {
           setState(() {
-            _minRating     = minR;
-            _gpsOnly       = gps;
+            _minRating = minR;
+            _gpsOnly = gps;
             _availableOnly = avail;
           });
         },
@@ -495,16 +490,16 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
       context,
       MaterialPageRoute(
         builder: (_) => _ProviderDetailPage(
-          provider:   p,
-          color:      widget.color,
-          gradient:   widget.gradient,
-          icon:       widget.icon,
+          provider: p,
+          color: widget.color,
+          gradient: widget.gradient,
+          icon: widget.icon,
           isFavorite: _favorites.contains(p.id),
           onFavorite: () => _toggleFavorite(p.id),
-          onCall:     () => _call(p.phone),
+          onCall: () => _call(p.phone),
           onWhatsApp: () => _whatsapp(p.phone, p.name),
-          onGps:      () => _openMaps(p.lat, p.lng),
-          onRate:     (r, c) => _submitReview(p, r, c),
+          onGps: () => _openMaps(p.lat, p.lng),
+          onRate: (r, c) => _submitReview(p, r, c),
         ),
       ),
     );
@@ -535,25 +530,24 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
 
     // Ajouter l'avis
     await db.collection('service_reviews').add({
-      'providerId':  p.id,
-      'clientId':    _uid,
-      'rating':      rating,
-      'comment':     comment,
-      'createdAt':   FieldValue.serverTimestamp(),
+      'providerId': p.id,
+      'clientId': _uid,
+      'rating': rating,
+      'comment': comment,
+      'createdAt': FieldValue.serverTimestamp(),
     });
 
     // Mettre à jour la moyenne (transaction atomique)
     await db.runTransaction((tx) async {
-      final ref  = db.collection('service_providers').doc(p.id);
+      final ref = db.collection('service_providers').doc(p.id);
       final snap = await tx.get(ref);
       if (!snap.exists) return;
-      final d    = snap.data()!;
-      final cnt  = ((d['ratingCount'] as num?)?.toInt() ?? 0) + 1;
-      final avg  = ((d['rating']      as num?)?.toDouble() ?? 0) *
-              (cnt - 1) / cnt +
+      final d = snap.data()!;
+      final cnt = ((d['ratingCount'] as num?)?.toInt() ?? 0) + 1;
+      final avg = ((d['rating'] as num?)?.toDouble() ?? 0) * (cnt - 1) / cnt +
           rating / cnt;
       tx.update(ref, {
-        'rating':      double.parse(avg.toStringAsFixed(1)),
+        'rating': double.parse(avg.toStringAsFixed(1)),
         'ratingCount': cnt,
       });
     });
@@ -593,30 +587,30 @@ class _SortChip extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color:        active ? color : Colors.white,
+          color: active ? color : Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border:       Border.all(
-              color: active ? color : Colors.grey.shade300),
+          border: Border.all(color: active ? color : Colors.grey.shade300),
           boxShadow: active
-              ? [BoxShadow(
-                  color:      color.withValues(alpha: 0.3),
-                  blurRadius: 6,
-                  offset:     const Offset(0, 2))]
+              ? [
+                  BoxShadow(
+                      color: color.withValues(alpha: 0.3),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2))
+                ]
               : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon,
-                size:  14,
-                color: active ? Colors.white : Colors.grey.shade600),
+                size: 14, color: active ? Colors.white : Colors.grey.shade600),
             const SizedBox(width: 5),
             Text(
               label,
               style: GoogleFonts.urbanist(
-                fontSize:   12,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color:      active ? Colors.white : Colors.grey.shade700,
+                color: active ? Colors.white : Colors.grey.shade700,
               ),
             ),
           ],
@@ -661,13 +655,13 @@ class _ProviderCard extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 14),
         decoration: BoxDecoration(
-          color:        Colors.white,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color:      Colors.black.withValues(alpha: 0.07),
+              color: Colors.black.withValues(alpha: 0.07),
               blurRadius: 12,
-              offset:     const Offset(0, 4),
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -676,22 +670,21 @@ class _ProviderCard extends StatelessWidget {
           children: [
             // ── Photo ──────────────────────────────────────────────────────
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
               child: Stack(
                 children: [
                   SizedBox(
                     height: 150,
-                    width:  double.infinity,
-                    child:  p.photos.isNotEmpty
+                    width: double.infinity,
+                    child: p.photos.isNotEmpty
                         ? Image.network(
                             p.photos.first,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
-                                _GradientPlaceholder(
-                                  gradient: gradient,
-                                  icon: Icons.storefront_rounded,
-                                ),
+                            errorBuilder: (_, __, ___) => _GradientPlaceholder(
+                              gradient: gradient,
+                              icon: Icons.storefront_rounded,
+                            ),
                           )
                         : _GradientPlaceholder(
                             gradient: gradient,
@@ -701,12 +694,14 @@ class _ProviderCard extends StatelessWidget {
 
                   // Badge favori
                   Positioned(
-                    top: 10, right: 10,
+                    top: 10,
+                    right: 10,
                     child: GestureDetector(
                       onTap: onFavorite,
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
-                        width: 36, height: 36,
+                        width: 36,
+                        height: 36,
                         decoration: BoxDecoration(
                           color: isFavorite
                               ? Colors.red
@@ -727,12 +722,13 @@ class _ProviderCard extends StatelessWidget {
                   // Badge vérifié
                   if (p.isVerified)
                     Positioned(
-                      top: 10, left: 10,
+                      top: 10,
+                      left: 10,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color:        Colors.green.shade600,
+                          color: Colors.green.shade600,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
@@ -754,12 +750,13 @@ class _ProviderCard extends StatelessWidget {
                   // Distance
                   if (p.distanceStr.isNotEmpty)
                     Positioned(
-                      bottom: 8, left: 10,
+                      bottom: 8,
+                      left: 10,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color:        Colors.black.withValues(alpha: 0.55),
+                          color: Colors.black.withValues(alpha: 0.55),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
@@ -794,8 +791,8 @@ class _ProviderCard extends StatelessWidget {
                           p.name,
                           style: GoogleFonts.urbanist(
                             fontWeight: FontWeight.bold,
-                            fontSize:   15,
-                            color:      Colors.black87,
+                            fontSize: 15,
+                            color: Colors.black87,
                           ),
                         ),
                       ),
@@ -803,8 +800,7 @@ class _ProviderCard extends StatelessWidget {
                       // Note
                       if (p.ratingCount > 0) ...[
                         const SizedBox(width: 8),
-                        _RatingBadge(
-                            rating: p.rating, count: p.ratingCount),
+                        _RatingBadge(rating: p.rating, count: p.ratingCount),
                       ],
                     ],
                   ),
@@ -836,7 +832,7 @@ class _ProviderCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.urbanist(
-                          color:  Colors.grey.shade600,
+                          color: Colors.grey.shade600,
                           fontSize: 12,
                           height: 1.4),
                     ),
@@ -851,7 +847,7 @@ class _ProviderCard extends StatelessWidget {
                         Expanded(
                           child: _ActionBtn(
                             label: context.tr('call'),
-                            icon:  Icons.phone_rounded,
+                            icon: Icons.phone_rounded,
                             color: Colors.green,
                             onTap: onCall,
                           ),
@@ -860,7 +856,7 @@ class _ProviderCard extends StatelessWidget {
                         Expanded(
                           child: _ActionBtn(
                             label: 'WhatsApp',
-                            icon:  Icons.chat_rounded,
+                            icon: Icons.chat_rounded,
                             color: const Color(0xFF25D366),
                             onTap: onWhatsApp,
                           ),
@@ -871,7 +867,7 @@ class _ProviderCard extends StatelessWidget {
                         Expanded(
                           child: _ActionBtn(
                             label: context.tr('get_directions'),
-                            icon:  Icons.navigation_rounded,
+                            icon: Icons.navigation_rounded,
                             color: color,
                             onTap: onGps,
                           ),
@@ -923,8 +919,8 @@ class _ProviderDetailPage extends StatefulWidget {
 }
 
 class _ProviderDetailPageState extends State<_ProviderDetailPage> {
-  int    _photoIndex = 0;
-  bool   _isFav     = false;
+  int _photoIndex = 0;
+  bool _isFav = false;
 
   @override
   void initState() {
@@ -949,7 +945,9 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
             actions: [
               IconButton(
                 icon: Icon(
-                  _isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  _isFav
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
                   color: _isFav ? Colors.red.shade300 : Colors.white,
                 ),
                 onPressed: () {
@@ -965,8 +963,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                   if (p.photos.isNotEmpty)
                     PageView.builder(
                       itemCount: p.photos.length,
-                      onPageChanged: (i) =>
-                          setState(() => _photoIndex = i),
+                      onPageChanged: (i) => setState(() => _photoIndex = i),
                       itemBuilder: (_, i) => Image.network(
                         p.photos[i],
                         fit: BoxFit.cover,
@@ -981,19 +978,19 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                       gradient: widget.gradient,
                       icon: widget.icon,
                     ),
-
                   if (p.photos.length > 1)
                     Positioned(
                       bottom: 12,
-                      left:   0,
-                      right:  0,
+                      left: 0,
+                      right: 0,
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(p.photos.length, (i) =>
-                          AnimatedContainer(
+                        children: List.generate(
+                          p.photos.length,
+                          (i) => AnimatedContainer(
                             duration: const Duration(milliseconds: 200),
                             margin: const EdgeInsets.symmetric(horizontal: 3),
-                            width:  i == _photoIndex ? 18 : 6,
+                            width: i == _photoIndex ? 18 : 6,
                             height: 6,
                             decoration: BoxDecoration(
                               color: i == _photoIndex
@@ -1027,9 +1024,9 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                             Text(
                               p.name,
                               style: GoogleFonts.urbanist(
-                                fontSize:   22,
+                                fontSize: 22,
                                 fontWeight: FontWeight.bold,
-                                color:      Colors.black87,
+                                color: Colors.black87,
                               ),
                             ),
                             if (p.address.isNotEmpty) ...[
@@ -1037,14 +1034,13 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                               Row(
                                 children: [
                                   Icon(Icons.location_on_rounded,
-                                      size: 14,
-                                      color: Colors.grey.shade500),
+                                      size: 14, color: Colors.grey.shade500),
                                   const SizedBox(width: 5),
                                   Expanded(
                                     child: Text(
                                       p.address,
                                       style: GoogleFonts.urbanist(
-                                          color:    Colors.grey.shade600,
+                                          color: Colors.grey.shade600,
                                           fontSize: 13),
                                     ),
                                   ),
@@ -1065,8 +1061,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                             Text(
                               '${p.ratingCount} avis',
                               style: GoogleFonts.urbanist(
-                                  fontSize: 11,
-                                  color: Colors.grey.shade500),
+                                  fontSize: 11, color: Colors.grey.shade500),
                             ),
                           ],
                         ),
@@ -1080,21 +1075,21 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                     Row(children: [
                       Expanded(
                         child: _BigActionBtn(
-                          label:    context.tr('call'),
+                          label: context.tr('call'),
                           subtitle: p.phone,
-                          icon:     Icons.phone_rounded,
-                          color:    Colors.green,
-                          onTap:    widget.onCall,
+                          icon: Icons.phone_rounded,
+                          color: Colors.green,
+                          onTap: widget.onCall,
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: _BigActionBtn(
-                          label:    'WhatsApp',
+                          label: 'WhatsApp',
                           subtitle: p.phone,
-                          icon:     Icons.chat_rounded,
-                          color:    const Color(0xFF25D366),
-                          onTap:    widget.onWhatsApp,
+                          icon: Icons.chat_rounded,
+                          color: const Color(0xFF25D366),
+                          onTap: widget.onWhatsApp,
                         ),
                       ),
                     ]),
@@ -1104,11 +1099,11 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                     SizedBox(
                       width: double.infinity,
                       child: _BigActionBtn(
-                        label:    context.tr('get_directions'),
+                        label: context.tr('get_directions'),
                         subtitle: context.tr('gps_maps'),
-                        icon:     Icons.navigation_rounded,
-                        color:    widget.color,
-                        onTap:    widget.onGps,
+                        icon: Icons.navigation_rounded,
+                        color: widget.color,
+                        onTap: widget.onGps,
                       ),
                     ),
                   ],
@@ -1118,16 +1113,15 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                     Text(
                       context.tr('about_provider'),
                       style: GoogleFonts.urbanist(
-                          fontSize:   16,
-                          fontWeight: FontWeight.bold),
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       p.description,
                       style: GoogleFonts.urbanist(
-                          color:    Colors.grey.shade700,
+                          color: Colors.grey.shade700,
                           fontSize: 14,
-                          height:   1.6),
+                          height: 1.6),
                     ),
                   ],
 
@@ -1141,8 +1135,8 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                         Text(
                           'À ${p.distanceStr} de vous',
                           style: GoogleFonts.urbanist(
-                              fontSize:   13,
-                              color:      widget.color,
+                              fontSize: 13,
+                              color: widget.color,
                               fontWeight: FontWeight.w600),
                         ),
                       ],
@@ -1159,7 +1153,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
           SliverToBoxAdapter(
             child: Container(
               margin: const EdgeInsets.only(top: 8),
-              color:  Colors.white,
+              color: Colors.white,
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1173,8 +1167,7 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
                             fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       TextButton.icon(
-                        onPressed: () =>
-                            _showRateDialog(context, p),
+                        onPressed: () => _showRateDialog(context, p),
                         icon: const Icon(Icons.star_rounded,
                             size: 16, color: AppColors.primary),
                         label: Text(
@@ -1208,8 +1201,8 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text(
             'Noter ${p.name}',
             style: GoogleFonts.urbanist(fontWeight: FontWeight.bold),
@@ -1220,28 +1213,31 @@ class _ProviderDetailPageState extends State<_ProviderDetailPage> {
               // Étoiles
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(5, (i) => GestureDetector(
-                  onTap: () => setS(() => tempRating = (i + 1).toDouble()),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(
-                      Icons.star_rounded,
-                      size:  36,
-                      color: i < tempRating
-                          ? Colors.amber
-                          : Colors.grey.shade300,
-                    ),
-                  ),
-                )),
+                children: List.generate(
+                    5,
+                    (i) => GestureDetector(
+                          onTap: () =>
+                              setS(() => tempRating = (i + 1).toDouble()),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Icon(
+                              Icons.star_rounded,
+                              size: 36,
+                              color: i < tempRating
+                                  ? Colors.amber
+                                  : Colors.grey.shade300,
+                            ),
+                          ),
+                        )),
               ),
               const SizedBox(height: 16),
               TextField(
-                controller:  commentCtrl,
-                maxLines:    3,
-                decoration:  InputDecoration(
-                  hintText:   'Votre commentaire (optionnel)',
-                  hintStyle:  GoogleFonts.urbanist(fontSize: 13),
-                  border:     OutlineInputBorder(
+                controller: commentCtrl,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: 'Votre commentaire (optionnel)',
+                  hintStyle: GoogleFonts.urbanist(fontSize: 13),
+                  border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   contentPadding: const EdgeInsets.all(12),
                 ),
@@ -1300,15 +1296,13 @@ class _ReviewsList extends StatelessWidget {
           );
         }
         if (!snap.hasData) {
-          return const Center(
-              child: CircularProgressIndicator(strokeWidth: 2));
+          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
         }
         final docs = snap.data!.docs;
         if (docs.isEmpty) {
           return Text(
             'Aucun avis pour l\'instant.',
-            style: GoogleFonts.urbanist(
-                color: Colors.grey, fontSize: 13),
+            style: GoogleFonts.urbanist(color: Colors.grey, fontSize: 13),
           );
         }
         return Column(
@@ -1321,7 +1315,7 @@ class _ReviewsList extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color:        const Color(0xFFF5F5F5),
+                color: const Color(0xFFF5F5F5),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -1329,13 +1323,15 @@ class _ReviewsList extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      ...List.generate(5, (i) => Icon(
-                        Icons.star_rounded,
-                        size:  14,
-                        color: i < rating
-                            ? Colors.amber
-                            : Colors.grey.shade300,
-                      )),
+                      ...List.generate(
+                          5,
+                          (i) => Icon(
+                                Icons.star_rounded,
+                                size: 14,
+                                color: i < rating
+                                    ? Colors.amber
+                                    : Colors.grey.shade300,
+                              )),
                       const Spacer(),
                       if (ts != null)
                         Text(
@@ -1350,9 +1346,7 @@ class _ReviewsList extends StatelessWidget {
                     Text(
                       comment,
                       style: GoogleFonts.urbanist(
-                          fontSize: 12.5,
-                          color: Colors.black87,
-                          height: 1.4),
+                          fontSize: 12.5, color: Colors.black87, height: 1.4),
                     ),
                   ],
                 ],
@@ -1389,14 +1383,14 @@ class _FilterSheet extends StatefulWidget {
 
 class _FilterSheetState extends State<_FilterSheet> {
   late double _minRating;
-  late bool   _gpsOnly;
-  late bool   _availableOnly;
+  late bool _gpsOnly;
+  late bool _availableOnly;
 
   @override
   void initState() {
     super.initState();
-    _minRating    = widget.minRating;
-    _gpsOnly      = widget.gpsOnly;
+    _minRating = widget.minRating;
+    _gpsOnly = widget.gpsOnly;
     _availableOnly = widget.availableOnly;
   }
 
@@ -1404,11 +1398,13 @@ class _FilterSheetState extends State<_FilterSheet> {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
-        left: 20, right: 20, top: 8,
+        left: 20,
+        right: 20,
+        top: 8,
         bottom: MediaQuery.of(context).padding.bottom + 24,
       ),
       child: Column(
@@ -1416,10 +1412,11 @@ class _FilterSheetState extends State<_FilterSheet> {
         children: [
           Center(
             child: Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               margin: const EdgeInsets.only(top: 8, bottom: 20),
               decoration: BoxDecoration(
-                color:        Colors.grey.shade300,
+                color: Colors.grey.shade300,
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -1448,9 +1445,9 @@ class _FilterSheetState extends State<_FilterSheet> {
             ],
           ),
           Slider(
-            value:      _minRating,
-            min:        0,
-            max:        5,
+            value: _minRating,
+            min: 0,
+            max: 5,
             divisions: 5,
             activeColor: widget.color,
             onChanged: (v) => setState(() => _minRating = v),
@@ -1460,8 +1457,8 @@ class _FilterSheetState extends State<_FilterSheet> {
           SwitchListTile(
             title: Text('Avec localisation GPS uniquement',
                 style: GoogleFonts.urbanist(fontSize: 13)),
-            value:       _gpsOnly,
-            onChanged:   (v) => setState(() => _gpsOnly = v),
+            value: _gpsOnly,
+            onChanged: (v) => setState(() => _gpsOnly = v),
             activeThumbColor: widget.color,
             contentPadding: EdgeInsets.zero,
           ),
@@ -1470,8 +1467,8 @@ class _FilterSheetState extends State<_FilterSheet> {
           SwitchListTile(
             title: Text('Disponibles uniquement',
                 style: GoogleFonts.urbanist(fontSize: 13)),
-            value:       _availableOnly,
-            onChanged:   (v) => setState(() => _availableOnly = v),
+            value: _availableOnly,
+            onChanged: (v) => setState(() => _availableOnly = v),
             activeThumbColor: widget.color,
             contentPadding: EdgeInsets.zero,
           ),
@@ -1483,13 +1480,12 @@ class _FilterSheetState extends State<_FilterSheet> {
               child: OutlinedButton(
                 onPressed: () {
                   setState(() {
-                    _minRating     = 0;
-                    _gpsOnly       = false;
+                    _minRating = 0;
+                    _gpsOnly = false;
                     _availableOnly = true;
                   });
                 },
-                child: Text('Réinitialiser',
-                    style: GoogleFonts.urbanist()),
+                child: Text('Réinitialiser', style: GoogleFonts.urbanist()),
               ),
             ),
             const SizedBox(width: 12),
@@ -1529,9 +1525,9 @@ class _RatingBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color:        Colors.amber.shade50,
+        color: Colors.amber.shade50,
         borderRadius: BorderRadius.circular(8),
-        border:       Border.all(color: Colors.amber.shade200),
+        border: Border.all(color: Colors.amber.shade200),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1541,9 +1537,9 @@ class _RatingBadge extends StatelessWidget {
           Text(
             rating.toStringAsFixed(1),
             style: GoogleFonts.urbanist(
-              fontSize:   12,
+              fontSize: 12,
               fontWeight: FontWeight.bold,
-              color:      Colors.amber.shade800,
+              color: Colors.amber.shade800,
             ),
           ),
           Text(
@@ -1576,9 +1572,9 @@ class _ActionBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color:        color.withValues(alpha: 0.1),
+          color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(12),
-          border:       Border.all(color: color.withValues(alpha: 0.3)),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1588,9 +1584,9 @@ class _ActionBtn extends StatelessWidget {
             Text(
               label,
               style: GoogleFonts.urbanist(
-                color:      color,
+                color: color,
                 fontWeight: FontWeight.bold,
-                fontSize:   12.5,
+                fontSize: 12.5,
               ),
             ),
           ],
@@ -1621,13 +1617,13 @@ class _BigActionBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
         decoration: BoxDecoration(
-          color:        color,
+          color: color,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color:      color.withValues(alpha: 0.35),
+              color: color.withValues(alpha: 0.35),
               blurRadius: 10,
-              offset:     const Offset(0, 4),
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -1639,17 +1635,17 @@ class _BigActionBtn extends StatelessWidget {
             Text(
               label,
               style: GoogleFonts.urbanist(
-                color:      Colors.white,
+                color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize:   13,
+                fontSize: 13,
               ),
             ),
             Text(
               subtitle,
-              style: GoogleFonts.urbanist(
-                  color: Colors.white70, fontSize: 10.5),
-              maxLines:  1,
-              overflow:  TextOverflow.ellipsis,
+              style:
+                  GoogleFonts.urbanist(color: Colors.white70, fontSize: 10.5),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -1675,15 +1671,14 @@ class _EmptyState extends StatelessWidget {
             search.isEmpty
                 ? context.tr('no_provider')
                 : '${context.tr('no_result_for')} "$search"',
-            style: GoogleFonts.urbanist(
-                fontSize: 16, color: Colors.grey),
+            style: GoogleFonts.urbanist(fontSize: 16, color: Colors.grey),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
             context.tr('come_back'),
-            style: GoogleFonts.urbanist(
-                fontSize: 13, color: Colors.grey.shade400),
+            style:
+                GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade400),
           ),
         ],
       ),
@@ -1702,8 +1697,8 @@ class _GradientPlaceholder extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: gradient,
-          begin:  Alignment.topLeft,
-          end:    Alignment.bottomRight,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
       ),
       child: Center(
@@ -1712,4 +1707,3 @@ class _GradientPlaceholder extends StatelessWidget {
     );
   }
 }
-

@@ -1,6 +1,16 @@
 {
   "indexes": [
     {
+      "collectionGroup": "pharmacy_guards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cityKey", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "isVerified", "order": "ASCENDING" },
+        { "fieldPath": "guardStartAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "messages",
       "queryScope": "COLLECTION",
       "fields": [
@@ -22,6 +32,27 @@
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "propertyType", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "real_estate_listings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "propertyType", "order": "ASCENDING" },
+        { "fieldPath": "priceType", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "real_estate_listings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "propertyType", "order": "ASCENDING" },
+        { "fieldPath": "priceType", "order": "ASCENDING" },
+        { "fieldPath": "furnished", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
@@ -264,6 +295,22 @@
       ]
     },
     {
+      "collectionGroup": "marketplace_products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sellerId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketplace_products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
@@ -335,7 +382,126 @@
         { "fieldPath": "status",    "order": "ASCENDING"  },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
-    }
+    },
+    {
+      "collectionGroup": "event_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "subcategory", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "providerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_reservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_reservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "providerIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participantIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+      {
+        "collectionGroup": "places",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "verified", "order": "ASCENDING" },
+          { "fieldPath": "normalizedName", "order": "ASCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "places",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "verified", "order": "ASCENDING" },
+          { "fieldPath": "aliases", "arrayConfig": "CONTAINS" }
+        ]
+      },
+      {
+        "collectionGroup": "places",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "normalizedName", "order": "ASCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "places",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "verified", "order": "ASCENDING" },
+          { "fieldPath": "searchCount", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "reviews",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "sellerType", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "reviews",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "rating", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "reviews",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "sellerType", "order": "ASCENDING" },
+          { "fieldPath": "rating", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      }
   ],
   "fieldOverrides": []
 }

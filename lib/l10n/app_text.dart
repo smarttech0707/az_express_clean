@@ -79,7 +79,8 @@ class AppText {
       'no_account': 'Pas encore de compte ? ',
       'have_account': 'Déjà un compte ? ',
       'sign_up': "S'inscrire",
-      'wallet_hint': 'Ton wallet est lié à ton compte. Recharge et utilise tes crédits pour commander et acheter en boutique.',
+      'wallet_hint':
+          'Ton wallet est lié à ton compte. Recharge et utilise tes crédits pour commander et acheter en boutique.',
       'fill_required': 'Remplis tous les champs obligatoires',
       'enter_name': 'Entre ton nom complet',
       'password_min': 'Le mot de passe doit avoir au moins 6 caractères',
@@ -99,10 +100,12 @@ class AppText {
       'custom_amount': 'Montant personnalisé (FCFA)',
       'instructions': 'Instructions',
       'send_amount': '1. Envoyez {amount} FCFA au numéro :',
-      'instructions_steps': '2. Appuyez sur "J\'ai payé" ci-dessous\n3. L\'admin vérifie et crédite votre wallet',
+      'instructions_steps':
+          '2. Appuyez sur "J\'ai payé" ci-dessous\n3. L\'admin vérifie et crédite votre wallet',
       'paid_btn': "J'ai payé — Notifier l'admin",
       'min_amount': 'Montant minimum : 100 FCFA',
-      'request_sent': "Demande envoyée ! L'admin créditera votre wallet après vérification.",
+      'request_sent':
+          "Demande envoyée ! L'admin créditera votre wallet après vérification.",
       'no_transactions': 'Aucune transaction',
       'tx_history': 'Historique des transactions',
 
@@ -117,7 +120,8 @@ class AppText {
       'insufficient_balance': 'Solde insuffisant',
       'missing_amount': 'Il vous manque {amount} FCFA pour cet achat.',
       'current_balance': 'Solde actuel : {balance} FCFA',
-      'order_confirmed': 'Commande confirmée ! Livraison dans les 48h ou remboursement automatique.',
+      'order_confirmed':
+          'Commande confirmée ! Livraison dans les 48h ou remboursement automatique.',
       'auto_refund': 'Remboursement automatique si non livré dans 48h',
       'pay_btn': 'Payer {amount} FCFA',
       'qty_label': 'qté',
@@ -149,12 +153,15 @@ class AppText {
       'about': 'À propos de AZ Express',
       'logout': 'Se déconnecter',
       'delete_account': 'Supprimer mon compte',
-      'logout_confirm': 'Ton wallet et tes commandes seront sauvegardés. Tu pourras te reconnecter avec ton numéro et ton mot de passe.',
-      'delete_confirm': 'Cette action est irréversible. Toutes vos données seront supprimées.',
+      'logout_confirm':
+          'Ton wallet et tes commandes seront sauvegardés. Tu pourras te reconnecter avec ton numéro et ton mot de passe.',
+      'delete_confirm':
+          'Cette action est irréversible. Toutes vos données seront supprimées.',
       'account_deleted': 'Compte supprimé',
       'profile_updated': 'Profil mis à jour',
       'close': 'Fermer',
-      'about_app_text': 'AZ Express est une application de livraison rapide disponible à Abengourou et ses environs.\n\nLivraison de courses, repas, médicaments, colis et bien plus.',
+      'about_app_text':
+          'AZ Express est une application de livraison rapide disponible à Abengourou et ses environs.\n\nLivraison de courses, repas, médicaments, colis et bien plus.',
       'copyright': '© 2024 AZ Express — Tous droits réservés',
       'insufficient_stock': 'Stock insuffisant',
 
@@ -165,53 +172,53 @@ class AppText {
 
       // catégories
       'cat_real_estate': 'Immobilier',
-      'cat_artisans':    'Artisans',
-      'cat_mecanique':   'Mécanique Auto & Moto',
-      'cat_construction':'Eau & Construction',
-      'cat_telephonie':  'Téléphonie',
-      'cat_cave':        'Cave & Boissons',
+      'cat_artisans': 'Artisans',
+      'cat_mecanique': 'Mécanique Auto & Moto',
+      'cat_construction': 'Eau & Construction',
+      'cat_telephonie': 'Téléphonie',
+      'cat_cave': 'Cave & Boissons',
 
       // sous-catégories artisans
-      'sub_location':    'Location de maison',
-      'sub_vente':       'Vente de maison',
-      'sub_local':       'Local commercial',
-      'sub_terrain':     'Terrain',
-      'sub_macon':       'Maçon',
-      'sub_plombier':    'Plombier',
+      'sub_location': 'Location de maison',
+      'sub_vente': 'Vente de maison',
+      'sub_local': 'Local commercial',
+      'sub_terrain': 'Terrain',
+      'sub_macon': 'Maçon',
+      'sub_plombier': 'Plombier',
       'sub_electricien': 'Électricien',
-      'sub_ferronnier':  'Ferronnier',
-      'sub_menuisier':   'Menuisier',
-      'sub_carreleur':   'Carreleur',
-      'sub_peintre':     'Peintre',
-      'sub_vitrier':     'Vitrier',
+      'sub_ferronnier': 'Ferronnier',
+      'sub_menuisier': 'Menuisier',
+      'sub_carreleur': 'Carreleur',
+      'sub_peintre': 'Peintre',
+      'sub_vitrier': 'Vitrier',
       'sub_reparateur_tv': 'Réparateur TV / Électronique',
-      'sub_camera':      'Installation caméra & alarme',
-      'sub_decoration':  'Décoration intérieure',
-      'sub_reparateur':       'Réparateur portable',
-      'sub_salon_homme':      'Salon de coiffure homme',
-      'sub_barber_shop':      'Barber Shop',
-      'sub_salon_femme':      'Salon de coiffure femme',
-      'sub_onglerie':         'Onglerie',
+      'sub_camera': 'Installation caméra & alarme',
+      'sub_decoration': 'Décoration intérieure',
+      'sub_reparateur': 'Réparateur portable',
+      'sub_salon_homme': 'Salon de coiffure homme',
+      'sub_barber_shop': 'Barber Shop',
+      'sub_salon_femme': 'Salon de coiffure femme',
+      'sub_onglerie': 'Onglerie',
 
       // sous-catégories mécanique
       'sub_meca_voiture': 'Mécanicien voiture',
-      'sub_meca_moto':    'Mécanicien moto',
-      'sub_elec_auto':    'Électricien automobile',
-      'sub_carrosserie':  'Carrossier & peinture auto',
+      'sub_meca_moto': 'Mécanicien moto',
+      'sub_elec_auto': 'Électricien automobile',
+      'sub_carrosserie': 'Carrossier & peinture auto',
 
       // construction
-      'sub_eau':         'Eau en pack',
-      'sub_ciment':      'Ciment & Briques',
+      'sub_eau': 'Eau en pack',
+      'sub_ciment': 'Ciment & Briques',
 
       // téléphonie
-      'sub_telephone':   'Téléphones portables',
+      'sub_telephone': 'Téléphones portables',
       'sub_accessoires': 'Accessoires',
 
       // cave
-      'sub_cave_vins':       'Vins & Spiritueux',
-      'sub_cave_bieres':     'Bières',
-      'sub_cave_sans_alcool':'Boissons sans alcool',
-      'cave':     'Cave & Boissons',
+      'sub_cave_vins': 'Vins & Spiritueux',
+      'sub_cave_bieres': 'Bières',
+      'sub_cave_sans_alcool': 'Boissons sans alcool',
+      'cave': 'Cave & Boissons',
       'cave_sub': 'Vins, bières, jus et sodas',
 
       // ── SERVICE PROVIDERS ───────────────────────────────────
@@ -278,7 +285,6 @@ class AppText {
       'restaurant': 'Restaurant',
       'shopping': 'Courses',
     },
-
     'en': {
       // ── APP ────────────────────────────────────────────────
       'appTitle': 'AZ EXPRESS',
@@ -351,7 +357,8 @@ class AppText {
       'no_account': 'No account yet? ',
       'have_account': 'Already have an account? ',
       'sign_up': 'Sign up',
-      'wallet_hint': 'Your wallet is linked to your account. Top up and use your credits to order and shop.',
+      'wallet_hint':
+          'Your wallet is linked to your account. Top up and use your credits to order and shop.',
       'fill_required': 'Please fill in all required fields',
       'enter_name': 'Enter your full name',
       'password_min': 'Password must be at least 6 characters',
@@ -371,10 +378,12 @@ class AppText {
       'custom_amount': 'Custom amount (FCFA)',
       'instructions': 'Instructions',
       'send_amount': '1. Send {amount} FCFA to:',
-      'instructions_steps': '2. Tap "I paid" below\n3. Admin verifies and credits your wallet',
+      'instructions_steps':
+          '2. Tap "I paid" below\n3. Admin verifies and credits your wallet',
       'paid_btn': 'I paid — Notify admin',
       'min_amount': 'Minimum amount: 100 FCFA',
-      'request_sent': 'Request sent! Admin will credit your wallet after verification.',
+      'request_sent':
+          'Request sent! Admin will credit your wallet after verification.',
       'no_transactions': 'No transactions',
       'tx_history': 'Transaction history',
 
@@ -389,7 +398,8 @@ class AppText {
       'insufficient_balance': 'Insufficient balance',
       'missing_amount': 'You are missing {amount} FCFA for this purchase.',
       'current_balance': 'Current balance: {balance} FCFA',
-      'order_confirmed': 'Order confirmed! Delivery within 48h or automatic refund.',
+      'order_confirmed':
+          'Order confirmed! Delivery within 48h or automatic refund.',
       'auto_refund': 'Automatic refund if not delivered within 48h',
       'pay_btn': 'Pay {amount} FCFA',
       'qty_label': 'qty',
@@ -421,12 +431,15 @@ class AppText {
       'about': 'About AZ Express',
       'logout': 'Log out',
       'delete_account': 'Delete my account',
-      'logout_confirm': 'Your wallet and orders will be saved. You can log back in with your phone and password.',
-      'delete_confirm': 'This action is irreversible. All your data will be deleted.',
+      'logout_confirm':
+          'Your wallet and orders will be saved. You can log back in with your phone and password.',
+      'delete_confirm':
+          'This action is irreversible. All your data will be deleted.',
       'account_deleted': 'Account deleted',
       'profile_updated': 'Profile updated',
       'close': 'Close',
-      'about_app_text': 'AZ Express is a fast delivery app available in Abengourou and its surroundings.\n\nDelivery of groceries, meals, medicine, parcels and more.',
+      'about_app_text':
+          'AZ Express is a fast delivery app available in Abengourou and its surroundings.\n\nDelivery of groceries, meals, medicine, parcels and more.',
       'copyright': '© 2024 AZ Express — All rights reserved',
       'insufficient_stock': 'Insufficient stock',
 
@@ -436,46 +449,46 @@ class AppText {
       'ekbine_sub': 'Credit, internet & Mobile Money',
 
       'cat_real_estate': 'Real Estate',
-      'cat_artisans':    'Craftsmen',
-      'cat_mecanique':   'Auto & Moto Mechanics',
-      'cat_construction':'Water & Construction',
-      'cat_telephonie':  'Telephony',
-      'cat_cave':        'Bar & Drinks',
+      'cat_artisans': 'Craftsmen',
+      'cat_mecanique': 'Auto & Moto Mechanics',
+      'cat_construction': 'Water & Construction',
+      'cat_telephonie': 'Telephony',
+      'cat_cave': 'Bar & Drinks',
 
-      'sub_location':    'House rental',
-      'sub_vente':       'House sale',
-      'sub_local':       'Commercial space',
-      'sub_terrain':     'Land',
-      'sub_macon':       'Mason',
-      'sub_plombier':    'Plumber',
+      'sub_location': 'House rental',
+      'sub_vente': 'House sale',
+      'sub_local': 'Commercial space',
+      'sub_terrain': 'Land',
+      'sub_macon': 'Mason',
+      'sub_plombier': 'Plumber',
       'sub_electricien': 'Electrician',
-      'sub_ferronnier':  'Ironworker',
-      'sub_menuisier':   'Carpenter',
-      'sub_carreleur':   'Tiler',
-      'sub_peintre':     'Painter',
-      'sub_vitrier':     'Glazier',
+      'sub_ferronnier': 'Ironworker',
+      'sub_menuisier': 'Carpenter',
+      'sub_carreleur': 'Tiler',
+      'sub_peintre': 'Painter',
+      'sub_vitrier': 'Glazier',
       'sub_reparateur_tv': 'TV / Electronics repair',
-      'sub_camera':      'Camera & alarm installation',
-      'sub_decoration':  'Interior decoration',
-      'sub_reparateur':       'Phone repair',
-      'sub_salon_homme':      'Men\'s Hair Salon',
-      'sub_barber_shop':      'Barber Shop',
-      'sub_salon_femme':      'Women\'s Hair Salon',
-      'sub_onglerie':         'Nail Salon',
+      'sub_camera': 'Camera & alarm installation',
+      'sub_decoration': 'Interior decoration',
+      'sub_reparateur': 'Phone repair',
+      'sub_salon_homme': 'Men\'s Hair Salon',
+      'sub_barber_shop': 'Barber Shop',
+      'sub_salon_femme': 'Women\'s Hair Salon',
+      'sub_onglerie': 'Nail Salon',
 
       'sub_meca_voiture': 'Car mechanic',
-      'sub_meca_moto':    'Motorbike mechanic',
-      'sub_elec_auto':    'Auto electrician',
-      'sub_carrosserie':  'Body shop & auto paint',
+      'sub_meca_moto': 'Motorbike mechanic',
+      'sub_elec_auto': 'Auto electrician',
+      'sub_carrosserie': 'Body shop & auto paint',
 
-      'sub_eau':         'Bottled water',
-      'sub_ciment':      'Cement & Bricks',
-      'sub_telephone':   'Mobile phones',
+      'sub_eau': 'Bottled water',
+      'sub_ciment': 'Cement & Bricks',
+      'sub_telephone': 'Mobile phones',
       'sub_accessoires': 'Accessories',
-      'sub_cave_vins':       'Wines & Spirits',
-      'sub_cave_bieres':     'Beers',
-      'sub_cave_sans_alcool':'Non-alcoholic drinks',
-      'cave':     'Bar & Drinks',
+      'sub_cave_vins': 'Wines & Spirits',
+      'sub_cave_bieres': 'Beers',
+      'sub_cave_sans_alcool': 'Non-alcoholic drinks',
+      'cave': 'Bar & Drinks',
       'cave_sub': 'Wines, beers, juices and sodas',
 
       // ── SERVICE PROVIDERS ───────────────────────────────────
@@ -577,8 +590,7 @@ class AppLanguage extends InheritedWidget {
   });
 
   static AppLanguage of(BuildContext context) {
-    final result =
-        context.dependOnInheritedWidgetOfExactType<AppLanguage>();
+    final result = context.dependOnInheritedWidgetOfExactType<AppLanguage>();
     assert(result != null, 'No AppLanguage found in context');
     return result!;
   }

@@ -15,8 +15,8 @@ class EkOrderTracking extends StatefulWidget {
   final String? orderId;
 
   const EkOrderTracking({super.key, this.order, this.orderId})
-      : assert(order != null || orderId != null,
-            'Must provide order or orderId');
+      : assert(
+            order != null || orderId != null, 'Must provide order or orderId');
 
   @override
   State<EkOrderTracking> createState() => _EkOrderTrackingState();
@@ -25,13 +25,13 @@ class EkOrderTracking extends StatefulWidget {
 class _EkOrderTrackingState extends State<EkOrderTracking> {
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
-  bool _sending         = false;
-  bool _cancelling      = false;
-  bool _confirming      = false;
+  bool _sending = false;
+  bool _cancelling = false;
+  bool _confirming = false;
   bool _uploadingDeposit = false;
   bool _verifyingDeposit = false;
-  bool _showRating      = false;
-  double _rating        = 5.0;
+  bool _showRating = false;
+  double _rating = 5.0;
 
   late Stream<EkOrder?> _orderStream;
   late Stream<QuerySnapshot> _chatStream;
@@ -42,10 +42,10 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
   @override
   void initState() {
     super.initState();
-    _myUid  = FirebaseAuth.instance.currentUser?.uid;
+    _myUid = FirebaseAuth.instance.currentUser?.uid;
     _orderId = widget.orderId ?? widget.order!.id;
     _orderStream = EkService.streamOrder(_orderId);
-    _chatStream  = EkService.streamChatMessages(_orderId);
+    _chatStream = EkService.streamChatMessages(_orderId);
   }
 
   @override
@@ -64,7 +64,9 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         final order = snap.data;
         if (order == null) {
           return Scaffold(
-            appBar: AppBar(backgroundColor: kEkDark, foregroundColor: Colors.white,
+            appBar: AppBar(
+                backgroundColor: kEkDark,
+                foregroundColor: Colors.white,
                 title: const Text('Commande')),
             body: const Center(child: CircularProgressIndicator()),
           );
@@ -110,13 +112,16 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(order.serviceLabel,
             style: GoogleFonts.urbanist(
-                fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Colors.white)),
         Row(children: [
           Container(
-            width: 7, height: 7,
+            width: 7,
+            height: 7,
             margin: const EdgeInsets.only(right: 5),
-            decoration: BoxDecoration(
-                color: statusColor, shape: BoxShape.circle),
+            decoration:
+                BoxDecoration(color: statusColor, shape: BoxShape.circle),
           ),
           Expanded(
             child: Text(
@@ -131,8 +136,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         IconButton(
           onPressed: () {
             Clipboard.setData(ClipboardData(text: order.id));
-            ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('ID copié')));
+            ScaffoldMessenger.of(context)
+                .showSnackBar(const SnackBar(content: Text('ID copié')));
           },
           icon: const Icon(Icons.copy_rounded, size: 18),
           tooltip: 'Copier ID',
@@ -145,9 +150,15 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
     // wallet has no deposit step; other payment methods require deposit proof
     final statuses = order.paymentMethod == 'wallet'
         ? ['pending', 'assigned', 'in_progress', 'proof_sent', 'completed']
-        : ['pending', 'awaiting_deposit', 'in_progress', 'proof_sent', 'completed'];
-    final isCancelled  = order.status == 'cancelled';
-    final isDisputed   = order.status == 'disputed';
+        : [
+            'pending',
+            'awaiting_deposit',
+            'in_progress',
+            'proof_sent',
+            'completed'
+          ];
+    final isCancelled = order.status == 'cancelled';
+    final isDisputed = order.status == 'disputed';
     final currentIndex = statuses.indexOf(order.status);
 
     if (isCancelled || isDisputed) {
@@ -159,18 +170,19 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
               ? Colors.red.withValues(alpha: 0.08)
               : Colors.deepOrange.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: isCancelled ? Colors.red : Colors.deepOrange),
+          border:
+              Border.all(color: isCancelled ? Colors.red : Colors.deepOrange),
         ),
         child: Row(children: [
           Icon(isCancelled ? Icons.cancel_rounded : Icons.warning_rounded,
               color: isCancelled ? Colors.red : Colors.deepOrange, size: 24),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(isCancelled ? 'Commande annulée' : 'Litige ouvert',
-                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w700,
+                  style: GoogleFonts.urbanist(
+                      fontWeight: FontWeight.w700,
                       color: isCancelled ? Colors.red : Colors.deepOrange)),
               if (order.cancellationReason != null)
                 Text(order.cancellationReason!,
@@ -185,11 +197,12 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       child: Row(
         children: statuses.asMap().entries.map((e) {
-          final i     = e.key;
-          final s     = e.value;
-          final done  = i < currentIndex;
-          final curr  = i == currentIndex;
-          final color = curr ? ekStatusColor(s) : (done ? kEkGreen : kEkDivider);
+          final i = e.key;
+          final s = e.value;
+          final done = i < currentIndex;
+          final curr = i == currentIndex;
+          final color =
+              curr ? ekStatusColor(s) : (done ? kEkGreen : kEkDivider);
 
           return Expanded(
             child: Row(children: [
@@ -205,10 +218,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                       border: Border.all(color: color, width: 2),
                     ),
                     child: (done || curr)
-                        ? Icon(
-                            done ? Icons.check : Icons.circle,
-                            size: curr ? 12 : 10,
-                            color: Colors.white)
+                        ? Icon(done ? Icons.check : Icons.circle,
+                            size: curr ? 12 : 10, color: Colors.white)
                         : null,
                   ),
                   const SizedBox(height: 4),
@@ -240,13 +251,20 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
 
   String _shortStatus(String s) {
     switch (s) {
-      case 'pending':          return 'Attente';
-      case 'assigned':         return 'Agent';
-      case 'awaiting_deposit': return 'Dépôt';
-      case 'in_progress':      return 'En cours';
-      case 'proof_sent':       return 'Preuve';
-      case 'completed':        return 'Terminé';
-      default:                 return s;
+      case 'pending':
+        return 'Attente';
+      case 'assigned':
+        return 'Agent';
+      case 'awaiting_deposit':
+        return 'Dépôt';
+      case 'in_progress':
+        return 'En cours';
+      case 'proof_sent':
+        return 'Preuve';
+      case 'completed':
+        return 'Terminé';
+      default:
+        return s;
     }
   }
 
@@ -263,7 +281,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       child: Column(children: [
         Row(children: [
           Container(
-            width: 46, height: 46,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               color: opColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
@@ -271,17 +290,19 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             child: Center(
               child: Text(order.operator[0].toUpperCase(),
                   style: GoogleFonts.urbanist(
-                      fontSize: 20, fontWeight: FontWeight.w900,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
                       color: opColor)),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(order.serviceLabel,
                   style: GoogleFonts.urbanist(
-                      fontSize: 14, fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
                       color: kEkText)),
               Text('Pour : ${order.beneficiaryNumber}',
                   style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
@@ -289,20 +310,19 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           ),
           Text(_fmt(order.totalPaid),
               style: GoogleFonts.urbanist(
-                  fontSize: 16, fontWeight: FontWeight.w800,
-                  color: kEkGreen)),
+                  fontSize: 16, fontWeight: FontWeight.w800, color: kEkGreen)),
         ]),
         if (order.createdAt != null) ...[
           const SizedBox(height: 10),
           const Divider(height: 1),
           const SizedBox(height: 10),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('Commandé le', style: GoogleFonts.urbanist(
-                fontSize: 12, color: kEkMuted)),
+            Text('Commandé le',
+                style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
             Text(
               _dateStr(order.createdAt!),
-              style: GoogleFonts.urbanist(fontSize: 12, color: kEkText,
-                  fontWeight: FontWeight.w600),
+              style: GoogleFonts.urbanist(
+                  fontSize: 12, color: kEkText, fontWeight: FontWeight.w600),
             ),
           ]),
         ],
@@ -330,8 +350,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(order.agentName ?? 'Agent',
                 style: GoogleFonts.urbanist(
                     fontSize: 14, fontWeight: FontWeight.w700, color: kEkText)),
@@ -345,9 +365,10 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
   }
 
   Widget _buildDepositSection(EkOrder order) {
-    final isClient       = _myRole == 'client';
-    final hasProof       = order.depositProofUrl != null;
-    final awaitingDeposit = order.status == 'awaiting_deposit';
+    final isClient = _myRole == 'client';
+    final hasProof = order.depositProofUrl != null;
+    final awaitingDeposit = order.status == 'awaiting_deposit' ||
+        order.status == 'deposit_rejected';
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -355,7 +376,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       decoration: BoxDecoration(
         color: const Color(0xFFFFF3E0),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE65100).withValues(alpha: 0.4)),
+        border:
+            Border.all(color: const Color(0xFFE65100).withValues(alpha: 0.4)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -364,9 +386,12 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              hasProof ? 'Preuve de paiement envoyée' : 'Preuve de paiement requise',
+              hasProof
+                  ? 'Preuve de paiement envoyée'
+                  : 'Preuve de paiement requise',
               style: GoogleFonts.urbanist(
-                  fontSize: 13, fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
                   color: const Color(0xFFE65100)),
             ),
           ),
@@ -375,20 +400,23 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         if (!hasProof && isClient && awaitingDeposit) ...[
           _MomoNumberBox(
             operator: order.operator,
-            momoNumber: order.agentMomoNumber ?? order.agentPhone ?? '',
+            momoNumber: order.agentDepositNumber ?? '',
             total: order.totalPaid,
             paymentMethod: order.paymentMethod,
           ),
           const SizedBox(height: 8),
           Text(
             'Importez ensuite la capture d\'écran de la confirmation.',
-            style: GoogleFonts.urbanist(fontSize: 12, color: kEkText, height: 1.5),
+            style:
+                GoogleFonts.urbanist(fontSize: 12, color: kEkText, height: 1.5),
           ),
           const SizedBox(height: 12),
           SizedBox(
-            width: double.infinity, height: 46,
+            width: double.infinity,
+            height: 46,
             child: ElevatedButton.icon(
-              onPressed: _uploadingDeposit ? null : () => _uploadDepositProof(order),
+              onPressed:
+                  _uploadingDeposit ? null : () => _uploadDepositProof(order),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFE65100),
                 foregroundColor: Colors.white,
@@ -397,7 +425,9 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                 elevation: 0,
               ),
               icon: _uploadingDeposit
-                  ? const SizedBox(width: 16, height: 16,
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.upload_rounded, size: 18),
@@ -417,7 +447,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             isClient
                 ? 'Votre preuve a été envoyée. L\'agent va vérifier le paiement.'
                 : 'Le client a envoyé sa preuve. Vérifiez avant de commencer.',
-            style: GoogleFonts.urbanist(fontSize: 12, color: kEkText, height: 1.5),
+            style:
+                GoogleFonts.urbanist(fontSize: 12, color: kEkText, height: 1.5),
           ),
           const SizedBox(height: 10),
           Semantics(
@@ -435,9 +466,13 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                   fit: BoxFit.cover,
                   loadingBuilder: (_, child, progress) => progress == null
                       ? child
-                      : Container(height: 160, color: kEkDivider,
-                          child: const Center(child: CircularProgressIndicator())),
-                  errorBuilder: (_, __, ___) => Container(height: 160,
+                      : Container(
+                          height: 160,
+                          color: kEkDivider,
+                          child:
+                              const Center(child: CircularProgressIndicator())),
+                  errorBuilder: (_, __, ___) => Container(
+                      height: 160,
                       color: kEkDivider,
                       child: const Icon(Icons.broken_image, color: kEkMuted)),
                 ),
@@ -464,24 +499,27 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           button: true,
           excludeSemantics: true,
           child: GestureDetector(
-          onTap: () => _viewProof(order.proofUrl!),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Image.network(
-              order.proofUrl!,
-              height: 200,
-              width: double.infinity,
-              fit: BoxFit.cover,
-              loadingBuilder: (_, child, progress) => progress == null
-                  ? child
-                  : Container(
-                      height: 200, color: kEkDivider,
-                      child: const Center(child: CircularProgressIndicator())),
-              errorBuilder: (_, __, ___) => Container(
-                  height: 200, color: kEkDivider,
-                  child: const Icon(Icons.broken_image, color: kEkMuted)),
+            onTap: () => _viewProof(order.proofUrl!),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.network(
+                order.proofUrl!,
+                height: 200,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : Container(
+                        height: 200,
+                        color: kEkDivider,
+                        child:
+                            const Center(child: CircularProgressIndicator())),
+                errorBuilder: (_, __, ___) => Container(
+                    height: 200,
+                    color: kEkDivider,
+                    child: const Icon(Icons.broken_image, color: kEkMuted)),
+              ),
             ),
-          ),
           ),
         ),
       ]),
@@ -499,7 +537,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
             child: Image.network(url, fit: BoxFit.contain),
           ),
           Positioned(
-            top: 40, right: 16,
+            top: 40,
+            right: 16,
             child: IconButton(
               onPressed: () => Navigator.pop(context),
               tooltip: 'Fermer',
@@ -513,15 +552,17 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
 
   Widget _buildActions(EkOrder order) {
     final isClient = _myRole == 'client';
-    final isAgent  = _myRole == 'agent';
+    final isAgent = _myRole == 'agent';
 
     // Agent: verify deposit button
-    if (isAgent && order.status == 'awaiting_deposit' &&
+    if (isAgent &&
+        order.status == 'deposit_proof_sent' &&
         order.depositProofUrl != null) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         child: SizedBox(
-          width: double.infinity, height: 50,
+          width: double.infinity,
+          height: 50,
           child: ElevatedButton.icon(
             onPressed: _verifyingDeposit ? null : () => _verifyDeposit(order),
             style: ElevatedButton.styleFrom(
@@ -532,7 +573,9 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
               elevation: 0,
             ),
             icon: _verifyingDeposit
-                ? const SizedBox(width: 18, height: 18,
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2))
                 : const Icon(Icons.verified_rounded),
@@ -545,11 +588,10 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
 
     if (!isClient) return const SizedBox.shrink();
 
-    final canCancel   = order.status == 'pending' ||
-                        (order.status == 'awaiting_deposit' &&
-                         order.depositProofUrl == null);
-    final canConfirm  = order.status == 'proof_sent';
-    final canDispute  = order.status == 'proof_sent';
+    final canCancel = order.status == 'pending' ||
+        (order.status == 'awaiting_deposit' && order.depositProofUrl == null);
+    final canConfirm = order.status == 'proof_sent';
+    final canDispute = order.status == 'proof_sent';
     final isCompleted = order.status == 'completed';
 
     if (!canCancel && !canConfirm && !canDispute && !isCompleted) {
@@ -561,7 +603,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       child: Column(children: [
         if (canConfirm)
           SizedBox(
-            width: double.infinity, height: 50,
+            width: double.infinity,
+            height: 50,
             child: ElevatedButton.icon(
               onPressed: _confirming ? null : () => _confirm(order),
               style: ElevatedButton.styleFrom(
@@ -572,8 +615,11 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                 elevation: 0,
               ),
               icon: _confirming
-                  ? const SizedBox(width: 18, height: 18,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.check_circle_rounded),
               label: Text('Confirmer la réception',
                   style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
@@ -582,7 +628,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         if (canDispute) ...[
           const SizedBox(height: 10),
           SizedBox(
-            width: double.infinity, height: 44,
+            width: double.infinity,
+            height: 44,
             child: OutlinedButton.icon(
               onPressed: () => _dispute(order),
               style: OutlinedButton.styleFrom(
@@ -599,7 +646,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         ],
         if (canCancel)
           SizedBox(
-            width: double.infinity, height: 44,
+            width: double.infinity,
+            height: 44,
             child: TextButton.icon(
               onPressed: _cancelling ? null : () => _cancelDialog(order),
               style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -622,16 +670,16 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
               child: Row(children: [
                 const Icon(Icons.star_rounded, color: Color(0xFFFFBB00)),
                 const SizedBox(width: 10),
-                Expanded(child: Text('Notez votre agent',
-                    style: GoogleFonts.urbanist(fontWeight: FontWeight.w700,
-                        color: kEkText))),
+                Expanded(
+                    child: Text('Notez votre agent',
+                        style: GoogleFonts.urbanist(
+                            fontWeight: FontWeight.w700, color: kEkText))),
                 const Icon(Icons.arrow_forward_ios, size: 14, color: kEkMuted),
               ]),
             ),
           ),
         ],
-        if (_showRating && order.agentId != null)
-          _buildRating(order),
+        if (_showRating && order.agentId != null) _buildRating(order),
       ]),
     );
   }
@@ -647,8 +695,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       ),
       child: Column(children: [
         Text('Notez votre agent',
-            style: GoogleFonts.urbanist(fontWeight: FontWeight.w700,
-                fontSize: 15, color: kEkText)),
+            style: GoogleFonts.urbanist(
+                fontWeight: FontWeight.w700, fontSize: 15, color: kEkText)),
         const SizedBox(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           for (int i = 1; i <= 5; i++)
@@ -657,15 +705,19 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Icon(
-                  i <= _rating ? Icons.star_rounded : Icons.star_outline_rounded,
-                  color: const Color(0xFFFFBB00), size: 36,
+                  i <= _rating
+                      ? Icons.star_rounded
+                      : Icons.star_outline_rounded,
+                  color: const Color(0xFFFFBB00),
+                  size: 36,
                 ),
               ),
             ),
         ]),
         const SizedBox(height: 14),
         SizedBox(
-          width: double.infinity, height: 44,
+          width: double.infinity,
+          height: 44,
           child: ScaleButton(
             onPressed: () async {
               await EkService.rateAgent(order.agentId!, _rating);
@@ -735,7 +787,9 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
 
     return Container(
       padding: EdgeInsets.only(
-        left: 12, right: 12, top: 10,
+        left: 12,
+        right: 12,
+        top: 10,
         bottom: MediaQuery.of(context).viewInsets.bottom + 12,
       ),
       decoration: const BoxDecoration(
@@ -751,8 +805,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
               hintStyle: GoogleFonts.urbanist(color: kEkMuted, fontSize: 14),
               filled: true,
               fillColor: kEkBg,
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
                   borderSide: BorderSide.none),
@@ -765,7 +819,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           onTap: _sending ? null : () => _sendMessage(order),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: _sending ? kEkMuted : kEkGreen,
               shape: BoxShape.circle,
@@ -784,8 +839,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
 
   Future<void> _uploadDepositProof(EkOrder order) async {
     final picker = ImagePicker();
-    final file = await picker.pickImage(
-        source: ImageSource.gallery, imageQuality: 80);
+    final file =
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
     if (file == null) return;
 
     setState(() => _uploadingDeposit = true);
@@ -794,9 +849,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
       await EkService.clientSendDepositProof(order.id, url);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erreur upload: $e'),
-                backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Erreur upload: $e'), backgroundColor: Colors.red));
       }
     }
     if (mounted) setState(() => _uploadingDeposit = false);
@@ -815,10 +869,10 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
     _msgCtrl.clear();
 
     await EkService.sendChatMessage(order.id, {
-      'senderId':   _myUid,
+      'senderId': _myUid,
       'senderRole': _myRole,
-      'text':       text,
-      'type':       'text',
+      'text': text,
+      'type': 'text',
     });
     setState(() => _sending = false);
   }
@@ -826,7 +880,12 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
   Future<void> _confirm(EkOrder order) async {
     setState(() => _confirming = true);
     await EkService.clientConfirmOrder(order.id, order);
-    if (mounted) setState(() { _confirming = false; _showRating = true; });
+    if (mounted) {
+      setState(() {
+        _confirming = false;
+        _showRating = true;
+      });
+    }
   }
 
   Future<void> _dispute(EkOrder order) async {
@@ -837,7 +896,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         content: const Text(
             'Êtes-vous sûr ? Notre équipe va examiner la commande sous 24h.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
               child: const Text('Annuler')),
           ScaleButton(
             onPressed: () => Navigator.pop(context, true),
@@ -859,6 +919,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         title: const Text('Annuler la commande'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           const Text('Pourquoi annulez-vous ?'),
@@ -866,13 +927,13 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           TextField(
             onChanged: (v) => reason = v,
             decoration: const InputDecoration(
-                hintText: 'Raison (optionnel)',
-                border: OutlineInputBorder()),
+                hintText: 'Raison (optionnel)', border: OutlineInputBorder()),
             maxLines: 2,
           ),
         ]),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Garder')),
           ScaleButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -885,7 +946,8 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
     );
     if (ok == true) {
       setState(() => _cancelling = true);
-      await EkService.cancelOrder(order.id, reason.isEmpty ? 'Annulé par le client' : reason);
+      await EkService.cancelOrder(
+          order.id, reason.isEmpty ? 'Annulé par le client' : reason);
       if (mounted) setState(() => _cancelling = false);
     }
   }
@@ -911,25 +973,27 @@ class _MomoNumberBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final opLabel = _opLabel(paymentMethod.isNotEmpty ? paymentMethod : operator);
+    final opLabel =
+        _opLabel(paymentMethod.isNotEmpty ? paymentMethod : operator);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE65100).withValues(alpha: 0.5)),
+        border:
+            Border.all(color: const Color(0xFFE65100).withValues(alpha: 0.5)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Envoyez $opLabel à :',
-            style: GoogleFonts.urbanist(
-                fontSize: 12, color: kEkMuted)),
+            style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
         const SizedBox(height: 6),
         Row(children: [
           Expanded(
             child: Text(
               momoNumber.isEmpty ? '(voir le chat)' : momoNumber,
               style: GoogleFonts.urbanist(
-                  fontSize: 20, fontWeight: FontWeight.w900,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
                   color: const Color(0xFFE65100),
                   letterSpacing: 2),
             ),
@@ -954,7 +1018,8 @@ class _MomoNumberBox extends StatelessWidget {
               style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
           Text(_fmt(total),
               style: GoogleFonts.urbanist(
-                  fontSize: 14, fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
                   color: const Color(0xFFE65100))),
         ]),
       ]),
@@ -963,14 +1028,22 @@ class _MomoNumberBox extends StatelessWidget {
 
   String _opLabel(String method) {
     switch (method) {
-      case 'orange_money': return 'Orange Money';
-      case 'mtn_momo':     return 'MTN MoMo';
-      case 'wave':         return 'Wave';
-      case 'cash':         return 'en espèces';
-      case 'orange':       return 'Orange Money';
-      case 'mtn':          return 'MTN MoMo';
-      case 'moov':         return 'Moov Money';
-      default:             return method;
+      case 'orange_money':
+        return 'Orange Money';
+      case 'mtn_momo':
+        return 'MTN MoMo';
+      case 'wave':
+        return 'Wave';
+      case 'cash':
+        return 'en espèces';
+      case 'orange':
+        return 'Orange Money';
+      case 'mtn':
+        return 'MTN MoMo';
+      case 'moov':
+        return 'Moov Money';
+      default:
+        return method;
     }
   }
 }
@@ -989,18 +1062,19 @@ class _ChatBubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.72),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
         decoration: BoxDecoration(
           color: isMe ? kEkGreen : Colors.white,
           borderRadius: BorderRadius.only(
-            topLeft:     const Radius.circular(16),
-            topRight:    const Radius.circular(16),
-            bottomLeft:  Radius.circular(isMe ? 16 : 4),
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(isMe ? 16 : 4),
             bottomRight: Radius.circular(isMe ? 4 : 16),
           ),
           boxShadow: const [
-            BoxShadow(color: Color(0x10000000), blurRadius: 4, offset: Offset(0, 2))
+            BoxShadow(
+                color: Color(0x10000000), blurRadius: 4, offset: Offset(0, 2))
           ],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1008,8 +1082,7 @@ class _ChatBubble extends StatelessWidget {
             Text(
               data['senderRole'] == 'agent' ? 'Agent' : 'Moi',
               style: GoogleFonts.urbanist(
-                  fontSize: 10, fontWeight: FontWeight.w700,
-                  color: kEkGreen),
+                  fontSize: 10, fontWeight: FontWeight.w700, color: kEkGreen),
             ),
           Text(text,
               style: GoogleFonts.urbanist(
@@ -1031,4 +1104,3 @@ String _fmt(int price) {
   }
   return '${buf.toString()} F';
 }
-

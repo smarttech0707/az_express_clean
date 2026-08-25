@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../widgets/empty_state.dart';
+import '../../constants/support_categories.dart';
 
 /// Support client + signalements — première visibilité admin sur
 /// `support_tickets`/`marketplace_reports`, jusqu'ici lus par aucun écran
@@ -87,17 +88,23 @@ class _TicketsTab extends StatelessWidget {
           return const EmptyState(
             icon: Icons.support_agent_rounded,
             title: 'Aucun ticket',
-            description: 'Les demandes de support des clients apparaîtront ici.',
+            description:
+                'Les demandes de support des clients apparaîtront ici.',
           );
         }
         // Ouverts/en cours d'abord, fermés/résolus en bas — tri client-side,
         // volume attendu faible en pilote (pas de nouvel index nécessaire).
         final sorted = [...docs]..sort((a, b) {
-          const order = {'open': 0, 'in_progress': 1, 'resolved': 2, 'closed': 3};
-          final sa = order[(a.data() as Map)['status']] ?? 0;
-          final sb = order[(b.data() as Map)['status']] ?? 0;
-          return sa.compareTo(sb);
-        });
+            const order = {
+              'open': 0,
+              'in_progress': 1,
+              'resolved': 2,
+              'closed': 3
+            };
+            final sa = order[(a.data() as Map)['status']] ?? 0;
+            final sb = order[(b.data() as Map)['status']] ?? 0;
+            return sa.compareTo(sb);
+          });
         return ListView.builder(
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -114,12 +121,16 @@ class _TicketAdminCard extends StatelessWidget {
   const _TicketAdminCard({required this.doc});
 
   static const _statusLabels = {
-    'open': 'Ouvert', 'in_progress': 'En cours',
-    'resolved': 'Résolu', 'closed': 'Fermé',
+    'open': 'Ouvert',
+    'in_progress': 'En cours',
+    'resolved': 'Résolu',
+    'closed': 'Fermé',
   };
   static const _statusColors = {
-    'open': Colors.orange, 'in_progress': Colors.blue,
-    'resolved': Colors.green, 'closed': Colors.grey,
+    'open': Colors.orange,
+    'in_progress': Colors.blue,
+    'resolved': Colors.green,
+    'closed': Colors.grey,
   };
 
   @override
@@ -127,6 +138,9 @@ class _TicketAdminCard extends StatelessWidget {
     final data = doc.data() as Map<String, dynamic>;
     final status = data['status'] as String? ?? 'open';
     final color = _statusColors[status] ?? Colors.grey;
+    final category = data['category'] as String? ?? '';
+    final isApplicationFeedback =
+        category == SupportCategories.applicationFeedback;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -144,7 +158,8 @@ class _TicketAdminCard extends StatelessWidget {
           Row(children: [
             Expanded(
               child: Text(data['subject'] as String? ?? 'Sans sujet',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 14)),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -157,18 +172,22 @@ class _TicketAdminCard extends StatelessWidget {
             ),
           ]),
           const SizedBox(height: 4),
-          Text(data['category'] as String? ?? '',
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+          AdminTicketCategoryBadge(
+              category: category, isApplicationFeedback: isApplicationFeedback),
           const SizedBox(height: 6),
           Text(data['message'] as String? ?? '',
-              maxLines: 2, overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => _AdminTicketDetailScreen(ticketId: doc.id))),
+              onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) =>
+                          _AdminTicketDetailScreen(ticketId: doc.id))),
               child: const Text('Ouvrir'),
             ),
           ),
@@ -178,12 +197,49 @@ class _TicketAdminCard extends StatelessWidget {
   }
 }
 
+class AdminTicketCategoryBadge extends StatelessWidget {
+  const AdminTicketCategoryBadge({
+    super.key,
+    required this.category,
+    this.isApplicationFeedback = false,
+  });
+
+  final String category;
+  final bool isApplicationFeedback;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        key: isApplicationFeedback
+            ? const Key('admin-application-feedback-category')
+            : null,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: isApplicationFeedback
+              ? Colors.deepPurple.withValues(alpha: 0.12)
+              : Colors.grey.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          category,
+          style: TextStyle(
+            color: isApplicationFeedback
+                ? Colors.deepPurple
+                : Colors.grey.shade600,
+            fontSize: 12,
+            fontWeight:
+                isApplicationFeedback ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      );
+}
+
 class _AdminTicketDetailScreen extends StatefulWidget {
   final String ticketId;
   const _AdminTicketDetailScreen({required this.ticketId});
 
   @override
-  State<_AdminTicketDetailScreen> createState() => _AdminTicketDetailScreenState();
+  State<_AdminTicketDetailScreen> createState() =>
+      _AdminTicketDetailScreenState();
 }
 
 class _AdminTicketDetailScreenState extends State<_AdminTicketDetailScreen> {
@@ -196,8 +252,9 @@ class _AdminTicketDetailScreenState extends State<_AdminTicketDetailScreen> {
     super.dispose();
   }
 
-  DocumentReference get _ref =>
-      FirebaseFirestore.instance.collection('support_tickets').doc(widget.ticketId);
+  DocumentReference get _ref => FirebaseFirestore.instance
+      .collection('support_tickets')
+      .doc(widget.ticketId);
 
   Future<void> _sendReply() async {
     final text = _replyCtrl.text.trim();
@@ -214,10 +271,14 @@ class _AdminTicketDetailScreenState extends State<_AdminTicketDetailScreen> {
       });
       await _ref.update({
         'messages': messages,
-        if (((snap.data() as Map?)?['status']) == 'open') 'status': 'in_progress',
+        if (((snap.data() as Map?)?['status']) == 'open')
+          'status': 'in_progress',
       });
       if (!mounted) return;
-      setState(() { _replyCtrl.clear(); _sending = false; });
+      setState(() {
+        _replyCtrl.clear();
+        _sending = false;
+      });
     } catch (_) {
       if (mounted) setState(() => _sending = false);
     }
@@ -238,7 +299,8 @@ class _AdminTicketDetailScreenState extends State<_AdminTicketDetailScreen> {
           PopupMenuButton<String>(
             onSelected: _setStatus,
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'in_progress', child: Text('Marquer en cours')),
+              PopupMenuItem(
+                  value: 'in_progress', child: Text('Marquer en cours')),
               PopupMenuItem(value: 'resolved', child: Text('Marquer résolu')),
               PopupMenuItem(value: 'closed', child: Text('Fermer le ticket')),
             ],
@@ -249,7 +311,8 @@ class _AdminTicketDetailScreenState extends State<_AdminTicketDetailScreen> {
         stream: _ref.snapshots(),
         builder: (context, snap) {
           if (snap.hasError) {
-            return const Center(child: Text('Impossible de charger le ticket.'));
+            return const Center(
+                child: Text('Impossible de charger le ticket.'));
           }
           if (!snap.hasData || !snap.data!.exists) {
             return const Center(child: CircularProgressIndicator());
@@ -268,7 +331,8 @@ class _AdminTicketDetailScreenState extends State<_AdminTicketDetailScreen> {
                         style: const TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 16)),
                     Text('Client : ${data['userId'] ?? '—'}',
-                        style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                        style: TextStyle(
+                            color: Colors.grey.shade500, fontSize: 11)),
                     if (screenshotUrl != null) ...[
                       const SizedBox(height: 10),
                       ClipRRect(
@@ -346,8 +410,10 @@ class _AdminTicketDetailScreenState extends State<_AdminTicketDetailScreen> {
                           onPressed: _sending ? null : _sendReply,
                           icon: _sending
                               ? const SizedBox(
-                                  width: 18, height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2))
+                                  width: 18,
+                                  height: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
                               : const Icon(Icons.send_rounded,
                                   color: Color(0xFF00695C)),
                         ),
@@ -391,7 +457,8 @@ class _ReportsTab extends StatelessWidget {
           return const EmptyState(
             icon: Icons.flag_outlined,
             title: 'Aucun signalement en attente',
-            description: 'Les produits signalés par les utilisateurs apparaîtront ici.',
+            description:
+                'Les produits signalés par les utilisateurs apparaîtront ici.',
           );
         }
         return ListView.builder(
@@ -413,15 +480,18 @@ class _ReportsTab extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Produit : ${data['productId'] ?? '—'}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13)),
                   const SizedBox(height: 4),
                   Text('Raison : ${data['reason'] ?? '—'}',
-                      style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
+                      style:
+                          TextStyle(color: Colors.grey.shade700, fontSize: 13)),
                   const SizedBox(height: 10),
                   Row(children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () => doc.reference.update({'status': 'dismissed'}),
+                        onPressed: () =>
+                            doc.reference.update({'status': 'dismissed'}),
                         child: const Text('Ignorer'),
                       ),
                     ),
@@ -431,7 +501,8 @@ class _ReportsTab extends StatelessWidget {
                         style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.red,
                             side: const BorderSide(color: Colors.red)),
-                        onPressed: () => doc.reference.update({'status': 'reviewed'}),
+                        onPressed: () =>
+                            doc.reference.update({'status': 'reviewed'}),
                         child: const Text('Traité'),
                       ),
                     ),

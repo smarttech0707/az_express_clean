@@ -1,7 +1,6 @@
 import 'package:geolocator/geolocator.dart';
 
 class DeliveryService {
-
   // Abengourou et environs — coordonnées de référence
   static const double abengourouLat = 6.7273;
   static const double abengourouLng = -3.4961;

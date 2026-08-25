@@ -39,35 +39,47 @@ class AppStatus {
 
   static const Map<AppOrderStatus, StatusMeta> _meta = {
     AppOrderStatus.pending: StatusMeta(
-      color: AppColors.warning, icon: Icons.schedule_rounded,
-      label: 'En attente', pulsing: true,
+      color: AppColors.warning,
+      icon: Icons.schedule_rounded,
+      label: 'En attente',
+      pulsing: true,
     ),
     AppOrderStatus.accepted: StatusMeta(
-      color: AppColors.info, icon: Icons.check_circle_outline_rounded,
-      label: 'Acceptée', pulsing: true,
+      color: AppColors.info,
+      icon: Icons.check_circle_outline_rounded,
+      label: 'Acceptée',
+      pulsing: true,
     ),
     AppOrderStatus.preparing: StatusMeta(
-      color: AppColors.blue, icon: Icons.soup_kitchen_rounded,
-      label: 'En préparation', pulsing: true,
+      color: AppColors.blue,
+      icon: Icons.soup_kitchen_rounded,
+      label: 'En préparation',
+      pulsing: true,
     ),
     AppOrderStatus.onTheWay: StatusMeta(
-      color: AppColors.primary, icon: Icons.local_shipping_rounded,
-      label: 'En livraison', pulsing: true,
+      color: AppColors.primary,
+      icon: Icons.local_shipping_rounded,
+      label: 'En livraison',
+      pulsing: true,
     ),
     AppOrderStatus.delivered: StatusMeta(
-      color: AppColors.success, icon: Icons.task_alt_rounded,
+      color: AppColors.success,
+      icon: Icons.task_alt_rounded,
       label: 'Livrée',
     ),
     AppOrderStatus.completed: StatusMeta(
-      color: AppColors.success, icon: Icons.verified_rounded,
+      color: AppColors.success,
+      icon: Icons.verified_rounded,
       label: 'Terminée',
     ),
     AppOrderStatus.cancelled: StatusMeta(
-      color: AppColors.error, icon: Icons.cancel_outlined,
+      color: AppColors.error,
+      icon: Icons.cancel_outlined,
       label: 'Annulée',
     ),
     AppOrderStatus.failed: StatusMeta(
-      color: AppColors.error, icon: Icons.error_outline_rounded,
+      color: AppColors.error,
+      icon: Icons.error_outline_rounded,
       label: 'Échouée',
     ),
   };
@@ -123,9 +135,19 @@ class StatusBadge extends StatelessWidget {
   /// affiché tel quel (jamais un libellé français deviné au hasard).
   factory StatusBadge.fromRaw(String raw) {
     final known = {
-      'pending', 'broadcast', 'assigned', 'accepted', 'preparing',
-      'picked_up', 'delivering', 'ready', 'delivered', 'completed',
-      'cancelled', 'failed', 'error',
+      'pending',
+      'broadcast',
+      'assigned',
+      'accepted',
+      'preparing',
+      'picked_up',
+      'delivering',
+      'ready',
+      'delivered',
+      'completed',
+      'cancelled',
+      'failed',
+      'error',
     };
     return StatusBadge(
       AppStatus.fromRaw(raw),

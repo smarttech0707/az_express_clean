@@ -30,53 +30,85 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
 
   Future<Map<String, int>> _loadAuditStats() async {
     final results = await Future.wait([
-      _db.collection('audit_logs')
+      _db
+          .collection('audit_logs')
           .where('action', isEqualTo: 'payment_initiated')
-          .where('createdAt', isGreaterThan: _since24h).count().get(),
-      _db.collection('audit_logs')
+          .where('createdAt', isGreaterThan: _since24h)
+          .count()
+          .get(),
+      _db
+          .collection('audit_logs')
           .where('action', isEqualTo: 'wallet_credited')
-          .where('createdAt', isGreaterThan: _since24h).count().get(),
-      _db.collection('audit_logs')
+          .where('createdAt', isGreaterThan: _since24h)
+          .count()
+          .get(),
+      _db
+          .collection('audit_logs')
           .where('action', isEqualTo: 'withdrawal_initiated')
-          .where('createdAt', isGreaterThan: _since24h).count().get(),
-      _db.collection('security_events')
+          .where('createdAt', isGreaterThan: _since24h)
+          .count()
+          .get(),
+      _db
+          .collection('security_events')
           .where('resolved', isEqualTo: false)
-          .count().get(),
-      _db.collection('security_events')
+          .count()
+          .get(),
+      _db
+          .collection('security_events')
           .where('severity', isEqualTo: 'critical')
-          .where('resolved', isEqualTo: false).count().get(),
-      _db.collection('security_events')
+          .where('resolved', isEqualTo: false)
+          .count()
+          .get(),
+      _db
+          .collection('security_events')
           .where('eventType', isEqualTo: 'webhook_invalid_secret')
-          .where('createdAt', isGreaterThan: _since24h).count().get(),
-      _db.collection('security_events')
+          .where('createdAt', isGreaterThan: _since24h)
+          .count()
+          .get(),
+      _db
+          .collection('security_events')
           .where('eventType', isEqualTo: 'webhook_replay_attempt')
-          .where('createdAt', isGreaterThan: _since24h).count().get(),
-      _db.collection('rate_limits')
-          .where('updatedAt', isGreaterThan: _since1h).count().get(),
+          .where('createdAt', isGreaterThan: _since24h)
+          .count()
+          .get(),
+      _db
+          .collection('rate_limits')
+          .where('updatedAt', isGreaterThan: _since1h)
+          .count()
+          .get(),
       // Dispatching — commandes annulées faute de livreur
-      _db.collection('audit_logs')
+      _db
+          .collection('audit_logs')
           .where('action', isEqualTo: 'order_auto_cancelled_no_driver')
-          .where('createdAt', isGreaterThan: _since24h).count().get(),
-      _db.collection('audit_logs')
+          .where('createdAt', isGreaterThan: _since24h)
+          .count()
+          .get(),
+      _db
+          .collection('audit_logs')
           .where('action', isEqualTo: 'order_auto_cancelled_no_driver')
-          .where('createdAt', isGreaterThan: _since7d).count().get(),
-      _db.collection('audit_logs')
+          .where('createdAt', isGreaterThan: _since7d)
+          .count()
+          .get(),
+      _db
+          .collection('audit_logs')
           .where('action', isEqualTo: 'order_auto_cancelled_no_driver')
-          .where('createdAt', isGreaterThan: _since30d).count().get(),
+          .where('createdAt', isGreaterThan: _since30d)
+          .count()
+          .get(),
     ]);
 
     return {
-      'payments_24h':        results[0].count ?? 0,
-      'recharges_24h':       results[1].count ?? 0,
-      'withdrawals_24h':     results[2].count ?? 0,
-      'open_events':         results[3].count ?? 0,
-      'critical_events':     results[4].count ?? 0,
-      'webhook_invalid':     results[5].count ?? 0,
-      'webhook_replay':      results[6].count ?? 0,
-      'rate_limited_1h':     results[7].count ?? 0,
-      'no_driver_24h':       results[8].count ?? 0,
-      'no_driver_7d':        results[9].count ?? 0,
-      'no_driver_30d':       results[10].count ?? 0,
+      'payments_24h': results[0].count ?? 0,
+      'recharges_24h': results[1].count ?? 0,
+      'withdrawals_24h': results[2].count ?? 0,
+      'open_events': results[3].count ?? 0,
+      'critical_events': results[4].count ?? 0,
+      'webhook_invalid': results[5].count ?? 0,
+      'webhook_replay': results[6].count ?? 0,
+      'rate_limited_1h': results[7].count ?? 0,
+      'no_driver_24h': results[8].count ?? 0,
+      'no_driver_7d': results[9].count ?? 0,
+      'no_driver_30d': results[10].count ?? 0,
     };
   }
 
@@ -112,7 +144,8 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
         future: _loadAuditStats(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+            return const Center(
+                child: CircularProgressIndicator(color: AppColors.primary));
           }
           if (snap.hasError) {
             return Center(
@@ -124,7 +157,7 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
               ]),
             );
           }
-          final s     = snap.data!;
+          final s = snap.data!;
           final level = _alertLevel(s);
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -134,21 +167,24 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
               const _SectionTitle('Activité financière — 24h'),
               const SizedBox(height: 10),
               Row(children: [
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.payment_rounded,
                   label: 'Paiements initiés',
                   value: '${s['payments_24h']}',
                   color: const Color(0xFF2196F3),
                 )),
                 const SizedBox(width: 10),
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.account_balance_wallet_rounded,
                   label: 'Wallets crédités',
                   value: '${s['recharges_24h']}',
                   color: const Color(0xFF4CAF50),
                 )),
                 const SizedBox(width: 10),
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.send_rounded,
                   label: 'Retraits',
                   value: '${s['withdrawals_24h']}',
@@ -159,69 +195,89 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
               const _SectionTitle('Événements suspects'),
               const SizedBox(height: 10),
               Row(children: [
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.warning_rounded,
                   label: 'Alertes ouvertes',
                   value: '${s['open_events']}',
-                  color: (s['open_events'] ?? 0) > 0 ? Colors.orange : const Color(0xFF4CAF50),
+                  color: (s['open_events'] ?? 0) > 0
+                      ? Colors.orange
+                      : const Color(0xFF4CAF50),
                   highlight: (s['open_events'] ?? 0) > 0,
                 )),
                 const SizedBox(width: 10),
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.dangerous_rounded,
                   label: 'Critiques',
                   value: '${s['critical_events']}',
-                  color: (s['critical_events'] ?? 0) > 0 ? Colors.red : const Color(0xFF4CAF50),
+                  color: (s['critical_events'] ?? 0) > 0
+                      ? Colors.red
+                      : const Color(0xFF4CAF50),
                   highlight: (s['critical_events'] ?? 0) > 0,
                 )),
               ]),
               const SizedBox(height: 10),
               Row(children: [
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.webhook_rounded,
                   label: 'Webhooks invalides\n(24h)',
                   value: '${s['webhook_invalid']}',
-                  color: (s['webhook_invalid'] ?? 0) > 0 ? Colors.red : const Color(0xFF4CAF50),
+                  color: (s['webhook_invalid'] ?? 0) > 0
+                      ? Colors.red
+                      : const Color(0xFF4CAF50),
                   highlight: (s['webhook_invalid'] ?? 0) > 0,
                 )),
                 const SizedBox(width: 10),
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.replay_rounded,
                   label: 'Replays tentés\n(24h)',
                   value: '${s['webhook_replay']}',
-                  color: (s['webhook_replay'] ?? 0) > 0 ? Colors.red : const Color(0xFF4CAF50),
+                  color: (s['webhook_replay'] ?? 0) > 0
+                      ? Colors.red
+                      : const Color(0xFF4CAF50),
                   highlight: (s['webhook_replay'] ?? 0) > 0,
                 )),
                 const SizedBox(width: 10),
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.block_rounded,
                   label: 'Rate limits\n(1h)',
                   value: '${s['rate_limited_1h']}',
-                  color: (s['rate_limited_1h'] ?? 0) > 5 ? Colors.orange : const Color(0xFF607D8B),
+                  color: (s['rate_limited_1h'] ?? 0) > 5
+                      ? Colors.orange
+                      : const Color(0xFF607D8B),
                 )),
               ]),
               const SizedBox(height: 20),
               const _SectionTitle('Dispatching — commandes sans livreur'),
               const SizedBox(height: 10),
               Row(children: [
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.person_off_rounded,
                   label: 'Aujourd\'hui',
                   value: '${s['no_driver_24h']}',
                   color: (s['no_driver_24h'] ?? 0) > 0
-                      ? Colors.deepOrange : const Color(0xFF4CAF50),
+                      ? Colors.deepOrange
+                      : const Color(0xFF4CAF50),
                   highlight: (s['no_driver_24h'] ?? 0) > 0,
                 )),
                 const SizedBox(width: 10),
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.date_range_rounded,
                   label: '7 derniers jours',
                   value: '${s['no_driver_7d']}',
                   color: (s['no_driver_7d'] ?? 0) > 3
-                      ? Colors.orange : const Color(0xFF607D8B),
+                      ? Colors.orange
+                      : const Color(0xFF607D8B),
                 )),
                 const SizedBox(width: 10),
-                Expanded(child: _StatCard(
+                Expanded(
+                    child: _StatCard(
                   icon: Icons.calendar_month_rounded,
                   label: '30 derniers jours',
                   value: '${s['no_driver_30d']}',
@@ -255,14 +311,29 @@ class _AlertBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, label, bg, fg) = switch (level) {
-      'critical' => (Icons.emergency_rounded,  '🔴 CRITIQUE — Intervention requise immédiatement', const Color(0xFFFFEBEE), Colors.red.shade700),
-      'warning'  => (Icons.warning_amber_rounded, '🟠 SURVEILLANCE — Activité suspecte détectée',   const Color(0xFFFFF3E0), Colors.orange.shade700),
-      _          => (Icons.check_circle_rounded,   '🟢 NORMAL — Aucune alerte active',              const Color(0xFFE8F5E9), Colors.green.shade700),
+      'critical' => (
+          Icons.emergency_rounded,
+          '🔴 CRITIQUE — Intervention requise immédiatement',
+          const Color(0xFFFFEBEE),
+          Colors.red.shade700
+        ),
+      'warning' => (
+          Icons.warning_amber_rounded,
+          '🟠 SURVEILLANCE — Activité suspecte détectée',
+          const Color(0xFFFFF3E0),
+          Colors.orange.shade700
+        ),
+      _ => (
+          Icons.check_circle_rounded,
+          '🟢 NORMAL — Aucune alerte active',
+          const Color(0xFFE8F5E9),
+          Colors.green.shade700
+        ),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color:        bg,
+        color: bg,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: fg.withValues(alpha: 0.4)),
       ),
@@ -271,7 +342,8 @@ class _AlertBanner extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Text(label,
-            style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 14)),
+              style: TextStyle(
+                  color: fg, fontWeight: FontWeight.w700, fontSize: 14)),
         ),
       ]),
     );
@@ -285,8 +357,8 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(text,
-    style: const TextStyle(
-      fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF424242)));
+      style: const TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF424242)));
 }
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
@@ -313,11 +385,15 @@ class _StatCard extends StatelessWidget {
         color: highlight ? color.withValues(alpha: 0.08) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: highlight ? color.withValues(alpha: 0.4) : const Color(0xFFEEEEEE),
+          color: highlight
+              ? color.withValues(alpha: 0.4)
+              : const Color(0xFFEEEEEE),
         ),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8, offset: const Offset(0, 2)),
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Column(
@@ -334,12 +410,13 @@ class _StatCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(value,
-            style: TextStyle(
-              fontSize: 22, fontWeight: FontWeight.w800, color: color)),
+              style: TextStyle(
+                  fontSize: 22, fontWeight: FontWeight.w800, color: color)),
           const SizedBox(height: 2),
           Text(label,
-            style: const TextStyle(fontSize: 10, color: Color(0xFF757575)),
-            maxLines: 2, overflow: TextOverflow.ellipsis),
+              style: const TextStyle(fontSize: 10, color: Color(0xFF757575)),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
         ],
       ),
     );
@@ -354,7 +431,8 @@ class _RecentSecurityEvents extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: db.collection('security_events')
+      stream: db
+          .collection('security_events')
           .orderBy('createdAt', descending: true)
           .limit(10)
           .snapshots(),
@@ -368,15 +446,15 @@ class _RecentSecurityEvents extends StatelessWidget {
         }
         return Column(
           children: snap.data!.docs.map((doc) {
-            final d        = doc.data() as Map<String, dynamic>;
+            final d = doc.data() as Map<String, dynamic>;
             final severity = d['severity'] as String? ?? 'low';
             final resolved = d['resolved'] as bool? ?? false;
-            final ts       = (d['createdAt'] as Timestamp?)?.toDate();
-            final color    = switch (severity) {
+            final ts = (d['createdAt'] as Timestamp?)?.toDate();
+            final color = switch (severity) {
               'critical' => Colors.red,
-              'high'     => Colors.orange,
-              'medium'   => Colors.amber,
-              _          => Colors.grey,
+              'high' => Colors.orange,
+              'medium' => Colors.amber,
+              _ => Colors.grey,
             };
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
@@ -392,7 +470,8 @@ class _RecentSecurityEvents extends StatelessWidget {
               ),
               child: Row(children: [
                 Container(
-                  width: 8, height: 8,
+                  width: 8,
+                  height: 8,
                   decoration: BoxDecoration(
                     color: resolved ? Colors.grey : color,
                     shape: BoxShape.circle,
@@ -404,16 +483,21 @@ class _RecentSecurityEvents extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(d['eventType'] ?? '—',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                          color: resolved ? Colors.grey : const Color(0xFF212121),
-                          decoration: resolved ? TextDecoration.lineThrough : null,
-                        )),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: resolved
+                                ? Colors.grey
+                                : const Color(0xFF212121),
+                            decoration:
+                                resolved ? TextDecoration.lineThrough : null,
+                          )),
                       if (d['description'] != null)
                         Text(d['description'],
-                          style: const TextStyle(fontSize: 11, color: Color(0xFF757575)),
-                          maxLines: 2, overflow: TextOverflow.ellipsis),
+                            style: const TextStyle(
+                                fontSize: 11, color: Color(0xFF757575)),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis),
                     ],
                   ),
                 ),
@@ -423,7 +507,8 @@ class _RecentSecurityEvents extends StatelessWidget {
                   if (ts != null) ...[
                     const SizedBox(height: 4),
                     Text(DateFormat('dd/MM HH:mm').format(ts),
-                      style: const TextStyle(fontSize: 10, color: Color(0xFF9E9E9E))),
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFF9E9E9E))),
                   ],
                 ]),
               ]),
@@ -449,14 +534,15 @@ class _SeverityChip extends StatelessWidget {
           color: Colors.grey.shade100,
           borderRadius: BorderRadius.circular(6),
         ),
-        child: const Text('Résolu', style: TextStyle(fontSize: 10, color: Colors.grey)),
+        child: const Text('Résolu',
+            style: TextStyle(fontSize: 10, color: Colors.grey)),
       );
     }
     final (label, color) = switch (severity) {
       'critical' => ('CRITIQUE', Colors.red),
-      'high'     => ('ÉLEVÉ',    Colors.orange),
-      'medium'   => ('MOYEN',    Colors.amber),
-      _          => ('BAS',      Colors.grey),
+      'high' => ('ÉLEVÉ', Colors.orange),
+      'medium' => ('MOYEN', Colors.amber),
+      _ => ('BAS', Colors.grey),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -465,7 +551,8 @@ class _SeverityChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(label,
-        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color)),
+          style: TextStyle(
+              fontSize: 10, fontWeight: FontWeight.w700, color: color)),
     );
   }
 }
@@ -476,19 +563,26 @@ class _RecentAuditLogs extends StatelessWidget {
   const _RecentAuditLogs({required this.db});
 
   static const _actionIcons = {
-    'payment_initiated':              (Icons.payment_rounded,                Color(0xFF2196F3)),
-    'wallet_credited':                (Icons.account_balance_wallet_rounded, Color(0xFF4CAF50)),
-    'withdrawal_initiated':           (Icons.send_rounded,                   AppColors.primary),
-    'create_sub_admin':               (Icons.person_add_rounded,             Color(0xFF9C27B0)),
-    'delete_sub_admin':               (Icons.person_remove_rounded,          Colors.red),
-    'ekbine_confirm_order':           (Icons.check_circle_rounded,           Color(0xFF009688)),
-    'order_auto_cancelled_no_driver': (Icons.person_off_rounded,             Colors.deepOrange),
+    'payment_initiated': (Icons.payment_rounded, Color(0xFF2196F3)),
+    'wallet_credited': (
+      Icons.account_balance_wallet_rounded,
+      Color(0xFF4CAF50)
+    ),
+    'withdrawal_initiated': (Icons.send_rounded, AppColors.primary),
+    'create_sub_admin': (Icons.person_add_rounded, Color(0xFF9C27B0)),
+    'delete_sub_admin': (Icons.person_remove_rounded, Colors.red),
+    'ekbine_confirm_order': (Icons.check_circle_rounded, Color(0xFF009688)),
+    'order_auto_cancelled_no_driver': (
+      Icons.person_off_rounded,
+      Colors.deepOrange
+    ),
   };
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: db.collection('audit_logs')
+      stream: db
+          .collection('audit_logs')
           .orderBy('createdAt', descending: true)
           .limit(15)
           .snapshots(),
@@ -502,9 +596,9 @@ class _RecentAuditLogs extends StatelessWidget {
         }
         return Column(
           children: snap.data!.docs.map((doc) {
-            final d      = doc.data() as Map<String, dynamic>;
+            final d = doc.data() as Map<String, dynamic>;
             final action = d['action'] as String? ?? '—';
-            final ts     = (d['createdAt'] as Timestamp?)?.toDate();
+            final ts = (d['createdAt'] as Timestamp?)?.toDate();
             final amount = d['amount'] as int?;
             final (icon, color) = _actionIcons[action] ??
                 (Icons.history_rounded, const Color(0xFF9E9E9E));
@@ -513,7 +607,7 @@ class _RecentAuditLogs extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color:        Colors.white,
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: const Color(0xFFF0F0F0)),
               ),
@@ -532,22 +626,28 @@ class _RecentAuditLogs extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(_labelFor(action),
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      Text(d['userId'] != null
-                          ? 'uid: ${(d['userId'] as String).substring(0, 8)}…'
-                          : '—',
-                        style: const TextStyle(fontSize: 10, color: Color(0xFF9E9E9E))),
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text(
+                          d['userId'] != null
+                              ? 'uid: ${(d['userId'] as String).substring(0, 8)}…'
+                              : '—',
+                          style: const TextStyle(
+                              fontSize: 10, color: Color(0xFF9E9E9E))),
                     ],
                   ),
                 ),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   if (amount != null)
                     Text('${amount ~/ 1} FCFA',
-                      style: TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: color)),
                   if (ts != null)
                     Text(DateFormat('dd/MM HH:mm').format(ts),
-                      style: const TextStyle(fontSize: 10, color: Color(0xFF9E9E9E))),
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFF9E9E9E))),
                 ]),
               ]),
             );
@@ -558,15 +658,15 @@ class _RecentAuditLogs extends StatelessWidget {
   }
 
   String _labelFor(String action) => switch (action) {
-    'payment_initiated'              => 'Paiement initié',
-    'wallet_credited'                => 'Wallet crédité',
-    'withdrawal_initiated'           => 'Retrait initié',
-    'create_sub_admin'               => 'Sous-admin créé',
-    'delete_sub_admin'               => 'Sous-admin supprimé',
-    'ekbine_confirm_order'           => 'E-Kbine confirmé',
-    'order_auto_cancelled_no_driver' => 'Commande expirée — sans livreur',
-    _                                => action,
-  };
+        'payment_initiated' => 'Paiement initié',
+        'wallet_credited' => 'Wallet crédité',
+        'withdrawal_initiated' => 'Retrait initié',
+        'create_sub_admin' => 'Sous-admin créé',
+        'delete_sub_admin' => 'Sous-admin supprimé',
+        'ekbine_confirm_order' => 'E-Kbine confirmé',
+        'order_auto_cancelled_no_driver' => 'Commande expirée — sans livreur',
+        _ => action,
+      };
 }
 
 // ── Top Zones sans livreur ────────────────────────────────────────────────────
@@ -577,7 +677,8 @@ class _TopZonesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: db.collection('dispatch_metrics')
+      stream: db
+          .collection('dispatch_metrics')
           .orderBy('noDriverFoundCount', descending: true)
           .limit(5)
           .snapshots(),
@@ -591,11 +692,11 @@ class _TopZonesSection extends StatelessWidget {
         }
         return Column(
           children: snap.data!.docs.map((doc) {
-            final d     = doc.data() as Map<String, dynamic>;
-            final zone  = d['zone'] as String? ?? 'Inconnu';
+            final d = doc.data() as Map<String, dynamic>;
+            final zone = d['zone'] as String? ?? 'Inconnu';
             final count = d['noDriverFoundCount'] as int? ?? 0;
-            final svc   = d['serviceType'] as String? ?? '';
-            final date  = d['date'] as String? ?? '';
+            final svc = d['serviceType'] as String? ?? '';
+            final date = d['date'] as String? ?? '';
             return Container(
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -615,7 +716,8 @@ class _TopZonesSection extends StatelessWidget {
                       color: Colors.deepOrange, size: 16),
                 ),
                 const SizedBox(width: 10),
-                Expanded(child: Column(
+                Expanded(
+                    child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(zone,
@@ -628,8 +730,8 @@ class _TopZonesSection extends StatelessWidget {
                   ],
                 )),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.deepOrange.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(8),
@@ -654,21 +756,23 @@ class _EmptyCard extends StatelessWidget {
   final IconData icon;
   final String message;
   final Color color;
-  const _EmptyCard({required this.icon, required this.message, required this.color});
+  const _EmptyCard(
+      {required this.icon, required this.message, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFEEEEEE)),
       ),
       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(width: 10),
-        Text(message, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+        Text(message,
+            style: TextStyle(color: color, fontWeight: FontWeight.w600)),
       ]),
     );
   }

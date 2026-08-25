@@ -10,6 +10,16 @@
 const STALE_MINUTES     = 3;
 const DEFAULT_RADIUS_KM = 2.0;
 const EARTH_RADIUS_M    = 6371000;
+const DRIVER_QUERY_LIMIT = 50;
+const CITY_QUERY_LIMIT = 50;
+
+class DispatchError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'DispatchError';
+    this.code = code;
+  }
+}
 
 function haversineMeters(lat1, lng1, lat2, lng2) {
   const toRad = (d) => (d * Math.PI) / 180;
@@ -36,12 +46,199 @@ async function calculateCommission(db, budget) {
   return budget < threshold ? basic : standard;
 }
 
+function usableCity(doc) {
+  const d = doc.data();
+  const lat = Number(d.lat);
+  const lng = Number(d.lng);
+  const radiusKm = Number(d.radiusKm);
+  return d.type === 'ville' &&
+    d.isActive === true &&
+    d.isServiceable === true &&
+    d.coordinateSource === 'own' &&
+    Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+    Number.isFinite(lng) && lng >= -180 && lng <= 180 &&
+    Number.isFinite(radiusKm) && radiusKm > 0 &&
+    typeof d.cityId === 'string' && d.cityId.length > 0
+    ? { id: doc.id, cityId: d.cityId, lat, lng, radiusKm }
+    : null;
+}
+
+async function loadActiveCities(db) {
+  const snap = await db.collection('zones_livraison')
+    .where('type', '==', 'ville')
+    .where('isActive', '==', true)
+    .where('isServiceable', '==', true)
+    .limit(CITY_QUERY_LIMIT)
+    .get();
+  if (snap.size >= CITY_QUERY_LIMIT) {
+    console.warn(`[dispatch] limite villes atteinte cityLimit=${CITY_QUERY_LIMIT}`);
+  }
+  return snap.docs.map(usableCity).filter(Boolean);
+}
+
+function candidateCitiesForPickup(cities, pickupCityId, lat, lng, radiusKm) {
+  const pickupCity = cities.find((city) => city.cityId === pickupCityId);
+  if (!pickupCity) {
+    throw new DispatchError(
+      'inactive-city',
+      `Ville de collecte inactive, non desservie ou sans géométrie: ${pickupCityId}`,
+    );
+  }
+  return cities.filter((city) => {
+    const centerDistance = haversineMeters(lat, lng, city.lat, city.lng);
+    return centerDistance <= (city.radiusKm + radiusKm) * 1000;
+  });
+}
+
+async function loadCandidateDrivers(db, candidateCityIds) {
+  if (candidateCityIds.length === 0) return { docs: [], size: 0 };
+  if (candidateCityIds.length > 30) {
+    throw new DispatchError(
+      'too-many-candidate-cities',
+      'Plus de 30 villes candidates; la limite Firestore du filtre in serait dépassée.',
+    );
+  }
+  return db.collection('livreurs')
+    .where('isOnline', '==', true)
+    .where('currentCityId', 'in', candidateCityIds)
+    .limit(DRIVER_QUERY_LIMIT)
+    .get();
+}
+
+function driverHasCandidateCityGeometry(driver, cities) {
+  const city = cities.find((candidate) => candidate.cityId === driver.currentCityId);
+  if (!city) return false;
+  return haversineMeters(driver.lat, driver.lng, city.lat, city.lng) <=
+    city.radiusKm * 1000;
+}
+
+function assertValidDispatchPoint(lat, lng, label) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) ||
+      lat < -90 || lat > 90 || lng < -180 || lng > 180 ||
+      (lat === 0 && lng === 0)) {
+    throw new DispatchError(
+      'invalid-coordinates',
+      `Coordonnées du point de ${label} indisponibles.`,
+    );
+  }
+}
+
+function citiesContainingPoint(cities, lat, lng) {
+  return cities
+    .map((city) => ({
+      city,
+      ratio: haversineMeters(lat, lng, city.lat, city.lng) /
+        (city.radiusKm * 1000),
+    }))
+    .filter((entry) => entry.ratio <= 1)
+    .sort((a, b) => a.ratio - b.ratio);
+}
+
+async function resolveZoneForPoint(db, cityId, lat, lng) {
+  const snap = await db.collection('zones_livraison')
+    .where('cityId', '==', cityId)
+    .limit(200)
+    .get();
+  const matches = snap.docs
+    .map((doc) => {
+      const d = doc.data();
+      const zoneLat = Number(d.lat);
+      const zoneLng = Number(d.lng);
+      const radiusKm = Number(d.radiusKm);
+      if (!['quartier', 'village'].includes(d.type) ||
+          d.isActive !== true || d.isServiceable !== true ||
+          d.coordinateSource !== 'own' ||
+          !Number.isFinite(zoneLat) || !Number.isFinite(zoneLng) ||
+          !Number.isFinite(radiusKm) || radiusKm <= 0) return null;
+      const ratio = haversineMeters(lat, lng, zoneLat, zoneLng) /
+        (radiusKm * 1000);
+      return ratio <= 1 ? { id: doc.id, ratio } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.ratio - b.ratio);
+  return matches[0]?.id || null;
+}
+
+async function resolveDispatchGeography(db, {
+  pickupLat,
+  pickupLng,
+  deliveryLat,
+  deliveryLng,
+  pickupCoordinateSource,
+  deliveryCoordinateSource,
+}) {
+  assertValidDispatchPoint(pickupLat, pickupLng, 'collecte');
+  assertValidDispatchPoint(deliveryLat, deliveryLng, 'livraison');
+  const cities = await loadActiveCities(db);
+  const pickupMatches = citiesContainingPoint(cities, pickupLat, pickupLng);
+  const deliveryMatches = citiesContainingPoint(cities, deliveryLat, deliveryLng);
+  if (!pickupMatches.length) {
+    throw new DispatchError(
+      'outside-service',
+      'Le point de collecte est hors des villes desservies.',
+    );
+  }
+  if (!deliveryMatches.length) {
+    throw new DispatchError(
+      'outside-service',
+      'Le point de livraison est hors des villes desservies.',
+    );
+  }
+  const pickupCityId = pickupMatches[0].city.cityId;
+  const deliveryCityId = deliveryMatches[0].city.cityId;
+  const [pickupZoneId, deliveryZoneId] = await Promise.all([
+    resolveZoneForPoint(db, pickupCityId, pickupLat, pickupLng),
+    resolveZoneForPoint(db, deliveryCityId, deliveryLat, deliveryLng),
+  ]);
+  return {
+    pickupCityId,
+    pickupZoneId,
+    deliveryCityId,
+    deliveryZoneId,
+    pickupCoordinateSource,
+    deliveryCoordinateSource,
+    cityResolutionStatus: pickupMatches.length > 1 ? 'border' : 'resolved',
+  };
+}
+
 // Retourne { dispatched: boolean, mode: 'assigned'|'broadcast'|'none' }
-async function dispatchOrder(db, admin, { orderId, lat, lng, budget = 0, radiusKm = DEFAULT_RADIUS_KM }) {
+async function dispatchOrder(db, admin, {
+  orderId,
+  lat,
+  lng,
+  pickupCityId,
+  cityResolutionStatus,
+  budget = 0,
+  radiusKm = DEFAULT_RADIUS_KM,
+}) {
+  assertValidDispatchPoint(Number(lat), Number(lng), 'collecte');
+  if (cityResolutionStatus === 'outside_service' || cityResolutionStatus === 'unknown') {
+    throw new DispatchError(
+      'unresolved-city',
+      `Dispatch refusé pour cityResolutionStatus=${cityResolutionStatus}`,
+    );
+  }
+  if (typeof pickupCityId !== 'string' || pickupCityId.length === 0) {
+    throw new DispatchError('missing-pickup-city', 'pickupCityId manquant');
+  }
   const commission = await calculateCommission(db, budget);
   const staleMs     = Date.now() - STALE_MINUTES * 60 * 1000;
-
-  const snap = await db.collection('livreurs').where('isOnline', '==', true).get();
+  const cities = await loadActiveCities(db);
+  const candidateCities = candidateCitiesForPickup(
+    cities,
+    pickupCityId,
+    lat,
+    lng,
+    radiusKm,
+  );
+  const candidateCityIds = candidateCities.map((city) => city.cityId);
+  const snap = await loadCandidateDrivers(db, candidateCityIds);
+  if (snap.size >= DRIVER_QUERY_LIMIT) {
+    console.warn(
+      `[dispatch] orderId=${orderId} limite livreurs atteinte ` +
+      `driverLimit=${DRIVER_QUERY_LIMIT} candidateCities=${candidateCityIds.join(',')}`,
+    );
+  }
 
   // Master Prompt 129 (Partie 11) — logs minimaux mais suffisants pour
   // diagnostiquer, sans relire manuellement Firestore à chaque incident,
@@ -51,7 +248,7 @@ async function dispatchOrder(db, admin, { orderId, lat, lng, budget = 0, radiusK
   // les logs).
   const excluded = {
     onDelivery: 0, unavailable: 0, suspended: 0, alreadyNotified: 0,
-    walletLow: 0, staleGps: 0, noGps: 0, tooFar: 0,
+    walletLow: 0, staleGps: 0, noGps: 0, tooFar: 0, outsideCityGeometry: 0,
   };
 
   const nearby = [];
@@ -71,8 +268,24 @@ async function dispatchOrder(db, admin, { orderId, lat, lng, budget = 0, radiusK
     if (!dLat || !dLng) { excluded.noGps++; return; }
     const dist = haversineMeters(lat, lng, dLat, dLng);
     if (dist > radiusKm * 1000) { excluded.tooFar++; return; }
+    if (!driverHasCandidateCityGeometry({ ...d, lat: dLat, lng: dLng }, candidateCities)) {
+      excluded.outsideCityGeometry++;
+      return;
+    }
 
-    nearby.push({ id: doc.id, dist });
+    if (d.registeredCityId && d.registeredCityId !== d.currentCityId) {
+      console.log(
+        `[dispatch] divergence ville driverId=${doc.id} ` +
+        `registeredCityId=${d.registeredCityId} currentCityId=${d.currentCityId}`,
+      );
+    }
+
+    nearby.push({
+      id: doc.id,
+      dist,
+      currentCityMatch: d.currentCityId === pickupCityId,
+      registeredCityMatch: d.registeredCityId === pickupCityId,
+    });
   });
 
   console.log(`[dispatch] orderId=${orderId} onlineCount=${snap.size} eligible=${nearby.length} excluded=${JSON.stringify(excluded)} radiusKm=${radiusKm} commission=${commission}`);
@@ -82,7 +295,13 @@ async function dispatchOrder(db, admin, { orderId, lat, lng, budget = 0, radiusK
     return { dispatched: false, mode: 'none' };
   }
 
-  nearby.sort((a, b) => a.dist - b.dist);
+  nearby.sort((a, b) => {
+    const distanceOrder = a.dist - b.dist;
+    if (distanceOrder !== 0) return distanceOrder;
+    if (a.currentCityMatch !== b.currentCityMatch) return a.currentCityMatch ? -1 : 1;
+    if (a.registeredCityMatch !== b.registeredCityMatch) return a.registeredCityMatch ? -1 : 1;
+    return a.id.localeCompare(b.id);
+  });
   const ids      = nearby.slice(0, 5).map((r) => r.id);
   const orderRef = db.collection('orders').doc(orderId);
 
@@ -132,4 +351,16 @@ async function dispatchOrder(db, admin, { orderId, lat, lng, budget = 0, radiusK
   return { dispatched: result.dispatched, mode: result.mode };
 }
 
-module.exports = { dispatchOrder, calculateCommission, haversineMeters, STALE_MINUTES };
+module.exports = {
+  dispatchOrder,
+  calculateCommission,
+  haversineMeters,
+  candidateCitiesForPickup,
+  DispatchError,
+  STALE_MINUTES,
+  DEFAULT_RADIUS_KM,
+  DRIVER_QUERY_LIMIT,
+  CITY_QUERY_LIMIT,
+  assertValidDispatchPoint,
+  resolveDispatchGeography,
+};

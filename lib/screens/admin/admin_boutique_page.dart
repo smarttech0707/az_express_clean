@@ -1,10 +1,11 @@
-﻿import 'dart:io';
+import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/storage_cleanup.dart';
 
 class AdminBoutiquePage extends StatefulWidget {
   const AdminBoutiquePage({super.key});
@@ -34,16 +35,15 @@ class _AdminBoutiquePageState extends State<AdminBoutiquePage>
         .collection("app_config")
         .doc("payment")
         .get();
-    final waveCtrl = TextEditingController(
-        text: doc.data()?["waveNumber"] ?? "");
-    final orangeCtrl = TextEditingController(
-        text: doc.data()?["orangeNumber"] ?? "");
+    final waveCtrl =
+        TextEditingController(text: doc.data()?["waveNumber"] ?? "");
+    final orangeCtrl =
+        TextEditingController(text: doc.data()?["orangeNumber"] ?? "");
     if (!context.mounted) return;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text("Numéros de paiement"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -59,8 +59,8 @@ class _AdminBoutiquePageState extends State<AdminBoutiquePage>
               decoration: InputDecoration(
                 labelText: "Numéro Wave",
                 prefixIcon: const Icon(Icons.bolt, color: Color(0xFF1565C0)),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
             const SizedBox(height: 10),
@@ -71,8 +71,8 @@ class _AdminBoutiquePageState extends State<AdminBoutiquePage>
                 labelText: "Numéro Orange Money",
                 prefixIcon:
                     const Icon(Icons.phone_android, color: Colors.orange),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ],
@@ -176,13 +176,13 @@ class _ProductsAdminTab extends StatelessWidget {
           final docs = snap.data?.docs ?? [];
           if (docs.isEmpty) {
             return const Center(
-              child: Text("Aucun produit",
-                  style: TextStyle(color: Colors.grey)),
+              child:
+                  Text("Aucun produit", style: TextStyle(color: Colors.grey)),
             );
           }
           return ListView.builder(
             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             itemCount: docs.length,
             itemBuilder: (context, i) {
               final doc = docs[i];
@@ -228,8 +228,8 @@ class _ProductsAdminTab extends StatelessWidget {
                       Switch(
                         value: isAvailable,
                         activeThumbColor: AppColors.primary,
-                        onChanged: (_) => doc.reference
-                            .update({"isAvailable": !isAvailable}),
+                        onChanged: (_) =>
+                            doc.reference.update({"isAvailable": !isAvailable}),
                       ),
                       IconButton(
                         icon: const Icon(Icons.edit_outlined,
@@ -241,7 +241,11 @@ class _ProductsAdminTab extends StatelessWidget {
                         icon: const Icon(Icons.delete_outline,
                             size: 20, color: Colors.red),
                         tooltip: 'Supprimer',
-                        onPressed: () => doc.reference.delete(),
+                        onPressed: () async {
+                          final imageUrl = data["imageUrl"] as String?;
+                          await doc.reference.delete();
+                          await deleteStorageUrls([imageUrl]);
+                        },
                       ),
                     ],
                   ),
@@ -259,8 +263,7 @@ Widget _productIcon() => Container(
       width: 46,
       height: 46,
       color: AppColors.primary.withValues(alpha: 0.1),
-      child: const Icon(Icons.shopping_bag,
-          color: AppColors.primary, size: 22),
+      child: const Icon(Icons.shopping_bag, color: AppColors.primary, size: 22),
     );
 
 // ── PAGE AJOUT / MODIFICATION PRODUIT ────────────────────────────
@@ -346,8 +349,7 @@ class _AddProductPageState extends State<_AddProductPage> {
                   color: AppColors.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.camera_alt,
-                    color: AppColors.primary),
+                child: const Icon(Icons.camera_alt, color: AppColors.primary),
               ),
               title: const Text("Prendre une photo",
                   style: TextStyle(fontWeight: FontWeight.w600)),
@@ -365,8 +367,7 @@ class _AddProductPageState extends State<_AddProductPage> {
                   color: Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(Icons.photo_library,
-                    color: Colors.blue.shade700),
+                child: Icon(Icons.photo_library, color: Colors.blue.shade700),
               ),
               title: const Text("Choisir depuis la galerie",
                   style: TextStyle(fontWeight: FontWeight.w600)),
@@ -406,10 +407,7 @@ class _AddProductPageState extends State<_AddProductPage> {
     setState(() => _loading = true);
     try {
       final productId = widget.existing?.id ??
-          FirebaseFirestore.instance
-              .collection("boutique_products")
-              .doc()
-              .id;
+          FirebaseFirestore.instance.collection("boutique_products").doc().id;
 
       final imageUrl = await _uploadImage(productId);
 
@@ -439,9 +437,7 @@ class _AddProductPageState extends State<_AddProductPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text("Erreur : $e"),
-              backgroundColor: Colors.red),
+          SnackBar(content: Text("Erreur : $e"), backgroundColor: Colors.red),
         );
       }
     }
@@ -450,8 +446,7 @@ class _AddProductPageState extends State<_AddProductPage> {
 
   @override
   Widget build(BuildContext context) {
-    final hasImage =
-        _imageFile != null || (_existingImageUrl ?? "").isNotEmpty;
+    final hasImage = _imageFile != null || (_existingImageUrl ?? "").isNotEmpty;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
@@ -480,9 +475,7 @@ class _AddProductPageState extends State<_AddProductPage> {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: hasImage
-                        ? AppColors.primary
-                        : Colors.grey.shade300,
+                    color: hasImage ? AppColors.primary : Colors.grey.shade300,
                     width: 2,
                   ),
                   boxShadow: [
@@ -513,13 +506,10 @@ class _AddProductPageState extends State<_AddProductPage> {
             Center(
               child: TextButton.icon(
                 onPressed: _showImageOptions,
-                icon: Icon(
-                    hasImage ? Icons.edit : Icons.add_a_photo,
-                    size: 16),
+                icon: Icon(hasImage ? Icons.edit : Icons.add_a_photo, size: 16),
                 label:
                     Text(hasImage ? "Changer la photo" : "Ajouter une photo"),
-                style: TextButton.styleFrom(
-                    foregroundColor: AppColors.primary),
+                style: TextButton.styleFrom(foregroundColor: AppColors.primary),
               ),
             ),
 
@@ -661,8 +651,7 @@ class _AddProductPageState extends State<_AddProductPage> {
       keyboardType: type,
       decoration: InputDecoration(
         labelText: label,
-        prefixIcon:
-            Icon(icon, size: 20, color: Colors.grey.shade500),
+        prefixIcon: Icon(icon, size: 20, color: Colors.grey.shade500),
         border: InputBorder.none,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -691,8 +680,8 @@ class _OrdersAdminTab extends StatelessWidget {
         final docs = snap.data?.docs ?? [];
         if (docs.isEmpty) {
           return const Center(
-            child: Text("Aucune commande",
-                style: TextStyle(color: Colors.grey)),
+            child:
+                Text("Aucune commande", style: TextStyle(color: Colors.grey)),
           );
         }
         return ListView.builder(
@@ -703,8 +692,7 @@ class _OrdersAdminTab extends StatelessWidget {
             final doc = docs[i];
             final data = doc.data() as Map<String, dynamic>;
             final status = data["status"] ?? "paid";
-            final deadline =
-                (data["deliveryDeadline"] as Timestamp?)?.toDate();
+            final deadline = (data["deliveryDeadline"] as Timestamp?)?.toDate();
             final isLate = deadline != null &&
                 DateTime.now().isAfter(deadline) &&
                 status == "paid";
@@ -738,9 +726,7 @@ class _OrdersAdminTab extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: isLate
-                    ? Border.all(color: Colors.red.shade300)
-                    : null,
+                border: isLate ? Border.all(color: Colors.red.shade300) : null,
                 boxShadow: [
                   BoxShadow(
                       color: Colors.black.withValues(alpha: 0.05),
@@ -757,8 +743,7 @@ class _OrdersAdminTab extends StatelessWidget {
                         Expanded(
                           child: Text(data["productName"] ?? "—",
                               style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15)),
+                                  fontWeight: FontWeight.bold, fontSize: 15)),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -780,13 +765,11 @@ class _OrdersAdminTab extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       "Qté : ${data['qty']}  •  ${data['totalPrice']} FCFA",
-                      style: const TextStyle(
-                          color: Colors.grey, fontSize: 13),
+                      style: const TextStyle(color: Colors.grey, fontSize: 13),
                     ),
                     Text(
                       "Client ID : ${(data['clientId'] ?? '').toString().substring(0, 8)}...",
-                      style: const TextStyle(
-                          color: Colors.grey, fontSize: 11),
+                      style: const TextStyle(color: Colors.grey, fontSize: 11),
                     ),
                     if (isLate)
                       const Padding(
@@ -797,16 +780,14 @@ class _OrdersAdminTab extends StatelessWidget {
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold)),
                       ),
-                    if (status != "delivered" &&
-                        status != "refunded") ...[
+                    if (status != "delivered" && status != "refunded") ...[
                       const SizedBox(height: 10),
                       SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: Row(
                           children: [
                             if (status == "pending_payment")
-                              _actionBtn("Confirmer l'espèce reçue",
-                                  Colors.red,
+                              _actionBtn("Confirmer l'espèce reçue", Colors.red,
                                   () => _updateStatus(doc, "paid")),
                             if (status == "paid")
                               _actionBtn("En préparation", Colors.blue,
@@ -912,10 +893,12 @@ class _RechargesAdminTab extends StatelessWidget {
           .snapshots(),
       builder: (context, snap) {
         final docs = snap.data?.docs ?? [];
-        final pending =
-            docs.where((d) => (d.data() as Map)["status"] == "pending").toList();
-        final done =
-            docs.where((d) => (d.data() as Map)["status"] != "pending").toList();
+        final pending = docs
+            .where((d) => (d.data() as Map)["status"] == "pending")
+            .toList();
+        final done = docs
+            .where((d) => (d.data() as Map)["status"] != "pending")
+            .toList();
 
         if (docs.isEmpty) {
           return const Center(
@@ -948,8 +931,10 @@ class _RechargesAdminTab extends StatelessWidget {
               ...done.map((doc) {
                 final data = doc.data() as Map<String, dynamic>;
                 return _RechargeCard(
-                    data: data, isPending: false,
-                    onApprove: () {}, onReject: () {});
+                    data: data,
+                    isPending: false,
+                    onApprove: () {},
+                    onReject: () {});
               }),
             ],
           ],
@@ -960,9 +945,7 @@ class _RechargesAdminTab extends StatelessWidget {
 
   Widget _sectionTitle(String t) => Text(t,
       style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 14,
-          color: Colors.grey));
+          fontWeight: FontWeight.bold, fontSize: 14, color: Colors.grey));
 }
 
 class _RechargeCard extends StatelessWidget {
@@ -991,12 +974,9 @@ class _RechargeCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: isPending
-            ? Border.all(color: Colors.orange.shade300)
-            : null,
+        border: isPending ? Border.all(color: Colors.orange.shade300) : null,
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
         ],
       ),
       child: Padding(
@@ -1038,16 +1018,16 @@ class _RechargeCard extends StatelessWidget {
                           "${date.day.toString().padLeft(2, '0')}/"
                           "${date.month.toString().padLeft(2, '0')}/"
                           "${date.year}",
-                          style: const TextStyle(
-                              color: Colors.grey, fontSize: 11),
+                          style:
+                              const TextStyle(color: Colors.grey, fontSize: 11),
                         ),
                     ],
                   ),
                 ),
                 if (!isPending)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: status == "approved"
                           ? Colors.green.shade50
@@ -1057,9 +1037,8 @@ class _RechargeCard extends StatelessWidget {
                     child: Text(
                       status == "approved" ? "Approuvé" : "Rejeté",
                       style: TextStyle(
-                          color: status == "approved"
-                              ? Colors.green
-                              : Colors.red,
+                          color:
+                              status == "approved" ? Colors.green : Colors.red,
                           fontWeight: FontWeight.bold,
                           fontSize: 11),
                     ),
@@ -1104,4 +1083,3 @@ class _RechargeCard extends StatelessWidget {
     );
   }
 }
-

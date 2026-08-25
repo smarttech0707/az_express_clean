@@ -32,6 +32,7 @@ Future<void> showPartnerAccountSheet(
   String? photoUrl,
   String? photoStoragePath,
   Future<void> Function(String url)? onPhotoUploaded,
+  Future<void> Function()? onPhotoDeleted,
 }) {
   return showModalBottomSheet(
     context: context,
@@ -53,6 +54,7 @@ Future<void> showPartnerAccountSheet(
                       storagePath: photoStoragePath,
                       size: 52,
                       onUploaded: onPhotoUploaded,
+                      onDeleted: onPhotoDeleted,
                     )
                   : const CircleAvatar(
                       radius: 22,
@@ -67,7 +69,8 @@ Future<void> showPartnerAccountSheet(
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w700)),
                     Text(phone?.isNotEmpty == true ? phone! : roleLabel,
-                        style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                        style:
+                            TextStyle(fontSize: 13, color: Colors.grey[600])),
                   ],
                 ),
               ),
@@ -84,9 +87,11 @@ Future<void> showPartnerAccountSheet(
               },
             ),
             ListTile(
-              leading: const Icon(Icons.person_remove_outlined, color: Colors.red),
+              leading:
+                  const Icon(Icons.person_remove_outlined, color: Colors.red),
               title: const Text('Supprimer mon compte'),
-              subtitle: const Text('Demande de suppression de compte et de données'),
+              subtitle:
+                  const Text('Demande de suppression de compte et de données'),
               onTap: () {
                 Navigator.pop(ctx);
                 showAccountDeletionRequestDialog(context,

@@ -6,10 +6,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:uuid/uuid.dart';
+import 'package:provider/provider.dart';
 
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
 import '../../services/tarif_service.dart';
+import '../../providers/active_city_provider.dart';
 import '../../widgets/address_picker_widget.dart';
 import '../../widgets/scale_button.dart';
 import 'order_wait_screen.dart';
@@ -23,18 +25,17 @@ class CoursesScreen extends StatefulWidget {
 }
 
 class _CoursesScreenState extends State<CoursesScreen> {
-
   // ── Contrôleurs
-  final _listCtrl        = TextEditingController();
-  final _budgetCtrl      = TextEditingController();
-  final _notesCtrl       = TextEditingController();
+  final _listCtrl = TextEditingController();
+  final _budgetCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
   final _mobilePhoneCtrl = TextEditingController();
 
   // ── Articles avec quantités et prix
-  final List<String> _items      = [];
-  final List<int>    _quantities = [];
-  final List<int?>   _prices     = []; // null = pas de prix renseigné
-  final _itemCtrl    = TextEditingController();
+  final List<String> _items = [];
+  final List<int> _quantities = [];
+  final List<int?> _prices = []; // null = pas de prix renseigné
+  final _itemCtrl = TextEditingController();
 
   // ── Adresse de livraison
   AddressResult? _deliveryAddress;
@@ -44,14 +45,14 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
   // ── Paiement
   String _payment = 'cash';
-  int    _wallet  = 0;
+  int _wallet = 0;
   StreamSubscription? _walletSub;
 
   // ── Voice
-  final SpeechToText _speech       = SpeechToText();
-  bool               _speechAvailable = false;
-  bool               _listening    = false;
-  String             _liveWords    = '';
+  final SpeechToText _speech = SpeechToText();
+  bool _speechAvailable = false;
+  bool _listening = false;
+  String _liveWords = '';
 
   // ── État
   bool _sending = false;
@@ -69,13 +70,14 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   TarifResult get _tarifResult => TarifService.compute(
-        clientLat: _deliveryAddress?.latitude  ?? TarifService.centerLat,
+        clientLat: _deliveryAddress?.latitude ?? TarifService.centerLat,
         clientLng: _deliveryAddress?.longitude ?? TarifService.centerLng,
       );
 
   int get _standardFee => _tarifResult.standardPrice;
-  int get _expressFee  => _tarifResult.expressPrice;
-  int get _deliveryFee => _deliveryMode == 'express' ? _expressFee : _standardFee;
+  int get _expressFee => _tarifResult.expressPrice;
+  int get _deliveryFee =>
+      _deliveryMode == 'express' ? _expressFee : _standardFee;
 
   int get _budgetValue => int.tryParse(_budgetCtrl.text.trim()) ?? 0;
 
@@ -142,7 +144,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
       await _speech.stop();
       setState(() => _listening = false);
     } else {
-      setState(() { _listening = true; _liveWords = ''; });
+      setState(() {
+        _listening = true;
+        _liveWords = '';
+      });
       await _speech.listen(
         onResult: _onSpeechResult,
         listenOptions: SpeechListenOptions(
@@ -182,8 +187,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   void _addVoiceItem(String text) {
-    final separators = RegExp(r'[,\.;]|\bet\b|\bpuis\b|\baussi\b', caseSensitive: false);
-    final parts = text.split(separators)
+    final separators =
+        RegExp(r'[,\.;]|\bet\b|\bpuis\b|\baussi\b', caseSensitive: false);
+    final parts = text
+        .split(separators)
         .map((s) => s.trim())
         .where((s) => s.length >= 2)
         .toList();
@@ -222,8 +229,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   void _editItem(int index) {
-    final nameCtrl  = TextEditingController(text: _items[index]);
-    final priceCtrl = TextEditingController(text: _prices[index]?.toString() ?? '');
+    final nameCtrl = TextEditingController(text: _items[index]);
+    final priceCtrl =
+        TextEditingController(text: _prices[index]?.toString() ?? '');
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -239,8 +247,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
             decoration: InputDecoration(
               labelText: 'Article',
               hintText: 'Ex : Huile, Tomates…',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             ),
           ),
           const SizedBox(height: 12),
@@ -254,7 +264,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
               suffixText: 'FCFA',
               suffixStyle: TextStyle(
                   color: Colors.grey.shade500, fontWeight: FontWeight.w600),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             ),
@@ -269,21 +280,25 @@ class _CoursesScreenState extends State<CoursesScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2E7D32),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () {
-              final name  = nameCtrl.text.trim();
-              final price = int.tryParse(
-                  priceCtrl.text.trim().replaceAll(' ', '').replaceAll(' ', ''));
+              final name = nameCtrl.text.trim();
+              final price = int.tryParse(priceCtrl.text
+                  .trim()
+                  .replaceAll(' ', '')
+                  .replaceAll(' ', ''));
               if (name.isNotEmpty) {
                 setState(() {
-                  _items[index]  = _capitalize(name);
+                  _items[index] = _capitalize(name);
                   _prices[index] = (price != null && price > 0) ? price : null;
                 });
               }
               Navigator.pop(context);
             },
-            child: Text('Valider', style: GoogleFonts.urbanist(color: Colors.white)),
+            child: Text('Valider',
+                style: GoogleFonts.urbanist(color: Colors.white)),
           ),
         ],
       ),
@@ -317,8 +332,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
         .snapshots()
         .listen((s) {
       if (mounted) {
-        setState(
-            () => _wallet = (s.data()?['wallet'] as num?)?.toInt() ?? 0);
+        setState(() => _wallet = (s.data()?['wallet'] as num?)?.toInt() ?? 0);
       }
     });
   }
@@ -347,16 +361,17 @@ class _CoursesScreenState extends State<CoursesScreen> {
                     fontSize: 13, color: Colors.grey.shade600)),
             const SizedBox(height: 10),
             ...missing.map((m) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(children: [
-                const Icon(Icons.cancel_rounded, color: Colors.red, size: 16),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: Text(m,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 13, fontWeight: FontWeight.w600))),
-              ]),
-            )),
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(children: [
+                    const Icon(Icons.cancel_rounded,
+                        color: Colors.red, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Text(m,
+                            style: GoogleFonts.urbanist(
+                                fontSize: 13, fontWeight: FontWeight.w600))),
+                  ]),
+                )),
           ],
         ),
         actions: [
@@ -383,8 +398,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
       return;
     }
 
-    final int shoppingBudget =
-        _isPriceMode ? _articleTotal : _budgetValue;
+    final int shoppingBudget = _isPriceMode ? _articleTotal : _budgetValue;
     final int totalBudget = shoppingBudget + _deliveryFee;
     final needsMobilePhone = _payment != 'cash' && _payment != 'wallet';
 
@@ -427,61 +441,84 @@ class _CoursesScreenState extends State<CoursesScreen> {
               .collection('clients')
               .doc(user!.uid)
               .get();
-          clientName  = profile.data()?['name']  as String?;
+          clientName = profile.data()?['name'] as String?;
           clientPhone = profile.data()?['phone'] as String?;
         } catch (_) {}
       }
 
       final itemList = _items.isNotEmpty
           ? _items.asMap().entries.map((e) {
-              final qty      = _quantities[e.key];
-              final price    = _prices[e.key];
-              final priceStr = price != null
-                  ? ' — ${_fmt(price * qty)}'
-                  : '';
+              final qty = _quantities[e.key];
+              final price = _prices[e.key];
+              final priceStr = price != null ? ' — ${_fmt(price * qty)}' : '';
               return '${e.key + 1}. ${e.value}'
                   '${qty > 1 ? " (x$qty)" : ""}$priceStr';
             }).join('\n')
           : _listCtrl.text.trim();
 
-      final notes       = _notesCtrl.text.trim();
+      final notes = _notesCtrl.text.trim();
       final mobilePhone = _mobilePhoneCtrl.text.trim();
       var desc = itemList + (notes.isNotEmpty ? '\n\nNotes : $notes' : '');
       if (mobilePhone.isNotEmpty) desc += '\nPaiement : $mobilePhone';
 
-      if (_payment == 'wallet') {
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final ref  = FirebaseFirestore.instance
-              .collection('clients')
-              .doc(user!.uid);
-          final snap = await tx.get(ref);
-          final bal  = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
-          if (bal < totalBudget) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(ref, {'wallet': bal - totalBudget});
-        });
-      }
-
       final orderId = const Uuid().v4();
+      final point = _deliveryAddress!;
+      if (!mounted) return;
+      final cityProvider = context.read<ActiveCityProvider>();
+      final cityService = cityProvider.service;
+      final geography = await cityService.resolveDispatchGeography(
+        pickupLatitude: point.latitude,
+        pickupLongitude: point.longitude,
+        deliveryLatitude: point.latitude,
+        deliveryLongitude: point.longitude,
+      );
       final order = OrderModel(
-        id:              orderId,
-        description:     desc,
-        budget:          _deliveryFee,
-        shoppingBudget:  shoppingBudget,
-        status:          'pending',
-        latitude:        _deliveryAddress!.latitude,
-        longitude:       _deliveryAddress!.longitude,
-        deliveryAddress: _deliveryAddress!.address,
-        type:            'shopping',
-        clientId:        user?.uid,
-        clientName:      clientName,
-        clientPhone:     clientPhone,
-        paymentMethod:   _payment,
-        isPaid:          _payment == 'wallet',
-        forSelf:         true,
-        deliveryMode:    _deliveryMode,
+        id: orderId,
+        description: desc,
+        budget: _deliveryFee,
+        shoppingBudget: shoppingBudget,
+        status: 'pending',
+        latitude: point.latitude,
+        longitude: point.longitude,
+        destLat: point.latitude,
+        destLng: point.longitude,
+        deliveryAddress: point.address,
+        type: 'shopping',
+        clientId: user?.uid,
+        clientName: clientName,
+        clientPhone: clientPhone,
+        paymentMethod: _payment,
+        isPaid: _payment == 'wallet',
+        forSelf: true,
+        deliveryMode: _deliveryMode,
+        pickupCityId: geography.pickupCityId,
+        pickupZoneId: geography.pickupZoneId,
+        deliveryCityId: geography.deliveryCityId,
+        deliveryZoneId: geography.deliveryZoneId,
+        pickupCoordinateSource: point.coordinateSource,
+        deliveryCoordinateSource: point.coordinateSource,
+        gpsDetectedCityId: cityService.gpsDetectedCityId,
+        activeCityId: cityService.activeCityId,
+        citySelectionSource: cityService.citySelectionSource,
+        cityResolutionStatus: geography.cityResolutionStatus,
       );
 
-      await FirestoreService().createOrder(order);
+      if (_payment == 'wallet') {
+        final clientRef =
+            FirebaseFirestore.instance.collection('clients').doc(user!.uid);
+        final orderRef =
+            FirebaseFirestore.instance.collection('orders').doc(order.id);
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final snap = await tx.get(clientRef);
+          final balance = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
+          if (balance < totalBudget) throw Exception('SOLDE_INSUFFISANT');
+          tx.update(clientRef, {'wallet': balance - totalBudget});
+          tx.set(orderRef, order.toMap());
+        });
+        await FirestoreService().createOrder(order, alreadyCreated: true);
+      } else {
+        await FirestoreService().createOrder(order);
+      }
       if (!mounted) return;
 
       // Réinitialiser le formulaire
@@ -535,7 +572,6 @@ class _CoursesScreenState extends State<CoursesScreen> {
         padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad + 24),
         physics: const BouncingScrollPhysics(),
         children: [
-
           // ── Articles ─────────────────────────────────────────────────────────
           const _Section(
             icon: Icons.shopping_basket_rounded,
@@ -545,8 +581,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
           const SizedBox(height: 6),
           Text(
             'Ajoutez le prix pour un calcul auto · ex : "Huile 500 FCFA"',
-            style: GoogleFonts.urbanist(
-                fontSize: 11, color: Colors.grey.shade500),
+            style:
+                GoogleFonts.urbanist(fontSize: 11, color: Colors.grey.shade500),
           ),
           const SizedBox(height: 10),
 
@@ -558,7 +594,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
               const Icon(Icons.add_shopping_cart_rounded,
                   size: 20, color: Color(0xFF2E7D32)),
               const SizedBox(width: 10),
-              Expanded(child: TextField(
+              Expanded(
+                  child: TextField(
                 controller: _itemCtrl,
                 style: GoogleFonts.urbanist(fontSize: 15),
                 textCapitalization: TextCapitalization.sentences,
@@ -567,8 +604,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                   hintStyle: GoogleFonts.urbanist(
                       fontSize: 14, color: Colors.grey.shade400),
                   border: InputBorder.none,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 onSubmitted: (_) => _addManualItem(),
               )),
@@ -582,7 +618,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
                     borderRadius: BorderRadius.circular(24),
                     onTap: _addManualItem,
                     child: Container(
-                      width: 40, height: 40,
+                      width: 40,
+                      height: 40,
                       alignment: Alignment.center,
                       child: const Icon(Icons.add_circle_rounded,
                           color: Color(0xFF2E7D32), size: 28),
@@ -601,7 +638,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
                   onTap: _toggleListening,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: 44, height: 44,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       color: _listening
                           ? Colors.red.shade500
@@ -609,10 +647,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      _listening
-                          ? Icons.stop_rounded
-                          : Icons.mic_rounded,
-                      color: Colors.white, size: 22,
+                      _listening ? Icons.stop_rounded : Icons.mic_rounded,
+                      color: Colors.white,
+                      size: 22,
                     ),
                   ),
                 ),
@@ -633,9 +670,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
               child: Row(children: [
                 Icon(Icons.mic_rounded, color: Colors.red.shade400, size: 14),
                 const SizedBox(width: 8),
-                Expanded(child: Text(_liveWords,
-                    style: GoogleFonts.urbanist(
-                        fontSize: 13, fontStyle: FontStyle.italic))),
+                Expanded(
+                    child: Text(_liveWords,
+                        style: GoogleFonts.urbanist(
+                            fontSize: 13, fontStyle: FontStyle.italic))),
               ]),
             ),
           ],
@@ -655,22 +693,24 @@ class _CoursesScreenState extends State<CoursesScreen> {
               decoration: _cardDec,
               child: Column(
                 children: _items.asMap().entries.map((e) {
-                  final i     = e.key;
-                  final item  = e.value;
-                  final qty   = _quantities[i];
+                  final i = e.key;
+                  final item = e.value;
+                  final qty = _quantities[i];
                   final price = _prices[i];
                   return Column(children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 10),
                       child: Row(children: [
-                        Expanded(child: Column(
+                        Expanded(
+                            child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(item, style: GoogleFonts.urbanist(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87)),
+                            Text(item,
+                                style: GoogleFonts.urbanist(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87)),
                             if (price != null)
                               Text(
                                 qty > 1
@@ -694,9 +734,11 @@ class _CoursesScreenState extends State<CoursesScreen> {
                           onTap: () => _changeQty(i, -1),
                         ),
                         Container(
-                          width: 32, alignment: Alignment.center,
-                          child: Text('$qty', style: GoogleFonts.urbanist(
-                              fontSize: 14, fontWeight: FontWeight.w700)),
+                          width: 32,
+                          alignment: Alignment.center,
+                          child: Text('$qty',
+                              style: GoogleFonts.urbanist(
+                                  fontSize: 14, fontWeight: FontWeight.w700)),
                         ),
                         _QtyBtn(
                           icon: Icons.add,
@@ -765,7 +807,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
             Container(
               decoration: _cardDec,
               child: TextField(
-                controller:   _budgetCtrl,
+                controller: _budgetCtrl,
                 keyboardType: TextInputType.number,
                 style: GoogleFonts.urbanist(
                     fontSize: 18, fontWeight: FontWeight.bold),
@@ -773,21 +815,18 @@ class _CoursesScreenState extends State<CoursesScreen> {
                   hintText: 'ex : 2 500',
                   hintStyle: GoogleFonts.urbanist(
                       fontSize: 16, color: Colors.grey.shade400),
-                  prefixIcon: const Icon(
-                      Icons.account_balance_wallet_rounded,
+                  prefixIcon: const Icon(Icons.account_balance_wallet_rounded,
                       color: AppColors.primary),
                   suffixText: 'FCFA',
                   suffixStyle: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontWeight: FontWeight.w600),
+                      color: Colors.grey.shade500, fontWeight: FontWeight.w600),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide.none,
                   ),
-                  filled:    true,
+                  filled: true,
                   fillColor: Colors.white,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 16),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 16),
                 ),
               ),
             ),
@@ -802,16 +841,15 @@ class _CoursesScreenState extends State<CoursesScreen> {
           ),
           const SizedBox(height: 10),
           AddressPickerWidget(
-            title:       'Livraison',
-            hint:        'Où livrer ? Tapez quartier, rue, lieu-dit…',
+            title: 'Livraison',
+            hint: 'Où livrer ? Tapez quartier, rue, lieu-dit…',
             initialMode: AddressMode.gps,
-            onChanged:   (r) => setState(() => _deliveryAddress = r),
+            onChanged: (r) => setState(() => _deliveryAddress = r),
           ),
           if (_deliveryAddress != null) ...[
             const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 11),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               decoration: BoxDecoration(
                 color: const Color(0xFF1565C0).withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(12),
@@ -822,11 +860,12 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 const Icon(Icons.location_on_rounded,
                     color: Color(0xFF1565C0), size: 18),
                 const SizedBox(width: 10),
-                Expanded(child: Text(_deliveryAddress!.address,
-                    style: GoogleFonts.urbanist(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF1565C0)))),
+                Expanded(
+                    child: Text(_deliveryAddress!.address,
+                        style: GoogleFonts.urbanist(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF1565C0)))),
                 const Icon(Icons.check_circle_rounded,
                     color: Color(0xFF1565C0), size: 16),
               ]),
@@ -843,28 +882,28 @@ class _CoursesScreenState extends State<CoursesScreen> {
           ),
           const SizedBox(height: 10),
           _CourseModeCard(
-            mode:       'standard',
-            icon:       Icons.electric_bike_rounded,
-            title:      'STANDARD',
-            subtitle:   'Le livreur peut combiner plusieurs courses',
-            etaText:    '45 – 90 min',
-            priceText:  _fmt(_standardFee),
-            iconColor:  const Color(0xFF2E7D32),
+            mode: 'standard',
+            icon: Icons.electric_bike_rounded,
+            title: 'STANDARD',
+            subtitle: 'Le livreur peut combiner plusieurs courses',
+            etaText: '45 – 90 min',
+            priceText: _fmt(_standardFee),
+            iconColor: const Color(0xFF2E7D32),
             isSelected: _deliveryMode == 'standard',
-            onTap:      () => setState(() => _deliveryMode = 'standard'),
+            onTap: () => setState(() => _deliveryMode = 'standard'),
           ),
           const SizedBox(height: 8),
           _CourseModeCard(
-            mode:       'express',
-            icon:       Icons.rocket_launch_rounded,
-            title:      'EXPRESS',
-            subtitle:   'Mission dédiée uniquement pour vous',
-            etaText:    '15 – 30 min',
-            priceText:  _fmt(_expressFee),
-            iconColor:  AppColors.primary,
+            mode: 'express',
+            icon: Icons.rocket_launch_rounded,
+            title: 'EXPRESS',
+            subtitle: 'Mission dédiée uniquement pour vous',
+            etaText: '15 – 30 min',
+            priceText: _fmt(_expressFee),
+            iconColor: AppColors.primary,
             isSelected: _deliveryMode == 'express',
-            onTap:      () => setState(() => _deliveryMode = 'express'),
-            badge:      'Prioritaire',
+            onTap: () => setState(() => _deliveryMode = 'express'),
+            badge: 'Prioritaire',
           ),
 
           const SizedBox(height: 20),
@@ -885,8 +924,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
             decoration: _cardDec,
             child: TextField(
               controller: _notesCtrl,
-              maxLines:   4,
-              style:      GoogleFonts.urbanist(fontSize: 14),
+              maxLines: 4,
+              style: GoogleFonts.urbanist(fontSize: 14),
               decoration: InputDecoration(
                 hintText:
                     'Ne pas sonner, appeler avant d\'arriver,\nmonter au 2e étage, laisser au gardien…',
@@ -949,14 +988,14 @@ class _CoursesScreenState extends State<CoursesScreen> {
             ),
             if (_wallet > 0)
               _PayRow(
-                icon:      Icons.account_balance_wallet_rounded,
+                icon: Icons.account_balance_wallet_rounded,
                 iconColor: const Color(0xFF6A1B9A),
-                label:     'Wallet · ${_fmt(_wallet)}',
-                subtitle:  _wallet >= _orderTotal && _orderTotal > 0
+                label: 'Wallet · ${_fmt(_wallet)}',
+                subtitle: _wallet >= _orderTotal && _orderTotal > 0
                     ? 'Solde suffisant — paiement immédiat'
                     : 'Solde disponible',
-                selected:  _payment == 'wallet',
-                onTap:     () => setState(() => _payment = 'wallet'),
+                selected: _payment == 'wallet',
+                onTap: () => setState(() => _payment = 'wallet'),
               ),
           ],
           if (_payment != 'cash' && _payment != 'wallet') ...[
@@ -964,7 +1003,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
             Container(
               decoration: _cardDec,
               child: TextField(
-                controller:   _mobilePhoneCtrl,
+                controller: _mobilePhoneCtrl,
                 keyboardType: TextInputType.phone,
                 style: GoogleFonts.urbanist(
                     fontSize: 15, fontWeight: FontWeight.w500),
@@ -988,10 +1027,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide.none,
                   ),
-                  filled:    true,
+                  filled: true,
                   fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 16),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                 ),
               ),
             ),
@@ -1010,12 +1049,12 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
   Widget _buildRecap() {
     final modeName = _deliveryMode == 'express' ? 'Express' : 'Standard';
-    final fee      = _deliveryFee;
+    final fee = _deliveryFee;
 
     if (_isPriceMode) {
       // Mode prix : affiche articles + livraison + total
       final artTotal = _articleTotal;
-      final total    = artTotal + fee;
+      final total = artTotal + fee;
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -1028,8 +1067,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-              color: const Color(0xFF2E7D32).withValues(alpha: 0.2)),
+          border:
+              Border.all(color: const Color(0xFF2E7D32).withValues(alpha: 0.2)),
         ),
         child: Column(children: [
           // En-tête
@@ -1067,11 +1106,12 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 color: const Color(0xFF2E7D32).withValues(alpha: 0.3)),
           ),
           Row(children: [
-            Expanded(child: Text('TOTAL',
-                style: GoogleFonts.urbanist(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.black87))),
+            Expanded(
+                child: Text('TOTAL',
+                    style: GoogleFonts.urbanist(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.black87))),
             Text(
               _items.isNotEmpty ? _fmt(total) : '—',
               style: GoogleFonts.urbanist(
@@ -1085,7 +1125,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
     }
 
     // Mode budget : affiche budget + livraison Standard + livraison Express
-    final budget   = _budgetValue;
+    final budget = _budgetValue;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1098,8 +1138,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.25)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
       ),
       child: Column(children: [
         // En-tête
@@ -1130,20 +1169,20 @@ class _CoursesScreenState extends State<CoursesScreen> {
         const SizedBox(height: 12),
         // Ligne Standard
         _recapModeRow(
-          label:      'Standard',
-          icon:       Icons.electric_bike_rounded,
-          total:      budget > 0 ? budget + _standardFee : 0,
+          label: 'Standard',
+          icon: Icons.electric_bike_rounded,
+          total: budget > 0 ? budget + _standardFee : 0,
           isSelected: _deliveryMode == 'standard',
-          color:      const Color(0xFF2E7D32),
+          color: const Color(0xFF2E7D32),
         ),
         const SizedBox(height: 8),
         // Ligne Express
         _recapModeRow(
-          label:      'Express',
-          icon:       Icons.rocket_launch_rounded,
-          total:      budget > 0 ? budget + _expressFee : 0,
+          label: 'Express',
+          icon: Icons.rocket_launch_rounded,
+          total: budget > 0 ? budget + _expressFee : 0,
           isSelected: _deliveryMode == 'express',
-          color:      AppColors.primary,
+          color: AppColors.primary,
         ),
       ]),
     );
@@ -1151,11 +1190,12 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
   Widget _recapLine({required String label, required String value}) {
     return Row(children: [
-      Expanded(child: Text(label,
-          style: GoogleFonts.urbanist(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: Colors.grey.shade700))),
+      Expanded(
+          child: Text(label,
+              style: GoogleFonts.urbanist(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey.shade700))),
       Text(value,
           style: GoogleFonts.urbanist(
               fontSize: 13,
@@ -1165,11 +1205,11 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   Widget _recapModeRow({
-    required String   label,
+    required String label,
     required IconData icon,
-    required int      total,
-    required bool     isSelected,
-    required Color    color,
+    required int total,
+    required bool isSelected,
+    required Color color,
   }) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
@@ -1185,16 +1225,14 @@ class _CoursesScreenState extends State<CoursesScreen> {
         ),
       ),
       child: Row(children: [
-        Icon(icon,
-            size: 16,
-            color: isSelected ? color : Colors.grey.shade400),
+        Icon(icon, size: 16, color: isSelected ? color : Colors.grey.shade400),
         const SizedBox(width: 8),
-        Expanded(child: Text(label,
-            style: GoogleFonts.urbanist(
-                fontSize: 13,
-                fontWeight:
-                    isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: isSelected ? color : Colors.grey.shade600))),
+        Expanded(
+            child: Text(label,
+                style: GoogleFonts.urbanist(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    color: isSelected ? color : Colors.grey.shade600))),
         Text(
           total > 0 ? _fmt(total) : '—',
           style: GoogleFonts.urbanist(
@@ -1219,8 +1257,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
         onPressed: _sending ? null : _sendOrder,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF2E7D32),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           elevation: 0,
         ),
         child: _sending
@@ -1228,15 +1266,15 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   SizedBox(
-                    width: 20, height: 20,
+                    width: 20,
+                    height: 20,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5),
                   ),
                   SizedBox(width: 12),
                   Text('Recherche en cours…',
                       style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600)),
+                          color: Colors.white, fontWeight: FontWeight.w600)),
                 ],
               )
             : Column(
@@ -1270,67 +1308,66 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   BoxDecoration get _cardDec => BoxDecoration(
-    color:        Colors.white,
-    borderRadius: BorderRadius.circular(14),
-    boxShadow: [
-      BoxShadow(
-          color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
-    ],
-  );
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
+        ],
+      );
 }
 
 // ── Widgets locaux ─────────────────────────────────────────────────────────────
 
 class _Section extends StatelessWidget {
   final IconData icon;
-  final String   title;
-  final Color    color;
+  final String title;
+  final Color color;
   const _Section(
       {required this.icon, required this.title, required this.color});
 
   @override
   Widget build(BuildContext context) => Row(children: [
-    Container(
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8)),
-      child: Icon(icon, color: color, size: 16),
-    ),
-    const SizedBox(width: 10),
-    Text(title,
-        style: GoogleFonts.urbanist(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: Colors.black87)),
-  ]);
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8)),
+          child: Icon(icon, color: color, size: 16),
+        ),
+        const SizedBox(width: 10),
+        Text(title,
+            style: GoogleFonts.urbanist(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: Colors.black87)),
+      ]);
 }
 
 class _QtyBtn extends StatelessWidget {
-  final IconData      icon;
-  final Color         color;
-  final VoidCallback  onTap;
-  const _QtyBtn(
-      {required this.icon, required this.color, required this.onTap});
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  const _QtyBtn({required this.icon, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: 30, height: 30,
-      decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
-      child: Icon(icon, color: color, size: 16),
-    ),
-  );
+        onTap: onTap,
+        child: Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
+          child: Icon(icon, color: color, size: 16),
+        ),
+      );
 }
 
 class _PayRow extends StatelessWidget {
   final IconData? icon;
-  final String?   imagePath;
-  final Color     iconColor;
-  final String    label, subtitle;
-  final bool      selected;
+  final String? imagePath;
+  final Color iconColor;
+  final String label, subtitle;
+  final bool selected;
   final VoidCallback? onTap;
 
   const _PayRow({
@@ -1357,15 +1394,14 @@ class _PayRow extends StatelessWidget {
               : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: selected
-                ? const Color(0xFF2E7D32)
-                : Colors.grey.shade200,
+            color: selected ? const Color(0xFF2E7D32) : Colors.grey.shade200,
             width: selected ? 2 : 1,
           ),
         ),
         child: Row(children: [
           Container(
-            width: 36, height: 36,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: iconColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
@@ -1376,17 +1412,16 @@ class _PayRow extends StatelessWidget {
                     child: Image.asset(
                       imagePath!,
                       fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => Icon(
-                          Icons.payment_rounded,
-                          color: iconColor,
-                          size: 20),
+                      errorBuilder: (_, __, ___) => Icon(Icons.payment_rounded,
+                          color: iconColor, size: 20),
                     ),
                   )
                 : Icon(icon ?? Icons.payment_rounded,
                     color: iconColor, size: 20),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Column(
+          Expanded(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
@@ -1412,16 +1447,16 @@ class _PayRow extends StatelessWidget {
 }
 
 class _CourseModeCard extends StatelessWidget {
-  final String     mode;
-  final IconData   icon;
-  final String     title;
-  final String     subtitle;
-  final String     etaText;
-  final String?    priceText;
-  final Color      iconColor;
-  final bool       isSelected;
+  final String mode;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String etaText;
+  final String? priceText;
+  final Color iconColor;
+  final bool isSelected;
   final VoidCallback onTap;
-  final String?    badge;
+  final String? badge;
 
   const _CourseModeCard({
     required this.mode,
@@ -1444,25 +1479,27 @@ class _CourseModeCard extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: isSelected
-              ? iconColor.withValues(alpha: 0.06)
-              : Colors.white,
+          color: isSelected ? iconColor.withValues(alpha: 0.06) : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isSelected ? iconColor : Colors.grey.shade200,
             width: isSelected ? 2 : 1,
           ),
           boxShadow: isSelected
-              ? [BoxShadow(
-                  color: iconColor.withValues(alpha: 0.12),
-                  blurRadius: 8)]
-              : [BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 4)],
+              ? [
+                  BoxShadow(
+                      color: iconColor.withValues(alpha: 0.12), blurRadius: 8)
+                ]
+              : [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 4)
+                ],
         ),
         child: Row(children: [
           Container(
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: isSelected
                   ? iconColor.withValues(alpha: 0.14)
@@ -1470,11 +1507,11 @@ class _CourseModeCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon,
-                color: isSelected ? iconColor : Colors.grey.shade500,
-                size: 22),
+                color: isSelected ? iconColor : Colors.grey.shade500, size: 22),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Column(
+          Expanded(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
@@ -1482,14 +1519,12 @@ class _CourseModeCard extends StatelessWidget {
                     style: GoogleFonts.urbanist(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
-                        color: isSelected
-                            ? iconColor
-                            : Colors.black87)),
+                        color: isSelected ? iconColor : Colors.black87)),
                 if (badge != null) ...[
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: iconColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6),

@@ -1,0 +1,23 @@
+{
+  "migrationVersion": "abengourou_zones_v1",
+  "generatedAt": "2026-08-18T09:51:06.238Z",
+  "targetCityId": "abengourou",
+  "targetCityDocumentId": null,
+  "eligibleForApply": false,
+  "refusal": {
+    "code": "TARGET_CITY_NOT_FOUND",
+    "message": "Aucune ville unique ne correspond à type=ville et normalizedName=abengourou. Migration refusée."
+  },
+  "summary": {
+    "total": 0,
+    "ville_cible": 0,
+    "enfant_prouve": 0,
+    "autre": 0,
+    "conflit": 0,
+    "deja_conforme": 0,
+    "a_ecrire": 0
+  },
+  "documents": [],
+  "mode": "dry-run",
+  "projectId": "az-express-b0469"
+}

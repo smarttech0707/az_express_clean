@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -54,6 +55,8 @@ class AzIaProvider extends ChangeNotifier {
   final Stream<String?> _authUidChanges;
 
   final List<AzIaMessage> _messages = [];
+  late final UnmodifiableListView<AzIaMessage> _messagesView =
+      UnmodifiableListView(_messages);
   String? _conversationId;
   bool _isSending = false;
   String? _error;
@@ -76,10 +79,23 @@ class AzIaProvider extends ChangeNotifier {
   AzIaPendingAction? get pendingAction => _pendingAction;
   bool get confirming => _confirming;
 
-  AzIaProvider({AzIaService? service, Stream<String?>? authUidChanges})
-      : _service = service ?? AzIaService(),
+  AzIaProvider({
+    AzIaService? service,
+    Stream<String?>? authUidChanges,
+    Future<void>? initializationReady,
+  })  : _service = service ?? AzIaService(),
         _authUidChanges = authUidChanges ??
             FirebaseAuth.instance.authStateChanges().map((user) => user?.uid) {
+    if (initializationReady == null) {
+      _authSub = _authUidChanges.listen(_onAuthChanged);
+    } else {
+      unawaited(_subscribeToAuth(initializationReady));
+    }
+  }
+
+  Future<void> _subscribeToAuth(Future<void> initializationReady) async {
+    await initializationReady;
+    if (_disposed) return;
     _authSub = _authUidChanges.listen(_onAuthChanged);
   }
 
@@ -92,7 +108,7 @@ class AzIaProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  List<AzIaMessage> get messages => List.unmodifiable(_messages);
+  List<AzIaMessage> get messages => _messagesView;
   bool get isSending => _isSending;
   String? get error => _error;
 

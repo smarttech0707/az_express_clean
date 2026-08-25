@@ -11,27 +11,27 @@ import '../utils/app_haptics.dart';
 ///     child: MonWidget(),
 ///   )
 class TapEffect extends StatefulWidget {
-  final Widget      child;
+  final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
-  final double      scaleDown;
-  final Duration    duration;
-  final HapticType  haptic;
+  final double scaleDown;
+  final Duration duration;
+  final HapticType haptic;
   final BorderRadius? borderRadius;
   // Master Prompt 125 (Partie 2/4) — optionnel, purement additif : ce widget
   // enveloppe un `GestureDetector` brut sans aucune sémantique propre ;
   // quand `child` est une icône/image seule sans texte, ce libellé est le
   // seul moyen pour un lecteur d'écran d'annoncer le rôle du bouton.
-  final String?     semanticLabel;
+  final String? semanticLabel;
 
   const TapEffect({
     super.key,
     required this.child,
     this.onTap,
     this.onLongPress,
-    this.scaleDown    = 0.93,
-    this.duration     = const Duration(milliseconds: 120),
-    this.haptic       = HapticType.light,
+    this.scaleDown = 0.93,
+    this.duration = const Duration(milliseconds: 120),
+    this.haptic = HapticType.light,
     this.borderRadius,
     this.semanticLabel,
   });
@@ -45,7 +45,7 @@ enum HapticType { none, light, medium, selection }
 class _TapEffectState extends State<TapEffect>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
-  late Animation<double>   _scale;
+  late Animation<double> _scale;
 
   @override
   void initState() {
@@ -97,8 +97,8 @@ class _TapEffectState extends State<TapEffect>
   @override
   Widget build(BuildContext context) {
     final content = GestureDetector(
-      onTapDown:   widget.onTap != null ? _onTapDown   : null,
-      onTapUp:     widget.onTap != null ? _onTapUp     : null,
+      onTapDown: widget.onTap != null ? _onTapDown : null,
+      onTapUp: widget.onTap != null ? _onTapUp : null,
       onTapCancel: widget.onTap != null ? _onTapCancel : null,
       onLongPress: widget.onLongPress,
       child: AnimatedBuilder(

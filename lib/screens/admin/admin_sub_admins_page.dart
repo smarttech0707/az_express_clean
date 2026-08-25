@@ -5,11 +5,16 @@ import 'package:cloud_functions/cloud_functions.dart';
 /// Journalise un changement de rôle/permission dans `audit_logs` via le CF
 /// `logAdminAuditEvent` — best-effort, ne doit jamais bloquer l'action admin
 /// déjà effectuée (écriture Firestore directe) si la journalisation échoue.
-Future<void> _logAdminAuditEvent(String action, String targetId, [Map<String, dynamic>? metadata]) async {
+Future<void> _logAdminAuditEvent(String action, String targetId,
+    [Map<String, dynamic>? metadata]) async {
   try {
     await FirebaseFunctions.instanceFor(region: 'europe-west1')
         .httpsCallable('logAdminAuditEvent')
-        .call({'action': action, 'targetId': targetId, if (metadata != null) 'metadata': metadata});
+        .call({
+      'action': action,
+      'targetId': targetId,
+      if (metadata != null) 'metadata': metadata
+    });
   } catch (_) {
     // Non-bloquant.
   }
@@ -17,34 +22,35 @@ Future<void> _logAdminAuditEvent(String action, String targetId, [Map<String, dy
 
 // Toutes les sections disponibles avec leur libellé et icône
 const _kSections = [
-  ('livreurs',             'Livreurs',             Icons.delivery_dining_rounded),
-  ('commandes',            'Commandes',            Icons.receipt_long_rounded),
-  ('gains',                'Gains',                Icons.bar_chart_rounded),
-  ('classement',           'Classement',           Icons.emoji_events_rounded),
-  ('carte',                'Carte live',           Icons.map_rounded),
-  ('demandes',             'Demandes livreurs',    Icons.person_add_rounded),
-  ('restaurants',          'Restaurants',          Icons.restaurant_rounded),
-  ('demandes_resto',       'Dem. Restos',          Icons.store_mall_directory_rounded),
-  ('demandes_vendeurs',    'Dem. Vendeurs',        Icons.storefront_rounded),
-  ('demandes_boulangeries','Dem. Boulangeries',    Icons.bakery_dining_rounded),
-  ('demandes_pharmacies',  'Dem. Pharmacies',      Icons.local_pharmacy_rounded),
-  ('pharmacies',           'Pharmacies',           Icons.local_pharmacy_rounded),
-  ('boutique',             'Boutique',             Icons.storefront_rounded),
-  ('recharges',            'Recharges',            Icons.account_balance_wallet_rounded),
-  ('flottes',              'Flottes',              Icons.motorcycle_rounded),
-  ('locations',            'Locations',            Icons.home_rounded),
-  ('residences',           'Résidences',           Icons.apartment_rounded),
-  ('services',             'Services',             Icons.construction_rounded),
-  ('tricycle',             'Tricycle & Taxi',      Icons.local_taxi_rounded),
-  ('sos',                  'Alertes SOS',          Icons.sos_rounded),
-  ('anti_fraude',          'Anti-fraude',          Icons.gpp_bad_rounded),
-  ('cash_marchand',        'Cash à régler',        Icons.payments_rounded),
-  ('support',              'Support & Signalements', Icons.support_agent_rounded),
-  ('ai_dashboard',         'Tableau de bord IA',    Icons.smart_toy_rounded),
-  ('boulangeries',         'Boulangeries',         Icons.bakery_dining_rounded),
-  ('zones',                'Zones Géo',            Icons.add_location_alt_rounded),
-  ('ekbine',               'Agents E-Kbine',       Icons.sim_card_rounded),
-  ('purger',               'Purger',               Icons.delete_sweep_rounded),
+  ('livreurs', 'Livreurs', Icons.delivery_dining_rounded),
+  ('commandes', 'Commandes', Icons.receipt_long_rounded),
+  ('gains', 'Gains', Icons.bar_chart_rounded),
+  ('classement', 'Classement', Icons.emoji_events_rounded),
+  ('carte', 'Carte live', Icons.map_rounded),
+  ('demandes', 'Demandes livreurs', Icons.person_add_rounded),
+  ('restaurants', 'Restaurants', Icons.restaurant_rounded),
+  ('demandes_resto', 'Dem. Restos', Icons.store_mall_directory_rounded),
+  ('demandes_vendeurs', 'Dem. Vendeurs', Icons.storefront_rounded),
+  ('demandes_boulangeries', 'Dem. Boulangeries', Icons.bakery_dining_rounded),
+  ('demandes_pharmacies', 'Dem. Pharmacies', Icons.local_pharmacy_rounded),
+  ('pharmacies', 'Pharmacies', Icons.local_pharmacy_rounded),
+  ('boutique', 'Boutique', Icons.storefront_rounded),
+  ('recharges', 'Recharges', Icons.account_balance_wallet_rounded),
+  ('flottes', 'Flottes', Icons.motorcycle_rounded),
+  ('locations', 'Locations', Icons.home_rounded),
+  ('residences', 'Résidences', Icons.apartment_rounded),
+  ('services', 'Services', Icons.construction_rounded),
+  ('eventiel', 'Événementiel', Icons.celebration_rounded),
+  ('tricycle', 'Tricycle & Taxi', Icons.local_taxi_rounded),
+  ('sos', 'Alertes SOS', Icons.sos_rounded),
+  ('anti_fraude', 'Anti-fraude', Icons.gpp_bad_rounded),
+  ('cash_marchand', 'Cash à régler', Icons.payments_rounded),
+  ('support', 'Support & Signalements', Icons.support_agent_rounded),
+  ('ai_dashboard', 'Tableau de bord IA', Icons.smart_toy_rounded),
+  ('boulangeries', 'Boulangeries', Icons.bakery_dining_rounded),
+  ('zones', 'Zones Géo', Icons.add_location_alt_rounded),
+  ('ekbine', 'Agents E-Kbine', Icons.sim_card_rounded),
+  ('purger', 'Purger', Icons.delete_sweep_rounded),
 ];
 
 class AdminSubAdminsPage extends StatelessWidget {
@@ -75,8 +81,8 @@ class AdminSubAdminsPage extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.manage_accounts, size: 64,
-                      color: Colors.grey.shade300),
+                  Icon(Icons.manage_accounts,
+                      size: 64, color: Colors.grey.shade300),
                   const SizedBox(height: 12),
                   const Text('Aucun sous-admin pour le moment',
                       style: TextStyle(color: Colors.grey)),
@@ -87,8 +93,7 @@ class AdminSubAdminsPage extends StatelessWidget {
           return ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: docs.length,
-            itemBuilder: (context, i) =>
-                _SubAdminCard(doc: docs[i]),
+            itemBuilder: (context, i) => _SubAdminCard(doc: docs[i]),
           );
         },
       ),
@@ -151,9 +156,8 @@ class _SubAdminCard extends StatelessWidget {
             child: Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: isActive
-                      ? const Color(0xFF880E4F)
-                      : Colors.grey,
+                  backgroundColor:
+                      isActive ? const Color(0xFF880E4F) : Colors.grey,
                   child: Text(
                     _initial(data['name'] as String? ?? '?'),
                     style: const TextStyle(
@@ -228,8 +232,7 @@ class _SubAdminCard extends StatelessWidget {
                       child: Row(children: [
                         Icon(Icons.delete, size: 18, color: Colors.red),
                         SizedBox(width: 8),
-                        Text('Supprimer',
-                            style: TextStyle(color: Colors.red)),
+                        Text('Supprimer', style: TextStyle(color: Colors.red)),
                       ]),
                     ),
                   ],
@@ -257,7 +260,7 @@ class _SubAdminCard extends StatelessWidget {
                   runSpacing: 6,
                   children: perms.map((p) {
                     final matching = _kSections.where((s) => s.$1 == p);
-                  final sec = matching.isEmpty ? null : matching.first;
+                    final sec = matching.isEmpty ? null : matching.first;
                     return Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
@@ -369,9 +372,9 @@ class _CreateSubAdminDialog extends StatefulWidget {
 }
 
 class _CreateSubAdminDialogState extends State<_CreateSubAdminDialog> {
-  final _nameCtrl  = TextEditingController();
+  final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
+  final _passCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final Set<String> _selected = {};
   bool _loading = false;
@@ -387,9 +390,9 @@ class _CreateSubAdminDialogState extends State<_CreateSubAdminDialog> {
   }
 
   Future<void> _create() async {
-    final name  = _nameCtrl.text.trim();
+    final name = _nameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
-    final pass  = _passCtrl.text;
+    final pass = _passCtrl.text;
     if (name.isEmpty || email.isEmpty || pass.isEmpty) {
       _snack('Nom, email et mot de passe requis', Colors.red);
       return;
@@ -403,10 +406,10 @@ class _CreateSubAdminDialogState extends State<_CreateSubAdminDialog> {
       final fn = FirebaseFunctions.instanceFor(region: 'europe-west1')
           .httpsCallable('createSubAdmin');
       await fn.call({
-        'name':        name,
-        'email':       email,
-        'password':    pass,
-        'phone':       _phoneCtrl.text.trim(),
+        'name': name,
+        'email': email,
+        'password': pass,
+        'phone': _phoneCtrl.text.trim(),
         'permissions': _selected.toList(),
       });
       if (mounted) {
@@ -424,12 +427,13 @@ class _CreateSubAdminDialogState extends State<_CreateSubAdminDialog> {
 
   void _snack(String msg, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: color));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
   }
 
-  void _selectAll()   => setState(() => _selected.addAll(_kSections.map((s) => s.$1)));
-  void _clearAll()    => setState(() => _selected.clear());
+  void _selectAll() =>
+      setState(() => _selected.addAll(_kSections.map((s) => s.$1)));
+  void _clearAll() => setState(() => _selected.clear());
 
   @override
   Widget build(BuildContext context) {
@@ -452,8 +456,8 @@ class _CreateSubAdminDialogState extends State<_CreateSubAdminDialog> {
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text('Nouveau sous-admin',
-                      style: TextStyle(
-                          fontSize: 17, fontWeight: FontWeight.bold)),
+                      style:
+                          TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
@@ -476,14 +480,14 @@ class _CreateSubAdminDialogState extends State<_CreateSubAdminDialog> {
                 labelText: 'Mot de passe',
                 prefixIcon: const Icon(Icons.lock),
                 suffixIcon: IconButton(
-                  icon: Icon(
-                      _showPass ? Icons.visibility_off : Icons.visibility),
+                  icon:
+                      Icon(_showPass ? Icons.visibility_off : Icons.visibility),
                   onPressed: () => setState(() => _showPass = !_showPass),
                 ),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 14),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               ),
             ),
             const SizedBox(height: 10),
@@ -495,17 +499,15 @@ class _CreateSubAdminDialogState extends State<_CreateSubAdminDialog> {
             Row(
               children: [
                 const Text('Sections autorisées',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 14)),
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 const Spacer(),
                 TextButton(
                     onPressed: _selectAll,
-                    child: const Text('Tout',
-                        style: TextStyle(fontSize: 12))),
+                    child: const Text('Tout', style: TextStyle(fontSize: 12))),
                 TextButton(
                     onPressed: _clearAll,
-                    child: const Text('Aucun',
-                        style: TextStyle(fontSize: 12))),
+                    child: const Text('Aucun', style: TextStyle(fontSize: 12))),
               ],
             ),
             const SizedBox(height: 8),
@@ -561,8 +563,7 @@ class _CreateSubAdminDialogState extends State<_CreateSubAdminDialog> {
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon),
-        border:
-            OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       ),
@@ -583,8 +584,7 @@ class _EditPermissionsDialog extends StatefulWidget {
   });
 
   @override
-  State<_EditPermissionsDialog> createState() =>
-      _EditPermissionsDialogState();
+  State<_EditPermissionsDialog> createState() => _EditPermissionsDialogState();
 }
 
 class _EditPermissionsDialogState extends State<_EditPermissionsDialog> {
@@ -604,7 +604,8 @@ class _EditPermissionsDialogState extends State<_EditPermissionsDialog> {
           .collection('admins')
           .doc(widget.docId)
           .update({'permissions': _selected.toList()});
-      _logAdminAuditEvent('permissions_changed', widget.docId, {'permissions': _selected.toList()});
+      _logAdminAuditEvent('permissions_changed', widget.docId,
+          {'permissions': _selected.toList()});
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -654,22 +655,19 @@ class _EditPermissionsDialogState extends State<_EditPermissionsDialog> {
             ),
             const SizedBox(height: 4),
             Text('${_selected.length} section(s) sélectionnée(s)',
-                style:
-                    const TextStyle(color: Colors.grey, fontSize: 12)),
+                style: const TextStyle(color: Colors.grey, fontSize: 12)),
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: () => setState(() =>
-                      _selected.addAll(_kSections.map((s) => s.$1))),
+                  onPressed: () => setState(
+                      () => _selected.addAll(_kSections.map((s) => s.$1))),
                   child: const Text('Tout', style: TextStyle(fontSize: 12)),
                 ),
                 TextButton(
-                  onPressed: () =>
-                      setState(() => _selected.clear()),
-                  child:
-                      const Text('Aucun', style: TextStyle(fontSize: 12)),
+                  onPressed: () => setState(() => _selected.clear()),
+                  child: const Text('Aucun', style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),
@@ -731,25 +729,19 @@ class _PermissionsGrid extends StatelessWidget {
           onTap: () => onToggle(key),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: on
-                  ? const Color(0xFF880E4F)
-                  : Colors.grey.shade100,
+              color: on ? const Color(0xFF880E4F) : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: on
-                    ? const Color(0xFF880E4F)
-                    : Colors.grey.shade300,
+                color: on ? const Color(0xFF880E4F) : Colors.grey.shade300,
               ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(icon,
-                    size: 14,
-                    color: on ? Colors.white : Colors.grey.shade600),
+                    size: 14, color: on ? Colors.white : Colors.grey.shade600),
                 const SizedBox(width: 5),
                 Text(
                   label,

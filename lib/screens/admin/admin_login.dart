@@ -1,14 +1,41 @@
-﻿import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../services/notification_service.dart';
-import '../../services/auth_service.dart';
-import 'admin_dashboard.dart';
 import '../auth/generic_forgot_password_page.dart';
 import 'admin_otp_page.dart';
+import 'admin_dashboard.dart';
 import '../../theme/app_theme.dart';
+import '../../services/email_verification_resend_guard.dart';
+import '../../widgets/admin_email_verification_prompt.dart';
+
+const bool _adminSkipTwoFactorBuildFlag =
+    bool.fromEnvironment('ADMIN_SKIP_2FA', defaultValue: false);
+
+@visibleForTesting
+bool adminDevelopmentBypassAllowed({
+  required bool isDebug,
+  required bool buildFlagEnabled,
+  required bool credentialsAccepted,
+  required bool adminDocumentExists,
+  required bool roleActive,
+  required bool emailVerified,
+  required bool phoneConfigured,
+}) =>
+    isDebug &&
+    buildFlagEnabled &&
+    credentialsAccepted &&
+    adminDocumentExists &&
+    roleActive &&
+    emailVerified &&
+    phoneConfigured;
+
+@visibleForTesting
+bool adminDevelopmentRoleAllowed(Map<String, dynamic> adminData) {
+  final role = adminData['role'] as String?;
+  return role == 'super' || (role == 'sub' && adminData['isActive'] == true);
+}
 
 class AdminLogin extends StatefulWidget {
   const AdminLogin({super.key});
@@ -17,31 +44,15 @@ class AdminLogin extends StatefulWidget {
   State<AdminLogin> createState() => _AdminLoginState();
 }
 
-// ⚠️⚠️⚠️ MASTER PROMPT 134 — DÉSACTIVATION TEMPORAIRE, MODE DÉVELOPPEMENT UNIQUEMENT ⚠️⚠️⚠️
-// Contourne la 2FA SMS admin (Firebase Phone Auth) pour débloquer les tests
-// pendant que le blocage Play Integrity/reCAPTCHA (Master Prompt 133 — cause :
-// cette build n'est pas distribuée via Google Play, donc jamais "reconnue")
-// empêche l'envoi réel de SMS. Ne désactive QUE l'étape OTP : la vérification
-// de rôle admin (document `admins/{uid}` + `isActive` pour les sous-admins)
-// reste entièrement appliquée avant, inchangée.
-// Garde-fou double :
-//   1. `kDebugMode` est une constante de compilation Dart — `false` dans tout
-//      build release/profile (`flutter build apk/appbundle --release`), donc
-//      cette branche est éliminée à la compilation et NE PEUT PAS partir en
-//      production par oubli.
-//   2. `_kBypassAdminOtpInDebug` reste un second interrupteur explicite —
-//      repasser à `false` ici réactive l'OTP même en debug, sans toucher au
-//      reste du fichier.
-// AVANT PUBLICATION : repasser `_kBypassAdminOtpInDebug` à `false` (ou
-// simplement supprimer ce bloc) — voir Master Prompt 134 dans CLAUDE.md.
-const bool _kBypassAdminOtpInDebug = true;
-bool get _otpBypassActive => kDebugMode && _kBypassAdminOtpInDebug;
-
 class _AdminLoginState extends State<AdminLogin> {
   final _idCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _showPass = false;
   bool _loading = false;
+  bool _emailVerificationRequired = false;
+  bool _resendingVerificationEmail = false;
+  String? _verificationEmail;
+  final _verificationGuard = EmailVerificationResendGuard();
 
   // Master Prompt 128 — voir driver_login.dart pour le contexte complet.
   // Choix de sécurité délibéré, différent des 8 autres rôles corrigés
@@ -63,49 +74,14 @@ class _AdminLoginState extends State<AdminLogin> {
   }
 
   Future<void> _tryAutoResume(User user) async {
+    // Une ouverture de l'écran Admin représente une nouvelle session sensible :
+    // ne jamais réutiliser silencieusement une session persistée pour éviter le
+    // second facteur.
+    await FirebaseAuth.instance.signOut();
     try {
-      final adminDoc = await FirebaseFirestore.instance
-          .collection('admins')
-          .doc(user.uid)
-          .get();
-      if (!mounted) return;
-      if (!adminDoc.exists) {
-        setState(() => _autoResuming = false);
-        return;
-      }
-      final adminData = <String, dynamic>{'uid': user.uid, ...adminDoc.data()!};
-      adminData['role'] ??= 'super';
-      if (adminData['role'] == 'sub' && adminData['isActive'] == false) {
-        setState(() => _autoResuming = false);
-        return;
-      }
-
-      NotificationService().saveToken(user.uid, 'admins');
-      final adminPhone = adminData['phone'] as String?;
-      final hasPhone = adminPhone != null && adminPhone.isNotEmpty;
-      if (hasPhone && !_otpBypassActive) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => AdminOtpPage(
-            adminUid:   user.uid,
-            adminPhone: adminPhone,
-            adminData:  adminData,
-          )),
-        );
-      } else {
-        if (hasPhone && _otpBypassActive) {
-          debugPrint('⚠️ [DEV MODE] OTP admin SMS contourné (Master Prompt 134, '
-              '_kBypassAdminOtpInDebug=true) — À NE JAMAIS EXPÉDIER EN PRODUCTION.');
-        }
-        AuthService().logAuthEvent('login', 'admin');
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => AdminDashboard(adminData: adminData)),
-        );
-      }
-    } catch (_) {
-      if (mounted) setState(() => _autoResuming = false);
-    }
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (_) {}
+    if (mounted) setState(() => _autoResuming = false);
   }
 
   Future<void> _login() async {
@@ -120,6 +96,7 @@ class _AdminLoginState extends State<AdminLogin> {
     }
 
     setState(() => _loading = true);
+    setState(() => _emailVerificationRequired = false);
 
     try {
       final cred = await FirebaseAuth.instance
@@ -133,7 +110,9 @@ class _AdminLoginState extends State<AdminLogin> {
 
       if (!adminDoc.exists) {
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
         if (!mounted) return;
         setState(() => _loading = false);
         _error("Accès refusé. Vous n'êtes pas administrateur.");
@@ -153,52 +132,86 @@ class _AdminLoginState extends State<AdminLogin> {
       // Compte sous-admin désactivé
       if (adminData['role'] == 'sub' && adminData['isActive'] == false) {
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
         if (!mounted) return;
         setState(() => _loading = false);
-        _error("Votre compte a été désactivé. Contactez l'administrateur principal.");
+        _error(
+            "Votre compte a été désactivé. Contactez l'administrateur principal.");
         return;
       }
 
-      NotificationService().saveToken(cred.user!.uid, 'admins');
+      if (!cred.user!.emailVerified) {
+        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+        if (!mounted) return;
+        setState(() {
+          _emailVerificationRequired = true;
+          _verificationEmail = id;
+        });
+        _error('Vérifiez votre adresse email avant d’utiliser la 2FA Admin.');
+        return;
+      }
 
-      // ── 2FA : vérification OTP par SMS si l'admin a un téléphone ──────────
       final adminPhone = adminData['phone'] as String?;
       final hasPhone = adminPhone != null && adminPhone.isNotEmpty;
-      if (hasPhone && !_otpBypassActive) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => AdminOtpPage(
-            adminUid:   cred.user!.uid,
-            adminPhone: adminPhone,
-            adminData:  adminData,
-          )),
-        );
-      } else {
-        if (!hasPhone) {
-          // Aucun téléphone enregistré → accès direct + avertissement
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                '⚠️ Ajoutez un numéro de téléphone à votre profil admin pour activer la 2FA.'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 5),
-          ));
-        } else {
-          // Téléphone présent mais OTP volontairement contourné (dev only)
-          debugPrint('⚠️ [DEV MODE] OTP admin SMS contourné (Master Prompt 134, '
-              '_kBypassAdminOtpInDebug=true) — À NE JAMAIS EXPÉDIER EN PRODUCTION.');
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('🛠️ Mode développement : 2FA SMS contournée.'),
-            backgroundColor: Colors.blueGrey,
-            duration: Duration(seconds: 4),
-          ));
-        }
-        AuthService().logAuthEvent('login', 'admin');
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => AdminDashboard(adminData: adminData)),
-        );
+      if (!hasPhone) {
+        await FirebaseAuth.instance.signOut();
+        if (!mounted) return;
+        _error('2FA obligatoire : aucun téléphone Admin n’est configuré.');
+        return;
       }
+      final skipTwoFactor = adminDevelopmentBypassAllowed(
+        isDebug: kDebugMode,
+        buildFlagEnabled: _adminSkipTwoFactorBuildFlag,
+        credentialsAccepted: cred.user != null,
+        adminDocumentExists: adminDoc.exists,
+        roleActive: adminDevelopmentRoleAllowed(adminData),
+        emailVerified: cred.user!.emailVerified,
+        phoneConfigured: hasPhone,
+      );
+      if (skipTwoFactor) {
+        _passCtrl.clear();
+        debugPrint(
+            '[ADMIN_MFA] ATTENTION: 2FA SMS contournée en mode debug explicite');
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AdminDashboard(
+              adminData: adminData,
+              twoFactorBypassed: true,
+            ),
+          ),
+        );
+        return;
+      }
+      debugPrint(
+          '[ADMIN_MFA] enrôlement requis uid=${_maskedUid(cred.user!.uid)}');
+      final enrollmentSecret = AdminEnrollmentSecret(pass);
+      _passCtrl.clear();
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AdminOtpPage.enrollment(
+            adminUid: cred.user!.uid,
+            adminPhone: adminPhone,
+            enrollmentSecret: enrollmentSecret,
+          ),
+        ),
+      );
+    } on FirebaseAuthMultiFactorException catch (e) {
+      debugPrint('[ADMIN_MFA] second facteur requis code=${e.code}');
+      if (!mounted) return;
+      setState(() => _loading = false);
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AdminOtpPage.signIn(resolver: e.resolver),
+        ),
+      );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -216,6 +229,47 @@ class _AdminLoginState extends State<AdminLogin> {
       if (!mounted) return;
       setState(() => _loading = false);
       _error("Erreur : ${e.toString()}");
+    }
+  }
+
+  String _maskedUid(String uid) => uid.length <= 6
+      ? '***'
+      : '${uid.substring(0, 3)}…${uid.substring(uid.length - 3)}';
+
+  Future<void> _resendVerificationEmail() async {
+    if (!_verificationGuard.canSend()) {
+      final seconds =
+          (_verificationGuard.remaining().inMilliseconds / 1000).ceil();
+      _error('Attendez encore ${seconds}s avant un nouvel envoi.');
+      return;
+    }
+    final email = _verificationEmail ?? _idCtrl.text.trim();
+    final password = _passCtrl.text;
+    if (email.isEmpty || password.isEmpty) {
+      _error('Renseignez à nouveau votre email et votre mot de passe.');
+      return;
+    }
+    setState(() => _resendingVerificationEmail = true);
+    try {
+      final credential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
+      final user = credential.user;
+      if (user == null || user.emailVerified) {
+        throw FirebaseAuthException(code: 'email-already-verified');
+      }
+      await user.sendEmailVerification();
+      _verificationGuard.markSent();
+      _error('Email de vérification envoyé.');
+    } on FirebaseAuthException catch (e) {
+      _error(e.code == 'too-many-requests'
+          ? 'Trop de demandes. Réessayez plus tard.'
+          : 'Impossible d’envoyer l’email de vérification.');
+    } finally {
+      try {
+        await FirebaseAuth.instance.signOut();
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (_) {}
+      if (mounted) setState(() => _resendingVerificationEmail = false);
     }
   }
 
@@ -237,7 +291,8 @@ class _AdminLoginState extends State<AdminLogin> {
     if (_autoResuming) {
       return const Scaffold(
         backgroundColor: Color(0xFFF5F5F5),
-        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        body:
+            Center(child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
     return Scaffold(
@@ -281,23 +336,19 @@ class _AdminLoginState extends State<AdminLogin> {
                 ],
               ),
             ),
-
             const SizedBox(height: 36),
-
             TextField(
               controller: _idCtrl,
               decoration: InputDecoration(
                 labelText: "Identifiant",
                 prefixIcon: const Icon(Icons.person),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
                 fillColor: Colors.white,
               ),
             ),
-
             const SizedBox(height: 16),
-
             TextField(
               controller: _passCtrl,
               obscureText: !_showPass,
@@ -306,17 +357,16 @@ class _AdminLoginState extends State<AdminLogin> {
                 labelText: "Mot de passe",
                 prefixIcon: const Icon(Icons.lock),
                 suffixIcon: IconButton(
-                  icon: Icon(
-                      _showPass ? Icons.visibility_off : Icons.visibility),
+                  icon:
+                      Icon(_showPass ? Icons.visibility_off : Icons.visibility),
                   onPressed: () => setState(() => _showPass = !_showPass),
                 ),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
                 fillColor: Colors.white,
               ),
             ),
-
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
@@ -325,9 +375,9 @@ class _AdminLoginState extends State<AdminLogin> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => const GenericForgotPasswordPage(
-                      userType:    'admin',
+                      userType: 'admin',
                       accentColor: AppColors.primary,
-                      title:       'Mot de passe oublié',
+                      title: 'Mot de passe oublié',
                     ),
                   ),
                 ),
@@ -337,8 +387,13 @@ class _AdminLoginState extends State<AdminLogin> {
                 ),
               ),
             ),
+            AdminEmailVerificationPrompt(
+              visible: _emailVerificationRequired,
+              sending: _resendingVerificationEmail,
+              remaining: _verificationGuard.remaining(),
+              onResend: _resendVerificationEmail,
+            ),
             const SizedBox(height: 12),
-
             SizedBox(
               width: double.infinity,
               height: 55,

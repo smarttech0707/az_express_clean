@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -36,7 +36,7 @@ class _EkOrderFormState extends State<EkOrderForm> {
 
   final _numberCtrl = TextEditingController();
   final _amountCtrl = TextEditingController();
-  bool _submitting  = false;
+  bool _submitting = false;
 
   @override
   void initState() {
@@ -61,7 +61,10 @@ class _EkOrderFormState extends State<EkOrderForm> {
   }
 
   void _goBack() {
-    if (_step == 0) { Navigator.pop(context); return; }
+    if (_step == 0) {
+      Navigator.pop(context);
+      return;
+    }
     _pageCtrl.previousPage(
         duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
     setState(() => _step--);
@@ -73,7 +76,8 @@ class _EkOrderFormState extends State<EkOrderForm> {
         ekServices[_operator] as List? ?? []);
   }
 
-  int get _fee => _service == null ? 0 : ekCalculateFee(_service!['id'] as String, _amount);
+  int get _fee =>
+      _service == null ? 0 : ekCalculateFee(_service!['id'] as String, _amount);
   int get _total => _amount + _fee;
 
   @override
@@ -108,13 +112,22 @@ class _EkOrderFormState extends State<EkOrderForm> {
         children: [
           _StepOperator(
             selected: _operator,
-            onSelect: (op) { setState(() { _operator = op; _service = null; }); _goNext(); },
+            onSelect: (op) {
+              setState(() {
+                _operator = op;
+                _service = null;
+              });
+              _goNext();
+            },
           ),
           _StepService(
             operator: _operator,
             services: _currentServices,
             selected: _service,
-            onSelect: (svc) { setState(() => _service = svc); _goNext(); },
+            onSelect: (svc) {
+              setState(() => _service = svc);
+              _goNext();
+            },
           ),
           _StepBeneficiary(
             operator: _operator,
@@ -133,10 +146,12 @@ class _EkOrderFormState extends State<EkOrderForm> {
             },
             onNext: () {
               if (_numberCtrl.text.length < 8) {
-                _showErr('Numéro invalide (minimum 8 chiffres)'); return;
+                _showErr('Numéro invalide (minimum 8 chiffres)');
+                return;
               }
               if (_amount < ((_service?['minAmount'] as int?) ?? 100)) {
-                _showErr('Montant minimum : ${_service?['minAmount']} F'); return;
+                _showErr('Montant minimum : ${_service?['minAmount']} F');
+                return;
               }
               _beneficiary = _numberCtrl.text;
               _amount = int.tryParse(_amountCtrl.text) ?? 0;
@@ -147,7 +162,10 @@ class _EkOrderFormState extends State<EkOrderForm> {
             selected: _paymentMethod,
             totalPaid: _total,
             fee: _fee,
-            onSelect: (m) { setState(() => _paymentMethod = m); _goNext(); },
+            onSelect: (m) {
+              setState(() => _paymentMethod = m);
+              _goNext();
+            },
           ),
           _StepConfirm(
             operator: _operator,
@@ -167,12 +185,18 @@ class _EkOrderFormState extends State<EkOrderForm> {
 
   String _stepTitle() {
     switch (_step) {
-      case 0: return 'Choisir l\'opérateur';
-      case 1: return 'Choisir le service';
-      case 2: return 'Détails de la commande';
-      case 3: return 'Mode de paiement';
-      case 4: return 'Confirmation';
-      default: return 'Nouvelle commande';
+      case 0:
+        return 'Choisir l\'opérateur';
+      case 1:
+        return 'Choisir le service';
+      case 2:
+        return 'Détails de la commande';
+      case 3:
+        return 'Mode de paiement';
+      case 4:
+        return 'Confirmation';
+      default:
+        return 'Nouvelle commande';
     }
   }
 
@@ -186,35 +210,41 @@ class _EkOrderFormState extends State<EkOrderForm> {
     setState(() => _submitting = true);
 
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) { setState(() => _submitting = false); return; }
+    if (user == null) {
+      setState(() => _submitting = false);
+      return;
+    }
 
     // Fetch client info
     String clientName = 'Client', clientPhone = '';
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('clients').doc(user.uid).get();
-      clientName  = doc.data()?['name']  ?? 'Client';
+          .collection('clients')
+          .doc(user.uid)
+          .get();
+      clientName = doc.data()?['name'] ?? 'Client';
       clientPhone = doc.data()?['phone'] ?? '';
     } catch (_) {}
 
     if (!mounted) return;
     final result = await context.read<EkProvider>().placeOrder(
-      clientId:          user.uid,
-      clientName:        clientName,
-      clientPhone:       clientPhone,
-      operator:          _operator!,
-      serviceId:         _service!['id'] as String,
-      serviceLabel:      _service!['label'] as String,
-      beneficiaryNumber: _beneficiary,
-      amount:            _amount,
-      paymentMethod:     _paymentMethod,
-    );
+          clientId: user.uid,
+          clientName: clientName,
+          clientPhone: clientPhone,
+          operator: _operator!,
+          serviceId: _service!['id'] as String,
+          serviceLabel: _service!['label'] as String,
+          beneficiaryNumber: _beneficiary,
+          amount: _amount,
+          paymentMethod: _paymentMethod,
+        );
 
     if (!mounted) return;
     setState(() => _submitting = false);
 
     // Firestore auto-IDs are exactly 20 alphanumeric chars — anything else is an error message
-    final isOrderId = result != null && RegExp(r'^[A-Za-z0-9]{20}$').hasMatch(result);
+    final isOrderId =
+        result != null && RegExp(r'^[A-Za-z0-9]{20}$').hasMatch(result);
     if (!isOrderId) {
       _showErr(result ?? 'Erreur inconnue');
       return;
@@ -252,8 +282,8 @@ class _StepOperator extends StatelessWidget {
         const SizedBox(height: 28),
         ...ekOperators.map((op) {
           final color = Color(op['color'] as int);
-          final bg    = Color(op['bg'] as int);
-          final sel   = selected == op['id'];
+          final bg = Color(op['bg'] as int);
+          final sel = selected == op['id'];
           return GestureDetector(
             onTap: () => onSelect(op['id'] as String),
             child: AnimatedContainer(
@@ -268,8 +298,12 @@ class _StepOperator extends StatelessWidget {
                   width: sel ? 2 : 1,
                 ),
                 boxShadow: sel
-                    ? [BoxShadow(color: color.withValues(alpha: 0.2),
-                          blurRadius: 10, offset: const Offset(0, 4))]
+                    ? [
+                        BoxShadow(
+                            color: color.withValues(alpha: 0.2),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4))
+                      ]
                     : [],
               ),
               child: Row(children: [
@@ -277,7 +311,9 @@ class _StepOperator extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                   child: Image.asset(
                     op['logo'] as String,
-                    width: 48, height: 48, fit: BoxFit.contain,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => Text(
                       op['emoji'] as String,
                       style: const TextStyle(fontSize: 34),
@@ -286,17 +322,19 @@ class _StepOperator extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text(op['label'] as String,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: color)),
-                    Text('${(ekServices[op['id']] as List?)?.length ?? 0} services disponibles',
-                        style: GoogleFonts.urbanist(
-                            fontSize: 12, color: kEkMuted)),
-                  ]),
+                        Text(op['label'] as String,
+                            style: GoogleFonts.urbanist(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: color)),
+                        Text(
+                            '${(ekServices[op['id']] as List?)?.length ?? 0} services disponibles',
+                            style: GoogleFonts.urbanist(
+                                fontSize: 12, color: kEkMuted)),
+                      ]),
                 ),
                 if (sel)
                   Icon(Icons.check_circle_rounded, color: color, size: 26),
@@ -326,8 +364,8 @@ class _StepService extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (operator == null) return const SizedBox.shrink();
-    final opData = ekOperators.firstWhere(
-        (o) => o['id'] == operator, orElse: () => {});
+    final opData =
+        ekOperators.firstWhere((o) => o['id'] == operator, orElse: () => {});
     final opColor = Color((opData['color'] as int?) ?? 0xFF00C853);
 
     return ListView(
@@ -347,9 +385,7 @@ class _StepService extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
               decoration: BoxDecoration(
-                color: sel
-                    ? opColor.withValues(alpha: 0.08)
-                    : Colors.white,
+                color: sel ? opColor.withValues(alpha: 0.08) : Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: sel ? opColor : kEkDivider,
@@ -400,10 +436,14 @@ class _StepBeneficiary extends StatelessWidget {
 
   String get _phoneHint {
     switch (operator) {
-      case 'orange': return '07 XX XX XX XX';
-      case 'mtn':    return '05 XX XX XX XX';
-      case 'moov':   return '01 XX XX XX XX';
-      default:       return '07 XX XX XX XX';
+      case 'orange':
+        return '07 XX XX XX XX';
+      case 'mtn':
+        return '05 XX XX XX XX';
+      case 'moov':
+        return '01 XX XX XX XX';
+      default:
+        return '07 XX XX XX XX';
     }
   }
 
@@ -427,7 +467,8 @@ class _StepBeneficiary extends StatelessWidget {
           onChanged: (_) => onChanged(),
           keyboardType: TextInputType.phone,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          style: GoogleFonts.urbanist(fontSize: 18, fontWeight: FontWeight.w700),
+          style:
+              GoogleFonts.urbanist(fontSize: 18, fontWeight: FontWeight.w700),
           decoration: InputDecoration(
             hintText: _phoneHint,
             hintStyle: GoogleFonts.urbanist(color: kEkMuted),
@@ -456,7 +497,8 @@ class _StepBeneficiary extends StatelessWidget {
           onChanged: (_) => onChanged(),
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          style: GoogleFonts.urbanist(fontSize: 18, fontWeight: FontWeight.w700),
+          style:
+              GoogleFonts.urbanist(fontSize: 18, fontWeight: FontWeight.w700),
           decoration: InputDecoration(
             hintText: 'Ex: 1000',
             hintStyle: GoogleFonts.urbanist(color: kEkMuted),
@@ -477,12 +519,14 @@ class _StepBeneficiary extends StatelessWidget {
         const SizedBox(height: 14),
         // Presets
         Wrap(
-          spacing: 8, runSpacing: 8,
+          spacing: 8,
+          runSpacing: 8,
           children: ekAmountPresets.map((v) {
             return GestureDetector(
               onTap: () => onAmountPreset(v),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
@@ -538,21 +582,41 @@ class _StepPayment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final methods = [
-      {'id': 'wallet',       'label': 'Wallet AZ Express',
-       'sub': 'Paiement instantané depuis votre solde',
-       'icon': Icons.account_balance_wallet_rounded, 'color': 0xFF00C853},
-      {'id': 'orange_money', 'label': 'Orange Money',
-       'sub': 'Vous payez l\'agent directement en OM',
-       'icon': Icons.phone_android_rounded, 'color': 0xFFFF6600},
-      {'id': 'mtn_momo',    'label': 'MTN MoMo',
-       'sub': 'Vous payez l\'agent directement en MoMo',
-       'icon': Icons.phone_android_rounded, 'color': 0xFFFFBB00},
-      {'id': 'wave',         'label': 'Wave',
-       'sub': 'Vous payez l\'agent directement via Wave',
-       'icon': Icons.waves_rounded, 'color': 0xFF00B9F1},
-      {'id': 'cash',         'label': 'Espèces à l\'agent',
-       'sub': 'Vous remettez le montant en liquide à l\'agent',
-       'icon': Icons.money_rounded, 'color': 0xFF4CAF50},
+      {
+        'id': 'wallet',
+        'label': 'Wallet AZ Express',
+        'sub': 'Paiement instantané depuis votre solde',
+        'icon': Icons.account_balance_wallet_rounded,
+        'color': 0xFF00C853
+      },
+      {
+        'id': 'orange_money',
+        'label': 'Orange Money',
+        'sub': 'Vous payez l\'agent directement en OM',
+        'icon': Icons.phone_android_rounded,
+        'color': 0xFFFF6600
+      },
+      {
+        'id': 'mtn_momo',
+        'label': 'MTN MoMo',
+        'sub': 'Vous payez l\'agent directement en MoMo',
+        'icon': Icons.phone_android_rounded,
+        'color': 0xFFFFBB00
+      },
+      {
+        'id': 'wave',
+        'label': 'Wave',
+        'sub': 'Vous payez l\'agent directement via Wave',
+        'icon': Icons.waves_rounded,
+        'color': 0xFF00B9F1
+      },
+      {
+        'id': 'cash',
+        'label': 'Espèces à l\'agent',
+        'sub': 'Vous remettez le montant en liquide à l\'agent',
+        'icon': Icons.money_rounded,
+        'color': 0xFF4CAF50
+      },
     ];
 
     return ListView(
@@ -577,13 +641,14 @@ class _StepPayment extends StatelessWidget {
             Expanded(
               child: Text('Total à payer : ${_fmt(totalPaid)}',
                   style: GoogleFonts.urbanist(
-                      fontSize: 13, fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                       color: kEkGreen)),
             ),
           ]),
         ),
         ...methods.map((m) {
-          final sel   = selected == m['id'];
+          final sel = selected == m['id'];
           final color = Color(m['color'] as int);
           return GestureDetector(
             onTap: () => onSelect(m['id'] as String),
@@ -595,12 +660,12 @@ class _StepPayment extends StatelessWidget {
                 color: sel ? color.withValues(alpha: 0.06) : Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                    color: sel ? color : kEkDivider,
-                    width: sel ? 2 : 1),
+                    color: sel ? color : kEkDivider, width: sel ? 2 : 1),
               ),
               child: Row(children: [
                 Container(
-                  width: 42, height: 42,
+                  width: 42,
+                  height: 42,
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
@@ -609,17 +674,18 @@ class _StepPayment extends StatelessWidget {
                 ),
                 const SizedBox(width: 14),
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text(m['label'] as String,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: kEkText)),
-                    Text(m['sub'] as String,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 11, color: kEkMuted)),
-                  ]),
+                        Text(m['label'] as String,
+                            style: GoogleFonts.urbanist(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: kEkText)),
+                        Text(m['sub'] as String,
+                            style: GoogleFonts.urbanist(
+                                fontSize: 11, color: kEkMuted)),
+                      ]),
                 ),
                 if (sel)
                   Icon(Icons.check_circle_rounded, color: color, size: 22),
@@ -658,8 +724,8 @@ class _StepConfirm extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final opData = ekOperators.firstWhere(
-        (o) => o['id'] == operator, orElse: () => {});
+    final opData =
+        ekOperators.firstWhere((o) => o['id'] == operator, orElse: () => {});
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -694,8 +760,8 @@ class _StepConfirm extends StatelessWidget {
               child: Text(
                 'Un agent de votre communauté va exécuter cette opération. '
                 'Vous pourrez confirmer ou contester après réception de la preuve.',
-                style: GoogleFonts.urbanist(fontSize: 12, height: 1.5,
-                    color: const Color(0xFF5D4037)),
+                style: GoogleFonts.urbanist(
+                    fontSize: 12, height: 1.5, color: const Color(0xFF5D4037)),
               ),
             ),
           ]),
@@ -710,13 +776,16 @@ class _StepConfirm extends StatelessWidget {
               border: Border.all(color: const Color(0xFF90CAF9)),
             ),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Icon(Icons.info_rounded, color: Color(0xFF1565C0), size: 18),
+              const Icon(Icons.info_rounded,
+                  color: Color(0xFF1565C0), size: 18),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Paiement direct à l\'agent : vous devrez lui envoyer le montant total '
                   '(${_fmt(total)}) via ${_payLabelShort(paymentMethod)} avant ou après l\'opération.',
-                  style: GoogleFonts.urbanist(fontSize: 12, height: 1.5,
+                  style: GoogleFonts.urbanist(
+                      fontSize: 12,
+                      height: 1.5,
                       color: const Color(0xFF0D47A1)),
                 ),
               ),
@@ -738,7 +807,8 @@ class _StepConfirm extends StatelessWidget {
             ),
             child: submitting
                 ? const SizedBox(
-                    width: 24, height: 24,
+                    width: 24,
+                    height: 24,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5))
                 : Text('Confirmer & Commander',
@@ -781,41 +851,53 @@ class _SummaryCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: kEkDivider),
         boxShadow: const [
-          BoxShadow(color: Color(0x08000000), blurRadius: 8,
-              offset: Offset(0, 3))
+          BoxShadow(
+              color: Color(0x08000000), blurRadius: 8, offset: Offset(0, 3))
         ],
       ),
       child: Column(children: [
-        _Row('Opérateur',  '${operator['emoji'] ?? ''} ${operator['label'] ?? ''}'),
-        _Row('Service',    service?['label'] ?? ''),
+        _Row('Opérateur',
+            '${operator['emoji'] ?? ''} ${operator['label'] ?? ''}'),
+        _Row('Service', service?['label'] ?? ''),
         _Row('Bénéficiaire', beneficiary),
-        _Row('Montant',    _fmt(amount)),
+        _Row('Montant', _fmt(amount)),
         const Divider(height: 20),
-        _Row('Total',      _fmt(total), isTotal: true, opColor: opColor),
-        _Row('Paiement',   _payLabel(paymentMethod)),
+        _Row('Total', _fmt(total), isTotal: true, opColor: opColor),
+        _Row('Paiement', _payLabel(paymentMethod)),
       ]),
     );
   }
 
   String _payLabel(String m) {
     switch (m) {
-      case 'wallet':       return 'Wallet AZ Express';
-      case 'orange_money': return 'Orange Money';
-      case 'mtn_momo':    return 'MTN MoMo';
-      case 'wave':         return 'Wave';
-      case 'cash':         return 'Espèces à l\'agent';
-      default:             return m;
+      case 'wallet':
+        return 'Wallet AZ Express';
+      case 'orange_money':
+        return 'Orange Money';
+      case 'mtn_momo':
+        return 'MTN MoMo';
+      case 'wave':
+        return 'Wave';
+      case 'cash':
+        return 'Espèces à l\'agent';
+      default:
+        return m;
     }
   }
 }
 
 String _payLabelShort(String m) {
   switch (m) {
-    case 'orange_money': return 'Orange Money';
-    case 'mtn_momo':    return 'MTN MoMo';
-    case 'wave':         return 'Wave';
-    case 'cash':         return 'espèces';
-    default:             return m;
+    case 'orange_money':
+      return 'Orange Money';
+    case 'mtn_momo':
+      return 'MTN MoMo';
+    case 'wave':
+      return 'Wave';
+    case 'cash':
+      return 'espèces';
+    default:
+      return m;
   }
 }
 
@@ -825,22 +907,23 @@ class _Row extends StatelessWidget {
   final bool isTotal;
   final Color? opColor;
 
-  const _Row(this.label, this.value,
-      {this.isTotal = false, this.opColor});
+  const _Row(this.label, this.value, {this.isTotal = false, this.opColor});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: GoogleFonts.urbanist(
-            fontSize: isTotal ? 14 : 13,
-            color: isTotal ? kEkText : kEkMuted,
-            fontWeight: isTotal ? FontWeight.w700 : FontWeight.normal)),
-        Text(value, style: GoogleFonts.urbanist(
-            fontSize: isTotal ? 16 : 13,
-            color: isTotal ? (opColor ?? kEkGreen) : kEkText,
-            fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600)),
+        Text(label,
+            style: GoogleFonts.urbanist(
+                fontSize: isTotal ? 14 : 13,
+                color: isTotal ? kEkText : kEkMuted,
+                fontWeight: isTotal ? FontWeight.w700 : FontWeight.normal)),
+        Text(value,
+            style: GoogleFonts.urbanist(
+                fontSize: isTotal ? 16 : 13,
+                color: isTotal ? (opColor ?? kEkGreen) : kEkText,
+                fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600)),
       ]),
     );
   }
@@ -855,4 +938,3 @@ String _fmt(int price) {
   }
   return '${buf.toString()} F';
 }
-

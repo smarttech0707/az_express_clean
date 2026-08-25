@@ -9,37 +9,37 @@ String _generatePin() {
 }
 
 const _kSubcatLabels = {
-  'macon':                'Maçon',
-  'plombier':             'Plombier',
-  'electricien':          'Électricien',
-  'ferronnier':           'Ferronnier',
-  'menuisier':            'Menuisier',
-  'carreleur':            'Carreleur',
-  'peintre':              'Peintre',
-  'vitrier':              'Vitrier',
-  'reparateur_tv':        'Réparateur TV',
-  'installation_camera':  'Installation caméra',
-  'decoration':           'Décoration intérieure',
-  'reparateur_portable':  'Réparateur portable',
+  'macon': 'Maçon',
+  'plombier': 'Plombier',
+  'electricien': 'Électricien',
+  'ferronnier': 'Ferronnier',
+  'menuisier': 'Menuisier',
+  'carreleur': 'Carreleur',
+  'peintre': 'Peintre',
+  'vitrier': 'Vitrier',
+  'reparateur_tv': 'Réparateur TV',
+  'installation_camera': 'Installation caméra',
+  'decoration': 'Décoration intérieure',
+  'reparateur_portable': 'Réparateur portable',
   'salon_coiffure_homme': 'Salon coiffure homme',
-  'barber_shop':          'Barber Shop',
+  'barber_shop': 'Barber Shop',
   'salon_coiffure_femme': 'Salon coiffure femme',
-  'onglerie':             'Onglerie',
-  'mecanicien_voiture':   'Mécanicien voiture',
-  'mecanicien_moto':      'Mécanicien moto',
-  'electrique_auto':      'Électricien auto',
-  'carrosserie':          'Carrosserie',
-  'location':             'Location maison',
-  'vente_maison':         'Vente maison',
-  'local_commercial':     'Local commercial',
-  'terrain':              'Terrain',
-  'eau_pack':             'Eau en pack',
-  'ciment_briques':       'Ciment & Briques',
-  'telephone':            'Téléphones',
-  'accessoires':          'Accessoires téléphonie',
-  'cave_vins':            'Vins & Spiritueux',
-  'cave_bieres':          'Bières',
-  'cave_sans_alcool':     'Boissons sans alcool',
+  'onglerie': 'Onglerie',
+  'mecanicien_voiture': 'Mécanicien voiture',
+  'mecanicien_moto': 'Mécanicien moto',
+  'electrique_auto': 'Électricien auto',
+  'carrosserie': 'Carrosserie',
+  'location': 'Location maison',
+  'vente_maison': 'Vente maison',
+  'local_commercial': 'Local commercial',
+  'terrain': 'Terrain',
+  'eau_pack': 'Eau en pack',
+  'ciment_briques': 'Ciment & Briques',
+  'telephone': 'Téléphones',
+  'accessoires': 'Accessoires téléphonie',
+  'cave_vins': 'Vins & Spiritueux',
+  'cave_bieres': 'Bières',
+  'cave_sans_alcool': 'Boissons sans alcool',
 };
 
 class AdminServiceRequestsPage extends StatelessWidget {
@@ -87,8 +87,8 @@ class _RequestsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
-        .collection('service_providers');
+    Query<Map<String, dynamic>> query =
+        FirebaseFirestore.instance.collection('service_providers');
 
     if (statusFilter == 'pending') {
       query = query.where('status', isEqualTo: 'pending');
@@ -174,16 +174,16 @@ class _RequestCardState extends State<_RequestCard> {
           .collection('service_providers')
           .doc(widget.doc.id)
           .update({
-        'status':      'approved',
+        'status': 'approved',
         'isAvailable': true,
-        'artisanPin':  pin,
-        'approvedAt':  FieldValue.serverTimestamp(),
+        'artisanPin': pin,
+        'approvedAt': FieldValue.serverTimestamp(),
       });
       if (mounted) _showPin(pin);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Erreur : $e'), backgroundColor: Colors.red));
       }
     }
     if (mounted) setState(() => _loading = false);
@@ -217,13 +217,13 @@ class _RequestCardState extends State<_RequestCard> {
           .collection('service_providers')
           .doc(widget.doc.id)
           .update({
-        'status':     'rejected',
+        'status': 'rejected',
         'rejectedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Erreur : $e'), backgroundColor: Colors.red));
       }
     }
     if (mounted) setState(() => _loading = false);
@@ -239,7 +239,8 @@ class _RequestCardState extends State<_RequestCard> {
           const Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
           const SizedBox(width: 8),
           Text('Demande approuvée',
-              style: GoogleFonts.urbanist(fontWeight: FontWeight.bold, fontSize: 16)),
+              style: GoogleFonts.urbanist(
+                  fontWeight: FontWeight.bold, fontSize: 16)),
         ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -247,7 +248,8 @@ class _RequestCardState extends State<_RequestCard> {
             Text(
               'Voici le code PIN du prestataire. '
               'Communiquez-le lui pour qu\'il puisse se connecter.',
-              style: GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade600),
+              style: GoogleFonts.urbanist(
+                  fontSize: 13, color: Colors.grey.shade600),
             ),
             const SizedBox(height: 16),
             Container(
@@ -255,8 +257,8 @@ class _RequestCardState extends State<_RequestCard> {
               decoration: BoxDecoration(
                 color: const Color(0xFF1565C0).withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(16),
-                border:
-                    Border.all(color: const Color(0xFF1565C0).withValues(alpha: 0.3)),
+                border: Border.all(
+                    color: const Color(0xFF1565C0).withValues(alpha: 0.3)),
               ),
               child: Text(
                 pin,
@@ -289,14 +291,14 @@ class _RequestCardState extends State<_RequestCard> {
   @override
   Widget build(BuildContext context) {
     final d = widget.doc.data();
-    final status   = d['status'] as String? ?? 'pending';
-    final name     = d['name'] as String? ?? '—';
-    final phone    = d['phone'] as String? ?? '';
-    final address  = d['address'] as String? ?? '';
-    final subcat   = d['subcategory'] as String? ?? '';
-    final desc     = d['description'] as String? ?? '';
-    final photos   = List<String>.from(d['photos'] ?? []);
-    final pin      = d['artisanPin'] as String?;
+    final status = d['status'] as String? ?? 'pending';
+    final name = d['name'] as String? ?? '—';
+    final phone = d['phone'] as String? ?? '';
+    final address = d['address'] as String? ?? '';
+    final subcat = d['subcategory'] as String? ?? '';
+    final desc = d['description'] as String? ?? '';
+    final photos = List<String>.from(d['photos'] ?? []);
+    final pin = d['artisanPin'] as String?;
 
     final subcatLabel = _kSubcatLabels[subcat] ?? subcat;
 
@@ -308,17 +310,17 @@ class _RequestCardState extends State<_RequestCard> {
       case 'approved':
         statusColor = Colors.green;
         statusLabel = 'Approuvé';
-        statusIcon  = Icons.check_circle_rounded;
+        statusIcon = Icons.check_circle_rounded;
         break;
       case 'rejected':
         statusColor = Colors.red;
         statusLabel = 'Rejeté';
-        statusIcon  = Icons.cancel_rounded;
+        statusIcon = Icons.cancel_rounded;
         break;
       default:
         statusColor = Colors.orange;
         statusLabel = 'En attente';
-        statusIcon  = Icons.hourglass_top_rounded;
+        statusIcon = Icons.hourglass_top_rounded;
     }
 
     return Container(
@@ -482,8 +484,7 @@ class _RequestCardState extends State<_RequestCard> {
                             side: const BorderSide(color: Colors.red),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10)),
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 11),
+                            padding: const EdgeInsets.symmetric(vertical: 11),
                           ),
                         ),
                       ),
@@ -508,8 +509,7 @@ class _RequestCardState extends State<_RequestCard> {
                             backgroundColor: Colors.green,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10)),
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 11),
+                            padding: const EdgeInsets.symmetric(vertical: 11),
                           ),
                         ),
                       ),

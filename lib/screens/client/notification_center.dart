@@ -61,7 +61,8 @@ class _NotificationCenterContent extends StatelessWidget {
             end: Alignment.bottomRight,
           ),
           boxShadow: [
-            BoxShadow(color: Color(0x29FF6B00), blurRadius: 12, offset: Offset(0, 4)),
+            BoxShadow(
+                color: Color(0x29FF6B00), blurRadius: 12, offset: Offset(0, 4)),
           ],
         ),
         child: SafeArea(
@@ -85,11 +86,14 @@ class _NotificationCenterContent extends StatelessWidget {
               ),
               TextButton.icon(
                 onPressed: () => NotificationService.markAllRead(uid),
-                icon: const Icon(Icons.done_all_rounded, color: Colors.white70, size: 18),
+                icon: const Icon(Icons.done_all_rounded,
+                    color: Colors.white70, size: 18),
                 label: Text(
                   'Tout lire',
                   style: GoogleFonts.urbanist(
-                      color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500),
                 ),
               ),
             ]),
@@ -99,10 +103,11 @@ class _NotificationCenterContent extends StatelessWidget {
     );
   }
 
-  Widget _buildList(
-      BuildContext context, List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  Widget _buildList(BuildContext context,
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     // Regrouper par date
-    final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> groups = {};
+    final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+        groups = {};
     for (final doc in docs) {
       final key = _dateKey(doc.data()['createdAt']);
       groups.putIfAbsent(key, () => []).add(doc);
@@ -131,12 +136,12 @@ class _NotificationCenterContent extends StatelessWidget {
 
   String _dateKey(dynamic createdAt) {
     if (createdAt is! Timestamp) return 'Récent';
-    final d    = createdAt.toDate();
-    final now  = DateTime.now();
+    final d = createdAt.toDate();
+    final now = DateTime.now();
     final diff = now.difference(d).inDays;
     if (diff == 0) return 'Aujourd\'hui';
     if (diff == 1) return 'Hier';
-    if (diff < 7)  return DateFormat('EEEE', 'fr').format(d).capitalize();
+    if (diff < 7) return DateFormat('EEEE', 'fr').format(d).capitalize();
     return DateFormat('d MMMM', 'fr').format(d);
   }
 
@@ -166,7 +171,8 @@ class _NotificationCenterContent extends StatelessWidget {
         Text(
           'Vos mises à jour de commandes\napparaîtront ici.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.urbanist(fontSize: 13.5, color: AppColors.textMuted),
+          style:
+              GoogleFonts.urbanist(fontSize: 13.5, color: AppColors.textMuted),
         ),
       ]),
     );
@@ -206,12 +212,12 @@ class _NotifCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final data    = doc.data();
-    final isRead  = data['isRead'] as bool? ?? true;
-    final type    = data['type']   as String? ?? '';
-    final title   = data['title']  as String? ?? '';
-    final body    = data['body']   as String? ?? '';
-    final ts      = data['createdAt'];
+    final data = doc.data();
+    final isRead = data['isRead'] as bool? ?? true;
+    final type = data['type'] as String? ?? '';
+    final title = data['title'] as String? ?? '';
+    final body = data['body'] as String? ?? '';
+    final ts = data['createdAt'];
     final timeStr = ts is Timestamp ? _timeAgo(ts.toDate()) : '';
 
     return Dismissible(
@@ -252,12 +258,13 @@ class _NotifCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             onTap: () {
               final orderId = data['orderId'] as String?;
-              final status  = data['status']  as String?;
+              final status = data['status'] as String?;
               NotificationService.triggerTap(type, orderId, status);
             },
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child:
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 // Icône colorée
                 Container(
                   width: 44,
@@ -279,7 +286,8 @@ class _NotifCard extends StatelessWidget {
                           child: Text(
                             title,
                             style: GoogleFonts.urbanist(
-                              fontWeight: isRead ? FontWeight.w500 : FontWeight.w700,
+                              fontWeight:
+                                  isRead ? FontWeight.w500 : FontWeight.w700,
                               fontSize: 13.5,
                               color: Colors.black87,
                             ),
@@ -334,39 +342,59 @@ class _NotifCard extends StatelessWidget {
     final diff = DateTime.now().difference(dt);
     if (diff.inSeconds < 60) return 'À l\'instant';
     if (diff.inMinutes < 60) return 'Il y a ${diff.inMinutes} min';
-    if (diff.inHours   < 24) return 'Il y a ${diff.inHours} h';
+    if (diff.inHours < 24) return 'Il y a ${diff.inHours} h';
     return DateFormat('d MMM HH:mm', 'fr').format(dt);
   }
 
   IconData _iconFor(String type) {
     switch (type) {
-      case 'order_confirmed':    return Icons.check_circle_rounded;
-      case 'driver_found':       return Icons.two_wheeler_rounded;
-      case 'order_update':       return Icons.local_shipping_rounded;
-      case 'mission_end':        return Icons.task_alt_rounded;
-      case 'order_cancelled':    return Icons.cancel_rounded;
-      case 'new_order':          return Icons.delivery_dining_rounded;
-      case 'low_balance':        return Icons.account_balance_wallet_rounded;
-      case 'recharge':           return Icons.account_balance_wallet_rounded;
-      case 'ek_new_order':       return Icons.account_balance_rounded;
-      case 'ek_update':          return Icons.update_rounded;
-      case 'admin_new_driver':   return Icons.person_add_rounded;
-      default:                   return Icons.notifications_rounded;
+      case 'order_confirmed':
+        return Icons.check_circle_rounded;
+      case 'driver_found':
+        return Icons.two_wheeler_rounded;
+      case 'order_update':
+        return Icons.local_shipping_rounded;
+      case 'mission_end':
+        return Icons.task_alt_rounded;
+      case 'order_cancelled':
+        return Icons.cancel_rounded;
+      case 'new_order':
+        return Icons.delivery_dining_rounded;
+      case 'low_balance':
+        return Icons.account_balance_wallet_rounded;
+      case 'recharge':
+        return Icons.account_balance_wallet_rounded;
+      case 'ek_new_order':
+        return Icons.account_balance_rounded;
+      case 'ek_update':
+        return Icons.update_rounded;
+      case 'admin_new_driver':
+        return Icons.person_add_rounded;
+      default:
+        return Icons.notifications_rounded;
     }
   }
 
   Color _colorFor(String type) {
     switch (type) {
       case 'order_confirmed':
-      case 'driver_found':       return const Color(0xFF2E7D32);
-      case 'order_update':       return const Color(0xFF1565C0);
-      case 'mission_end':        return const Color(0xFF00695C);
-      case 'order_cancelled':    return Colors.red;
-      case 'low_balance':        return Colors.red;
-      case 'recharge':           return const Color(0xFF00695C);
+      case 'driver_found':
+        return const Color(0xFF2E7D32);
+      case 'order_update':
+        return const Color(0xFF1565C0);
+      case 'mission_end':
+        return const Color(0xFF00695C);
+      case 'order_cancelled':
+        return Colors.red;
+      case 'low_balance':
+        return Colors.red;
+      case 'recharge':
+        return const Color(0xFF00695C);
       case 'ek_new_order':
-      case 'ek_update':          return const Color(0xFF4A148C);
-      default:                   return AppColors.primary;
+      case 'ek_update':
+        return const Color(0xFF4A148C);
+      default:
+        return AppColors.primary;
     }
   }
 }

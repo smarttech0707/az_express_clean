@@ -1,5 +1,4 @@
 class DriverModel {
-
   final String id;
   final String name;
   final String phone;

@@ -125,7 +125,8 @@ class _AppButtonState extends State<AppButton>
       onPointerCancel: (_) => _ctrl.reverse(),
       child: AnimatedBuilder(
         animation: _scale,
-        builder: (_, child) => Transform.scale(scale: _scale.value, child: child),
+        builder: (_, child) =>
+            Transform.scale(scale: _scale.value, child: child),
         child: GestureDetector(
           onTap: _enabled ? widget.onPressed : null,
           behavior: HitTestBehavior.opaque,
@@ -138,7 +139,9 @@ class _AppButtonState extends State<AppButton>
               borderRadius: AppRadius.official18R,
               border: c.border != null
                   ? Border.all(
-                      color: _enabled ? c.border! : c.border!.withValues(alpha: 0.45),
+                      color: _enabled
+                          ? c.border!
+                          : c.border!.withValues(alpha: 0.45),
                       width: 1.5)
                   : null,
             ),
@@ -147,7 +150,8 @@ class _AppButtonState extends State<AppButton>
                 ? SizedBox(
                     width: 22,
                     height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.5, color: fg),
+                    child:
+                        CircularProgressIndicator(strokeWidth: 2.5, color: fg),
                   )
                 : Row(
                     mainAxisSize: MainAxisSize.min,

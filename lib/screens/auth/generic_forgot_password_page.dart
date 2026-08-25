@@ -11,7 +11,7 @@ import '../../services/auth_service.dart';
 ///            'pharmacie' | 'boulangerie' | 'artisan'
 class GenericForgotPasswordPage extends StatefulWidget {
   final String userType;
-  final Color  accentColor;
+  final Color accentColor;
   final String title;
 
   const GenericForgotPasswordPage({
@@ -28,10 +28,9 @@ class GenericForgotPasswordPage extends StatefulWidget {
 
 enum _Step { identifier, otp, newSecret }
 
-class _GenericForgotPasswordPageState
-    extends State<GenericForgotPasswordPage> {
-  _Step _step    = _Step.identifier;
-  bool  _loading = false;
+class _GenericForgotPasswordPageState extends State<GenericForgotPasswordPage> {
+  _Step _step = _Step.identifier;
+  bool _loading = false;
 
   // Étape 1
   final _identCtrl = TextEditingController();
@@ -39,23 +38,22 @@ class _GenericForgotPasswordPageState
   // Étape 2 – OTP
   final List<TextEditingController> _otpCtrl =
       List.generate(6, (_) => TextEditingController());
-  final List<FocusNode> _otpFocus =
-      List.generate(6, (_) => FocusNode());
+  final List<FocusNode> _otpFocus = List.generate(6, (_) => FocusNode());
   String? _verificationId;
-  int?    _resendToken;
-  bool    _canResend = false;
-  int     _countdown = 60;
-  Timer?  _timer;
+  int? _resendToken;
+  bool _canResend = false;
+  int _countdown = 60;
+  Timer? _timer;
 
   // Étape 3 – Nouveau secret
-  final _secretCtrl  = TextEditingController();
+  final _secretCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
-  bool  _showSecret  = false;
+  bool _showSecret = false;
 
   // ── Accesseurs ───────────────────────────────────────────────────────────
 
   bool get _isArtisan => widget.userType == 'artisan';
-  bool get _isAdmin   => widget.userType == 'admin';
+  bool get _isAdmin => widget.userType == 'admin';
 
   String get _secretLabel =>
       _isArtisan ? 'Nouveau code PIN (4-6 chiffres)' : 'Nouveau mot de passe';
@@ -67,8 +65,12 @@ class _GenericForgotPasswordPageState
     _identCtrl.dispose();
     _secretCtrl.dispose();
     _confirmCtrl.dispose();
-    for (final c in _otpCtrl) { c.dispose(); }
-    for (final f in _otpFocus) { f.dispose(); }
+    for (final c in _otpCtrl) {
+      c.dispose();
+    }
+    for (final f in _otpFocus) {
+      f.dispose();
+    }
     _timer?.cancel();
     super.dispose();
   }
@@ -99,7 +101,8 @@ class _GenericForgotPasswordPageState
       try {
         await FirebaseAuth.instance.sendPasswordResetEmail(email: ident);
         if (!mounted) return;
-        _snack('Lien envoyé à $ident. Vérifiez votre boîte mail.', Colors.green);
+        _snack(
+            'Lien envoyé à $ident. Vérifiez votre boîte mail.', Colors.green);
         Navigator.pop(context);
       } on FirebaseAuthException catch (e) {
         _snack(
@@ -121,10 +124,10 @@ class _GenericForgotPasswordPageState
         phone: ident,
         onCodeSent: (verificationId, resendToken) {
           _verificationId = verificationId;
-          _resendToken    = resendToken;
+          _resendToken = resendToken;
           if (!mounted) return;
           setState(() {
-            _step    = _Step.otp;
+            _step = _Step.otp;
             _loading = false;
           });
           _startCountdown();
@@ -141,13 +144,22 @@ class _GenericForgotPasswordPageState
   }
 
   void _startCountdown() {
-    setState(() { _canResend = false; _countdown = 60; });
+    setState(() {
+      _canResend = false;
+      _countdown = 60;
+    });
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() {
         _countdown--;
-        if (_countdown <= 0) { t.cancel(); _canResend = true; }
+        if (_countdown <= 0) {
+          t.cancel();
+          _canResend = true;
+        }
       });
     });
   }
@@ -158,7 +170,9 @@ class _GenericForgotPasswordPageState
 
   void _onOtpDigit(int index, String value) {
     if (value.length == 6) {
-      for (int i = 0; i < 6; i++) { _otpCtrl[i].text = value[i]; }
+      for (int i = 0; i < 6; i++) {
+        _otpCtrl[i].text = value[i];
+      }
       _otpFocus[5].requestFocus();
       _verifyOtp();
       return;
@@ -184,10 +198,14 @@ class _GenericForgotPasswordPageState
     }
     setState(() => _loading = true);
     try {
-      final cred = AuthService().buildPhoneCredential(_verificationId!, _otpCode);
+      final cred =
+          AuthService().buildPhoneCredential(_verificationId!, _otpCode);
       await FirebaseAuth.instance.signInWithCredential(cred);
       if (!mounted) return;
-      setState(() { _step = _Step.newSecret; _loading = false; });
+      setState(() {
+        _step = _Step.newSecret;
+        _loading = false;
+      });
     } on FirebaseAuthException {
       if (mounted) setState(() => _loading = false);
       _snack('Code incorrect ou expiré', Colors.red);
@@ -207,7 +225,7 @@ class _GenericForgotPasswordPageState
         resendToken: _resendToken,
         onCodeSent: (vid, rt) {
           _verificationId = vid;
-          _resendToken    = rt;
+          _resendToken = rt;
           _startCountdown();
           _snack('Nouveau code envoyé', Colors.green);
         },
@@ -234,11 +252,14 @@ class _GenericForgotPasswordPageState
   }
 
   Future<void> _saveSecret() async {
-    final val     = _secretCtrl.text;
+    final val = _secretCtrl.text;
     final confirm = _confirmCtrl.text;
 
     final err = _validateSecret(val);
-    if (err != null) { _snack(err, Colors.orange); return; }
+    if (err != null) {
+      _snack(err, Colors.orange);
+      return;
+    }
     if (val != confirm) {
       _snack('Les valeurs ne correspondent pas', Colors.red);
       return;
@@ -249,7 +270,7 @@ class _GenericForgotPasswordPageState
       final fn = FirebaseFunctions.instanceFor(region: 'europe-west1');
       await fn.httpsCallable('resetAccountPassword').call({
         'userType': widget.userType,
-        'phone':    _identCtrl.text.trim().replaceAll(' ', ''),
+        'phone': _identCtrl.text.trim().replaceAll(' ', ''),
         'newValue': val,
       });
 
@@ -263,7 +284,9 @@ class _GenericForgotPasswordPageState
 
       // Déconnecter la session téléphonique temporaire
       await FirebaseAuth.instance.signOut();
-      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (_) {}
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -297,8 +320,8 @@ class _GenericForgotPasswordPageState
             _buildHero(color),
             const SizedBox(height: 32),
             if (_step == _Step.identifier) _buildIdentifierStep(color),
-            if (_step == _Step.otp)        _buildOtpStep(color),
-            if (_step == _Step.newSecret)  _buildSecretStep(color),
+            if (_step == _Step.otp) _buildOtpStep(color),
+            if (_step == _Step.newSecret) _buildSecretStep(color),
           ],
         ),
       ),
@@ -312,15 +335,15 @@ class _GenericForgotPasswordPageState
     final String subtitle;
     switch (_step) {
       case _Step.identifier:
-        icon     = _isAdmin ? Icons.email_outlined : Icons.phone_outlined;
+        icon = _isAdmin ? Icons.email_outlined : Icons.phone_outlined;
         subtitle = _isAdmin
             ? 'Entrez votre adresse email pour recevoir\nun lien de réinitialisation'
             : 'Entrez votre numéro de téléphone\npour recevoir un code SMS';
       case _Step.otp:
-        icon     = Icons.smartphone;
+        icon = Icons.smartphone;
         subtitle = 'Code envoyé par SMS au\n${_identCtrl.text.trim()}';
       case _Step.newSecret:
-        icon     = Icons.lock_open_outlined;
+        icon = Icons.lock_open_outlined;
         subtitle = _isArtisan
             ? 'Créez un nouveau code PIN'
             : 'Créez un nouveau mot de passe sécurisé';
@@ -330,8 +353,8 @@ class _GenericForgotPasswordPageState
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-            colors: [color, color.withValues(alpha: 0.72)]),
+        gradient:
+            LinearGradient(colors: [color, color.withValues(alpha: 0.72)]),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -341,9 +364,7 @@ class _GenericForgotPasswordPageState
           Text(
             _isArtisan ? 'PIN oublié' : 'Mot de passe oublié',
             style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold),
+                color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 6),
           Text(
@@ -363,28 +384,24 @@ class _GenericForgotPasswordPageState
       children: [
         TextField(
           controller: _identCtrl,
-          keyboardType: _isAdmin
-              ? TextInputType.emailAddress
-              : TextInputType.phone,
+          keyboardType:
+              _isAdmin ? TextInputType.emailAddress : TextInputType.phone,
           autofillHints: _isAdmin
               ? const [AutofillHints.email]
               : const [AutofillHints.telephoneNumber],
           decoration: InputDecoration(
-            labelText: _isAdmin
-                ? 'Adresse email'
-                : 'Numéro de téléphone',
+            labelText: _isAdmin ? 'Adresse email' : 'Numéro de téléphone',
             hintText: _isAdmin ? 'admin@example.com' : '07 00 00 00 00',
             prefixIcon: Icon(
               _isAdmin ? Icons.email_outlined : Icons.phone_outlined,
               color: color,
             ),
-            border:
-                OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide(color: color, width: 2),
             ),
-            filled:    true,
+            filled: true,
             fillColor: Colors.white,
           ),
           onSubmitted: (_) => _sendOtp(),
@@ -438,10 +455,10 @@ class _GenericForgotPasswordPageState
             6,
             (i) => _OtpBox(
               controller: _otpCtrl[i],
-              focusNode:  _otpFocus[i],
-              color:      color,
-              onChanged:  (val) => _onOtpDigit(i, val),
-              onBackspace: ()   => _onOtpBackspace(i),
+              focusNode: _otpFocus[i],
+              color: color,
+              onChanged: (val) => _onOtpDigit(i, val),
+              onBackspace: () => _onOtpBackspace(i),
               index: i,
               total: 6,
             ),
@@ -484,8 +501,7 @@ class _GenericForgotPasswordPageState
               )
             : Text(
                 'Renvoyer dans $_countdown secondes',
-                style:
-                    TextStyle(color: Colors.grey.shade500, fontSize: 13),
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
               ),
       ],
     );
@@ -509,8 +525,7 @@ class _GenericForgotPasswordPageState
               children: [
                 Text(
                   'Le mot de passe doit contenir :',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 SizedBox(height: 6),
                 _Rule(text: 'Au moins 8 caractères'),
@@ -523,23 +538,23 @@ class _GenericForgotPasswordPageState
         ],
         _SecretField(
           controller: _secretCtrl,
-          label:      _secretLabel,
-          isNumeric:  _isArtisan,
-          maxLen:     _isArtisan ? 6 : null,
+          label: _secretLabel,
+          isNumeric: _isArtisan,
+          maxLen: _isArtisan ? 6 : null,
           showSecret: _showSecret,
-          color:      color,
-          onToggle:   () => setState(() => _showSecret = !_showSecret),
+          color: color,
+          onToggle: () => setState(() => _showSecret = !_showSecret),
         ),
         const SizedBox(height: 14),
         _SecretField(
           controller: _confirmCtrl,
-          label:      _isArtisan ? 'Confirmer le PIN' : 'Confirmer le mot de passe',
-          isNumeric:  _isArtisan,
-          maxLen:     _isArtisan ? 6 : null,
+          label: _isArtisan ? 'Confirmer le PIN' : 'Confirmer le mot de passe',
+          isNumeric: _isArtisan,
+          maxLen: _isArtisan ? 6 : null,
           showSecret: _showSecret,
-          color:      color,
-          onToggle:   () => setState(() => _showSecret = !_showSecret),
-          onSubmit:   _saveSecret,
+          color: color,
+          onToggle: () => setState(() => _showSecret = !_showSecret),
+          onSubmit: _saveSecret,
         ),
         const SizedBox(height: 32),
         SizedBox(
@@ -579,10 +594,10 @@ class _GenericForgotPasswordPageState
 
 class _OtpBox extends StatelessWidget {
   final TextEditingController controller;
-  final FocusNode             focusNode;
-  final Color                 color;
+  final FocusNode focusNode;
+  final Color color;
   final void Function(String) onChanged;
-  final VoidCallback          onBackspace;
+  final VoidCallback onBackspace;
   // Master Prompt 125 (Partie 6) — purement additif, défauts sûrs.
   final int index;
   final int total;
@@ -603,37 +618,37 @@ class _OtpBox extends StatelessWidget {
       label: 'Chiffre ${index + 1} sur $total du code de vérification',
       textField: true,
       child: SizedBox(
-      width:  46,
-      height: 56,
-      child: KeyboardListener(
-        focusNode: FocusNode(),
-        onKeyEvent: (event) {
-          if (event.logicalKey.keyLabel == 'Backspace') onBackspace();
-        },
-        child: TextField(
-          controller:  controller,
-          focusNode:   focusNode,
-          maxLength:   1,
-          textAlign:   TextAlign.center,
-          keyboardType: TextInputType.number,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-          decoration: InputDecoration(
-            counterText: '',
-            filled:    true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.grey.shade300),
+        width: 46,
+        height: 56,
+        child: KeyboardListener(
+          focusNode: FocusNode(),
+          onKeyEvent: (event) {
+            if (event.logicalKey.keyLabel == 'Backspace') onBackspace();
+          },
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            maxLength: 1,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            decoration: InputDecoration(
+              counterText: '',
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: color, width: 2),
+              ),
+              contentPadding: EdgeInsets.zero,
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: color, width: 2),
-            ),
-            contentPadding: EdgeInsets.zero,
+            onChanged: onChanged,
           ),
-          onChanged: onChanged,
         ),
-      ),
       ),
     );
   }
@@ -641,13 +656,13 @@ class _OtpBox extends StatelessWidget {
 
 class _SecretField extends StatelessWidget {
   final TextEditingController controller;
-  final String    label;
-  final bool      isNumeric;
-  final int?      maxLen;
-  final bool      showSecret;
-  final Color     color;
-  final VoidCallback          onToggle;
-  final VoidCallback?         onSubmit;
+  final String label;
+  final bool isNumeric;
+  final int? maxLen;
+  final bool showSecret;
+  final Color color;
+  final VoidCallback onToggle;
+  final VoidCallback? onSubmit;
 
   const _SecretField({
     required this.controller,
@@ -663,10 +678,10 @@ class _SecretField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TextField(
-      controller:   controller,
-      obscureText:  !showSecret,
+      controller: controller,
+      obscureText: !showSecret,
       keyboardType: isNumeric ? TextInputType.number : TextInputType.text,
-      maxLength:    maxLen,
+      maxLength: maxLen,
       decoration: InputDecoration(
         labelText: label,
         counterText: '',
@@ -683,7 +698,7 @@ class _SecretField extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: color, width: 2),
         ),
-        filled:    true,
+        filled: true,
         fillColor: Colors.white,
       ),
       onSubmitted: onSubmit != null ? (_) => onSubmit!() : null,
@@ -701,8 +716,7 @@ class _Rule extends StatelessWidget {
       padding: const EdgeInsets.only(top: 3),
       child: Row(
         children: [
-          const Icon(Icons.check_circle_outline,
-              size: 14, color: Colors.grey),
+          const Icon(Icons.check_circle_outline, size: 14, color: Colors.grey),
           const SizedBox(width: 6),
           Text(text, style: const TextStyle(fontSize: 12)),
         ],

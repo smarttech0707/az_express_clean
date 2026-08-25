@@ -1,11 +1,13 @@
-﻿import 'dart:io';
+import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/subscription_service.dart';
+import '../../utils/storage_cleanup.dart';
+import '../../utils/partner_location_validator.dart';
+import '../../widgets/partner_location_input.dart';
 
 class AdminRestaurantsPage extends StatelessWidget {
   const AdminRestaurantsPage({super.key});
@@ -18,7 +20,6 @@ class AdminRestaurantsPage extends StatelessWidget {
     final latCtrl = TextEditingController();
     final lngCtrl = TextEditingController();
     bool isOpen = true;
-    bool gpsLoading = false;
 
     showDialog(
       context: context,
@@ -35,89 +36,16 @@ class AdminRestaurantsPage extends StatelessWidget {
                 const SizedBox(height: 10),
                 _dialogField(addressCtrl, "Adresse", Icons.location_on),
                 const SizedBox(height: 10),
-                _dialogField(categoryCtrl, "Catégorie (ex: Ivoirien, Fast food)",
-                    Icons.category),
+                _dialogField(categoryCtrl,
+                    "Catégorie (ex: Ivoirien, Fast food)", Icons.category),
                 const SizedBox(height: 10),
-                _dialogField(minCtrl, "Livraison min (FCFA)", Icons.delivery_dining,
+                _dialogField(
+                    minCtrl, "Livraison min (FCFA)", Icons.delivery_dining,
                     type: TextInputType.number),
                 const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _dialogField(
-                        latCtrl,
-                        "Latitude",
-                        Icons.gps_fixed,
-                        type: const TextInputType.numberWithOptions(
-                            decimal: true, signed: true),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _dialogField(
-                        lngCtrl,
-                        "Longitude",
-                        Icons.gps_not_fixed,
-                        type: const TextInputType.numberWithOptions(
-                            decimal: true, signed: true),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: gpsLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.my_location, size: 18),
-                    label: Text(
-                        gpsLoading ? "Localisation..." : "Ma position GPS"),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF1565C0),
-                      side: const BorderSide(color: Color(0xFF1565C0)),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: gpsLoading
-                        ? null
-                        : () async {
-                            setS(() => gpsLoading = true);
-                            try {
-                              bool svc =
-                                  await Geolocator.isLocationServiceEnabled();
-                              if (!svc) {
-                                setS(() => gpsLoading = false);
-                                return;
-                              }
-                              LocationPermission perm =
-                                  await Geolocator.checkPermission();
-                              if (perm == LocationPermission.denied) {
-                                perm =
-                                    await Geolocator.requestPermission();
-                                if (perm == LocationPermission.denied) {
-                                  setS(() => gpsLoading = false);
-                                  return;
-                                }
-                              }
-                              final pos =
-                                  await Geolocator.getCurrentPosition();
-                              setS(() {
-                                latCtrl.text =
-                                    pos.latitude.toStringAsFixed(6);
-                                lngCtrl.text =
-                                    pos.longitude.toStringAsFixed(6);
-                                gpsLoading = false;
-                              });
-                            } catch (_) {
-                              setS(() => gpsLoading = false);
-                            }
-                          },
-                  ),
+                PartnerLocationInput(
+                  latitudeController: latCtrl,
+                  longitudeController: lngCtrl,
                 ),
                 const SizedBox(height: 10),
                 SwitchListTile(
@@ -143,19 +71,23 @@ class AdminRestaurantsPage extends StatelessWidget {
               onPressed: () async {
                 final name = nameCtrl.text.trim();
                 if (name.isEmpty) return;
-                await FirebaseFirestore.instance
-                    .collection("restaurants")
-                    .add({
+                final locationError = PartnerLocationValidator.validateText(
+                    latCtrl.text, lngCtrl.text);
+                if (locationError != null) {
+                  ScaffoldMessenger.of(ctx)
+                      .showSnackBar(SnackBar(content: Text(locationError)));
+                  return;
+                }
+                await FirebaseFirestore.instance.collection("restaurants").add({
                   "name": name,
                   "address": addressCtrl.text.trim(),
                   "category": categoryCtrl.text.trim().isEmpty
                       ? "Cuisine locale"
                       : categoryCtrl.text.trim(),
-                  "minDelivery":
-                      int.tryParse(minCtrl.text.trim()) ?? 500,
+                  "minDelivery": int.tryParse(minCtrl.text.trim()) ?? 500,
                   "isOpen": isOpen,
-                  "lat": double.tryParse(latCtrl.text.trim()) ?? 0.0,
-                  "lng": double.tryParse(lngCtrl.text.trim()) ?? 0.0,
+                  "lat": double.parse(latCtrl.text.trim()),
+                  "lng": double.parse(lngCtrl.text.trim()),
                   "createdAt": Timestamp.now(),
                 });
                 if (ctx.mounted) Navigator.pop(ctx);
@@ -194,10 +126,14 @@ class AdminRestaurantsPage extends StatelessWidget {
                   .doc(doc.id)
                   .collection("menu")
                   .get();
+              final dishImageUrls = <String?>[];
               for (final m in menus.docs) {
+                dishImageUrls.add((m.data())['imageUrl'] as String?);
                 await m.reference.delete();
               }
+              final logoUrl = (doc.data() as Map)['logoUrl'] as String?;
               await doc.reference.delete();
+              await deleteStorageUrls([logoUrl, ...dishImageUrls]);
             },
             child: const Text("Supprimer"),
           ),
@@ -259,13 +195,14 @@ class AdminRestaurantsPage extends StatelessWidget {
 
           return ListView.builder(
             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             itemCount: docs.length,
             itemBuilder: (context, i) {
               final doc = docs[i];
               final data = doc.data() as Map<String, dynamic>;
               final isOpen = data["isOpen"] ?? true;
-              final subStatus = data["subscriptionStatus"] as String? ?? 'active';
+              final subStatus =
+                  data["subscriptionStatus"] as String? ?? 'active';
               final vipStatus = data["vipStatus"] as String? ?? 'none';
 
               return Container(
@@ -289,7 +226,8 @@ class AdminRestaurantsPage extends StatelessWidget {
                         width: 50,
                         height: 50,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF1565C0).withValues(alpha: 0.12),
+                          color:
+                              const Color(0xFF1565C0).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: const Icon(Icons.restaurant,
@@ -304,12 +242,15 @@ class AdminRestaurantsPage extends StatelessWidget {
                           ),
                         ),
                         Container(
-                          width: 10, height: 10,
+                          width: 10,
+                          height: 10,
                           margin: const EdgeInsets.only(right: 4),
                           decoration: BoxDecoration(
-                            color: subStatus == 'active' ? Colors.green
-                                : subStatus == 'trial' ? Colors.blue
-                                : Colors.red,
+                            color: subStatus == 'active'
+                                ? Colors.green
+                                : subStatus == 'trial'
+                                    ? Colors.blue
+                                    : Colors.red,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -382,8 +323,7 @@ class AdminRestaurantsPage extends StatelessWidget {
                         // Supprimer
                         Expanded(
                           child: TextButton.icon(
-                            onPressed: () =>
-                                _deleteRestaurant(context, doc),
+                            onPressed: () => _deleteRestaurant(context, doc),
                             icon: const Icon(Icons.delete_outline,
                                 size: 18, color: Colors.red),
                             label: const Text(
@@ -541,7 +481,10 @@ class _MenuManagePage extends StatelessWidget {
                       IconButton(
                         icon: const Icon(Icons.delete_outline,
                             color: Colors.red, size: 20),
-                        onPressed: () => doc.reference.delete(),
+                        onPressed: () async {
+                          await doc.reference.delete();
+                          await deleteStorageUrls([imageUrl]);
+                        },
                       ),
                     ],
                   ),
@@ -661,8 +604,7 @@ class _AddMenuItemPageState extends State<_AddMenuItemPage> {
 
   Future<String?> _uploadImage(String docId) async {
     if (_imageFile == null) return _existingImageUrl;
-    final ref =
-        FirebaseStorage.instance.ref("restaurant_menus/$docId.jpg");
+    final ref = FirebaseStorage.instance.ref("restaurant_menus/$docId.jpg");
     await ref.putFile(_imageFile!);
     return await ref.getDownloadURL();
   }
@@ -703,9 +645,7 @@ class _AddMenuItemPageState extends State<_AddMenuItemPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text("Erreur : $e"),
-              backgroundColor: Colors.red),
+          SnackBar(content: Text("Erreur : $e"), backgroundColor: Colors.red),
         );
       }
     }
@@ -714,8 +654,7 @@ class _AddMenuItemPageState extends State<_AddMenuItemPage> {
 
   @override
   Widget build(BuildContext context) {
-    final hasImage =
-        _imageFile != null || (_existingImageUrl ?? "").isNotEmpty;
+    final hasImage = _imageFile != null || (_existingImageUrl ?? "").isNotEmpty;
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
@@ -790,8 +729,7 @@ class _AddMenuItemPageState extends State<_AddMenuItemPage> {
             Center(
               child: TextButton.icon(
                 onPressed: _showImageOptions,
-                icon: Icon(hasImage ? Icons.edit : Icons.add_a_photo,
-                    size: 16),
+                icon: Icon(hasImage ? Icons.edit : Icons.add_a_photo, size: 16),
                 label:
                     Text(hasImage ? "Changer la photo" : "Ajouter une photo"),
                 style: TextButton.styleFrom(
@@ -916,7 +854,9 @@ class _RestaurantSubPageState extends State<_RestaurantSubPage> {
       await action();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Opération réussie'), backgroundColor: Colors.green),
+          const SnackBar(
+              content: Text('Opération réussie'),
+              backgroundColor: Colors.green),
         );
       }
     } catch (e) {
@@ -949,7 +889,8 @@ class _RestaurantSubPageState extends State<_RestaurantSubPage> {
             .doc(widget.docId)
             .snapshots(),
         builder: (context, snap) {
-          final data = snap.data?.data() as Map<String, dynamic>? ?? widget.data;
+          final data =
+              snap.data?.data() as Map<String, dynamic>? ?? widget.data;
           final subStatus = data['subscriptionStatus'] as String? ?? 'active';
           final subExpiry = data['subscriptionExpiresAt'];
           final vipStatus = data['vipStatus'] as String? ?? 'none';
@@ -962,69 +903,108 @@ class _RestaurantSubPageState extends State<_RestaurantSubPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Wallet : $wallet FCFA',
-                    style: TextStyle(color: Colors.grey.shade700, fontSize: 14)),
+                    style:
+                        TextStyle(color: Colors.grey.shade700, fontSize: 14)),
                 const SizedBox(height: 16),
 
                 // Subscription
                 const Text('Abonnement Standard (1 000 F/mois)',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 8),
                 Row(children: [
                   _buildStatusChip(
-                    label: subStatus == 'active' ? 'Actif'
-                        : subStatus == 'trial' ? 'Trial'
-                        : 'Suspendu',
-                    color: subStatus == 'active' ? Colors.green
-                        : subStatus == 'trial' ? Colors.blue
-                        : Colors.red,
+                    label: subStatus == 'active'
+                        ? 'Actif'
+                        : subStatus == 'trial'
+                            ? 'Trial'
+                            : 'Suspendu',
+                    color: subStatus == 'active'
+                        ? Colors.green
+                        : subStatus == 'trial'
+                            ? Colors.blue
+                            : Colors.red,
                   ),
                   const SizedBox(width: 10),
-                  Text('Expire : ${SubscriptionService.formatExpiry(subExpiry)}',
+                  Text(
+                      'Expire : ${SubscriptionService.formatExpiry(subExpiry)}',
                       style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 ]),
                 const SizedBox(height: 10),
                 _loading
                     ? const Center(child: CircularProgressIndicator())
                     : Wrap(spacing: 8, runSpacing: 8, children: [
-                        _buildBtn('Activer (1 000 F)', const Color(0xFF1565C0), () => _run(() =>
-                            SubscriptionService.adminActivateSubscription('restaurants', widget.docId, chargeWallet: true))),
-                        _buildBtn('Gratuit', Colors.green, () => _run(() =>
-                            SubscriptionService.adminActivateSubscription('restaurants', widget.docId, chargeWallet: false))),
-                        _buildBtn('Suspendre', Colors.red, () => _run(() =>
-                            SubscriptionService.adminSuspend('restaurants', widget.docId))),
+                        _buildBtn(
+                            'Activer (1 000 F)',
+                            const Color(0xFF1565C0),
+                            () => _run(() =>
+                                SubscriptionService.adminActivateSubscription(
+                                    'restaurants', widget.docId,
+                                    chargeWallet: true))),
+                        _buildBtn(
+                            'Gratuit',
+                            Colors.green,
+                            () => _run(() =>
+                                SubscriptionService.adminActivateSubscription(
+                                    'restaurants', widget.docId,
+                                    chargeWallet: false))),
+                        _buildBtn(
+                            'Suspendre',
+                            Colors.red,
+                            () => _run(() => SubscriptionService.adminSuspend(
+                                'restaurants', widget.docId))),
                       ]),
 
                 const Divider(height: 28),
 
                 // VIP
                 const Text('Abonnement VIP (2 000 F/mois)',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 8),
                 Row(children: [
                   _buildStatusChip(
-                    label: vipStatus == 'active' ? '👑 VIP Actif'
-                        : vipStatus == 'expired' ? 'VIP Expiré'
-                        : 'Aucun VIP',
-                    color: vipStatus == 'active' ? const Color(0xFFFFD700)
-                        : vipStatus == 'expired' ? Colors.orange
-                        : Colors.grey,
-                    textColor: vipStatus == 'active' ? Colors.black87 : Colors.white,
+                    label: vipStatus == 'active'
+                        ? '👑 VIP Actif'
+                        : vipStatus == 'expired'
+                            ? 'VIP Expiré'
+                            : 'Aucun VIP',
+                    color: vipStatus == 'active'
+                        ? const Color(0xFFFFD700)
+                        : vipStatus == 'expired'
+                            ? Colors.orange
+                            : Colors.grey,
+                    textColor:
+                        vipStatus == 'active' ? Colors.black87 : Colors.white,
                   ),
                   const SizedBox(width: 10),
                   if (vipExpiry != null)
-                    Text('Expire : ${SubscriptionService.formatExpiry(vipExpiry)}',
-                        style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text(
+                        'Expire : ${SubscriptionService.formatExpiry(vipExpiry)}',
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey)),
                 ]),
                 const SizedBox(height: 10),
                 Wrap(spacing: 8, runSpacing: 8, children: [
-                  _buildBtn('Activer VIP (2 000 F)', const Color(0xFFFFD700),
-                      () => _run(() => SubscriptionService.adminActivateVip('restaurants', widget.docId, chargeWallet: true)),
+                  _buildBtn(
+                      'Activer VIP (2 000 F)',
+                      const Color(0xFFFFD700),
+                      () => _run(() => SubscriptionService.adminActivateVip(
+                          'restaurants', widget.docId,
+                          chargeWallet: true)),
                       textColor: Colors.black87),
-                  _buildBtn('VIP Gratuit', Colors.amber,
-                      () => _run(() => SubscriptionService.adminActivateVip('restaurants', widget.docId, chargeWallet: false)),
+                  _buildBtn(
+                      'VIP Gratuit',
+                      Colors.amber,
+                      () => _run(() => SubscriptionService.adminActivateVip(
+                          'restaurants', widget.docId,
+                          chargeWallet: false)),
                       textColor: Colors.black87),
-                  _buildBtn('Retirer VIP', Colors.grey.shade600,
-                      () => _run(() => SubscriptionService.adminDeactivateVip('restaurants', widget.docId))),
+                  _buildBtn(
+                      'Retirer VIP',
+                      Colors.grey.shade600,
+                      () => _run(() => SubscriptionService.adminDeactivateVip(
+                          'restaurants', widget.docId))),
                 ]),
               ],
             ),
@@ -1034,21 +1014,31 @@ class _RestaurantSubPageState extends State<_RestaurantSubPage> {
     );
   }
 
-  Widget _buildStatusChip({required String label, required Color color, Color textColor = Colors.white}) {
+  Widget _buildStatusChip(
+      {required String label,
+      required Color color,
+      Color textColor = Colors.white}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
-      child: Text(label, style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.bold)),
+      decoration:
+          BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+      child: Text(label,
+          style: TextStyle(
+              color: textColor, fontSize: 12, fontWeight: FontWeight.bold)),
     );
   }
 
-  Widget _buildBtn(String label, Color color, VoidCallback onTap, {Color textColor = Colors.white}) {
+  Widget _buildBtn(String label, Color color, VoidCallback onTap,
+      {Color textColor = Colors.white}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
-        child: Text(label, style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w600)),
+        decoration: BoxDecoration(
+            color: color, borderRadius: BorderRadius.circular(10)),
+        child: Text(label,
+            style: TextStyle(
+                color: textColor, fontSize: 12, fontWeight: FontWeight.w600)),
       ),
     );
   }
@@ -1075,8 +1065,7 @@ Widget _dialogField(
       labelText: label,
       prefixIcon: Icon(icon),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     ),
   );
 }

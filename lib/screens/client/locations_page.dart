@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -62,7 +62,8 @@ class _LocationsPageState extends State<LocationsPage> {
                         const SizedBox(height: 4),
                         Text(
                           context.tr('find_home'),
-                          style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13),
                         ),
                       ],
                     ),
@@ -81,8 +82,7 @@ class _LocationsPageState extends State<LocationsPage> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: TextField(
                 controller: _searchCtrl,
-                onChanged: (v) =>
-                    setState(() => _search = v.toLowerCase()),
+                onChanged: (v) => setState(() => _search = v.toLowerCase()),
                 decoration: InputDecoration(
                   hintText: context.tr('search_house'),
                   prefixIcon:
@@ -98,8 +98,7 @@ class _LocationsPageState extends State<LocationsPage> {
                       : null,
                   filled: true,
                   fillColor: Colors.white,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide.none,
@@ -131,10 +130,8 @@ class _LocationsPageState extends State<LocationsPage> {
                   ? docs
                   : docs.where((d) {
                       final data = d.data() as Map;
-                      final title =
-                          (data["title"] ?? "").toLowerCase();
-                      final address =
-                          (data["address"] ?? "").toLowerCase();
+                      final title = (data["title"] ?? "").toLowerCase();
+                      final address = (data["address"] ?? "").toLowerCase();
                       return title.contains(_search) ||
                           address.contains(_search);
                     }).toList();
@@ -151,8 +148,8 @@ class _LocationsPageState extends State<LocationsPage> {
                         _search.isEmpty
                             ? context.tr('no_house')
                             : "${context.tr('no_result_for')} \"$_search\"",
-                        style: const TextStyle(
-                            fontSize: 16, color: Colors.grey),
+                        style:
+                            const TextStyle(fontSize: 16, color: Colors.grey),
                       ),
                     ],
                   ),
@@ -160,20 +157,17 @@ class _LocationsPageState extends State<LocationsPage> {
               }
 
               return SliverPadding(
-                padding:
-                    const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, i) {
                       final doc = filtered[i];
-                      final data =
-                          doc.data() as Map<String, dynamic>;
+                      final data = doc.data() as Map<String, dynamic>;
                       return _FadeInItem(
                         index: i,
                         child: _LocationCard(
                           data: data,
-                          onTap: () =>
-                              _showDetail(context, data),
+                          onTap: () => _showDetail(context, data),
                         ),
                       );
                     },
@@ -188,8 +182,7 @@ class _LocationsPageState extends State<LocationsPage> {
     );
   }
 
-  void _showDetail(
-      BuildContext context, Map<String, dynamic> data) {
+  void _showDetail(BuildContext context, Map<String, dynamic> data) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -234,16 +227,15 @@ class _LocationCard extends StatelessWidget {
           children: [
             // Photo
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
               child: SizedBox(
                 height: 180,
                 width: double.infinity,
                 child: photoUrl != null && photoUrl.isNotEmpty
                     ? Image.network(photoUrl,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) =>
-                            _placeholder())
+                        errorBuilder: (_, __, ___) => _placeholder())
                     : _placeholder(),
               ),
             ),
@@ -257,22 +249,19 @@ class _LocationCard extends StatelessWidget {
                   Text(
                     title,
                     style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16),
+                        fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                   const SizedBox(height: 6),
                   Row(
                     children: [
                       Icon(Icons.location_on,
-                          size: 14,
-                          color: Colors.grey.shade500),
+                          size: 14, color: Colors.grey.shade500),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           address,
                           style: TextStyle(
-                              color: Colors.grey.shade600,
-                              fontSize: 13),
+                              color: Colors.grey.shade600, fontSize: 13),
                         ),
                       ),
                     ],
@@ -284,16 +273,13 @@ class _LocationCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF00695C)
-                              .withValues(alpha: 0.1),
-                          borderRadius:
-                              BorderRadius.circular(20),
+                          color: const Color(0xFF00695C).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
                           children: [
                             const Icon(Icons.bed_rounded,
-                                size: 14,
-                                color: Color(0xFF00695C)),
+                                size: 14, color: Color(0xFF00695C)),
                             const SizedBox(width: 4),
                             Text(
                               "$rooms ${context.tr('rooms_label')}${rooms > 1 ? 's' : ''}",
@@ -318,16 +304,14 @@ class _LocationCard extends StatelessWidget {
                       Text(
                         context.tr('per_month'),
                         style: TextStyle(
-                            color: Colors.grey.shade500,
-                            fontSize: 12),
+                            color: Colors.grey.shade500, fontSize: 12),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Container(
                     width: double.infinity,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 10),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
                       color: const Color(0xFF00695C),
                       borderRadius: BorderRadius.circular(12),
@@ -362,8 +346,7 @@ class _LocationCard extends StatelessWidget {
         ),
       ),
       child: const Center(
-        child: Icon(Icons.home_rounded,
-            size: 64, color: Colors.white38),
+        child: Icon(Icons.home_rounded, size: 64, color: Colors.white38),
       ),
     );
   }
@@ -399,8 +382,7 @@ class _LocationDetail extends StatelessWidget {
       builder: (_, scrollCtrl) => Container(
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: ListView(
           controller: scrollCtrl,
@@ -448,14 +430,12 @@ class _LocationDetail extends StatelessWidget {
                   Row(
                     children: [
                       Icon(Icons.location_on,
-                          size: 16,
-                          color: Colors.grey.shade500),
+                          size: 16, color: Colors.grey.shade500),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(address,
                             style: TextStyle(
-                                color: Colors.grey.shade600,
-                                fontSize: 14)),
+                                color: Colors.grey.shade600, fontSize: 14)),
                       ),
                     ],
                   ),
@@ -467,7 +447,8 @@ class _LocationDetail extends StatelessWidget {
                           "$rooms ${context.tr('rooms_label')}${rooms > 1 ? 's' : ''}",
                           const Color(0xFF00695C)),
                       const SizedBox(width: 10),
-                      _infoChip(Icons.payments_rounded,
+                      _infoChip(
+                          Icons.payments_rounded,
                           "$price FCFA${context.tr('per_month')}",
                           Colors.orange.shade700),
                     ],
@@ -477,8 +458,7 @@ class _LocationDetail extends StatelessWidget {
                     Text(
                       context.tr('description'),
                       style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold),
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -499,14 +479,10 @@ class _LocationDetail extends StatelessWidget {
                     },
                     child: Container(
                       width: double.infinity,
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 16),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [
-                            Color(0xFF004D40),
-                            Color(0xFF00897B)
-                          ],
+                          colors: [Color(0xFF004D40), Color(0xFF00897B)],
                         ),
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -547,8 +523,7 @@ class _LocationDetail extends StatelessWidget {
 
   Widget _infoChip(IconData icon, String label, Color color) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
@@ -560,9 +535,7 @@ class _LocationDetail extends StatelessWidget {
           const SizedBox(width: 6),
           Text(label,
               style: TextStyle(
-                  color: color,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600)),
+                  color: color, fontSize: 13, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -578,8 +551,7 @@ class _LocationDetail extends StatelessWidget {
         ),
       ),
       child: const Center(
-        child: Icon(Icons.home_rounded,
-            size: 80, color: Colors.white24),
+        child: Icon(Icons.home_rounded, size: 80, color: Colors.white24),
       ),
     );
   }
@@ -616,7 +588,8 @@ class _GalleryPageViewState extends State<_GalleryPageView> {
             widget.urls[i],
             fit: BoxFit.cover,
             width: double.infinity,
-            errorBuilder: (_, __, ___) => Container(color: Colors.grey.shade200),
+            errorBuilder: (_, __, ___) =>
+                Container(color: Colors.grey.shade200),
           ),
         ),
         Positioned(
@@ -664,12 +637,9 @@ class _FadeInItemState extends State<_FadeInItem>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 350));
-    _anim =
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    Future.delayed(
-        Duration(milliseconds: widget.index * 60), () {
+        vsync: this, duration: const Duration(milliseconds: 350));
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    Future.delayed(Duration(milliseconds: widget.index * 60), () {
       if (mounted) _ctrl.forward();
     });
   }

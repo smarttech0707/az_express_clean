@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/single_photo_editor.dart';
 
 class DriverProfil extends StatefulWidget {
   final String driverId;
@@ -62,8 +63,8 @@ class _DriverProfilState extends State<DriverProfil> {
   // ── Dialogues sécurité ───────────────────────────────────────────────────
 
   void _showChangePassword() {
-    final curCtrl  = TextEditingController();
-    final newCtrl  = TextEditingController();
+    final curCtrl = TextEditingController();
+    final newCtrl = TextEditingController();
     final confCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -72,12 +73,13 @@ class _DriverProfilState extends State<DriverProfil> {
         return StatefulBuilder(
           builder: (ctx, setS) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
               title: const Text('Changer le mot de passe'),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
-                _SecField(ctrl: curCtrl,  label: 'Mot de passe actuel'),
+                _SecField(ctrl: curCtrl, label: 'Mot de passe actuel'),
                 const SizedBox(height: 10),
-                _SecField(ctrl: newCtrl,  label: 'Nouveau mot de passe'),
+                _SecField(ctrl: newCtrl, label: 'Nouveau mot de passe'),
                 const SizedBox(height: 10),
                 _SecField(ctrl: confCtrl, label: 'Confirmer'),
               ]),
@@ -94,17 +96,20 @@ class _DriverProfilState extends State<DriverProfil> {
                           final err =
                               AuthService.validatePassword(newCtrl.text);
                           if (err != null) {
-                            if (ctx.mounted) { ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                                content: Text(err),
-                                backgroundColor: Colors.orange)); }
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                                  content: Text(err),
+                                  backgroundColor: Colors.orange));
+                            }
                             return;
                           }
                           if (newCtrl.text != confCtrl.text) {
-                            if (ctx.mounted) { ScaffoldMessenger.of(ctx).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        'Les mots de passe ne correspondent pas'),
-                                    backgroundColor: Colors.red)); }
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                                  content: Text(
+                                      'Les mots de passe ne correspondent pas'),
+                                  backgroundColor: Colors.red));
+                            }
                             return;
                           }
                           setS(() => loading = true);
@@ -140,7 +145,7 @@ class _DriverProfilState extends State<DriverProfil> {
   }
 
   void _showChangeEmail() {
-    final passCtrl  = TextEditingController();
+    final passCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -149,12 +154,14 @@ class _DriverProfilState extends State<DriverProfil> {
         return StatefulBuilder(
           builder: (ctx, setS) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
               title: const Text('Modifier l\'email'),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
-                _SecField(ctrl: passCtrl,  label: 'Mot de passe actuel'),
+                _SecField(ctrl: passCtrl, label: 'Mot de passe actuel'),
                 const SizedBox(height: 10),
-                _SecField(ctrl: emailCtrl, label: 'Nouvel email', isEmail: true),
+                _SecField(
+                    ctrl: emailCtrl, label: 'Nouvel email', isEmail: true),
               ]),
               actions: [
                 TextButton(
@@ -167,10 +174,12 @@ class _DriverProfilState extends State<DriverProfil> {
                       ? null
                       : () async {
                           if (!AuthService.isValidEmail(emailCtrl.text)) {
-                            if (ctx.mounted) { ScaffoldMessenger.of(ctx).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Email invalide'),
-                                    backgroundColor: Colors.orange)); }
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Email invalide'),
+                                      backgroundColor: Colors.orange));
+                            }
                             return;
                           }
                           setS(() => loading = true);
@@ -209,7 +218,7 @@ class _DriverProfilState extends State<DriverProfil> {
   }
 
   void _showChangePhone() {
-    final passCtrl  = TextEditingController();
+    final passCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -218,12 +227,14 @@ class _DriverProfilState extends State<DriverProfil> {
         return StatefulBuilder(
           builder: (ctx, setS) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
               title: const Text('Modifier le téléphone'),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
-                _SecField(ctrl: passCtrl,  label: 'Mot de passe actuel'),
+                _SecField(ctrl: passCtrl, label: 'Mot de passe actuel'),
                 const SizedBox(height: 10),
-                _SecField(ctrl: phoneCtrl, label: 'Nouveau numéro', isPhone: true),
+                _SecField(
+                    ctrl: phoneCtrl, label: 'Nouveau numéro', isPhone: true),
               ]),
               actions: [
                 TextButton(
@@ -236,10 +247,12 @@ class _DriverProfilState extends State<DriverProfil> {
                       ? null
                       : () async {
                           if (!AuthService.isValidPhone(phoneCtrl.text)) {
-                            if (ctx.mounted) { ScaffoldMessenger.of(ctx).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Numéro invalide'),
-                                    backgroundColor: Colors.orange)); }
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Numéro invalide'),
+                                      backgroundColor: Colors.orange));
+                            }
                             return;
                           }
                           setS(() => loading = true);
@@ -299,11 +312,9 @@ class _DriverProfilState extends State<DriverProfil> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text("Se déconnecter"),
-        content: const Text(
-            "Vous serez déconnecté de l'application livreur."),
+        content: const Text("Vous serez déconnecté de l'application livreur."),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
@@ -348,10 +359,9 @@ class _DriverProfilState extends State<DriverProfil> {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final data =
-              snap.data!.exists
-                  ? snap.data!.data() as Map<String, dynamic>
-                  : <String, dynamic>{};
+          final data = snap.data!.exists
+              ? snap.data!.data() as Map<String, dynamic>
+              : <String, dynamic>{};
           final photoUrl = data["photoUrl"] as String?;
           final wallet = data["wallet"] ?? 0;
           final deliveries = data["deliveries"] ?? 0;
@@ -379,17 +389,24 @@ class _DriverProfilState extends State<DriverProfil> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const SizedBox(height: 30),
-                          CircleAvatar(
-                            radius: 44,
-                            backgroundColor:
-                                Colors.white.withValues(alpha: 0.25),
-                            backgroundImage: photoUrl != null
-                                ? NetworkImage(photoUrl)
-                                : null,
-                            child: photoUrl == null
-                                ? const Icon(Icons.person,
-                                    color: Colors.white, size: 44)
-                                : null,
+                          SinglePhotoEditor(
+                            photoUrl: photoUrl,
+                            storagePath:
+                                'driver_photos/${widget.driverId}/profile.jpg',
+                            size: 88,
+                            placeholderIcon: Icons.person,
+                            onUploaded: (url) async {
+                              await FirebaseFirestore.instance
+                                  .collection('livreurs')
+                                  .doc(widget.driverId)
+                                  .update({'photoUrl': url});
+                            },
+                            onDeleted: () async {
+                              await FirebaseFirestore.instance
+                                  .collection('livreurs')
+                                  .doc(widget.driverId)
+                                  .update({'photoUrl': FieldValue.delete()});
+                            },
                           ),
                           const SizedBox(height: 10),
                           Text(
@@ -430,8 +447,7 @@ class _DriverProfilState extends State<DriverProfil> {
                       Row(
                         children: [
                           _statCard("Solde", "$wallet FCFA",
-                              Icons.account_balance_wallet,
-                              AppColors.primary),
+                              Icons.account_balance_wallet, AppColors.primary),
                           const SizedBox(width: 10),
                           _statCard("Livraisons", "$deliveries",
                               Icons.delivery_dining, Colors.green),
@@ -500,8 +516,8 @@ class _DriverProfilState extends State<DriverProfil> {
                           Icons.gavel_outlined,
                           "Conditions livreurs",
                           "Vos droits et obligations",
-                          () => _showLegal(context, "Conditions livreurs",
-                              _termsDriver),
+                          () => _showLegal(
+                              context, "Conditions livreurs", _termsDriver),
                         ),
                         const Divider(height: 1),
                         _menuItem(
@@ -509,8 +525,8 @@ class _DriverProfilState extends State<DriverProfil> {
                           Icons.payments_outlined,
                           "Rémunération",
                           "Comment sont calculés vos gains",
-                          () => _showLegal(context,
-                              "Rémunération des livreurs", _remuneration),
+                          () => _showLegal(context, "Rémunération des livreurs",
+                              _remuneration),
                         ),
                       ]),
 
@@ -536,7 +552,8 @@ class _DriverProfilState extends State<DriverProfil> {
                           Icons.person_remove_outlined,
                           "Supprimer mon compte",
                           "Demande de suppression de compte et de données",
-                          () => showAccountDeletionRequestDialog(context, role: 'livreur'),
+                          () => showAccountDeletionRequestDialog(context,
+                              role: 'livreur'),
                           color: Colors.red,
                         ),
                       ]),
@@ -597,12 +614,11 @@ class _DriverProfilState extends State<DriverProfil> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label,
-                      style:
-                          const TextStyle(color: Colors.grey, fontSize: 11)),
+                      style: const TextStyle(color: Colors.grey, fontSize: 11)),
                   const SizedBox(height: 2),
                   Text(value,
-                      style: const TextStyle(
-                          fontSize: 15, color: Colors.black87)),
+                      style:
+                          const TextStyle(fontSize: 15, color: Colors.black87)),
                 ],
               ),
             ),
@@ -631,9 +647,7 @@ class _DriverProfilState extends State<DriverProfil> {
             Text(value,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold)),
+                    color: color, fontSize: 14, fontWeight: FontWeight.bold)),
             Text(label,
                 style: const TextStyle(color: Colors.grey, fontSize: 11)),
           ],
@@ -651,12 +665,10 @@ class _DriverProfilState extends State<DriverProfil> {
     Color? color,
   }) {
     return ListTile(
-      leading:
-          Icon(icon, color: color ?? AppColors.primary, size: 22),
+      leading: Icon(icon, color: color ?? AppColors.primary, size: 22),
       title: Text(title,
           style: TextStyle(
-              color: color ?? Colors.black87,
-              fontWeight: FontWeight.w600)),
+              color: color ?? Colors.black87, fontWeight: FontWeight.w600)),
       subtitle: Text(subtitle,
           style: const TextStyle(fontSize: 11, color: Colors.grey)),
       trailing:
@@ -669,8 +681,7 @@ class _DriverProfilState extends State<DriverProfil> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -687,8 +698,7 @@ class _DriverProfilState extends State<DriverProfil> {
             ),
             const SizedBox(height: 14),
             const Text("AZ Express",
-                style: TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.bold)),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             const Text("Version 1.0.0",
                 style: TextStyle(color: Colors.grey, fontSize: 13)),
@@ -697,8 +707,8 @@ class _DriverProfilState extends State<DriverProfil> {
               "Application de livraison rapide à Abengourou.\n\n"
               "Support livreurs : znm0905@gmail.com",
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 13, color: Colors.black87, height: 1.5),
+              style:
+                  TextStyle(fontSize: 13, color: Colors.black87, height: 1.5),
             ),
             const SizedBox(height: 12),
             const Text("© 2026 AZ Express — Tous droits réservés",
@@ -764,8 +774,7 @@ AZ Express peut suspendre un livreur en cas de :
 
 Le livreur est responsable de ses actions pendant les livraisons.""";
 
-  static const String _remuneration =
-      """RÉMUNÉRATION DES LIVREURS — AZ Express
+  static const String _remuneration = """RÉMUNÉRATION DES LIVREURS — AZ Express
 
 PRINCIPE
 

@@ -40,8 +40,8 @@ class _AdminGeoStatsPageState extends State<AdminGeoStatsPage>
   Future<void> _loadStats() async {
     setState(() => _loading = true);
     try {
-      final since = Timestamp.fromDate(
-          DateTime.now().subtract(const Duration(days: 30)));
+      final since =
+          Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 30)));
       final snap = await FirebaseFirestore.instance
           .collection('orders')
           .where('createdAt', isGreaterThan: since)
@@ -57,8 +57,8 @@ class _AdminGeoStatsPageState extends State<AdminGeoStatsPage>
       for (final doc in snap.docs) {
         final d = doc.data();
         final deliveryZone = d['deliveryZone'] as String?;
-        final pickupZone   = d['pickupZone']   as String?;
-        final createdAt    = (d['createdAt'] as Timestamp?)?.toDate();
+        final pickupZone = d['pickupZone'] as String?;
+        final createdAt = (d['createdAt'] as Timestamp?)?.toDate();
 
         // Delivery zone counts
         if (deliveryZone != null && deliveryZone.isNotEmpty) {
@@ -66,8 +66,10 @@ class _AdminGeoStatsPageState extends State<AdminGeoStatsPage>
         }
 
         // Route counts
-        if (pickupZone != null && deliveryZone != null &&
-            pickupZone.isNotEmpty && deliveryZone.isNotEmpty) {
+        if (pickupZone != null &&
+            deliveryZone != null &&
+            pickupZone.isNotEmpty &&
+            deliveryZone.isNotEmpty) {
           final route = '$pickupZone → $deliveryZone';
           routes[route] = (routes[route] ?? 0) + 1;
         }
@@ -124,7 +126,8 @@ class _AdminGeoStatsPageState extends State<AdminGeoStatsPage>
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white54,
-          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          labelStyle:
+              const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
           tabs: const [
             Tab(text: 'Zones actives'),
             Tab(text: 'Routes fréquentes'),
@@ -275,7 +278,10 @@ class _AdminGeoStatsPageState extends State<AdminGeoStatsPage>
                         gradient: LinearGradient(
                           colors: isNight
                               ? [Colors.indigo.shade600, Colors.indigo.shade300]
-                              : [const Color(0xFF1565C0), const Color(0xFF42A5F5)],
+                              : [
+                                  const Color(0xFF1565C0),
+                                  const Color(0xFF42A5F5)
+                                ],
                         ),
                         borderRadius: BorderRadius.circular(4),
                       ),
@@ -292,7 +298,9 @@ class _AdminGeoStatsPageState extends State<AdminGeoStatsPage>
                   style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: count > 0 ? Colors.grey.shade800 : Colors.grey.shade400),
+                      color: count > 0
+                          ? Colors.grey.shade800
+                          : Colors.grey.shade400),
                 ),
               ),
             ]),
@@ -397,7 +405,8 @@ class _AdminGeoStatsPageState extends State<AdminGeoStatsPage>
           const SizedBox(height: 16),
           Text(msg,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 14, height: 1.5)),
+              style: TextStyle(
+                  color: Colors.grey.shade500, fontSize: 14, height: 1.5)),
         ]),
       ),
     );
@@ -410,7 +419,8 @@ class _SummaryChip extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
-  const _SummaryChip({required this.icon, required this.label, required this.value});
+  const _SummaryChip(
+      {required this.icon, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -425,7 +435,8 @@ class _SummaryChip extends StatelessWidget {
           Icon(icon, color: Colors.white70, size: 18),
           const SizedBox(width: 6),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(value,
                   style: const TextStyle(
                       color: Colors.white,
@@ -501,7 +512,8 @@ class _ZoneBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sharePct = total > 0 ? (count / total * 100).toStringAsFixed(1) : '0.0';
+    final sharePct =
+        total > 0 ? (count / total * 100).toStringAsFixed(1) : '0.0';
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -509,8 +521,10 @@ class _ZoneBar extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 6, offset: const Offset(0, 2)),
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Row(children: [
@@ -536,7 +550,8 @@ class _ZoneBar extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(
                 child: Text(name,
@@ -594,7 +609,7 @@ class _RouteCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final parts = route.split(' → ');
     final from = parts.isNotEmpty ? parts[0] : route;
-    final to   = parts.length > 1 ? parts[1] : '';
+    final to = parts.length > 1 ? parts[1] : '';
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -602,8 +617,10 @@ class _RouteCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 6, offset: const Offset(0, 2)),
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -683,13 +700,15 @@ class _NightServiceNote extends StatelessWidget {
         border: Border.all(color: Colors.indigo.shade200),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(Icons.nights_stay_rounded, color: Colors.indigo.shade600, size: 18),
+        Icon(Icons.nights_stay_rounded,
+            color: Colors.indigo.shade600, size: 18),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             'Service de nuit (21h–6h) : tarif majoré (1 000 FCFA). '
             'Livraisons >10 km refusées après 21h.',
-            style: TextStyle(fontSize: 12, color: Colors.indigo.shade700, height: 1.4),
+            style: TextStyle(
+                fontSize: 12, color: Colors.indigo.shade700, height: 1.4),
           ),
         ),
       ]),

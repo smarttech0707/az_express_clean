@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,11 +21,11 @@ class PharmacieChangePassword extends StatefulWidget {
 }
 
 class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
-  final _newCtrl     = TextEditingController();
+  final _newCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
-  bool _obscureNew     = true;
+  bool _obscureNew = true;
   bool _obscureConfirm = true;
-  bool _loading        = false;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -43,7 +43,8 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
       return;
     }
     if (newPass.length < 6) {
-      _snack('Le mot de passe doit contenir au moins 6 caractères', Colors.orange);
+      _snack(
+          'Le mot de passe doit contenir au moins 6 caractères', Colors.orange);
       return;
     }
     if (newPass != confirm) {
@@ -136,8 +137,7 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
                             'Définissez un mot de passe personnel '
                             'pour sécuriser votre accès.',
                             style: GoogleFonts.urbanist(
-                                fontSize: 12,
-                                color: Colors.orange.shade700)),
+                                fontSize: 12, color: Colors.orange.shade700)),
                       ],
                     ),
                   ),
@@ -203,9 +203,7 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
         prefixIcon: Icon(Icons.lock_outline, color: color),
         suffixIcon: IconButton(
           icon: Icon(
-            obscure
-                ? Icons.visibility_off_outlined
-                : Icons.visibility_outlined,
+            obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
             color: Colors.grey,
           ),
           onPressed: onToggle,
@@ -221,4 +219,3 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
     );
   }
 }
-

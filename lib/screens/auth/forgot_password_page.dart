@@ -15,7 +15,7 @@ class ForgotPasswordPage extends StatefulWidget {
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
-  bool _bySms   = true;
+  bool _bySms = true;
   bool _loading = false;
 
   @override
@@ -56,9 +56,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       _snack('Lien de réinitialisation envoyé à $email', Colors.green);
       Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
-      _snack(e.code == 'user-not-found'
-          ? 'Aucun compte trouvé avec cet email'
-          : 'Erreur : ${e.message}', Colors.red);
+      _snack(
+          e.code == 'user-not-found'
+              ? 'Aucun compte trouvé avec cet email'
+              : 'Erreur : ${e.message}',
+          Colors.red);
     } catch (_) {
       _snack('Erreur. Vérifiez votre connexion.', Colors.red);
     } finally {
@@ -99,16 +101,21 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       );
     } catch (_) {
       if (mounted) setState(() => _loading = false);
-      _snack('Impossible d\'envoyer le SMS. Vérifiez votre numéro.', Colors.red);
+      _snack(
+          'Impossible d\'envoyer le SMS. Vérifiez votre numéro.', Colors.red);
     }
   }
 
   String _smsError(String code) {
     switch (code) {
-      case 'invalid-phone-number': return 'Numéro de téléphone invalide';
-      case 'too-many-requests':    return 'Trop de tentatives. Réessayez plus tard.';
-      case 'quota-exceeded':       return 'Quota SMS dépassé. Utilisez l\'email.';
-      default: return 'Erreur SMS : $code';
+      case 'invalid-phone-number':
+        return 'Numéro de téléphone invalide';
+      case 'too-many-requests':
+        return 'Trop de tentatives. Réessayez plus tard.';
+      case 'quota-exceeded':
+        return 'Quota SMS dépassé. Utilisez l\'email.';
+      default:
+        return 'Erreur SMS : $code';
     }
   }
 
@@ -145,11 +152,15 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Récupération de compte',
-                            style: TextStyle(color: Colors.white,
-                                fontSize: 16, fontWeight: FontWeight.bold)),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold)),
                         SizedBox(height: 4),
-                        Text('Choisissez comment recevoir\nvotre code de récupération',
-                            style: TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(
+                            'Choisissez comment recevoir\nvotre code de récupération',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -165,7 +176,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
             // Sélecteur SMS / Email
             Row(
               children: [
-                Expanded(child: _MethodCard(
+                Expanded(
+                    child: _MethodCard(
                   icon: Icons.sms_outlined,
                   label: 'Recevoir un code\npar SMS',
                   selected: _bySms,
@@ -173,7 +185,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                   onTap: () => setState(() => _bySms = true),
                 )),
                 const SizedBox(width: 12),
-                Expanded(child: _MethodCard(
+                Expanded(
+                    child: _MethodCard(
                   icon: Icons.email_outlined,
                   label: 'Recevoir un lien\npar Email',
                   selected: !_bySms,
@@ -194,15 +207,19 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 keyboardType: TextInputType.phone,
                 decoration: InputDecoration(
                   hintText: 'ex: 0701234567 ou +2250701234567',
-                  prefixIcon: const Icon(Icons.phone_outlined, color: AppColors.primary),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                  prefixIcon: const Icon(Icons.phone_outlined,
+                      color: AppColors.primary),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: AppColors.primary, width: 2),
+                    borderSide:
+                        const BorderSide(color: AppColors.primary, width: 2),
                   ),
                   filled: true,
                   fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 ),
               ),
               const SizedBox(height: 8),
@@ -217,15 +234,19 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 keyboardType: TextInputType.emailAddress,
                 decoration: InputDecoration(
                   hintText: 'exemple@email.com',
-                  prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFF1E88E5)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                  prefixIcon: const Icon(Icons.email_outlined,
+                      color: Color(0xFF1E88E5)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFF1E88E5), width: 2),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF1E88E5), width: 2),
                   ),
                   filled: true,
                   fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 ),
               ),
               const SizedBox(height: 8),
@@ -239,23 +260,28 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               width: double.infinity,
               height: 54,
               child: ElevatedButton(
-                onPressed: _loading
-                    ? null
-                    : (_bySms ? _submitSms : _submitEmail),
+                onPressed:
+                    _loading ? null : (_bySms ? _submitSms : _submitEmail),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _bySms
-                      ? AppColors.primary
-                      : const Color(0xFF1E88E5),
+                  backgroundColor:
+                      _bySms ? AppColors.primary : const Color(0xFF1E88E5),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16)),
                   elevation: 4,
                 ),
                 child: _loading
-                    ? const SizedBox(width: 24, height: 24,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2.5))
                     : Text(
-                        _bySms ? 'Envoyer le code SMS' : 'Envoyer le lien email',
-                        style: const TextStyle(color: Colors.white, fontSize: 16,
+                        _bySms
+                            ? 'Envoyer le code SMS'
+                            : 'Envoyer le lien email',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold),
                       ),
               ),
@@ -282,8 +308,12 @@ class _MethodCard extends StatelessWidget {
   final bool selected;
   final Color color;
   final VoidCallback onTap;
-  const _MethodCard({required this.icon, required this.label,
-      required this.selected, required this.color, required this.onTap});
+  const _MethodCard(
+      {required this.icon,
+      required this.label,
+      required this.selected,
+      required this.color,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {

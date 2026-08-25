@@ -1,7 +1,8 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../utils/partner_location_validator.dart';
 
 class AdminSellerRequestsPage extends StatefulWidget {
   const AdminSellerRequestsPage({super.key});
@@ -28,24 +29,36 @@ class _AdminSellerRequestsPageState extends State<AdminSellerRequestsPage>
   }
 
   Future<void> _approve(String uid, Map<String, dynamic> data) async {
+    final latitude = (data['lat'] as num?)?.toDouble();
+    final longitude = (data['lng'] as num?)?.toDouble();
+    final locationError =
+        PartnerLocationValidator.validate(latitude, longitude);
+    if (locationError != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(locationError), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
     final db = FirebaseFirestore.instance;
     final batch = db.batch();
 
     batch.set(db.collection('sellers').doc(uid), {
-      'uid':       uid,
+      'uid': uid,
       'ownerName': data['ownerName'] ?? '',
-      'shopName':  data['shopName'] ?? '',
-      'phone':     data['phone'] ?? '',
-      'address':   data['address'] ?? '',
-      'category':  data['category'] ?? '',
-      'lat':       data['lat'] ?? 0.0,
-      'lng':       data['lng'] ?? 0.0,
-      'isActive':  true,
+      'shopName': data['shopName'] ?? '',
+      'phone': data['phone'] ?? '',
+      'address': data['address'] ?? '',
+      'category': data['category'] ?? '',
+      'lat': latitude,
+      'lng': longitude,
+      'isActive': true,
       'createdAt': FieldValue.serverTimestamp(),
     });
 
     batch.update(db.collection('seller_requests').doc(uid), {
-      'status':     'approved',
+      'status': 'approved',
       'approvedAt': FieldValue.serverTimestamp(),
     });
 
@@ -73,8 +86,7 @@ class _AdminSellerRequestsPageState extends State<AdminSellerRequestsPage>
               child: const Text('Annuler')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Refuser',
-                style: TextStyle(color: Colors.red)),
+            child: const Text('Refuser', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -84,7 +96,8 @@ class _AdminSellerRequestsPageState extends State<AdminSellerRequestsPage>
     await FirebaseFirestore.instance
         .collection('seller_requests')
         .doc(uid)
-        .update({'status': 'rejected', 'rejectedAt': FieldValue.serverTimestamp()});
+        .update(
+            {'status': 'rejected', 'rejectedAt': FieldValue.serverTimestamp()});
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -157,8 +170,9 @@ class _SellerRequestsList extends StatelessWidget {
     } else {
       query = FirebaseFirestore.instance
           .collection('seller_requests')
-          .where('status', whereIn: ['approved', 'rejected'])
-          .orderBy('createdAt', descending: true);
+          .where('status', whereIn: ['approved', 'rejected']).orderBy(
+              'createdAt',
+              descending: true);
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -173,7 +187,8 @@ class _SellerRequestsList extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.inbox_rounded, size: 64, color: Colors.grey.shade300),
+                Icon(Icons.inbox_rounded,
+                    size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text('Aucune demande',
                     style: GoogleFonts.urbanist(color: Colors.grey)),
@@ -185,13 +200,14 @@ class _SellerRequestsList extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           itemCount: docs.length,
           itemBuilder: (context, i) {
-            final doc  = docs[i];
+            final doc = docs[i];
             final data = doc.data() as Map<String, dynamic>;
             return _SellerRequestCard(
               uid: doc.id,
               data: data,
               onApprove: () => onApprove(doc.id, data),
-              onReject:  () => onReject(doc.id, data['shopName'] ?? 'cette boutique'),
+              onReject: () =>
+                  onReject(doc.id, data['shopName'] ?? 'cette boutique'),
             );
           },
         );
@@ -215,17 +231,23 @@ class _SellerRequestCard extends StatelessWidget {
 
   Color get _statusColor {
     switch (data['status']) {
-      case 'approved': return const Color(0xFF2E7D32);
-      case 'rejected': return const Color(0xFFC62828);
-      default:         return const Color(0xFFFF8F00);
+      case 'approved':
+        return const Color(0xFF2E7D32);
+      case 'rejected':
+        return const Color(0xFFC62828);
+      default:
+        return const Color(0xFFFF8F00);
     }
   }
 
   String get _statusLabel {
     switch (data['status']) {
-      case 'approved': return 'Approuvé';
-      case 'rejected': return 'Refusé';
-      default:         return 'En attente';
+      case 'approved':
+        return 'Approuvé';
+      case 'rejected':
+        return 'Refusé';
+      default:
+        return 'En attente';
     }
   }
 
@@ -244,7 +266,8 @@ class _SellerRequestCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: isPending
             ? Border.all(
-                color: const Color(0xFFFF8F00).withValues(alpha: 0.5), width: 1.5)
+                color: const Color(0xFFFF8F00).withValues(alpha: 0.5),
+                width: 1.5)
             : null,
         boxShadow: [
           BoxShadow(
@@ -289,7 +312,8 @@ class _SellerRequestCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: _statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -301,11 +325,9 @@ class _SellerRequestCard extends StatelessWidget {
                         fontWeight: FontWeight.w700)),
               ),
             ]),
-
             const SizedBox(height: 14),
             const Divider(height: 1),
             const SizedBox(height: 12),
-
             _infoRow(Icons.person_outline, data['ownerName'] ?? '—'),
             const SizedBox(height: 6),
             _infoRow(Icons.phone_outlined, data['phone'] ?? '—'),
@@ -315,7 +337,6 @@ class _SellerRequestCard extends StatelessWidget {
               const SizedBox(height: 6),
               _infoRow(Icons.calendar_today_outlined, date),
             ],
-
             if (isPending) ...[
               const SizedBox(height: 16),
               Row(children: [
@@ -361,8 +382,8 @@ class _SellerRequestCard extends StatelessWidget {
       const SizedBox(width: 8),
       Expanded(
         child: Text(text,
-            style: GoogleFonts.urbanist(
-                fontSize: 13, color: Colors.grey.shade700),
+            style:
+                GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade700),
             maxLines: 1,
             overflow: TextOverflow.ellipsis),
       ),

@@ -55,7 +55,14 @@ class VoiceTextProcessor {
   // uniquement s'ils apparaissent comme un mot isolé (jamais à l'intérieur
   // d'un autre mot), pour ne jamais couper un vrai mot par erreur.
   static const _fillerWords = {
-    'euh', 'heu', 'hum', 'hmm', 'ben', 'bah', 'genre', 'quoi',
+    'euh',
+    'heu',
+    'hum',
+    'hmm',
+    'ben',
+    'bah',
+    'genre',
+    'quoi',
   };
 
   /// Étape 1 (Partie 3) — nettoyage générique, sans dictionnaire métier.
@@ -89,7 +96,8 @@ class VoiceTextProcessor {
     final words = text.split(' ');
     final kept = <String>[];
     for (final w in words) {
-      final bare = w.toLowerCase().replaceAll(RegExp(r'[^\wàâäéèêëïîôöùûüç]'), '');
+      final bare =
+          w.toLowerCase().replaceAll(RegExp(r'[^\wàâäéèêëïîôöùûüç]'), '');
       if (_fillerWords.contains(bare)) continue;
       kept.add(w);
     }
@@ -101,7 +109,7 @@ class VoiceTextProcessor {
 
   static String _stripAccents(String s) {
     const from = 'àâäéèêëïîôöùûüçÀÂÄÉÈÊËÏÎÔÖÙÛÜÇ';
-    const to   = 'aaaeeeeiioouuucAAAEEEEIIOOUUUC';
+    const to = 'aaaeeeeiioouuucAAAEEEEIIOOUUUC';
     final buf = StringBuffer();
     for (final ch in s.split('')) {
       final idx = from.indexOf(ch);
@@ -110,8 +118,10 @@ class VoiceTextProcessor {
     return buf.toString();
   }
 
-  static String _normalizeKey(String s) =>
-      _stripAccents(s.toLowerCase()).replaceAll(RegExp(r'[^\w\s]'), '').replaceAll(RegExp(r'\s+'), ' ').trim();
+  static String _normalizeKey(String s) => _stripAccents(s.toLowerCase())
+      .replaceAll(RegExp(r'[^\w\s]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 
   /// Distance de Levenshtein classique (nombre minimal d'insertions/
   /// suppressions/substitutions pour passer de [a] à [b]).
@@ -144,7 +154,8 @@ class VoiceTextProcessor {
   /// dégradée.
   static VoiceCorrectionResult correctBusinessTerms(String text) {
     if (text.isEmpty) {
-      return const VoiceCorrectionResult(text: '', exactCorrections: [], fuzzyMatches: []);
+      return const VoiceCorrectionResult(
+          text: '', exactCorrections: [], fuzzyMatches: []);
     }
 
     final exact = <String>[];
@@ -189,13 +200,15 @@ class VoiceTextProcessor {
       final bare = raw.replaceAll(RegExp(r'[^\wàâäéèêëïîôöùûüç-]'), '');
       if (bare.length < 4) continue; // mots trop courts = trop de faux positifs
       final normalized = _normalizeKey(bare);
-      if (AzVoiceDictionary.knownTerms.any((t) => _normalizeKey(t) == normalized)) {
+      if (AzVoiceDictionary.knownTerms
+          .any((t) => _normalizeKey(t) == normalized)) {
         continue; // déjà exact, rien à corriger
       }
       String? bestTerm;
       var bestDist = 999;
       for (final term in AzVoiceDictionary.knownTerms) {
-        if (term.contains(' ')) continue; // termes composés hors fuzzy single-mot
+        if (term.contains(' '))
+          continue; // termes composés hors fuzzy single-mot
         final termNorm = _normalizeKey(term);
         // Seuil resserré : à distance 2 sur un terme de 6-7 lettres, un mot
         // français courant et sans rapport (ex. "livre") finissait par
@@ -214,7 +227,8 @@ class VoiceTextProcessor {
       }
     }
 
-    return VoiceCorrectionResult(text: working, exactCorrections: exact, fuzzyMatches: fuzzy);
+    return VoiceCorrectionResult(
+        text: working, exactCorrections: exact, fuzzyMatches: fuzzy);
   }
 
   /// Remplace les occurrences de [pattern] (déjà calculé sur la version

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -36,6 +36,9 @@ class SimpleServicePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final directoryMessage = serviceType == 'taxi_nuit'
+        ? 'Annuaire de chauffeurs. Appelez directement le chauffeur pour convenir du trajet.'
+        : 'Annuaire de prestataires. Appelez directement le prestataire pour convenir du service.';
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       body: CustomScrollView(
@@ -97,6 +100,15 @@ class SimpleServicePage extends StatelessWidget {
           ),
 
           // Liste
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Text(
+                directoryMessage,
+                style: const TextStyle(color: Colors.black54, fontSize: 13),
+              ),
+            ),
+          ),
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection("simple_services")
@@ -122,7 +134,8 @@ class SimpleServicePage extends StatelessWidget {
                         const SizedBox(height: 16),
                         Text(
                           context.tr('no_provider'),
-                          style: const TextStyle(fontSize: 16, color: Colors.grey),
+                          style:
+                              const TextStyle(fontSize: 16, color: Colors.grey),
                         ),
                         const SizedBox(height: 6),
                         Text(
@@ -141,8 +154,7 @@ class SimpleServicePage extends StatelessWidget {
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, i) {
-                      final data =
-                          docs[i].data() as Map<String, dynamic>;
+                      final data = docs[i].data() as Map<String, dynamic>;
                       final name = data["name"] ?? "Sans nom";
                       final phone = data["phone"] ?? "";
 
@@ -190,7 +202,8 @@ class SimpleServicePage extends StatelessWidget {
                                   width: double.infinity,
                                   child: Container(
                                     decoration: BoxDecoration(
-                                      gradient: LinearGradient(colors: gradient),
+                                      gradient:
+                                          LinearGradient(colors: gradient),
                                     ),
                                     child: Center(
                                         child: Icon(icon,
@@ -205,7 +218,8 @@ class SimpleServicePage extends StatelessWidget {
                                 children: [
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           name,

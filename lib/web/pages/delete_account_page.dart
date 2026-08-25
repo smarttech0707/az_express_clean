@@ -30,7 +30,9 @@ class WebDeleteAccountPage extends StatelessWidget {
             ]),
           ),
           const Positioned(
-            top: 0, left: 0, right: 0,
+            top: 0,
+            left: 0,
+            right: 0,
             child: WebNavBar(currentRoute: '/delete-account'),
           ),
         ],
@@ -44,11 +46,12 @@ class WebDeleteAccountPage extends StatelessWidget {
       decoration: const BoxDecoration(gradient: kHeroGradient),
       child: Column(children: [
         Text('Suppression de compte AZ Express',
-          style: kH1Style(ctx), textAlign: TextAlign.center),
+            style: kH1Style(ctx), textAlign: TextAlign.center),
         const SizedBox(height: 12),
-        Text('Demandez la suppression de votre compte et de vos données, sans avoir besoin de réinstaller l\'application.',
-          style: GoogleFonts.inter(fontSize: 15, color: kTextMuted),
-          textAlign: TextAlign.center),
+        Text(
+            'Demandez la suppression de votre compte et de vos données, sans avoir besoin de réinstaller l\'application.',
+            style: GoogleFonts.inter(fontSize: 15, color: kTextMuted),
+            textAlign: TextAlign.center),
       ]),
     );
   }
@@ -67,7 +70,8 @@ class _DeleteAccountBody extends StatelessWidget {
           children: [
             const _InfoBlock(
               title: 'Procédure',
-              body: 'Renseignez le formulaire ci-dessous avec le rôle de votre compte '
+              body:
+                  'Renseignez le formulaire ci-dessous avec le rôle de votre compte '
                   '(client, livreur, vendeur, restaurant, pharmacie, boulangerie, agent '
                   'Ekbine, agent immobilier ou patron de flotte) et le numéro de téléphone '
                   'associé à votre compte AZ Express. Votre demande est transmise à notre '
@@ -75,7 +79,8 @@ class _DeleteAccountBody extends StatelessWidget {
             ),
             const _InfoBlock(
               title: 'Délai de traitement',
-              body: 'Votre compte est désactivé sous 48 heures ouvrables suivant la demande. '
+              body:
+                  'Votre compte est désactivé sous 48 heures ouvrables suivant la demande. '
                   'Vos données personnelles sont ensuite effacées sous 30 jours, sauf '
                   'obligation légale de conservation (ex. historique des transactions '
                   'financières, conservé le temps requis par la réglementation applicable). '
@@ -108,11 +113,13 @@ class _InfoBlock extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: GoogleFonts.inter(
-            fontSize: 17, fontWeight: FontWeight.w700, color: kWhite)),
+          Text(title,
+              style: GoogleFonts.inter(
+                  fontSize: 17, fontWeight: FontWeight.w700, color: kWhite)),
           const SizedBox(height: 8),
-          Text(body, style: GoogleFonts.inter(
-            fontSize: 14, color: kTextMuted, height: 1.7)),
+          Text(body,
+              style: GoogleFonts.inter(
+                  fontSize: 14, color: kTextMuted, height: 1.7)),
         ],
       ),
     );
@@ -146,7 +153,10 @@ class _DeleteAccountFormState extends State<_DeleteAccountForm> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       await AccountDeletionService.submitRequest(
         role: _role,
@@ -155,7 +165,10 @@ class _DeleteAccountFormState extends State<_DeleteAccountForm> {
         reason: _reasonCtrl.text.trim(),
         requestedVia: 'web',
       );
-      setState(() { _loading = false; _success = true; });
+      setState(() {
+        _loading = false;
+        _success = true;
+      });
     } catch (e) {
       setState(() {
         _loading = false;
@@ -176,10 +189,13 @@ class _DeleteAccountFormState extends State<_DeleteAccountForm> {
   Widget _successView() {
     return Column(children: [
       const Icon(Icons.check_circle_rounded, color: kSuccess, size: 56)
-          .animate().scale(duration: 600.ms, curve: Curves.elasticOut),
+          .animate()
+          .scale(duration: 600.ms, curve: Curves.elasticOut),
       const SizedBox(height: 20),
-      Text('Demande envoyée', style: GoogleFonts.inter(
-        fontSize: 22, fontWeight: FontWeight.w700, color: kWhite), textAlign: TextAlign.center),
+      Text('Demande envoyée',
+          style: GoogleFonts.inter(
+              fontSize: 22, fontWeight: FontWeight.w700, color: kWhite),
+          textAlign: TextAlign.center),
       const SizedBox(height: 10),
       Text(
         'Votre compte sera désactivé sous 48 heures ouvrables. '
@@ -194,8 +210,9 @@ class _DeleteAccountFormState extends State<_DeleteAccountForm> {
     return Form(
       key: _formKey,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Demande de suppression', style: GoogleFonts.inter(
-          fontSize: 20, fontWeight: FontWeight.w700, color: kWhite)),
+        Text('Demande de suppression',
+            style: GoogleFonts.inter(
+                fontSize: 20, fontWeight: FontWeight.w700, color: kWhite)),
         const SizedBox(height: 24),
         DropdownButtonFormField<String>(
           initialValue: _role,
@@ -240,7 +257,8 @@ class _DeleteAccountFormState extends State<_DeleteAccountForm> {
         ),
         if (_error != null) ...[
           const SizedBox(height: 12),
-          Text(_error!, style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 13)),
+          Text(_error!,
+              style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 13)),
         ],
         const SizedBox(height: 24),
         SizedBox(
@@ -248,15 +266,21 @@ class _DeleteAccountFormState extends State<_DeleteAccountForm> {
           child: ElevatedButton(
             onPressed: _loading ? null : _submit,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red, foregroundColor: kWhite,
+              backgroundColor: Colors.red,
+              foregroundColor: kWhite,
               padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
             ),
             child: _loading
-                ? const SizedBox(width: 20, height: 20,
-                    child: CircularProgressIndicator(color: kWhite, strokeWidth: 2))
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        color: kWhite, strokeWidth: 2))
                 : Text('Demander la suppression de mon compte',
-                    style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700)),
+                    style: GoogleFonts.inter(
+                        fontSize: 15, fontWeight: FontWeight.w700)),
           ),
         ),
       ]),

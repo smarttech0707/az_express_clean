@@ -4,7 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:permission_handler/permission_handler.dart' show openAppSettings;
+import 'package:permission_handler/permission_handler.dart'
+    show openAppSettings;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/order_model.dart';
@@ -21,7 +22,7 @@ import '../theme/app_theme.dart';
 /// Cet écran s'abonne au stream de positions pour l'affichage uniquement.
 class DriverTrackingScreen extends StatefulWidget {
   final OrderModel order;
-  final String     driverId;
+  final String driverId;
 
   const DriverTrackingScreen({
     super.key,
@@ -35,40 +36,39 @@ class DriverTrackingScreen extends StatefulWidget {
 
 class _DriverTrackingScreenState extends State<DriverTrackingScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-
   // ── Carte ──────────────────────────────────────────────────────────────────
-  GoogleMapController?  _mapCtrl;
-  Set<Marker>           _markers   = {};
-  Set<Polyline>         _polylines = {};
-  BitmapDescriptor?     _motoIcon;
-  BitmapDescriptor?     _clientIcon;
-  BitmapDescriptor?     _destIcon;
+  GoogleMapController? _mapCtrl;
+  Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
+  BitmapDescriptor? _motoIcon;
+  BitmapDescriptor? _clientIcon;
+  BitmapDescriptor? _destIcon;
 
   // ── Position driver ────────────────────────────────────────────────────────
-  LatLng?  _driverPos;
-  bool     _followDriver   = true;
-  bool     _firstFitDone   = false;
+  LatLng? _driverPos;
+  bool _followDriver = true;
+  bool _firstFitDone = false;
 
   // ── Abonnement au stream DLS (lecture seule — plus d'écriture Firestore ici)
   StreamSubscription<Position>? _posSub;
 
   // ── Routes ─────────────────────────────────────────────────────────────────
   RouteModel _routeToClient = RouteModel.empty();
-  RouteModel _routeToDest   = RouteModel.empty();
-  bool       _routeLoading  = false;
-  LatLng?    _lastRouteCalcPos;
+  RouteModel _routeToDest = RouteModel.empty();
+  bool _routeLoading = false;
+  LatLng? _lastRouteCalcPos;
   static const _recalcThresholdM = 80.0;
 
   // ── Points de référence ────────────────────────────────────────────────────
   late LatLng _clientPos;
-  LatLng?     _destPos;
+  LatLng? _destPos;
 
   // ── Indicateur GPS ─────────────────────────────────────────────────────────
   bool _gpsActive = false;
 
   // ── Animation pulsation GPS ────────────────────────────────────────────────
   late AnimationController _pulseCtrl;
-  late Animation<double>   _pulse;
+  late Animation<double> _pulse;
 
   @override
   void initState() {
@@ -77,15 +77,15 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 
     final o = widget.order;
     _clientPos = LatLng(o.latitude, o.longitude);
-    _destPos   = (o.destLat != null && o.destLng != null)
+    _destPos = (o.destLat != null && o.destLng != null)
         ? LatLng(o.destLat!, o.destLng!)
         : null;
 
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900))
       ..repeat(reverse: true);
-    _pulse = Tween<double>(begin: 0.3, end: 1.0).animate(
-        CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+    _pulse = Tween<double>(begin: 0.3, end: 1.0)
+        .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
 
     _loadIcons();
     _subscribeToPositionStream();
@@ -113,9 +113,9 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   // ── Chargement icônes ──────────────────────────────────────────────────────
 
   Future<void> _loadIcons() async {
-    _motoIcon   = await DriverMarkerIcon.getMotoIcon(size: 56);
+    _motoIcon = await DriverMarkerIcon.getMotoIcon(size: 56);
     _clientIcon = DriverMarkerIcon.getClientIcon();
-    _destIcon   = DriverMarkerIcon.getDestIcon();
+    _destIcon = DriverMarkerIcon.getDestIcon();
     if (mounted) _rebuildMap();
   }
 
@@ -177,13 +177,13 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
     setState(() => _routeLoading = true);
 
     _routeToClient = await GoogleRoutesService.getRouteModel(
-      origin:      from,
+      origin: from,
       destination: _clientPos,
     );
 
     if (_destPos != null) {
       _routeToDest = await GoogleRoutesService.getRouteModel(
-        origin:      _clientPos,
+        origin: _clientPos,
         destination: _destPos!,
       );
     }
@@ -204,10 +204,10 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   void _rebuildMap() {
     if (!mounted) return;
     setState(() {
-      _markers   = _buildMarkers();
+      _markers = _buildMarkers();
       _polylines = RoutePolylineBuilder.buildForDriver(
         routeToClient: _routeToClient,
-        routeToDest:   _routeToDest,
+        routeToDest: _routeToDest,
       );
     });
   }
@@ -215,13 +215,13 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   Set<Marker> _buildMarkers() {
     if (_driverPos == null) return {};
     return MapMarkersBuilder.buildForDriver(
-      driverPos:   _driverPos!,
-      clientPos:   _clientPos,
+      driverPos: _driverPos!,
+      clientPos: _clientPos,
       destination: _destPos,
-      driverIcon:  _motoIcon,
-      clientIcon:  _clientIcon ?? DriverMarkerIcon.getClientIcon(),
-      destIcon:    _destIcon   ?? DriverMarkerIcon.getDestIcon(),
-      clientName:  widget.order.clientName,
+      driverIcon: _motoIcon,
+      clientIcon: _clientIcon ?? DriverMarkerIcon.getClientIcon(),
+      destIcon: _destIcon ?? DriverMarkerIcon.getDestIcon(),
+      clientName: widget.order.clientName,
       clientPhone: widget.order.clientPhone,
     );
   }
@@ -249,8 +249,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   // ── Navigation externe ────────────────────────────────────────────────────
 
   Future<void> _navigateTo(LatLng dest) async {
-    final url = Uri.parse(
-        'https://www.google.com/maps/dir/?api=1'
+    final url = Uri.parse('https://www.google.com/maps/dir/?api=1'
         '&destination=${dest.latitude},${dest.longitude}'
         '&travelmode=driving');
     if (await canLaunchUrl(url)) {
@@ -290,8 +289,8 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Annuler',
-                style: TextStyle(color: Colors.grey.shade600)),
+            child:
+                Text('Annuler', style: TextStyle(color: Colors.grey.shade600)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -305,7 +304,8 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
               if (permanent) {
                 await openAppSettings();
               } else {
-                await DriverLocationService.instance.startTracking(widget.driverId);
+                await DriverLocationService.instance
+                    .startTracking(widget.driverId);
                 if (mounted) _subscribeToPositionStream();
               }
             },
@@ -322,9 +322,9 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final hasDest    = _destPos != null;
-    final topPad     = MediaQuery.of(context).padding.top;
-    final bottomPad  = MediaQuery.of(context).padding.bottom;
+    final hasDest = _destPos != null;
+    final topPad = MediaQuery.of(context).padding.top;
+    final bottomPad = MediaQuery.of(context).padding.bottom;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -333,20 +333,20 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
         body: _driverPos == null
             ? _buildLoadingScreen()
             : Stack(children: [
-
                 // ── Carte ──────────────────────────────────────────────────
                 GoogleMap(
-                  initialCameraPosition: CameraPosition(
-                      target: _clientPos, zoom: 14),
-                  markers:             _markers,
-                  polylines:           _polylines,
-                  myLocationEnabled:   false,
+                  initialCameraPosition:
+                      CameraPosition(target: _clientPos, zoom: 14),
+                  markers: _markers,
+                  polylines: _polylines,
+                  myLocationEnabled: false,
                   zoomControlsEnabled: false,
-                  compassEnabled:      true,
-                  mapToolbarEnabled:   false,
+                  compassEnabled: true,
+                  mapToolbarEnabled: false,
                   onMapCreated: (ctrl) {
                     _mapCtrl = ctrl;
-                    Future.delayed(const Duration(milliseconds: 600), _fitAllVisible);
+                    Future.delayed(
+                        const Duration(milliseconds: 600), _fitAllVisible);
                   },
                   onCameraMoveStarted: () {
                     if (_followDriver) setState(() => _followDriver = false);
@@ -355,17 +355,20 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 
                 // ── Header transparent ──────────────────────────────────────
                 Positioned(
-                  top: topPad + 10, left: 16, right: 16,
+                  top: topPad + 10,
+                  left: 16,
+                  right: 16,
                   child: Row(children: [
                     _FloatingBtn(
-                      icon:  Icons.arrow_back_rounded,
+                      icon: Icons.arrow_back_rounded,
                       onTap: () => Navigator.pop(context),
                     ),
                     const Spacer(),
                     // C3 — Indicateur GPS réel (plus jamais "actif" quand indisponible)
                     _GpsStatusChip(
                       isActive: _gpsActive &&
-                          DriverLocationService.instance.gpsState == GpsTrackingState.active,
+                          DriverLocationService.instance.gpsState ==
+                              GpsTrackingState.active,
                       pulse: _pulse,
                     ),
                   ]),
@@ -377,11 +380,10 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
                   bottom: 300 + bottomPad,
                   child: Column(children: [
                     _FloatingBtn(
-                      icon:    _followDriver
+                      icon: _followDriver
                           ? Icons.navigation_rounded
                           : Icons.navigation_outlined,
-                      bgColor: _followDriver
-                          ? AppColors.primary : Colors.white,
+                      bgColor: _followDriver ? AppColors.primary : Colors.white,
                       iconColor: _followDriver ? Colors.white : Colors.black87,
                       onTap: () {
                         setState(() => _followDriver = !_followDriver);
@@ -390,13 +392,14 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
                     ),
                     const SizedBox(height: 10),
                     _FloatingBtn(
-                      icon:  Icons.zoom_out_map_rounded,
+                      icon: Icons.zoom_out_map_rounded,
                       onTap: _fitAllVisible,
                     ),
                     if (_routeLoading) ...[
                       const SizedBox(height: 10),
                       const SizedBox(
-                        width: 44, height: 44,
+                        width: 44,
+                        height: 44,
                         child: CircularProgressIndicator(
                             color: AppColors.primary, strokeWidth: 3),
                       ),
@@ -406,7 +409,9 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 
                 // ── Panneau bas ──────────────────────────────────────────────
                 Positioned(
-                  bottom: 0, left: 0, right: 0,
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
                   child: _buildBottomPanel(hasDest, bottomPad),
                 ),
               ]),
@@ -419,21 +424,24 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   Widget _buildBottomPanel(bool hasDest, double bottomPad) {
     return Container(
       decoration: const BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
-          BoxShadow(color: Color(0x22000000), blurRadius: 20, offset: Offset(0, -4)),
+          BoxShadow(
+              color: Color(0x22000000), blurRadius: 20, offset: Offset(0, -4)),
         ],
       ),
       padding: EdgeInsets.fromLTRB(20, 16, 20, bottomPad + 16),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-
         // Poignée
-        Center(child: Container(
-          width: 36, height: 4,
+        Center(
+            child: Container(
+          width: 36,
+          height: 4,
           margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
-            color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4)),
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(4)),
         )),
 
         // ── GPS actif ────────────────────────────────────────────────────────
@@ -441,11 +449,10 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
           FadeTransition(
             opacity: _pulse,
             child: Container(
-              width: 12, height: 12,
+              width: 12,
+              height: 12,
               decoration: BoxDecoration(
-                color: _gpsActive
-                    ? const Color(0xFF22C55E)
-                    : Colors.orange,
+                color: _gpsActive ? const Color(0xFF22C55E) : Colors.orange,
                 shape: BoxShape.circle,
               ),
             ),
@@ -457,10 +464,9 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
                   ? 'Position transmise en temps réel'
                   : 'Acquisition GPS en cours…',
               style: GoogleFonts.urbanist(
-                fontSize: 12, fontWeight: FontWeight.w600,
-                color: _gpsActive
-                    ? const Color(0xFF22C55E)
-                    : Colors.orange,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _gpsActive ? const Color(0xFF22C55E) : Colors.orange,
               ),
             ),
           ),
@@ -471,22 +477,22 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
         // ── Stats ────────────────────────────────────────────────────────────
         Row(children: [
           _StatTile(
-            label:    'Vers le client',
+            label: 'Vers le client',
             distance: _routeToClient.distanceText,
-            eta:      _routeToClient.etaText,
-            color:    AppColors.primary,
-            icon:     Icons.person_pin_circle_rounded,
+            eta: _routeToClient.etaText,
+            color: AppColors.primary,
+            icon: Icons.person_pin_circle_rounded,
           ),
           if (hasDest) ...[
             const SizedBox(width: 12),
             _StatTile(
-              label:    'Total trajet',
+              label: 'Total trajet',
               distance: RouteModel.formatDistance(
                   _routeToClient.distanceKm + _routeToDest.distanceKm),
-              eta:      RouteModel.formatEta(
+              eta: RouteModel.formatEta(
                   _routeToClient.etaMinutes + _routeToDest.etaMinutes),
-              color:    const Color(0xFF1565C0),
-              icon:     Icons.place_rounded,
+              color: const Color(0xFF1565C0),
+              icon: Icons.place_rounded,
             ),
           ],
         ]),
@@ -495,7 +501,8 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 
         // ── Boutons navigation ───────────────────────────────────────────────
         Row(children: [
-          Expanded(child: ElevatedButton.icon(
+          Expanded(
+              child: ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
@@ -505,15 +512,17 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
               elevation: 0,
             ),
             onPressed: () => _navigateTo(_clientPos),
-            icon:  const Icon(Icons.navigation_rounded, size: 18),
+            icon: const Icon(Icons.navigation_rounded, size: 18),
             label: Text(
               hasDest ? 'Vers le client' : 'Naviguer',
-              style: GoogleFonts.urbanist(fontWeight: FontWeight.w700, fontSize: 14),
+              style: GoogleFonts.urbanist(
+                  fontWeight: FontWeight.w700, fontSize: 14),
             ),
           )),
           if (hasDest && _destPos != null) ...[
             const SizedBox(width: 10),
-            Expanded(child: ElevatedButton.icon(
+            Expanded(
+                child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1565C0),
                 foregroundColor: Colors.white,
@@ -523,9 +532,10 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
                 elevation: 0,
               ),
               onPressed: () => _navigateTo(_destPos!),
-              icon:  const Icon(Icons.place_rounded, size: 18),
+              icon: const Icon(Icons.place_rounded, size: 18),
               label: Text('Destination',
-                  style: GoogleFonts.urbanist(fontWeight: FontWeight.w700, fontSize: 14)),
+                  style: GoogleFonts.urbanist(
+                      fontWeight: FontWeight.w700, fontSize: 14)),
             )),
           ],
         ]),
@@ -536,17 +546,21 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   // ── Écran chargement GPS ──────────────────────────────────────────────────
 
   Widget _buildLoadingScreen() => Scaffold(
-    backgroundColor: Colors.white,
-    body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const CircularProgressIndicator(color: AppColors.primary, strokeWidth: 3),
-      const SizedBox(height: 20),
-      Text('Localisation GPS…',
-          style: GoogleFonts.urbanist(fontSize: 16, fontWeight: FontWeight.w600)),
-      const SizedBox(height: 8),
-      Text('Veuillez patienter',
-          style: GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade500)),
-    ])),
-  );
+        backgroundColor: Colors.white,
+        body: Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const CircularProgressIndicator(
+              color: AppColors.primary, strokeWidth: 3),
+          const SizedBox(height: 20),
+          Text('Localisation GPS…',
+              style: GoogleFonts.urbanist(
+                  fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text('Veuillez patienter',
+              style: GoogleFonts.urbanist(
+                  fontSize: 13, color: Colors.grey.shade500)),
+        ])),
+      );
 
   @override
   void dispose() {
@@ -561,101 +575,120 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 // ── Chip GPS status ───────────────────────────────────────────────────────────
 
 class _GpsStatusChip extends StatelessWidget {
-  final bool              isActive;
+  final bool isActive;
   final Animation<double> pulse;
   const _GpsStatusChip({required this.isActive, required this.pulse});
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    decoration: BoxDecoration(
-      color:        Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      boxShadow: const [
-        BoxShadow(color: Color(0x22000000), blurRadius: 8),
-      ],
-    ),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      FadeTransition(
-        opacity: isActive ? pulse : const AlwaysStoppedAnimation(1.0),
-        child: Container(
-          width: 8, height: 8,
-          decoration: BoxDecoration(
-            color: isActive ? const Color(0xFF22C55E) : Colors.orange,
-            shape: BoxShape.circle,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(color: Color(0x22000000), blurRadius: 8),
+          ],
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          FadeTransition(
+            opacity: isActive ? pulse : const AlwaysStoppedAnimation(1.0),
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: isActive ? const Color(0xFF22C55E) : Colors.orange,
+                shape: BoxShape.circle,
+              ),
+            ),
           ),
-        ),
-      ),
-      const SizedBox(width: 6),
-      Text(
-        isActive ? 'GPS actif' : 'GPS…',
-        style: GoogleFonts.urbanist(
-          fontSize: 12, fontWeight: FontWeight.w600,
-          color: isActive ? const Color(0xFF22C55E) : Colors.orange,
-        ),
-      ),
-    ]),
-  );
+          const SizedBox(width: 6),
+          Text(
+            isActive ? 'GPS actif' : 'GPS…',
+            style: GoogleFonts.urbanist(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isActive ? const Color(0xFF22C55E) : Colors.orange,
+            ),
+          ),
+        ]),
+      );
 }
 
 // ── Widgets helpers ───────────────────────────────────────────────────────────
 
 class _FloatingBtn extends StatelessWidget {
-  final IconData  icon;
-  final Color     bgColor, iconColor;
+  final IconData icon;
+  final Color bgColor, iconColor;
   final VoidCallback onTap;
 
   const _FloatingBtn({
     required this.icon,
     required this.onTap,
-    this.bgColor   = Colors.white,
+    this.bgColor = Colors.white,
     this.iconColor = Colors.black87,
   });
 
   @override
   Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: 44, height: 44,
-      decoration: BoxDecoration(
-        color: bgColor, shape: BoxShape.circle,
-        boxShadow: const [
-          BoxShadow(color: Color(0x22000000), blurRadius: 8, offset: Offset(0, 2)),
-        ],
-      ),
-      child: Icon(icon, color: iconColor, size: 20),
-    ),
-  );
+        onTap: onTap,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: bgColor,
+            shape: BoxShape.circle,
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x22000000),
+                  blurRadius: 8,
+                  offset: Offset(0, 2)),
+            ],
+          ),
+          child: Icon(icon, color: iconColor, size: 20),
+        ),
+      );
 }
 
 class _StatTile extends StatelessWidget {
-  final String   label, distance, eta;
-  final Color    color;
+  final String label, distance, eta;
+  final Color color;
   final IconData icon;
   const _StatTile({
-    required this.label, required this.distance, required this.eta,
-    required this.color, required this.icon,
+    required this.label,
+    required this.distance,
+    required this.eta,
+    required this.color,
+    required this.icon,
   });
 
   @override
-  Widget build(BuildContext context) => Expanded(child: Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color:  color.withValues(alpha: 0.07),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: color.withValues(alpha: 0.2)),
-    ),
-    child: Row(children: [
-      Icon(icon, color: color, size: 22),
-      const SizedBox(width: 10),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: GoogleFonts.urbanist(
-            fontSize: 11, color: Colors.grey.shade500)),
-        Text(distance, style: GoogleFonts.urbanist(
-            fontSize: 15, fontWeight: FontWeight.w800, color: color)),
-        Text(eta, style: GoogleFonts.urbanist(
-            fontSize: 11, color: Colors.grey.shade500)),
-      ])),
-    ]),
-  ));
+  Widget build(BuildContext context) => Expanded(
+          child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Row(children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(label,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 11, color: Colors.grey.shade500)),
+                Text(distance,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: color)),
+                Text(eta,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 11, color: Colors.grey.shade500)),
+              ])),
+        ]),
+      ));
 }

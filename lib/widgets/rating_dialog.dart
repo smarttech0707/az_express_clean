@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
@@ -22,7 +22,12 @@ class _RatingDialogState extends State<RatingDialog> {
   bool _sending = false;
 
   static const _labels = [
-    "", "Très mauvais", "Mauvais", "Correct", "Bien", "Excellent !"
+    "",
+    "Très mauvais",
+    "Mauvais",
+    "Correct",
+    "Bien",
+    "Excellent !"
   ];
 
   Future<void> _submit() async {
@@ -35,8 +40,7 @@ class _RatingDialogState extends State<RatingDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -46,14 +50,12 @@ class _RatingDialogState extends State<RatingDialog> {
             const SizedBox(height: 12),
             const Text(
               "Livraison effectuée !",
-              style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             Text(
               "Comment était ${widget.driverName} ?",
-              style:
-                  const TextStyle(color: Colors.grey, fontSize: 14),
+              style: const TextStyle(color: Colors.grey, fontSize: 14),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
@@ -66,12 +68,9 @@ class _RatingDialogState extends State<RatingDialog> {
                 return GestureDetector(
                   onTap: () => setState(() => _selected = star),
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: Icon(
-                      star <= _selected
-                          ? Icons.star
-                          : Icons.star_border,
+                      star <= _selected ? Icons.star : Icons.star_border,
                       color: Colors.amber,
                       size: 40,
                     ),
@@ -102,9 +101,7 @@ class _RatingDialogState extends State<RatingDialog> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: ScaleButton(
-                    onPressed: (_selected == 0 || _sending)
-                        ? null
-                        : _submit,
+                    onPressed: (_selected == 0 || _sending) ? null : _submit,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,

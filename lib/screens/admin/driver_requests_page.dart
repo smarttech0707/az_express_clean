@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../theme/app_theme.dart';
 
@@ -11,8 +11,8 @@ class DriverRequestsPage extends StatelessWidget {
     final uid = data["uid"] ?? doc.id;
 
     // Vérifier si déjà approuvé (évite la double-approbation)
-    final existing = await FirebaseFirestore.instance
-        .collection("livreurs").doc(uid).get();
+    final existing =
+        await FirebaseFirestore.instance.collection("livreurs").doc(uid).get();
     if (existing.exists) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -28,21 +28,21 @@ class DriverRequestsPage extends StatelessWidget {
     final batch = FirebaseFirestore.instance.batch();
 
     batch.set(FirebaseFirestore.instance.collection("livreurs").doc(uid), {
-      "name":        data["name"]        ?? "",
-      "phone":       data["phone"]       ?? "",
-      "email":       data["email"]       ?? "",
+      "name": data["name"] ?? "",
+      "phone": data["phone"] ?? "",
+      "email": data["email"] ?? "",
       "identifiant": data["identifiant"] ?? "",
-      "photoUrl":    data["photoUrl"]    ?? "",
-      "idPhotoUrl":  data["idPhotoUrl"]  ?? "",
-      "selfieUrl":   data["selfieUrl"]   ?? "",
-      "wallet":      500,
-      "isOnline":    false,
-      "lat":         0,
-      "lng":         0,
-      "deliveries":  0,
-      "avgRating":   0.0,
+      "photoUrl": data["photoUrl"] ?? "",
+      "idPhotoUrl": data["idPhotoUrl"] ?? "",
+      "selfieUrl": data["selfieUrl"] ?? "",
+      "wallet": 500,
+      "isOnline": false,
+      "lat": 0,
+      "lng": 0,
+      "deliveries": 0,
+      "avgRating": 0.0,
       "ratingCount": 0,
-      "createdAt":   Timestamp.now(),
+      "createdAt": Timestamp.now(),
     });
 
     batch.delete(doc.reference);
@@ -52,7 +52,8 @@ class DriverRequestsPage extends StatelessWidget {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("${data['name']} approuvé — peut maintenant se connecter"),
+          content:
+              Text("${data['name']} approuvé — peut maintenant se connecter"),
           backgroundColor: Colors.green,
         ),
       );
@@ -114,7 +115,7 @@ class DriverRequestsPage extends StatelessWidget {
 
           return ListView.builder(
             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(14),
             itemCount: requests.length,
             itemBuilder: (context, index) {
               final doc = requests[index];
@@ -146,17 +147,15 @@ class DriverRequestsPage extends StatelessWidget {
                                           borderRadius:
                                               BorderRadius.circular(16)),
                                       child: ClipRRect(
-                                        borderRadius:
-                                            BorderRadius.circular(16),
-                                        child: Image.network(
-                                            data["photoUrl"]),
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: Image.network(data["photoUrl"]),
                                       ),
                                     ),
                                   ),
                                   child: CircleAvatar(
                                     radius: 28,
-                                    backgroundImage: NetworkImage(
-                                        data["photoUrl"]),
+                                    backgroundImage:
+                                        NetworkImage(data["photoUrl"]),
                                   ),
                                 )
                               : Container(
@@ -202,8 +201,7 @@ class DriverRequestsPage extends StatelessWidget {
                             decoration: BoxDecoration(
                               color: Colors.orange.shade50,
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                  color: Colors.orange.shade200),
+                              border: Border.all(color: Colors.orange.shade200),
                             ),
                             child: const Text(
                               "En attente",

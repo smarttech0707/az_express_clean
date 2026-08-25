@@ -159,6 +159,28 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
         ...(transition.requiresDate ? { proposedDate } : {}),
         resolvedAt:   admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      // Master Prompt "GPS privé V2" — accorder l'accès à la localisation
+      // exacte UNIQUEMENT sur une confirmation réelle de visite, dans la
+      // MÊME transaction que le changement de statut : jamais un statut
+      // "confirmed" sans l'accès correspondant, ni l'inverse. La transition
+      // `decline`/`cancel` ne part jamais du statut `confirmed` (voir
+      // VISIT_TRANSITIONS ci-dessus), donc aucun accès déjà accordé ne peut
+      // être annulé par ce chemin — rien à révoquer explicitement ici.
+      if (transition.to === 'confirmed') {
+        const accessRef = db.collection('real_estate_location_access')
+          .doc(`${data.listingId}_${data.clientId}`);
+        tx.set(accessRef, {
+          listingId:      data.listingId,
+          clientId:       data.clientId,
+          grantedBy:      'respondToVisitRequest',
+          visitRequestId: requestId,
+          isActive:       true,
+          expiresAt:      null,
+          createdAt:      admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt:      admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
     });
 
     await logAudit({

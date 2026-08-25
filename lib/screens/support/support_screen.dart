@@ -8,7 +8,33 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../constants/app_constants.dart';
+import '../../constants/support_categories.dart';
 import '../../theme/app_theme.dart';
+
+Map<String, dynamic> buildSupportTicketData({
+  required String userId,
+  required String subject,
+  required String message,
+  required String category,
+  required Object createdAt,
+  String? screenshotUrl,
+}) =>
+    {
+      'userId': userId,
+      'subject': subject,
+      'message': message,
+      'category': category,
+      'status': 'open',
+      'screenshotUrl': screenshotUrl,
+      'createdAt': createdAt,
+      'messages': [
+        {
+          'sender': 'user',
+          'text': message,
+          'timestamp': DateTime.now().toIso8601String(),
+        }
+      ],
+    };
 
 class SupportScreen extends StatefulWidget {
   const SupportScreen({super.key});
@@ -77,20 +103,12 @@ class _NewTicketTab extends StatefulWidget {
 class _NewTicketTabState extends State<_NewTicketTab> {
   final _subjectCtrl = TextEditingController();
   final _messageCtrl = TextEditingController();
-  String _category   = 'Livraison';
-  bool   _sending    = false;
+  String _category = 'Livraison';
+  bool _sending = false;
   Uint8List? _screenshotBytes;
-  String?    _screenshotName;
+  String? _screenshotName;
 
-  static const _categories = [
-    'Livraison',
-    'Paiement / Wallet',
-    'Commande',
-    'Compte',
-    'E-Kbine',
-    'Marketplace',
-    'Autre',
-  ];
+  static const _categories = SupportCategories.all;
 
   @override
   void dispose() {
@@ -110,13 +128,14 @@ class _NewTicketTabState extends State<_NewTicketTab> {
         final bytes = await picked.readAsBytes();
         setState(() {
           _screenshotBytes = bytes;
-          _screenshotName  = picked.name;
+          _screenshotName = picked.name;
         });
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Impossible d'accéder à la galerie. Vérifiez les permissions."),
+          content: Text(
+              "Impossible d'accéder à la galerie. Vérifiez les permissions."),
           backgroundColor: Colors.orange,
         ));
       }
@@ -138,12 +157,12 @@ class _NewTicketTabState extends State<_NewTicketTab> {
     setState(() => _sending = true);
 
     try {
-      final uid  = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
       String? screenshotUrl;
 
       if (_screenshotBytes != null) {
-        final ref = FirebaseStorage.instance
-            .ref('support_screenshots/$uid/${DateTime.now().millisecondsSinceEpoch}.jpg');
+        final ref = FirebaseStorage.instance.ref(
+            'support_screenshots/$uid/${DateTime.now().millisecondsSinceEpoch}.jpg');
         await ref.putData(
           _screenshotBytes!,
           SettableMetadata(contentType: 'image/jpeg'),
@@ -153,22 +172,14 @@ class _NewTicketTabState extends State<_NewTicketTab> {
 
       await FirebaseFirestore.instance
           .collection(Collections.supportTickets)
-          .add({
-        'userId':        uid,
-        'subject':       subject,
-        'message':       message,
-        'category':      _category,
-        'status':        'open',
-        'screenshotUrl': screenshotUrl,
-        'createdAt':     FieldValue.serverTimestamp(),
-        'messages': [
-          {
-            'sender':    'user',
-            'text':      message,
-            'timestamp': DateTime.now().toIso8601String(),
-          }
-        ],
-      });
+          .add(buildSupportTicketData(
+            userId: uid,
+            subject: subject,
+            message: message,
+            category: _category,
+            screenshotUrl: screenshotUrl,
+            createdAt: FieldValue.serverTimestamp(),
+          ));
 
       if (!mounted) return;
       setState(() {
@@ -176,7 +187,7 @@ class _NewTicketTabState extends State<_NewTicketTab> {
         _subjectCtrl.clear();
         _messageCtrl.clear();
         _screenshotBytes = null;
-        _screenshotName  = null;
+        _screenshotName = null;
         _category = 'Livraison';
       });
 
@@ -223,8 +234,8 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                 value: _category,
                 decoration: const InputDecoration(
                   labelText: 'Catégorie',
-                  prefixIcon: Icon(Icons.category_outlined,
-                      color: AppColors.primary),
+                  prefixIcon:
+                      Icon(Icons.category_outlined, color: AppColors.primary),
                   border: InputBorder.none,
                 ),
                 items: _categories
@@ -261,8 +272,8 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                   alignLabelWithHint: true,
                   prefixIcon: Padding(
                     padding: EdgeInsets.only(bottom: 80),
-                    child: Icon(Icons.message_outlined,
-                        color: AppColors.primary),
+                    child:
+                        Icon(Icons.message_outlined, color: AppColors.primary),
                   ),
                   border: InputBorder.none,
                 ),
@@ -300,7 +311,8 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                               style: TextStyle(
                                   fontWeight: FontWeight.w600, fontSize: 14)),
                           Text(
-                            _screenshotName ?? 'Optionnel — aide à comprendre le problème',
+                            _screenshotName ??
+                                'Optionnel — aide à comprendre le problème',
                             style: TextStyle(
                                 color: _screenshotName != null
                                     ? Colors.green
@@ -317,7 +329,7 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                             size: 18, color: Colors.grey),
                         onPressed: () => setState(() {
                           _screenshotBytes = null;
-                          _screenshotName  = null;
+                          _screenshotName = null;
                         }),
                       ),
                   ],
@@ -330,8 +342,7 @@ class _NewTicketTabState extends State<_NewTicketTab> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: Image.memory(_screenshotBytes!,
-                        height: 160, width: double.infinity,
-                        fit: BoxFit.cover),
+                        height: 160, width: double.infinity, fit: BoxFit.cover),
                   ),
                 ),
             ]),
@@ -407,29 +418,27 @@ class _QuickContacts extends StatelessWidget {
       children: [
         const Text('Contacter AZ Express',
             style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey)),
+                fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
         const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
               child: _ContactButton(
-                icon:     Icons.chat_rounded,
-                label:    'WhatsApp',
+                icon: Icons.chat_rounded,
+                label: 'WhatsApp',
                 sublabel: 'Réponse rapide',
-                color:    const Color(0xFF25D366),
-                onTap:    _openWhatsApp,
+                color: const Color(0xFF25D366),
+                onTap: _openWhatsApp,
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _ContactButton(
-                icon:     Icons.phone_rounded,
-                label:    'Appeler',
+                icon: Icons.phone_rounded,
+                label: 'Appeler',
                 sublabel: AppConfig.supportPhone,
-                color:    const Color(0xFF1E88E5),
-                onTap:    _callSupport,
+                color: const Color(0xFF1E88E5),
+                onTap: _callSupport,
               ),
             ),
           ],
@@ -440,10 +449,10 @@ class _QuickContacts extends StatelessWidget {
 }
 
 class _ContactButton extends StatelessWidget {
-  final IconData   icon;
-  final String     label;
-  final String     sublabel;
-  final Color      color;
+  final IconData icon;
+  final String label;
+  final String sublabel;
+  final Color color;
   final VoidCallback onTap;
 
   const _ContactButton({
@@ -488,8 +497,7 @@ class _ContactButton extends StatelessWidget {
                           color: Colors.black87)),
                   Text(sublabel,
                       style: GoogleFonts.urbanist(
-                          fontSize: 10,
-                          color: Colors.grey),
+                          fontSize: 10, color: Colors.grey),
                       overflow: TextOverflow.ellipsis),
                 ],
               ),
@@ -511,8 +519,7 @@ class _TicketHistoryTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
-      return const Center(
-          child: Text('Connectez-vous pour voir vos tickets.'));
+      return const Center(child: Text('Connectez-vous pour voir vos tickets.'));
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -538,8 +545,8 @@ class _TicketHistoryTab extends StatelessWidget {
                     size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text('Aucun ticket pour l\'instant',
-                    style: GoogleFonts.urbanist(
-                        color: Colors.grey, fontSize: 15)),
+                    style:
+                        GoogleFonts.urbanist(color: Colors.grey, fontSize: 15)),
                 const SizedBox(height: 6),
                 Text('Signalez un problème depuis l\'onglet "Nouveau ticket"',
                     style: GoogleFonts.urbanist(
@@ -566,26 +573,36 @@ class _TicketHistoryTab extends StatelessWidget {
 
 class _TicketCard extends StatelessWidget {
   final Map<String, dynamic> data;
-  final String               id;
+  final String id;
   const _TicketCard({required this.data, required this.id});
 
   Color _statusColor(String s) {
     switch (s) {
-      case 'open':       return Colors.orange;
-      case 'in_progress': return Colors.blue;
-      case 'resolved':   return Colors.green;
-      case 'closed':     return Colors.grey;
-      default:           return Colors.orange;
+      case 'open':
+        return Colors.orange;
+      case 'in_progress':
+        return Colors.blue;
+      case 'resolved':
+        return Colors.green;
+      case 'closed':
+        return Colors.grey;
+      default:
+        return Colors.orange;
     }
   }
 
   String _statusLabel(String s) {
     switch (s) {
-      case 'open':        return 'Ouvert';
-      case 'in_progress': return 'En cours';
-      case 'resolved':    return 'Résolu';
-      case 'closed':      return 'Fermé';
-      default:            return s;
+      case 'open':
+        return 'Ouvert';
+      case 'in_progress':
+        return 'En cours';
+      case 'resolved':
+        return 'Résolu';
+      case 'closed':
+        return 'Fermé';
+      default:
+        return s;
     }
   }
 
@@ -597,10 +614,10 @@ class _TicketCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status   = data['status'] as String? ?? 'open';
-    final subject  = data['subject'] as String? ?? 'Sans sujet';
+    final status = data['status'] as String? ?? 'open';
+    final subject = data['subject'] as String? ?? 'Sans sujet';
     final category = data['category'] as String? ?? '';
-    final color    = _statusColor(status);
+    final color = _statusColor(status);
     final hasScreenshot = (data['screenshotUrl'] as String?) != null;
     final messages = (data['messages'] as List?) ?? [];
     final hasReply = messages.any((m) => (m as Map)['sender'] == 'admin');
@@ -635,8 +652,8 @@ class _TicketCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
@@ -656,15 +673,15 @@ class _TicketCard extends StatelessWidget {
                       size: 13, color: Colors.grey.shade400),
                   const SizedBox(width: 4),
                   Text(category,
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey.shade500)),
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade500)),
                   const Spacer(),
                   Icon(Icons.calendar_today_outlined,
                       size: 12, color: Colors.grey.shade400),
                   const SizedBox(width: 4),
                   Text(_formatDate(data['createdAt']),
-                      style: TextStyle(
-                          fontSize: 11, color: Colors.grey.shade400)),
+                      style:
+                          TextStyle(fontSize: 11, color: Colors.grey.shade400)),
                   if (hasScreenshot) ...[
                     const SizedBox(width: 8),
                     Icon(Icons.image_outlined,
@@ -678,14 +695,13 @@ class _TicketCard extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey.shade600,
-                    height: 1.4),
+                    fontSize: 13, color: Colors.grey.shade600, height: 1.4),
               ),
               if (hasReply) ...[
                 const SizedBox(height: 8),
                 Row(children: [
-                  Icon(Icons.reply_rounded, size: 13, color: Colors.blue.shade400),
+                  Icon(Icons.reply_rounded,
+                      size: 13, color: Colors.blue.shade400),
                   const SizedBox(width: 4),
                   Text('Réponse du support disponible — touchez pour voir',
                       style: TextStyle(
@@ -743,7 +759,10 @@ class _TicketDetailScreenState extends State<_TicketDetailScreen> {
       });
       await ref.update({'messages': messages});
       if (!mounted) return;
-      setState(() { _replyCtrl.clear(); _sending = false; });
+      setState(() {
+        _replyCtrl.clear();
+        _sending = false;
+      });
     } catch (_) {
       if (mounted) setState(() => _sending = false);
     }
@@ -766,7 +785,8 @@ class _TicketDetailScreenState extends State<_TicketDetailScreen> {
             .snapshots(),
         builder: (context, snap) {
           if (snap.hasError) {
-            return const Center(child: Text('Impossible de charger le ticket.'));
+            return const Center(
+                child: Text('Impossible de charger le ticket.'));
           }
           if (!snap.hasData || !snap.data!.exists) {
             return const Center(child: CircularProgressIndicator());
@@ -841,8 +861,10 @@ class _TicketDetailScreenState extends State<_TicketDetailScreen> {
                           onPressed: _sending ? null : _sendReply,
                           icon: _sending
                               ? const SizedBox(
-                                  width: 18, height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2))
+                                  width: 18,
+                                  height: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
                               : const Icon(Icons.send_rounded,
                                   color: AppColors.primary),
                         ),

@@ -67,8 +67,8 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      setState(() =>
-          _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
+      setState(
+          () => _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
     });
   }
 
@@ -98,7 +98,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
         "id": id,
         "description":
             "Blanchisserie : $_serviceType — $_quantity kg\nAdresse : ${_addressCtrl.text.trim()}"
-            "${_notesCtrl.text.trim().isNotEmpty ? '\nNotes : ${_notesCtrl.text.trim()}' : ''}",
+                "${_notesCtrl.text.trim().isNotEmpty ? '\nNotes : ${_notesCtrl.text.trim()}' : ''}",
         "budget": _totalPrice,
         "shoppingBudget": 0,
         "status": "pending",
@@ -109,10 +109,10 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
         "notes": _notesCtrl.text.trim(),
         "latitude": 0,
         "longitude": 0,
-        "clientId":      uid,
+        "clientId": uid,
         "paymentMethod": _paymentMethod,
-        "isPaid":        false,
-        "createdAt":     FieldValue.serverTimestamp(),
+        "isPaid": _paymentMethod == 'wallet',
+        "createdAt": FieldValue.serverTimestamp(),
       };
 
       if (_paymentMethod == 'wallet') {
@@ -185,8 +185,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
         ],
       ),
       child: Column(
@@ -242,22 +241,20 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.account_balance_wallet,
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.account_balance_wallet,
+                          color: _paymentMethod == 'wallet'
+                              ? Colors.white
+                              : Colors.grey,
+                          size: 18),
+                      const SizedBox(width: 6),
+                      Text("Wallet",
+                          style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
                                   : Colors.grey,
-                              size: 18),
-                          const SizedBox(width: 6),
-                          Text("Wallet",
-                              style: TextStyle(
-                                  color: _paymentMethod == 'wallet'
-                                      ? Colors.white
-                                      : Colors.grey,
-                                  fontWeight: FontWeight.bold)),
-                        ]),
+                              fontWeight: FontWeight.bold)),
+                    ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
@@ -308,7 +305,8 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                               fontSize: 20,
                               fontWeight: FontWeight.bold)),
                       Text("Dépôt et retrait de linge",
-                          style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 13)),
                     ],
                   ),
                 ),
@@ -317,7 +315,6 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
             title: const Text("Blanchisserie"),
             centerTitle: true,
           ),
-
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -453,8 +450,8 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                       controller: _addressCtrl,
                       decoration: InputDecoration(
                         hintText: "Ex : Quartier Commerce, rue principale...",
-                        prefixIcon:
-                            Icon(Icons.location_on, color: Colors.blue.shade700),
+                        prefixIcon: Icon(Icons.location_on,
+                            color: Colors.blue.shade700),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none),
@@ -553,8 +550,6 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
   Widget _sectionTitle(String title) => Text(
         title,
         style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey),
+            fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey),
       );
 }

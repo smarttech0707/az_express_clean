@@ -30,7 +30,9 @@ class VoiceManager {
   /// de texte lu d'une traite.
   final Duration sentencePause;
 
-  VoiceManager({VoiceProvider? provider, this.sentencePause = const Duration(milliseconds: 180)})
+  VoiceManager(
+      {VoiceProvider? provider,
+      this.sentencePause = const Duration(milliseconds: 180)})
       : _provider = provider ?? AndroidTtsProvider();
 
   VoiceProvider get activeProvider => _provider;
@@ -41,12 +43,14 @@ class VoiceManager {
       // Tout fournisseur de niveau 2 non configuré retombe sur le niveau 1
       // gratuit — jamais un AZ IA muet parce qu'un fournisseur payant
       // n'est pas encore activé.
-      debugPrint('[VoiceManager] "${_provider.name}" indisponible — repli sur AndroidTtsProvider.');
+      debugPrint(
+          '[VoiceManager] "${_provider.name}" indisponible — repli sur AndroidTtsProvider.');
       _provider = AndroidTtsProvider();
       await _provider.initialize();
     }
     _initialized = true;
-    debugPrint('[VoiceManager] Fournisseur actif : ${_provider.name} (disponible: ${_provider.isAvailable})');
+    debugPrint(
+        '[VoiceManager] Fournisseur actif : ${_provider.name} (disponible: ${_provider.isAvailable})');
   }
 
   /// Change de fournisseur à chaud (ex. activer une voix IA payante plus
@@ -66,7 +70,8 @@ class VoiceManager {
   Future<void> speak(String rawText) async {
     if (!_initialized) await initialize();
     if (!_provider.isAvailable) {
-      debugPrint('[VoiceManager] Aucun fournisseur vocal disponible — lecture ignorée.');
+      debugPrint(
+          '[VoiceManager] Aucun fournisseur vocal disponible — lecture ignorée.');
       return;
     }
 

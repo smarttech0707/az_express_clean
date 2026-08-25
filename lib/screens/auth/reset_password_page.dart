@@ -1,21 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
 
 class ResetPasswordPage extends StatefulWidget {
   final PhoneAuthCredential? phoneCredential;
-  const ResetPasswordPage({super.key, this.phoneCredential});
+  final String phone;
+  const ResetPasswordPage({
+    super.key,
+    required this.phone,
+    this.phoneCredential,
+  });
 
   @override
   State<ResetPasswordPage> createState() => _ResetPasswordPageState();
 }
 
 class _ResetPasswordPageState extends State<ResetPasswordPage> {
-  final _passCtrl    = TextEditingController();
+  final _passCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
-  bool _showPass  = false;
-  bool _loading   = false;
+  bool _showPass = false;
+  bool _loading = false;
   String? _error;
 
   @override
@@ -35,7 +41,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
   }
 
   Future<void> _save() async {
-    final pass    = _passCtrl.text;
+    final pass = _passCtrl.text;
     final confirm = _confirmCtrl.text;
 
     final err = AuthService.validatePassword(pass);
@@ -47,23 +53,38 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       setState(() => _error = 'Les mots de passe ne correspondent pas');
       return;
     }
-    setState(() { _error = null; _loading = true; });
+    setState(() {
+      _error = null;
+      _loading = true;
+    });
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('Session expirée. Recommencez.');
-      await user.updatePassword(pass);
+      if (user == null || user.phoneNumber == null) {
+        throw Exception('Session téléphonique expirée. Recommencez.');
+      }
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('resetAccountPassword')
+          .call(<String, dynamic>{
+        'userType': 'client',
+        'phone': widget.phone,
+        'newValue': pass,
+      });
       if (!mounted) return;
       _snack('Mot de passe mis à jour avec succès !', Colors.green);
       // Déconnecter et retourner à l'accueil
       await FirebaseAuth.instance.signOut();
-      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (_) {}
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);
     } on FirebaseAuthException catch (e) {
-      _snack(e.code == 'weak-password'
-          ? 'Mot de passe trop faible'
-          : 'Erreur : ${e.message}', Colors.red);
+      _snack(
+          e.code == 'weak-password'
+              ? 'Mot de passe trop faible'
+              : 'Erreur : ${e.message}',
+          Colors.red);
     } catch (e) {
       _snack(e.toString(), Colors.red);
     } finally {
@@ -103,11 +124,14 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Créer un nouveau mot de passe',
-                            style: TextStyle(color: Colors.white,
-                                fontSize: 15, fontWeight: FontWeight.bold)),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold)),
                         SizedBox(height: 4),
                         Text('Choisissez un mot de passe sécurisé',
-                            style: TextStyle(color: Colors.white70, fontSize: 12)),
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -129,7 +153,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Le mot de passe doit contenir :',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   SizedBox(height: 6),
                   _Rule(text: 'Au moins 8 caractères'),
                   _Rule(text: 'Au moins 1 majuscule (A-Z)'),
@@ -174,11 +199,15 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                   elevation: 4,
                 ),
                 child: _loading
-                    ? const SizedBox(width: 24, height: 24,
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2.5))
                     : const Text('Enregistrer le mot de passe',
-                        style: TextStyle(color: Colors.white, fontSize: 16,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold)),
               ),
             ),
@@ -198,7 +227,8 @@ class _Rule extends StatelessWidget {
       padding: const EdgeInsets.only(top: 3),
       child: Row(
         children: [
-          Icon(Icons.check_circle_outline, size: 14, color: Colors.orange.shade700),
+          Icon(Icons.check_circle_outline,
+              size: 14, color: Colors.orange.shade700),
           const SizedBox(width: 6),
           Text(text, style: const TextStyle(fontSize: 12)),
         ],
@@ -212,8 +242,11 @@ class _PassField extends StatelessWidget {
   final String label;
   final bool showPass;
   final VoidCallback onToggle;
-  const _PassField({required this.controller, required this.label,
-      required this.showPass, required this.onToggle});
+  const _PassField(
+      {required this.controller,
+      required this.label,
+      required this.showPass,
+      required this.onToggle});
 
   @override
   Widget build(BuildContext context) {
@@ -224,7 +257,10 @@ class _PassField extends StatelessWidget {
         labelText: label,
         prefixIcon: const Icon(Icons.lock_outline, color: AppColors.primary),
         suffixIcon: IconButton(
-          icon: Icon(showPass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+          icon: Icon(
+              showPass
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
               color: Colors.grey),
           onPressed: onToggle,
         ),
@@ -235,7 +271,8 @@ class _PassField extends StatelessWidget {
         ),
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     );
   }

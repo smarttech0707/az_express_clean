@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/firestore_service.dart';
@@ -18,14 +18,12 @@ class DriversPage extends StatelessWidget {
         centerTitle: true,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection("fleet_owners")
-            .snapshots(),
+        stream:
+            FirebaseFirestore.instance.collection("fleet_owners").snapshots(),
         builder: (context, patronSnap) {
           return StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection("livreurs")
-                .snapshots(),
+            stream:
+                FirebaseFirestore.instance.collection("livreurs").snapshots(),
             builder: (context, driverSnap) {
               if (!driverSnap.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -43,7 +41,7 @@ class DriversPage extends StatelessWidget {
 
               return ListView(
                 physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16),
                 children: [
                   // ── STATS GLOBALES ─────────────────────────
                   _GlobalStats(drivers: allDrivers),
@@ -72,11 +70,10 @@ class DriversPage extends StatelessWidget {
                     )
                   else ...[
                     ...patrons.map((patron) {
-                      final patronData =
-                          patron.data() as Map<String, dynamic>;
+                      final patronData = patron.data() as Map<String, dynamic>;
                       final patronDrivers = allDrivers
-                          .where((d) =>
-                              (d.data() as Map)["ownerId"] == patron.id)
+                          .where(
+                              (d) => (d.data() as Map)["ownerId"] == patron.id)
                           .toList();
                       return _PatronCard(
                         patronId: patron.id,
@@ -95,8 +92,8 @@ class DriversPage extends StatelessWidget {
 
                   const SizedBox(height: 16),
                   // ── LIVREURS INDÉPENDANTS ──────────────────
-                  _sectionTitle(
-                      "Livreurs indépendants", Icons.delivery_dining, Colors.blue),
+                  _sectionTitle("Livreurs indépendants", Icons.delivery_dining,
+                      Colors.blue),
                   const SizedBox(height: 10),
 
                   if (independent.isEmpty)
@@ -121,9 +118,8 @@ class DriversPage extends StatelessWidget {
                             context, doc.id, data["name"] ?? "Livreur"),
                         onDelete: () =>
                             _confirmDelete(context, doc.id, data["name"]),
-                        onTransfer: () => _showAssignToFleetDialog(
-                            context, doc.id, data["name"] ?? "Livreur",
-                            patrons),
+                        onTransfer: () => _showAssignToFleetDialog(context,
+                            doc.id, data["name"] ?? "Livreur", patrons),
                       );
                     }),
 
@@ -152,9 +148,7 @@ class DriversPage extends StatelessWidget {
         Text(
           title,
           style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87),
+              fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
         ),
       ],
     );
@@ -166,12 +160,10 @@ class DriversPage extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
-            const Icon(Icons.account_balance_wallet,
-                color: AppColors.primary),
+            const Icon(Icons.account_balance_wallet, color: AppColors.primary),
             const SizedBox(width: 8),
             Expanded(
                 child: Text("Recharger $driverName",
@@ -186,20 +178,18 @@ class DriversPage extends StatelessWidget {
             labelText: "Montant (FCFA)",
             prefixIcon:
                 const Icon(Icons.attach_money, color: AppColors.primary),
-            border:
-                OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             suffixText: "FCFA",
           ),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("Annuler",
-                  style: TextStyle(color: Colors.grey))),
+              child:
+                  const Text("Annuler", style: TextStyle(color: Colors.grey))),
           ScaleButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white),
+                backgroundColor: Colors.green, foregroundColor: Colors.white),
             onPressed: () async {
               final amount = int.tryParse(amountCtrl.text.trim());
               if (amount == null || amount <= 0) return;
@@ -240,7 +230,8 @@ class DriversPage extends StatelessWidget {
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Row(children: [
             const Icon(Icons.swap_horiz_rounded, color: Color(0xFF6A1B9A)),
             const SizedBox(width: 8),
@@ -256,20 +247,23 @@ class DriversPage extends StatelessWidget {
               final selected = selectedPatronId == p.id;
               return GestureDetector(
                 onTap: () => setDialogState(() {
-                  selectedPatronId   = p.id;
+                  selectedPatronId = p.id;
                   selectedPatronName = pd['name'] as String? ?? 'Flotte';
                 }),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
                     color: selected
                         ? const Color(0xFF6A1B9A).withValues(alpha: 0.1)
                         : Colors.grey.shade50,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: selected ? const Color(0xFF6A1B9A) : Colors.grey.shade300,
+                      color: selected
+                          ? const Color(0xFF6A1B9A)
+                          : Colors.grey.shade300,
                       width: selected ? 2 : 1,
                     ),
                   ),
@@ -357,13 +351,14 @@ class DriversPage extends StatelessWidget {
               await FirestoreService().makeDriverIndependent(driverId);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text("${name ?? 'Livreur'} est maintenant indépendant"),
+                  content:
+                      Text("${name ?? 'Livreur'} est maintenant indépendant"),
                   backgroundColor: Colors.blue,
                 ));
               }
             },
-            child: const Text("Confirmer",
-                style: TextStyle(color: Colors.white)),
+            child:
+                const Text("Confirmer", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -374,18 +369,16 @@ class DriversPage extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text("Supprimer le livreur"),
-        content: Text(
-            "Voulez-vous vraiment supprimer ${name ?? 'ce livreur'} ?"),
+        content:
+            Text("Voulez-vous vraiment supprimer ${name ?? 'ce livreur'} ?"),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text("Annuler")),
           ScaleButton(
-            style:
-                ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
               Navigator.pop(context);
               await FirebaseFirestore.instance
@@ -393,8 +386,8 @@ class DriversPage extends StatelessWidget {
                   .doc(driverId)
                   .delete();
             },
-            child: const Text("Supprimer",
-                style: TextStyle(color: Colors.white)),
+            child:
+                const Text("Supprimer", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -451,14 +444,11 @@ class _GlobalStats extends StatelessWidget {
                   color: Colors.white,
                   fontSize: 22,
                   fontWeight: FontWeight.bold)),
-          Text(l,
-              style:
-                  const TextStyle(color: Colors.white70, fontSize: 11)),
+          Text(l, style: const TextStyle(color: Colors.white70, fontSize: 11)),
         ],
       );
 
-  Widget _divider() => Container(
-      width: 1, height: 36, color: Colors.white24);
+  Widget _divider() => Container(width: 1, height: 36, color: Colors.white24);
 }
 
 // ── CARTE PATRON ──────────────────────────────────────────────
@@ -518,8 +508,8 @@ class _PatronCardState extends State<_PatronCard> {
                       color: Colors.purple.shade50,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.motorcycle,
-                        color: Color(0xFF6A1B9A)),
+                    child:
+                        const Icon(Icons.motorcycle, color: Color(0xFF6A1B9A)),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -533,8 +523,8 @@ class _PatronCardState extends State<_PatronCard> {
                         ),
                         Text(
                           widget.patronData["phone"] ?? "—",
-                          style: const TextStyle(
-                              color: Colors.grey, fontSize: 12),
+                          style:
+                              const TextStyle(color: Colors.grey, fontSize: 12),
                         ),
                       ],
                     ),
@@ -596,8 +586,7 @@ class _PatronCardState extends State<_PatronCard> {
                   data: data,
                   onRecharge: () =>
                       widget.onRecharge(doc.id, data["name"] ?? "Livreur"),
-                  onDelete: () =>
-                      widget.onDelete(doc.id, data["name"]),
+                  onDelete: () => widget.onDelete(doc.id, data["name"]),
                   onTransfer: () =>
                       widget.onMakeIndependent(doc.id, data["name"]),
                   isSubItem: true,
@@ -641,14 +630,16 @@ class _DriverCard extends StatelessWidget {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(suspend ? 'Suspendre ce livreur ?' : 'Lever la suspension ?'),
+        title:
+            Text(suspend ? 'Suspendre ce livreur ?' : 'Lever la suspension ?'),
         content: Text(suspend
             ? '${data["name"] ?? "Ce livreur"} ne recevra plus de nouvelles '
-              'commandes et ne pourra plus en accepter tant qu\'il est suspendu.'
+                'commandes et ne pourra plus en accepter tant qu\'il est suspendu.'
             : '${data["name"] ?? "Ce livreur"} pourra à nouveau recevoir et '
-              'accepter des commandes.'),
+                'accepter des commandes.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
               child: const Text('Annuler')),
           ScaleButton(
             style: ElevatedButton.styleFrom(
@@ -661,9 +652,14 @@ class _DriverCard extends StatelessWidget {
       ),
     );
     if (confirm != true) return;
-    await FirebaseFirestore.instance.collection('livreurs').doc(driverId).update(
-      suspend ? {'isSuspended': true, 'isOnline': false} : {'isSuspended': false},
-    );
+    await FirebaseFirestore.instance
+        .collection('livreurs')
+        .doc(driverId)
+        .update(
+          suspend
+              ? {'isSuspended': true, 'isOnline': false}
+              : {'isSuspended': false},
+        );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(suspend ? 'Livreur suspendu' : 'Suspension levée'),
@@ -745,18 +741,18 @@ class _DriverCard extends StatelessWidget {
                           color: Colors.red.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8)),
                       child: const Text('SUSPENDU',
-                          style: TextStyle(color: Colors.red,
-                              fontSize: 9, fontWeight: FontWeight.bold)),
+                          style: TextStyle(
+                              color: Colors.red,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ]),
                 Text(data["phone"] ?? "—",
-                    style:
-                        const TextStyle(color: Colors.grey, fontSize: 11)),
+                    style: const TextStyle(color: Colors.grey, fontSize: 11)),
                 Text(
                   "ID: ${data['identifiant'] ?? '—'}",
-                  style: TextStyle(
-                      color: Colors.purple.shade300, fontSize: 11),
+                  style: TextStyle(color: Colors.purple.shade300, fontSize: 11),
                 ),
               ],
             ),
@@ -780,18 +776,18 @@ class _DriverCard extends StatelessWidget {
                     button: true,
                     excludeSemantics: true,
                     child: GestureDetector(
-                    onTap: onRecharge,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.green.shade200),
+                      onTap: onRecharge,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green.shade200),
+                        ),
+                        child: const Icon(Icons.add_card,
+                            color: Colors.green, size: 18),
                       ),
-                      child: const Icon(Icons.add_card,
-                          color: Colors.green, size: 18),
-                    ),
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -810,7 +806,8 @@ class _DriverCard extends StatelessWidget {
                           isSubItem
                               ? Icons.person_outline
                               : Icons.swap_horiz_rounded,
-                          color: Colors.purple, size: 18,
+                          color: Colors.purple,
+                          size: 18,
                         ),
                       ),
                     ),

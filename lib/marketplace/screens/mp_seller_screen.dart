@@ -30,7 +30,8 @@ class MpSellerScreen extends StatelessWidget {
               context,
               MaterialPageRoute(builder: (_) => const MpAddProductScreen()),
             ),
-            icon: const Icon(Icons.add_circle_rounded, color: kMpOrange, size: 28),
+            icon: const Icon(Icons.add_circle_rounded,
+                color: kMpOrange, size: 28),
           ),
         ],
       ),
@@ -45,18 +46,18 @@ class MpSellerScreen extends StatelessWidget {
 
           // Stats
           final active = products.where((p) => p.status == 'active').length;
-          final sold   = products.where((p) => p.status == 'sold').length;
+          final sold = products.where((p) => p.status == 'sold').length;
           final hidden = products.where((p) => p.status == 'hidden').length;
-          final views  = products.fold<int>(0, (s, p) => s + p.views);
-          final favs   = products.fold<int>(0, (s, p) => s + p.favoritesCount);
+          final views = products.fold<int>(0, (s, p) => s + p.views);
+          final favs = products.fold<int>(0, (s, p) => s + p.favoritesCount);
 
           return Column(
             children: [
               // Stats bar
               Container(
                 color: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 14),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 child: Row(children: [
                   _Stat('$active', 'Actif', kMpOrange),
                   _Stat('$sold', 'Vendu', const Color(0xFF4CAF50)),
@@ -113,8 +114,7 @@ class MpSellerScreen extends StatelessWidget {
                   child: ListView.separated(
                     padding: const EdgeInsets.all(12),
                     itemCount: products.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: 8),
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (_, i) => _SellerProductTile(
                       product: products[i],
                     ),
@@ -156,8 +156,7 @@ class _Stat extends StatelessWidget {
               fontWeight: FontWeight.w800,
               color: color,
             )),
-        Text(label,
-            style: GoogleFonts.urbanist(fontSize: 11, color: kMpMuted)),
+        Text(label, style: GoogleFonts.urbanist(fontSize: 11, color: kMpMuted)),
       ]),
     );
   }
@@ -200,8 +199,8 @@ class _SellerProductTile extends StatelessWidget {
                   builder: (_) => MpProductDetail(product: product)),
             ),
             child: ClipRRect(
-              borderRadius: const BorderRadius.horizontal(
-                  left: Radius.circular(14)),
+              borderRadius:
+                  const BorderRadius.horizontal(left: Radius.circular(14)),
               child: SizedBox(
                 width: 90,
                 height: 90,
@@ -266,8 +265,8 @@ class _SellerProductTile extends StatelessWidget {
                         size: 11, color: kMpMuted),
                     const SizedBox(width: 2),
                     Text('${product.views}',
-                        style:
-                            GoogleFonts.urbanist(fontSize: 11, color: kMpMuted)),
+                        style: GoogleFonts.urbanist(
+                            fontSize: 11, color: kMpMuted)),
                   ]),
                 ],
               ),
@@ -277,10 +276,9 @@ class _SellerProductTile extends StatelessWidget {
           // Actions
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, color: kMpMuted),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14)),
-            onSelected: (action) =>
-                _handleAction(context, action),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            onSelected: (action) => _handleAction(context, action),
             itemBuilder: (_) => [
               const PopupMenuItem(
                 value: 'edit',
@@ -289,15 +287,14 @@ class _SellerProductTile extends StatelessWidget {
               if (product.status == 'active')
                 const PopupMenuItem(
                   value: 'sold',
-                  child: _MenuItem(
-                      Icons.check_circle_rounded, 'Marquer vendu',
+                  child: _MenuItem(Icons.check_circle_rounded, 'Marquer vendu',
                       Color(0xFF4CAF50)),
                 ),
-              if (product.status == 'sold')
+              if (product.status == 'sold' || product.status == 'hidden')
                 const PopupMenuItem(
                   value: 'reactivate',
-                  child: _MenuItem(
-                      Icons.refresh_rounded, 'Réactiver', kMpOrange),
+                  child:
+                      _MenuItem(Icons.refresh_rounded, 'Republier', kMpOrange),
                 ),
               if (product.status == 'active')
                 const PopupMenuItem(
@@ -307,8 +304,7 @@ class _SellerProductTile extends StatelessWidget {
                 ),
               const PopupMenuItem(
                 value: 'delete',
-                child: _MenuItem(
-                    Icons.delete_rounded, 'Supprimer', Colors.red),
+                child: _MenuItem(Icons.delete_rounded, 'Supprimer', Colors.red),
               ),
             ],
           ),
@@ -330,7 +326,24 @@ class _SellerProductTile extends StatelessWidget {
         await MpService.markSold(product.id);
         break;
       case 'reactivate':
-        await MpService.reactivate(product.id);
+        try {
+          await MpService.reactivate(product.id);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Annonce republiée pour 15 jours.')),
+            );
+          }
+        } catch (error) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  error.toString().replaceFirst('Exception: ', ''),
+                ),
+              ),
+            );
+          }
+        }
         break;
       case 'hide':
         await MpService.softDelete(product.id);
@@ -339,12 +352,11 @@ class _SellerProductTile extends StatelessWidget {
         final ok = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Text('Supprimer ?',
                 style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
-            content: Text(
-                'Cette annonce sera masquée définitivement.',
+            content: Text('Cette annonce sera masquée définitivement.',
                 style: GoogleFonts.urbanist()),
             actions: [
               TextButton(
@@ -375,8 +387,8 @@ class _MenuItem extends StatelessWidget {
       Icon(icon, color: color, size: 18),
       const SizedBox(width: 10),
       Text(label,
-          style:
-              GoogleFonts.urbanist(fontSize: 14, color: color, fontWeight: FontWeight.w600)),
+          style: GoogleFonts.urbanist(
+              fontSize: 14, color: color, fontWeight: FontWeight.w600)),
     ]);
   }
 }

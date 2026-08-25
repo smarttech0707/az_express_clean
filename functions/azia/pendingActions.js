@@ -32,11 +32,14 @@ async function createPendingAction(db, admin, { uid, conversationId, toolName, t
 // même transaction que la mutation réelle — même schéma que
 // `ekClientConfirmOrder` dans functions/index.js — pour empêcher un replay
 // (un double-tap voit status !== 'pending' et échoue proprement).
-function buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByName }) {
+function buildConfirmAction({
+  db, admin, onCall, logAudit, HttpsError, toolsByName, secrets = [],
+}) {
   return onCall({
     region:         'europe-west1',
     timeoutSeconds: 60,
     memory:         '256MiB',
+    secrets,
   }, async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Vous devez être connecté');
@@ -73,7 +76,9 @@ function buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByNa
       const expiresAtMs = data.expiresAt?.toMillis ? data.expiresAt.toMillis() : 0;
       if (expiresAtMs < Date.now()) {
         tx.update(ref, { status: 'expired', resolvedAt: admin.firestore.FieldValue.serverTimestamp() });
-        throw new HttpsError('deadline-exceeded', 'Cette action a expiré. Recommencez la demande.');
+        // Laisser la transaction committer le statut avant de renvoyer
+        // l'erreur callable. Lever ici annulerait aussi l'update Firestore.
+        return { expired: true };
       }
 
       const tool = toolsByName.get(data.toolName);
@@ -85,6 +90,10 @@ function buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByNa
       tx.update(ref, { status: 'completed', resolvedAt: admin.firestore.FieldValue.serverTimestamp() });
       return { toolName: data.toolName, amount: data.amount, result };
     });
+
+    if (outcome.expired) {
+      throw new HttpsError('deadline-exceeded', 'Cette action a expiré. Recommencez la demande.');
+    }
 
     // Étape optionnelle, hors transaction : un outil comme la recharge
     // wallet doit appeler une API externe (FeexPay) après la bascule de

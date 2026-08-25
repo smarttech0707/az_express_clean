@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../models/mp_product.dart';
@@ -60,13 +60,17 @@ class MpProductCard extends StatelessWidget {
                       bottom: 6,
                       left: 6,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFFD700),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Text('👑 VIP',
-                            style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.black87)),
+                            style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.black87)),
                       ),
                     ),
                   // Sold overlay
@@ -135,8 +139,8 @@ class MpProductCard extends StatelessWidget {
                         product.city,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 11, color: kMpMuted),
+                        style:
+                            GoogleFonts.urbanist(fontSize: 11, color: kMpMuted),
                       ),
                     ),
                     if (product.sellerVerified)
@@ -190,11 +194,13 @@ class MpProductTile extends StatelessWidget {
                   ),
                 ),
                 Positioned(
-                  top: 6, left: 6,
+                  top: 6,
+                  left: 6,
                   child: _ConditionBadge(product.condition, small: true),
                 ),
                 Positioned(
-                  top: 2, right: 2,
+                  top: 2,
+                  right: 2,
                   child: _FavButton(productId: product.id, small: true),
                 ),
                 if (product.sellerVipStatus == 'active')
@@ -202,14 +208,25 @@ class MpProductTile extends StatelessWidget {
                     bottom: 4,
                     left: 4,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
                       decoration: BoxDecoration(
                         color: const Color(0xFFFFD700),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Text('👑 VIP',
-                          style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.black87)),
+                          style: TextStyle(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black87)),
                     ),
+                  ),
+                if (product.sellerVerified)
+                  const Positioned(
+                    bottom: 4,
+                    right: 4,
+                    child: Icon(Icons.verified_rounded,
+                        size: 16, color: Color(0xFF2196F3)),
                   ),
               ],
             ),
@@ -222,12 +239,15 @@ class MpProductTile extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.urbanist(
-                          fontSize: 12, fontWeight: FontWeight.w600,
-                          color: kMpText, height: 1.3)),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: kMpText,
+                          height: 1.3)),
                   const SizedBox(height: 3),
                   Text(_fmt(product.price),
                       style: GoogleFonts.urbanist(
-                          fontSize: 13, fontWeight: FontWeight.w800,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
                           color: kMpOrange)),
                 ],
               ),
@@ -264,7 +284,8 @@ class _ProductImage extends StatelessWidget {
   Widget _placeholder() => Container(
         color: const Color(0xFFF0F0F0),
         child: const Center(
-          child: Icon(Icons.devices_rounded, size: 36, color: Color(0xFFBDBDBD)),
+          child:
+              Icon(Icons.devices_rounded, size: 36, color: Color(0xFFBDBDBD)),
         ),
       );
 
@@ -342,8 +363,7 @@ class _FavButton extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.9),
               shape: BoxShape.circle,
               boxShadow: const [
-                BoxShadow(
-                    color: Color(0x1A000000), blurRadius: 4)
+                BoxShadow(color: Color(0x1A000000), blurRadius: 4)
               ],
             ),
             child: Icon(

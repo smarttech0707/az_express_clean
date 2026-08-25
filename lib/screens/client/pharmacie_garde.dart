@@ -1,12 +1,17 @@
-﻿import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:geolocator/geolocator.dart';
-import '../../services/tarif_service.dart';
+import 'package:provider/provider.dart';
+
+import '../../models/pharmacy_guard.dart';
 import '../../services/firestore_service.dart';
+import '../../providers/active_city_provider.dart';
+import '../../services/pharmacy_guard_repository.dart';
+import '../../services/tarif_service.dart';
 
 class PharmacieGardePage extends StatefulWidget {
   const PharmacieGardePage({super.key});
@@ -17,796 +22,504 @@ class PharmacieGardePage extends StatefulWidget {
 
 class _PharmacieGardePageState extends State<PharmacieGardePage>
     with SingleTickerProviderStateMixin {
-  late TabController _tabCtrl;
+  final _repository = PharmacyGuardRepository();
+  late final TabController _tabs;
+  Position? _position;
 
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
+    _tabs = TabController(length: 4, vsync: this);
+    _loadPosition();
+  }
+
+  Future<void> _loadPosition() async {
+    try {
+      final permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+      final value = await Geolocator.getCurrentPosition(
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.medium));
+      if (mounted) setState(() => _position = value);
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _tabCtrl.dispose();
+    _tabs.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      body: NestedScrollView(
-        headerSliverBuilder: (context, _) => [
-          SliverAppBar(
-            expandedHeight: 150,
-            pinned: true,
-            backgroundColor: Colors.red.shade700,
-            foregroundColor: Colors.white,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.red.shade900, Colors.red.shade500],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: SafeArea(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const SizedBox(height: 30),
-                      const Icon(Icons.local_pharmacy,
-                          color: Colors.white, size: 44),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Pharmacies',
-                        style: GoogleFonts.urbanist(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        'Abengourou',
-                        style: GoogleFonts.urbanist(
-                            color: Colors.white70, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            title: Text('Pharmacies',
-                style: GoogleFonts.urbanist(fontWeight: FontWeight.bold)),
-            centerTitle: true,
-            bottom: TabBar(
-              controller: _tabCtrl,
-              indicatorColor: Colors.white,
-              indicatorWeight: 3,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white60,
-              labelStyle: GoogleFonts.urbanist(
-                  fontWeight: FontWeight.w600, fontSize: 13),
-              tabs: const [
-                Tab(icon: Icon(Icons.list_rounded), text: 'Toutes'),
-                Tab(icon: Icon(Icons.emergency_rounded), text: 'De garde'),
-              ],
-            ),
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: const Color(0xFFF5F5F5),
+        appBar: AppBar(
+          title: const Text('Pharmacies de garde'),
+          backgroundColor: Colors.red.shade700,
+          foregroundColor: Colors.white,
+          bottom: TabBar(
+            controller: _tabs,
+            isScrollable: true,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            indicatorColor: Colors.white,
+            tabs: const [
+              Tab(text: 'Maintenant'),
+              Tab(text: 'Cette semaine'),
+              Tab(text: 'Ce mois'),
+              Tab(text: 'Partenaires AZ'),
+            ],
           ),
-        ],
-        body: TabBarView(
-          controller: _tabCtrl,
-          children: const [
-            _PharmacieList(onlyOnDuty: false),
-            _PharmacieList(onlyOnDuty: true),
-          ],
         ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _PharmacieList extends StatefulWidget {
-  final bool onlyOnDuty;
-  const _PharmacieList({required this.onlyOnDuty});
-
-  @override
-  State<_PharmacieList> createState() => _PharmacieListState();
-}
-
-class _PharmacieListState extends State<_PharmacieList> {
-  // Anti double-tap — _orderDelivery lance une transaction Firestore sans
-  // clé d'idempotence ; sans ce garde-fou, un double-tap sur "Livraison"
-  // crée deux commandes indépendantes et débite le client deux fois
-  // (Master Prompt 49, même famille que le bug boutique_page.dart corrigé
-  // au Prompt 48).
-  bool _busy = false;
-
-  Future<void> _call(String phone) async {
-    final url = Uri.parse('tel:$phone');
-    if (await canLaunchUrl(url)) launchUrl(url);
-  }
-
-  Future<void> _openMap(double lat, double lng, String name) async {
-    final url = Uri.parse('https://maps.google.com/?q=$lat,$lng');
-    if (await canLaunchUrl(url)) {
-      launchUrl(url, mode: LaunchMode.externalApplication);
-    }
-  }
-
-  Future<void> _orderDelivery(
-      BuildContext context, String name, String pharmacieId) async {
-    final payment = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _PaymentPickerSheet(),
-    );
-    if (payment == null || _busy) return;
-
-    setState(() => _busy = true);
-    int deliveryFee = 0;
-    try {
-      var user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        await FirebaseAuth.instance.signInAnonymously();
-        user = FirebaseAuth.instance.currentUser;
-      }
-      if (user == null) return;
-
-      double lat = 0, lng = 0;
-      try {
-        await Geolocator.requestPermission();
-        final pos = await Geolocator.getCurrentPosition(
-            locationSettings:
-                const LocationSettings(accuracy: LocationAccuracy.medium))
-            .timeout(const Duration(seconds: 8));
-        lat = pos.latitude;
-        lng = pos.longitude;
-      } catch (_) {}
-
-      final tarif = TarifService.compute(clientLat: lat, clientLng: lng);
-      if (!tarif.canOrder) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(tarif.rejectionMessage ?? 'Livraison non disponible'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ));
-        }
-        return;
-      }
-      deliveryFee = tarif.standardPrice;
-
-      final id = const Uuid().v4();
-      final orderData = {
-        'id':            id,
-        'description':   'Livraison pharmacie : $name',
-        'budget':        deliveryFee,
-        'shoppingBudget': 0,
-        'status':        'pending',
-        'isPaid':        false,
-        'type':          'pharmacie',
-        'pharmacieId':   pharmacieId,
-        'pharmacieName': name,
-        'latitude':      lat,
-        'longitude':     lng,
-        'clientId':      user.uid,
-        'paymentMethod': payment,
-        'createdAt':     FieldValue.serverTimestamp(),
-      };
-
-      if (payment == 'wallet') {
-        // Ne débite PAS le wallet ici — le prix final (livraison + médicaments,
-        // seulement connu une fois la pharmacie contactée) est réglé en une
-        // seule fois après livraison via le bouton de paiement de
-        // suivi_commande.dart (_WalletPayButton → payOrderFromWalletCF).
-        // Avant ce correctif, cette transaction débitait déjà le client du
-        // seul montant de livraison ICI, PUIS payOrderFromWalletCF débitait
-        // à nouveau le montant complet (livraison + médicaments) après
-        // livraison, sans jamais que cette commande soit marquée `isPaid`
-        // entre les deux — un double débit client / double crédit livreur
-        // confirmé et corrigé (2026-07-09). On garde uniquement la
-        // vérification de solde (lecture seule) pour ne pas laisser un client
-        // sans fonds suffisants passer commande.
-        final clientSnap = await FirebaseFirestore.instance
-            .collection('clients')
-            .doc(user.uid)
-            .get();
-        final balance = (clientSnap.data()?['wallet'] as num? ?? 0).toInt();
-        if (balance < deliveryFee) {
-          throw Exception('SOLDE_INSUFFISANT:$balance');
-        }
-      }
-      await FirebaseFirestore.instance
-          .collection('orders')
-          .doc(id)
-          .set(orderData);
-
-      try {
-        await FirestoreService().findNearestDriver(lat, lng, id, budget: deliveryFee);
-      } catch (_) {}
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Demande de livraison envoyée !'),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        final msg = e.toString().contains('SOLDE_INSUFFISANT')
-            ? 'Solde wallet insuffisant ($deliveryFee FCFA requis)'
-            : 'Erreur : $e';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(msg),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    Query<Map<String, dynamic>> query =
-        FirebaseFirestore.instance.collection('pharmacies').orderBy('name');
-
-    if (widget.onlyOnDuty) {
-      query = FirebaseFirestore.instance
-          .collection('pharmacies')
-          .where('isOnDuty', isEqualTo: true);
-    }
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: query.snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final docs = snapshot.data?.docs ?? [];
-
-        if (docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+        body: StreamBuilder<List<PharmacyGuard>>(
+          stream: _repository.watchPublicGuards(city: 'Abengourou'),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const _Message(
+                  icon: Icons.cloud_off_rounded,
+                  text:
+                      'Les gardes sont momentanément indisponibles. Réessayez plus tard.');
+            }
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final periodLists = PharmacyGuardPeriod.values
+                .map((period) => _GuardList(
+                      guards: snapshot.data!,
+                      period: period,
+                      position: _position,
+                    ))
+                .toList(growable: false);
+            return TabBarView(
+              controller: _tabs,
               children: [
-                Icon(Icons.local_pharmacy_outlined,
-                    size: 72, color: Colors.grey.shade300),
-                const SizedBox(height: 16),
-                Text(
-                  widget.onlyOnDuty
-                      ? 'Aucune pharmacie de garde\nen ce moment'
-                      : 'Aucune pharmacie enregistrée',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 15, color: Colors.grey),
-                ),
-                if (widget.onlyOnDuty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Revenez plus tard ou appelez le 15',
-                    style: GoogleFonts.urbanist(
-                        color: Colors.grey.shade400, fontSize: 12),
-                  ),
-                ],
+                ...periodLists,
+                _PartnerPharmacies(position: _position)
               ],
-            ),
-          );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          physics: const BouncingScrollPhysics(),
-          itemCount: docs.length,
-          itemBuilder: (context, i) {
-            final doc  = docs[i];
-            final data = doc.data() as Map<String, dynamic>;
-            final name     = data['name'] as String? ?? '—';
-            final address  = data['address'] as String? ?? '';
-            final phone    = data['phone'] as String? ?? '';
-            final hours    = data['hours'] as String? ?? '';
-            final lat      = (data['lat'] as num?)?.toDouble() ?? 0.0;
-            final lng      = (data['lng'] as num?)?.toDouble() ?? 0.0;
-            final isOnDuty = data['isOnDuty'] == true;
-            final hasCoords = lat != 0.0 && lng != 0.0;
-
-            return _PharmacieCard(
-              name: name,
-              address: address,
-              phone: phone,
-              hours: hours,
-              lat: lat,
-              lng: lng,
-              isOnDuty: isOnDuty,
-              hasCoords: hasCoords,
-              onCall: phone.isNotEmpty ? () => _call(phone) : null,
-              onMap: hasCoords ? () => _openMap(lat, lng, name) : null,
-              onDeliver: _busy ? null : () => _orderDelivery(context, name, doc.id),
             );
           },
-        );
-      },
-    );
-  }
+        ),
+      );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+class _PartnerPharmacies extends StatelessWidget {
+  const _PartnerPharmacies({required this.position});
+  final Position? position;
 
-class _PharmacieCard extends StatelessWidget {
-  final String name, address, phone, hours;
-  final double lat, lng;
-  final bool isOnDuty, hasCoords;
-  final VoidCallback? onCall, onMap, onDeliver;
+  @override
+  Widget build(BuildContext context) =>
+      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: FirebaseFirestore.instance
+            .collection('pharmacies')
+            .orderBy('name')
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.data!.docs.isEmpty) {
+            return const _Message(
+                icon: Icons.handshake_outlined,
+                text: 'Aucune pharmacie partenaire enregistrée.');
+          }
+          final now = DateTime.now().toUtc();
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              final doc = snapshot.data!.docs[index];
+              final data = doc.data();
+              final guard = PharmacyGuard(
+                id: 'partner-${doc.id}',
+                pharmacyId: doc.id,
+                name: data['name'] as String? ?? 'Pharmacie',
+                city: data['city'] as String? ?? 'Abengourou',
+                address: data['address'] as String?,
+                phone: data['phone'] as String?,
+                latitude: (data['lat'] as num?)?.toDouble(),
+                longitude: (data['lng'] as num?)?.toDouble(),
+                guardStartAt: now,
+                guardEndAt: now.add(const Duration(days: 1)),
+                sourceType: 'partner',
+                isVerified: true,
+                isActive: true,
+                linkedPartner: true,
+                partnerPharmacyId: doc.id,
+              );
+              return _GuardCard(
+                  guard: guard,
+                  now: now,
+                  position: position,
+                  partnerOnly: true);
+            },
+          );
+        },
+      );
+}
 
-  const _PharmacieCard({
-    required this.name,
-    required this.address,
-    required this.phone,
-    required this.hours,
-    required this.lat,
-    required this.lng,
-    required this.isOnDuty,
-    required this.hasCoords,
-    this.onCall,
-    this.onMap,
-    this.onDeliver,
-  });
+class _GuardList extends StatelessWidget {
+  const _GuardList(
+      {required this.guards, required this.period, required this.position});
+
+  final List<PharmacyGuard> guards;
+  final PharmacyGuardPeriod period;
+  final Position? position;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: isOnDuty
-            ? Border.all(color: Colors.red.shade200, width: 1.5)
-            : Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: isOnDuty
-                ? Colors.red.withValues(alpha: 0.07)
-                : Colors.black.withValues(alpha: 0.05),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-            decoration: BoxDecoration(
-              color: isOnDuty
-                  ? Colors.red.withValues(alpha: 0.04)
-                  : Colors.grey.withValues(alpha: 0.03),
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: isOnDuty
-                        ? Colors.red.shade50
-                        : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(Icons.local_pharmacy,
-                      color: isOnDuty
-                          ? Colors.red.shade700
-                          : Colors.grey.shade400,
-                      size: 28),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name,
-                          style: GoogleFonts.urbanist(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                              color: const Color(0xFF1A1A2E))),
-                      if (hours.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            Icon(Icons.access_time,
-                                size: 13,
-                                color: Colors.orange.shade700),
-                            const SizedBox(width: 4),
-                            Text(hours,
-                                style: GoogleFonts.urbanist(
-                                    fontSize: 12,
-                                    color: Colors.orange.shade700)),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                // Badge
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: isOnDuty
-                        ? Colors.red.shade50
-                        : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: isOnDuty
-                            ? Colors.red.shade200
-                            : Colors.grey.shade300),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                          color: isOnDuty ? Colors.red : Colors.grey,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        isOnDuty ? 'De garde' : 'Fermée',
-                        style: TextStyle(
-                            color: isOnDuty
-                                ? Colors.red.shade700
-                                : Colors.grey.shade600,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const Divider(height: 1),
-
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-            child: Column(
-              children: [
-                // Phone
-                if (phone.isNotEmpty)
-                  _ActionRow(
-                    icon: Icons.phone_rounded,
-                    iconBg: Colors.green.shade100,
-                    iconColor: Colors.green.shade700,
-                    bg: Colors.green.shade50,
-                    border: Colors.green.shade200,
-                    label: 'Téléphone',
-                    value: phone,
-                    trailingIcon: Icons.call,
-                    onTap: onCall,
-                  ),
-
-                if (phone.isNotEmpty) const SizedBox(height: 8),
-
-                // Address/Map
-                _ActionRow(
-                  icon: Icons.location_on_rounded,
-                  iconBg: hasCoords
-                      ? Colors.blue.shade100
-                      : Colors.grey.shade200,
-                  iconColor: hasCoords
-                      ? Colors.blue.shade700
-                      : Colors.grey,
-                  bg: hasCoords
-                      ? Colors.blue.shade50
-                      : Colors.grey.shade50,
-                  border: hasCoords
-                      ? Colors.blue.shade200
-                      : Colors.grey.shade200,
-                  label: 'Localisation',
-                  value: address.isNotEmpty
-                      ? address
-                      : hasCoords
-                          ? 'Voir sur la carte'
-                          : 'Non renseignée',
-                  trailingIcon: hasCoords ? Icons.open_in_new : null,
-                  onTap: onMap,
-                ),
-              ],
-            ),
-          ),
-
-          // Delivery button
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: onDeliver,
-                icon: const Icon(Icons.delivery_dining,
-                    size: 18, color: Colors.white),
-                label: Text('Commander une livraison',
-                    style: GoogleFonts.urbanist(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red.shade700,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
-                ),
-              ),
-            ),
-          ),
-        ],
+    final now = DateTime.now().toUtc();
+    final visible = guards
+        .where((guard) => guard.matchesPeriod(period, now))
+        .toList(growable: false)
+      ..sort((a, b) => a.guardStartAt.compareTo(b.guardStartAt));
+    if (visible.isEmpty) {
+      return const _Message(
+          icon: Icons.local_pharmacy_outlined,
+          text: 'Aucune garde publiée pour cette période.');
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: visible.length,
+      itemBuilder: (context, index) => _GuardCard(
+        guard: visible[index],
+        now: now,
+        position: position,
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+class _GuardCard extends StatelessWidget {
+  const _GuardCard(
+      {required this.guard,
+      required this.now,
+      required this.position,
+      this.partnerOnly = false});
 
-class _PaymentPickerSheet extends StatefulWidget {
-  const _PaymentPickerSheet();
+  final PharmacyGuard guard;
+  final DateTime now;
+  final Position? position;
+  final bool partnerOnly;
 
-  @override
-  State<_PaymentPickerSheet> createState() => _PaymentPickerSheetState();
-}
-
-class _PaymentPickerSheetState extends State<_PaymentPickerSheet> {
-  int? _walletBalance;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadBalance();
+  String _date(DateTime value) {
+    final local = value.toLocal();
+    return '${local.day.toString().padLeft(2, '0')}/'
+        '${local.month.toString().padLeft(2, '0')} à '
+        '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
   }
 
-  Future<void> _loadBalance() async {
+  Future<void> _call() => launchUrl(Uri.parse('tel:${guard.phone}'));
+
+  Future<void> _map() {
+    final query = guard.latitude != null && guard.longitude != null
+        ? '${guard.latitude},${guard.longitude}'
+        : Uri.encodeComponent(
+            '${guard.address ?? ''}, ${guard.city}, Côte d’Ivoire');
+    return launchUrl(Uri.parse('https://maps.google.com/?q=$query'),
+        mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onDuty = guard.isOnDutyAt(now);
+    final expired = guard.isExpiredAt(now);
+    final hasMap = (guard.latitude != null && guard.longitude != null) ||
+        guard.address?.trim().isNotEmpty == true;
+    final distance =
+        position != null && guard.latitude != null && guard.longitude != null
+            ? Geolocator.distanceBetween(position!.latitude,
+                    position!.longitude, guard.latitude!, guard.longitude!) /
+                1000
+            : null;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.local_pharmacy_rounded,
+                  color: Colors.red.shade700, size: 34),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(guard.name,
+                        style: GoogleFonts.urbanist(
+                            fontSize: 17, fontWeight: FontWeight.w700)),
+                    Text([
+                      guard.city,
+                      if (guard.district?.trim().isNotEmpty == true)
+                        guard.district!,
+                      if (guard.address?.trim().isNotEmpty == true)
+                        guard.address!,
+                    ].join(' — ')),
+                    if (guard.phone?.trim().isNotEmpty == true)
+                      Text(guard.phone!),
+                    if (distance != null)
+                      Text('${distance.toStringAsFixed(1)} km',
+                          style: const TextStyle(color: Colors.blue)),
+                  ],
+                ),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            if (!partnerOnly) ...[
+              _GuardBadge(onDuty: onDuty, expired: expired, guard: guard),
+              const SizedBox(height: 6),
+              Text(onDuty
+                  ? 'Jusqu’au ${_date(guard.guardEndAt)}'
+                  : 'Du ${_date(guard.guardStartAt)} au ${_date(guard.guardEndAt)}'),
+            ] else
+              const Text('PARTENAIRE AZ EXPRESS',
+                  style: TextStyle(
+                      color: Colors.blue, fontWeight: FontWeight.bold)),
+            if (guard.lastSyncedAt != null) ...[
+              const SizedBox(height: 4),
+              Text('Mise à jour : ${_date(guard.lastSyncedAt!)}',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                    onPressed:
+                        guard.phone?.trim().isNotEmpty == true ? _call : null,
+                    icon: const Icon(Icons.call_rounded),
+                    label: const Text('Appeler')),
+                OutlinedButton.icon(
+                    onPressed: hasMap ? _map : null,
+                    icon: const Icon(Icons.directions_rounded),
+                    label: const Text('Itinéraire')),
+                FilledButton.icon(
+                  onPressed: () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    builder: (_) => _PharmacyOrderSheet(guard: guard),
+                  ),
+                  icon: const Icon(Icons.delivery_dining_rounded),
+                  label: const Text('Commander avec AZ Express'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GuardBadge extends StatelessWidget {
+  const _GuardBadge(
+      {required this.onDuty, required this.expired, required this.guard});
+  final bool onDuty;
+  final bool expired;
+  final PharmacyGuard guard;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = onDuty
+        ? Colors.green
+        : expired
+            ? Colors.grey
+            : Colors.orange;
+    final label = onDuty
+        ? 'DE GARDE MAINTENANT'
+        : expired
+            ? 'GARDE TERMINÉE'
+            : 'GARDE À VENIR';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+          color: color.withValues(alpha: .1),
+          borderRadius: BorderRadius.circular(20)),
+      child: Text(label,
+          style: TextStyle(
+              color: color, fontWeight: FontWeight.w800, fontSize: 11)),
+    );
+  }
+}
+
+class _PharmacyOrderSheet extends StatefulWidget {
+  const _PharmacyOrderSheet({required this.guard});
+  final PharmacyGuard guard;
+
+  @override
+  State<_PharmacyOrderSheet> createState() => _PharmacyOrderSheetState();
+}
+
+class _PharmacyOrderSheetState extends State<_PharmacyOrderSheet> {
+  final _products = TextEditingController();
+  final _quantity = TextEditingController(text: '1');
+  final _budget = TextEditingController();
+  final _note = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _products.dispose();
+    _quantity.dispose();
+    _budget.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_products.text.trim().isEmpty) return;
+    setState(() => _sending = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) {
-        final doc = await FirebaseFirestore.instance
-            .collection('clients')
-            .doc(uid)
-            .get();
-        if (mounted) {
-          setState(() {
-            _walletBalance =
-                (doc.data()?['wallet'] as num? ?? 0).toInt();
-            _loading = false;
-          });
-        }
-      } else {
-        if (mounted) setState(() { _walletBalance = 0; _loading = false; });
+      var user = FirebaseAuth.instance.currentUser;
+      user ??= (await FirebaseAuth.instance.signInAnonymously()).user;
+      if (user == null) throw StateError('Utilisateur non connecté');
+      Position? position;
+      try {
+        position = await Geolocator.getCurrentPosition(
+            locationSettings:
+                const LocationSettings(accuracy: LocationAccuracy.medium));
+      } catch (_) {}
+      final pickupLat = widget.guard.latitude;
+      final pickupLng = widget.guard.longitude;
+      if (pickupLat == null ||
+          pickupLng == null ||
+          (pickupLat == 0 && pickupLng == 0)) {
+        throw StateError(
+          'Les coordonnées de la pharmacie ne sont pas renseignées. '
+          'La commande ne peut pas être envoyée.',
+        );
       }
-    } catch (_) {
-      if (mounted) setState(() { _walletBalance = 0; _loading = false; });
+      if (position == null ||
+          (position.latitude == 0 && position.longitude == 0)) {
+        throw StateError(
+          'Votre position de livraison est indisponible. '
+          'Activez le GPS puis réessayez.',
+        );
+      }
+      final lat = position.latitude;
+      final lng = position.longitude;
+      if (!mounted) return;
+      final cityService = context.read<ActiveCityProvider>().service;
+      final geography = await cityService.resolveDispatchGeography(
+        pickupLatitude: pickupLat,
+        pickupLongitude: pickupLng,
+        deliveryLatitude: lat,
+        deliveryLongitude: lng,
+      );
+      final tariff = TarifService.compute(clientLat: lat, clientLng: lng);
+      if (!tariff.canOrder) {
+        throw StateError(tariff.rejectionMessage ?? 'Livraison indisponible');
+      }
+      final id = const Uuid().v4();
+      await FirebaseFirestore.instance.collection('orders').doc(id).set({
+        ...buildPharmacyOrderPrefill(widget.guard),
+        'id': id,
+        'description':
+            'Livraison pharmacie : ${_products.text.trim()} (quantité ${_quantity.text.trim()})',
+        'customerNote': _note.text.trim(),
+        'shoppingBudget': int.tryParse(_budget.text.trim()) ?? 0,
+        'budget': tariff.standardPrice,
+        'status': 'pending',
+        'isPaid': false,
+        'type': 'pharmacie',
+        'latitude': pickupLat,
+        'longitude': pickupLng,
+        'destLat': lat,
+        'destLng': lng,
+        'pickupCityId': geography.pickupCityId,
+        'pickupZoneId': geography.pickupZoneId,
+        'deliveryCityId': geography.deliveryCityId,
+        'deliveryZoneId': geography.deliveryZoneId,
+        'pickupCoordinateSource': 'local_place',
+        'deliveryCoordinateSource': 'gps',
+        'gpsDetectedCityId': cityService.gpsDetectedCityId,
+        'activeCityId': cityService.activeCityId,
+        'citySelectionSource': cityService.citySelectionSource,
+        'cityResolutionStatus': geography.cityResolutionStatus,
+        'clientId': user.uid,
+        'paymentMethod': 'cash',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      await FirestoreService().findNearestDriver(pickupLat, pickupLng, id,
+          budget: tariff.standardPrice);
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Demande confirmée et envoyée.'),
+          backgroundColor: Colors.green));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Erreur : $error')));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    final canWallet = (_walletBalance ?? 0) >= 500;
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: EdgeInsets.fromLTRB(
-          24, 20, 24, MediaQuery.of(context).viewInsets.bottom + 28),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text('Mode de paiement',
-              style: GoogleFonts.urbanist(
-                  fontSize: 18, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text('Frais de livraison : 500 FCFA',
-              style: GoogleFonts.urbanist(
-                  fontSize: 13, color: Colors.grey.shade600)),
-          const SizedBox(height: 20),
-          if (_loading)
-            const Center(child: CircularProgressIndicator())
-          else ...[
-            _PayOption(
-              icon: Icons.account_balance_wallet_rounded,
-              color: canWallet ? Colors.green : Colors.grey,
-              title: 'Wallet AZ Express',
-              subtitle: _walletBalance != null
-                  ? 'Solde : $_walletBalance FCFA'
-                      '${!canWallet ? ' — insuffisant' : ''}'
-                  : 'Solde indisponible',
-              enabled: canWallet,
-              onTap: canWallet
-                  ? () => Navigator.pop(context, 'wallet')
-                  : null,
-            ),
-            const SizedBox(height: 12),
-            _PayOption(
-              icon: Icons.payments_rounded,
-              color: Colors.orange.shade700,
-              title: 'Espèces à la livraison',
-              subtitle: 'Vous payez le livreur en liquide',
-              enabled: true,
-              onTap: () => Navigator.pop(context, 'cash'),
-            ),
-          ],
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-}
-
-class _PayOption extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String subtitle;
-  final bool enabled;
-  final VoidCallback? onTap;
-
-  const _PayOption({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.subtitle,
-    required this.enabled,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: enabled
-              ? color.withValues(alpha: 0.06)
-              : Colors.grey.shade50,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: enabled
-                ? color.withValues(alpha: 0.3)
-                : Colors.grey.shade200,
-          ),
-        ),
-        child: Row(children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: enabled
-                  ? color.withValues(alpha: 0.12)
-                  : Colors.grey.shade100,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon,
-                color: enabled ? color : Colors.grey, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              Text(title,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: enabled ? Colors.black87 : Colors.grey)),
-              Text(subtitle,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 12, color: Colors.grey.shade600)),
-            ]),
-          ),
-          if (enabled)
-            Icon(Icons.arrow_forward_ios_rounded,
-                size: 14, color: color),
-        ]),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ActionRow extends StatelessWidget {
-  final IconData icon;
-  final Color iconBg, iconColor, bg, border;
-  final String label, value;
-  final IconData? trailingIcon;
-  final VoidCallback? onTap;
-
-  const _ActionRow({
-    required this.icon,
-    required this.iconBg,
-    required this.iconColor,
-    required this.bg,
-    required this.border,
-    required this.label,
-    required this.value,
-    this.trailingIcon,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: border),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration:
-                  BoxDecoration(color: iconBg, shape: BoxShape.circle),
-              child: Icon(icon, color: iconColor, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.w500)),
-                  Text(value,
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: iconColor),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis),
-                ],
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            20, 20, 20, MediaQuery.viewInsetsOf(context).bottom + 20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Commander chez ${widget.guard.name}',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              TextField(
+                  controller: _products,
+                  decoration: const InputDecoration(
+                      labelText: 'Médicament ou produit recherché *')),
+              TextField(
+                  controller: _quantity,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Quantité')),
+              TextField(
+                  controller: _budget,
+                  keyboardType: TextInputType.number,
+                  decoration:
+                      const InputDecoration(labelText: 'Budget produits')),
+              TextField(
+                  controller: _note,
+                  maxLines: 2,
+                  decoration: const InputDecoration(labelText: 'Note')),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: _sending ? null : _submit,
+                child: Text(_sending ? 'Envoi…' : 'Confirmer la demande'),
               ),
-            ),
-            if (trailingIcon != null)
-              Icon(trailingIcon, color: iconColor, size: 20),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
-  }
+      );
+}
+
+class _Message extends StatelessWidget {
+  const _Message({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 64, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            Text(text, textAlign: TextAlign.center),
+          ]),
+        ),
+      );
 }

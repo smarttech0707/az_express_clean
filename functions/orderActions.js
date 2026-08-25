@@ -1,5 +1,7 @@
 'use strict';
 
+const { resolveDispatchGeography } = require('./dispatch');
+
 // Fabriques pour payOrderFromWalletCF / cancelOrderCF / deliverOrderCF —
 // séparées de index.js pour rester testables sans initialiser Firebase Admin
 // (même pattern que azia/pendingActions.js:buildConfirmAction). Portage
@@ -338,6 +340,16 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
         throw new HttpsError('failed-precondition', 'Cette commande ne peut pas être marquée livrée');
       }
 
+      const linkedBoutiqueOrderId = order.linkedBoutiqueOrderId || null;
+      const boutiqueOrderRef = linkedBoutiqueOrderId
+        ? db.collection('boutique_orders').doc(String(linkedBoutiqueOrderId))
+        : null;
+      const boutiqueOrderSnap = boutiqueOrderRef ? await tx.get(boutiqueOrderRef) : null;
+      const boutiqueOrder = boutiqueOrderSnap?.exists ? boutiqueOrderSnap.data() : null;
+      if (boutiqueOrder && ['refunded', 'cancelled'].includes(boutiqueOrder.status)) {
+        throw new HttpsError('failed-precondition', 'La commande boutique liée ne peut plus être livrée');
+      }
+
       const sid            = order.sellerId || null;
       const sType          = order.sellerType || 'seller';
       const budget         = Number(order.budget || 0);
@@ -371,6 +383,19 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
         ...(typeof deliveredLng === 'number' ? { deliveredLng } : {}),
         ...(deliveryPhotoUrl ? { deliveryPhoto: deliveryPhotoUrl } : {}),
       });
+
+      // La livraison et la vente Boutique doivent atteindre leur état terminal
+      // dans la même transaction. Les documents historiques sans
+      // deliveryOrderId restent lisibles ; leur remboursement est protégé par
+      // la vérification de la course liée dans buildRefundExpiredBoutiqueOrder.
+      if (boutiqueOrder && boutiqueOrder.deliveryOrderId === String(orderId) &&
+          !['delivered', 'refunded', 'cancelled'].includes(boutiqueOrder.status)) {
+        tx.update(boutiqueOrderRef, {
+          status: 'delivered',
+          dispatchStatus: 'delivered',
+          deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
 
       const driverWallet = Number(driverSnap.data()?.wallet || 0);
 
@@ -511,6 +536,111 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
 
 const BOUTIQUE_DELIVERY_FEE = 500; // même constante que boutique_page.dart côté Dart
 
+function isCompletedBoutiqueDelivery(delivery) {
+  if (!delivery) return false;
+  return ['delivered', 'completed'].includes(delivery.status) ||
+    (delivery.status === 'proof_sent' &&
+      (delivery.proofValidated === true || delivery.deliveryCompletedAt != null)) ||
+    delivery.deliveredAt != null ||
+    delivery.deliveryCompletedAt != null;
+}
+
+async function readProductBoutiqueSeller(tx, db, product, HttpsError) {
+  const sellerId = String(product.sellerId || product.boutiqueId || '');
+  if (!sellerId) {
+    throw new HttpsError('failed-precondition', 'Produit sans vendeur boutique');
+  }
+
+  const sellerRef = db.collection('sellers').doc(sellerId);
+  const sellerSnap = await tx.get(sellerRef);
+  if (!sellerSnap.exists) {
+    throw new HttpsError('failed-precondition', 'Vendeur boutique introuvable');
+  }
+
+  const seller = sellerSnap.data();
+  if (seller.type !== 'boutique' || seller.isSuspended === true ||
+      seller.isActive === false || seller.status === 'suspended') {
+    throw new HttpsError('failed-precondition', 'Vendeur boutique indisponible');
+  }
+
+  return { sellerId, sellerRef, seller };
+}
+
+async function resolveBoutiqueOrderGeography(
+  db,
+  HttpsError,
+  productId,
+  deliveryLat,
+  deliveryLng,
+) {
+  const productSnap = await db.collection('boutique_products')
+    .doc(String(productId)).get();
+  if (!productSnap.exists) {
+    throw new HttpsError('not-found', 'Produit introuvable');
+  }
+  const sellerId = String(
+    productSnap.data().sellerId || productSnap.data().boutiqueId || '',
+  );
+  const sellerSnap = sellerId
+    ? await db.collection('sellers').doc(sellerId).get()
+    : null;
+  if (!sellerSnap?.exists) {
+    throw new HttpsError('failed-precondition', 'Vendeur boutique introuvable');
+  }
+  try {
+    return await resolveDispatchGeography(db, {
+      pickupLat: Number(sellerSnap.data().lat),
+      pickupLng: Number(sellerSnap.data().lng),
+      deliveryLat: Number(deliveryLat),
+      deliveryLng: Number(deliveryLng),
+      pickupCoordinateSource: 'local_place',
+      deliveryCoordinateSource: 'gps',
+    });
+  } catch (error) {
+    throw new HttpsError('failed-precondition', error.message);
+  }
+}
+
+async function compensateFailedCashBoutiqueDispatch({
+  db, admin, orderId, deliveryOrderId, productId, quantity, reason,
+}) {
+  return db.runTransaction(async (tx) => {
+    const orderRef = db.collection('boutique_orders').doc(orderId);
+    const deliveryRef = db.collection('orders').doc(deliveryOrderId);
+    const productRef = db.collection('boutique_products').doc(String(productId));
+    const [orderSnap, deliverySnap, productSnap] = await Promise.all([
+      tx.get(orderRef), tx.get(deliveryRef), tx.get(productRef),
+    ]);
+
+    if (!orderSnap.exists || !deliverySnap.exists || !productSnap.exists) {
+      return false;
+    }
+    const order = orderSnap.data();
+    const delivery = deliverySnap.data();
+    if (order.status !== 'pending_dispatch' ||
+        order.deliveryOrderId !== deliveryOrderId ||
+        delivery.status !== 'pending' || delivery.driverId ||
+        (delivery.notifiedDriverIds || []).length > 0) {
+      return false;
+    }
+
+    const currentStock = Number(productSnap.data().stock || 0);
+    tx.update(productRef, { stock: currentStock + quantity });
+    tx.update(orderRef, {
+      status: 'dispatch_failed',
+      dispatchStatus: 'failed',
+      failureReason: String(reason || 'dispatch_failed').slice(0, 500),
+      dispatchFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    tx.update(deliveryRef, {
+      status: 'cancelled',
+      cancellationReason: 'boutique_dispatch_failed',
+      cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
+}
+
 // Remplace FirestoreService.creditSellerWallet() appelé depuis
 // lib/screens/client/boutique_page.dart (Prompt 28) : le client débitait son
 // propre wallet dans une transaction, PUIS créditait le wallet du vendeur
@@ -536,29 +666,28 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
 
     await checkRateLimit(uid, 'pay_boutique_order', 20, 60);
 
-    // Vendeur boutique unique — même requête que boutique_page.dart côté
-    // Dart, non transactionnelle (ce compte change rarement, risque négligeable).
-    const sellerSnap = await db.collection('sellers').where('type', '==', 'boutique').limit(1).get();
-    if (sellerSnap.empty) {
-      throw new HttpsError('failed-precondition', 'Aucun vendeur boutique configuré');
-    }
-    const sellerDoc  = sellerSnap.docs[0];
-    const sellerId   = sellerDoc.id;
-    const sellerName = sellerDoc.data().name || 'Boutique AZ';
+    const geography = await resolveBoutiqueOrderGeography(
+      db, HttpsError, productId, deliveryLat, deliveryLng,
+    );
 
     const orderRef = db.collection('boutique_orders').doc();
     const orderId  = orderRef.id;
+    const deliveryOrderRef = db.collection('orders').doc();
+    const deliveryOrderId = deliveryOrderRef.id;
 
-    let totalPrice, productName, productCategory;
+    let totalPrice, productName, productCategory, sellerId, sellerName;
+    let pickupLat, pickupLng;
 
     await db.runTransaction(async (tx) => {
       const productRef = db.collection('boutique_products').doc(String(productId));
       const clientRef  = db.collection('clients').doc(uid);
-      const sellerRef  = db.collection('sellers').doc(sellerId);
 
       const productSnap = await tx.get(productRef);
       if (!productSnap.exists) throw new HttpsError('not-found', 'Produit introuvable');
       const product = productSnap.data();
+      const sellerInfo = await readProductBoutiqueSeller(tx, db, product, HttpsError);
+      sellerId = sellerInfo.sellerId;
+      sellerName = sellerInfo.seller.name || 'Boutique AZ';
 
       const currentStock = Number(product.stock || 0);
       if (currentStock < quantity) {
@@ -579,8 +708,9 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
         throw new HttpsError('failed-precondition', `SOLDE_INSUFFISANT:${clientWallet}:${totalPrice}`);
       }
 
-      const sellerSnapTx = await tx.get(sellerRef);
-      const sellerWallet = Number(sellerSnapTx.data()?.wallet || 0);
+      const sellerRef = sellerInfo.sellerRef;
+      const sellerSnapTx = sellerInfo.seller;
+      const sellerWallet = Number(sellerSnapTx.wallet || 0);
 
       tx.update(clientRef, { wallet: clientWallet - totalPrice });
       tx.update(sellerRef, { wallet: sellerWallet + totalPrice });
@@ -598,8 +728,37 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
         totalPrice,
         paymentMethod: 'wallet',
         status:        'paid',
+        deliveryOrderId,
+        linkedOrderId: deliveryOrderId,
+        dispatchStatus: 'pending_dispatch',
         deliveryDeadline: admin.firestore.Timestamp.fromMillis(Date.now() + 48 * 3600 * 1000),
         createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+      });
+      const seller = sellerInfo.seller;
+      const lat = Number(seller.lat);
+      const lng = Number(seller.lng);
+      pickupLat = lat;
+      pickupLng = lng;
+      tx.set(deliveryOrderRef, {
+        description:   `🛍️ Boutique AZ : ${productName} ×${quantity}`,
+        budget:         BOUTIQUE_DELIVERY_FEE,
+        shoppingBudget: 0,
+        status:         'pending',
+        latitude:       lat,
+        longitude:      lng,
+        destLat:        Number(deliveryLat),
+        destLng:        Number(deliveryLng),
+        type:           'boutique',
+        orderType:      'boutique',
+        clientId:       uid,
+        sellerId,
+        sellerName,
+        sellerType:     'boutique',
+        paymentMethod:  'wallet',
+        linkedBoutiqueOrderId: orderId,
+        isPaid:         false,
+        ...geography,
+        createdAt:      admin.firestore.FieldValue.serverTimestamp(),
       });
     });
 
@@ -625,28 +784,16 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
     // enveloppait cette étape dans son propre try/catch silencieux).
     let dispatchResult = null;
     try {
-      const deliveryOrderRef = db.collection('orders').doc();
-      const lat = typeof deliveryLat === 'number' ? deliveryLat : 0;
-      const lng = typeof deliveryLng === 'number' ? deliveryLng : 0;
-      await deliveryOrderRef.set({
-        description:   `🛍️ Boutique AZ : ${productName} ×${quantity}`,
-        budget:         BOUTIQUE_DELIVERY_FEE,
-        shoppingBudget: 0,
-        status:         'pending',
-        latitude:       lat,
-        longitude:      lng,
-        type:           'boutique',
-        clientId:       uid,
-        sellerId,
-        sellerName,
-        sellerType:     'boutique',
-        paymentMethod:  'wallet',
-        linkedBoutiqueOrderId: orderId,
-        isPaid:         false,
-        createdAt:      admin.firestore.FieldValue.serverTimestamp(),
-      });
       dispatchResult = await dispatchOrder(db, admin, {
-        orderId: deliveryOrderRef.id, lat, lng, budget: BOUTIQUE_DELIVERY_FEE,
+        orderId: deliveryOrderId,
+        lat: pickupLat,
+        lng: pickupLng,
+        pickupCityId: geography.pickupCityId,
+        cityResolutionStatus: geography.cityResolutionStatus,
+        budget: BOUTIQUE_DELIVERY_FEE,
+      });
+      await orderRef.update({
+        dispatchStatus: dispatchResult.dispatched ? 'dispatched' : 'pending',
       });
     } catch (err) {
       console.error('payBoutiqueOrderCF: création/dispatch de la course a échoué (achat déjà validé):', err.message);
@@ -691,18 +838,20 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
 
     await checkRateLimit(uid, 'pay_boutique_order_cash', 20, 60);
 
+    const geography = await resolveBoutiqueOrderGeography(
+      db, HttpsError, productId, deliveryLat, deliveryLng,
+    );
+
     // Vendeur boutique unique — même requête que payBoutiqueOrderCF (le
     // paiement wallet), non transactionnelle (ce compte change rarement).
-    const sellerSnap = await db.collection('sellers').where('type', '==', 'boutique').limit(1).get();
-    if (sellerSnap.empty) {
-      throw new HttpsError('failed-precondition', 'Aucun vendeur boutique configuré');
-    }
-    const sellerDoc  = sellerSnap.docs[0];
-    const sellerId   = sellerDoc.id;
-    const sellerName = sellerDoc.data().name || 'Boutique AZ';
+    let sellerId;
+    let sellerName;
+    let pickupLat, pickupLng;
 
     const orderRef = db.collection('boutique_orders').doc();
     const orderId  = orderRef.id;
+    const deliveryOrderRef = db.collection('orders').doc();
+    const deliveryOrderId = deliveryOrderRef.id;
 
     let totalPrice, productName, productCategory;
 
@@ -716,6 +865,9 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
       const productSnap = await tx.get(productRef);
       if (!productSnap.exists) throw new HttpsError('not-found', 'Produit introuvable');
       const product = productSnap.data();
+      const sellerInfo = await readProductBoutiqueSeller(tx, db, product, HttpsError);
+      sellerId = sellerInfo.sellerId;
+      sellerName = sellerInfo.seller.name || 'Boutique AZ';
 
       const currentStock = Number(product.stock || 0);
       if (currentStock < quantity) {
@@ -741,9 +893,37 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
         unitPrice,
         totalPrice,
         paymentMethod: 'cash',
-        status:        'pending_payment',
+        status:        'pending_dispatch',
+        deliveryOrderId,
+        linkedOrderId: deliveryOrderId,
+        dispatchStatus: 'pending_dispatch',
         deliveryDeadline: admin.firestore.Timestamp.fromMillis(Date.now() + 48 * 3600 * 1000),
         createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+      });
+      const lat = Number(sellerInfo.seller.lat);
+      const lng = Number(sellerInfo.seller.lng);
+      pickupLat = lat;
+      pickupLng = lng;
+      tx.set(deliveryOrderRef, {
+        description: `Boutique AZ : ${productName} x${quantity}`,
+        budget: BOUTIQUE_DELIVERY_FEE,
+        shoppingBudget: 0,
+        status: 'pending',
+        latitude: lat,
+        longitude: lng,
+        destLat: Number(deliveryLat),
+        destLng: Number(deliveryLng),
+        type: 'boutique',
+        orderType: 'boutique',
+        clientId: uid,
+        sellerId,
+        sellerName,
+        sellerType: 'boutique',
+        paymentMethod: 'cash',
+        linkedBoutiqueOrderId: orderId,
+        isPaid: false,
+        ...geography,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
 
@@ -756,35 +936,33 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
     // buildPayBoutiqueOrder : un échec ici n'invalide pas l'achat déjà créé.
     let dispatchResult = null;
     try {
-      const deliveryOrderRef = db.collection('orders').doc();
-      const lat = typeof deliveryLat === 'number' ? deliveryLat : 0;
-      const lng = typeof deliveryLng === 'number' ? deliveryLng : 0;
-      await deliveryOrderRef.set({
-        description:   `🛍️ Boutique AZ : ${productName} ×${quantity}`,
-        budget:         BOUTIQUE_DELIVERY_FEE,
-        shoppingBudget: 0,
-        status:         'pending',
-        latitude:       lat,
-        longitude:      lng,
-        type:           'boutique',
-        clientId:       uid,
-        sellerId,
-        sellerName,
-        sellerType:     'boutique',
-        paymentMethod:  'cash',
-        linkedBoutiqueOrderId: orderId,
-        isPaid:         false,
-        createdAt:      admin.firestore.FieldValue.serverTimestamp(),
-      });
       dispatchResult = await dispatchOrder(db, admin, {
-        orderId: deliveryOrderRef.id, lat, lng, budget: BOUTIQUE_DELIVERY_FEE,
+        orderId: deliveryOrderId,
+        lat: pickupLat,
+        lng: pickupLng,
+        pickupCityId: geography.pickupCityId,
+        cityResolutionStatus: geography.cityResolutionStatus,
+        budget: BOUTIQUE_DELIVERY_FEE,
       });
+      await orderRef.update({
+        status: 'pending_payment',
+        dispatchStatus: dispatchResult.dispatched ? 'dispatched' : 'pending',
+      });
+      return { orderId, totalPrice, dispatched: dispatchResult.dispatched || false };
     } catch (err) {
-      console.error('payBoutiqueOrderCashCF: création/dispatch de la course a échoué (achat déjà validé):', err.message);
-      logAudit({
-        userId: uid, userType: 'client', action: 'pay_boutique_order_cash_dispatch_failed',
-        targetId: orderId, status: 'error', metadata: { sellerId, error: err.message },
+      const restored = await compensateFailedCashBoutiqueDispatch({
+        db, admin, orderId, deliveryOrderId, productId, quantity, reason: err.message,
       });
+      console.error('payBoutiqueOrderCashCF: dispatch failed:', err.message);
+      await logAudit({
+        userId: uid, userType: 'client', action: 'pay_boutique_order_cash_dispatch_failed',
+        targetId: orderId,
+        status: restored ? 'rolled_back' : 'error',
+        metadata: { sellerId, deliveryOrderId, stockRestored: restored, error: err.message },
+      });
+      if (restored) {
+        throw new HttpsError('unavailable', 'Course indisponible, stock restauré. Réessayez.');
+      }
     }
 
     return { orderId, totalPrice, dispatched: dispatchResult?.dispatched || false };
@@ -819,6 +997,15 @@ function buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkR
     await checkRateLimit(uid, 'refund_boutique_order', 10, 60);
 
     const orderRef = db.collection('boutique_orders').doc(String(orderId));
+    // Compatibilité historique : les anciennes ventes n'avaient pas de
+    // deliveryOrderId, mais la course conserve linkedBoutiqueOrderId.
+    const legacyDeliveryQuery = await db.collection('orders')
+      .where('linkedBoutiqueOrderId', '==', String(orderId))
+      .limit(1)
+      .get();
+    const legacyDeliveryRef = legacyDeliveryQuery.empty
+      ? null
+      : db.collection('orders').doc(legacyDeliveryQuery.docs[0].id);
     let amount = 0, sellerId = null, sellerDebit = 0;
 
     await db.runTransaction(async (tx) => {
@@ -828,6 +1015,10 @@ function buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkR
 
       if (order.clientId !== uid) {
         throw new HttpsError('permission-denied', "Cette commande n'est pas la vôtre");
+      }
+      if (order.deliveredAt != null || order.deliveryCompletedAt != null ||
+          ['delivered', 'refunded', 'cancelled'].includes(order.status)) {
+        throw new HttpsError('failed-precondition', 'Cette commande est déjà terminée');
       }
       if (order.status !== 'paid') {
         throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être remboursée automatiquement');
@@ -842,9 +1033,19 @@ function buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkR
 
       const clientRef = db.collection('clients').doc(uid);
       const sellerRef = sellerId ? db.collection('sellers').doc(sellerId) : null;
+      const deliveryOrderId = order.deliveryOrderId || order.linkedOrderId || null;
+      const deliveryRef = deliveryOrderId
+        ? db.collection('orders').doc(String(deliveryOrderId))
+        : legacyDeliveryRef;
 
-      const clientSnap = await tx.get(clientRef);
-      const sellerSnap = sellerRef ? await tx.get(sellerRef) : null;
+      const [clientSnap, sellerSnap, deliverySnap] = await Promise.all([
+        tx.get(clientRef),
+        sellerRef ? tx.get(sellerRef) : null,
+        deliveryRef ? tx.get(deliveryRef) : null,
+      ]);
+      if (deliverySnap?.exists && isCompletedBoutiqueDelivery(deliverySnap.data())) {
+        throw new HttpsError('failed-precondition', 'La livraison liée est déjà accomplie');
+      }
 
       tx.update(orderRef, {
         status:       'refunded',

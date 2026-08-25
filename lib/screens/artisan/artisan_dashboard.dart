@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -71,7 +71,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text("Supprimer la photo"),
-        content: const Text("Voulez-vous supprimer cette photo de votre profil ?"),
+        content:
+            const Text("Voulez-vous supprimer cette photo de votre profil ?"),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -127,8 +128,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 8),
             ListTile(
-              leading: const Icon(Icons.camera_alt,
-                  color: Color(0xFF1565C0)),
+              leading: const Icon(Icons.camera_alt, color: Color(0xFF1565C0)),
               title: const Text("Prendre une photo"),
               onTap: () {
                 Navigator.pop(context);
@@ -136,8 +136,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library,
-                  color: Color(0xFF1565C0)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF1565C0)),
               title: const Text("Choisir depuis la galerie"),
               onTap: () {
                 Navigator.pop(context);
@@ -163,9 +163,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
               child: Center(
                 child: Image.network(_photos[index],
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) =>
-                        const Icon(Icons.broken_image,
-                            color: Colors.white, size: 64)),
+                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
+                        color: Colors.white, size: 64)),
               ),
             ),
             Positioned(
@@ -181,8 +180,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                     padding: const EdgeInsets.all(8),
                     decoration: const BoxDecoration(
                         color: Colors.black54, shape: BoxShape.circle),
-                    child: const Icon(Icons.close,
-                        color: Colors.white, size: 22),
+                    child:
+                        const Icon(Icons.close, color: Colors.white, size: 22),
                   ),
                 ),
               ),
@@ -322,8 +321,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                               if (address.isNotEmpty)
                                 Row(children: [
                                   Icon(Icons.location_on,
-                                      size: 12,
-                                      color: Colors.grey.shade500),
+                                      size: 12, color: Colors.grey.shade500),
                                   const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
@@ -349,16 +347,13 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                                 : Colors.grey.shade100,
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                                color: isAvailable
-                                    ? Colors.green
-                                    : Colors.grey),
+                                color:
+                                    isAvailable ? Colors.green : Colors.grey),
                           ),
                           child: Text(
                             isAvailable ? "Actif" : "Masqué",
                             style: TextStyle(
-                                color: isAvailable
-                                    ? Colors.green
-                                    : Colors.grey,
+                                color: isAvailable ? Colors.green : Colors.grey,
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold),
                           ),
@@ -389,8 +384,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                   const SizedBox(height: 6),
                   Text(
                     "Ajoutez des photos de vos réalisations pour attirer plus de clients.",
-                    style:
-                        TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                    style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
                   ),
 
                   const SizedBox(height: 16),
@@ -404,7 +398,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                            color: const Color(0xFF1565C0).withValues(alpha: 0.2),
+                            color:
+                                const Color(0xFF1565C0).withValues(alpha: 0.2),
                             width: 1.5),
                       ),
                       child: Column(
@@ -455,8 +450,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                                 color: const Color(0xFFE3F2FD),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                    color: const Color(0xFF1565C0),
-                                    width: 1.5),
+                                    color: const Color(0xFF1565C0), width: 1.5),
                               ),
                               child: const Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -542,4 +536,3 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
     );
   }
 }
-

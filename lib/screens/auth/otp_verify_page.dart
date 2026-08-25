@@ -3,16 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
 import 'reset_password_page.dart';
-import '../../theme/app_theme.dart';
 
-enum OtpMode { resetPassword, adminTwoFa }
+enum OtpMode { resetPassword }
 
 class OtpVerifyPage extends StatefulWidget {
   final String phone;
-  final String? verificationId;   // SMS OTP
-  final int?    resendToken;
+  final String? verificationId; // SMS OTP
+  final int? resendToken;
   final OtpMode mode;
-  final String? adminUid;         // pour adminTwoFa
 
   const OtpVerifyPage({
     super.key,
@@ -20,7 +18,6 @@ class OtpVerifyPage extends StatefulWidget {
     required this.mode,
     this.verificationId,
     this.resendToken,
-    this.adminUid,
   });
 
   @override
@@ -32,28 +29,37 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
       List.generate(6, (_) => TextEditingController());
   final List<FocusNode> _focus = List.generate(6, (_) => FocusNode());
 
-  bool _loading     = false;
-  bool _canResend   = false;
-  int  _countdown   = 60;
+  bool _loading = false;
+  bool _canResend = false;
+  int _countdown = 60;
   Timer? _timer;
   String? _verificationId;
-  int?    _resendToken;
+  int? _resendToken;
 
   @override
   void initState() {
     super.initState();
     _verificationId = widget.verificationId;
-    _resendToken    = widget.resendToken;
+    _resendToken = widget.resendToken;
     _startCountdown();
   }
 
   void _startCountdown() {
-    setState(() { _canResend = false; _countdown = 60; });
+    setState(() {
+      _canResend = false;
+      _countdown = 60;
+    });
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() {
         _countdown--;
-        if (_countdown <= 0) { t.cancel(); _canResend = true; }
+        if (_countdown <= 0) {
+          t.cancel();
+          _canResend = true;
+        }
       });
     });
   }
@@ -61,8 +67,12 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
   @override
   void dispose() {
     _timer?.cancel();
-    for (final c in _ctrl) { c.dispose(); }
-    for (final f in _focus) { f.dispose(); }
+    for (final c in _ctrl) {
+      c.dispose();
+    }
+    for (final f in _focus) {
+      f.dispose();
+    }
     super.dispose();
   }
 
@@ -112,11 +122,7 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
     setState(() => _loading = true);
 
     try {
-      if (widget.mode == OtpMode.adminTwoFa) {
-        await _verifyAdminOtp(code);
-      } else {
-        await _verifySmsOtp(code);
-      }
+      await _verifySmsOtp(code);
     } catch (e) {
       _snack('Code incorrect ou expiré', Colors.red);
     } finally {
@@ -133,18 +139,12 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (_) => ResetPasswordPage(phoneCredential: cred),
+        builder: (_) => ResetPasswordPage(
+          phone: widget.phone,
+          phoneCredential: cred,
+        ),
       ),
     );
-  }
-
-  Future<void> _verifyAdminOtp(String code) async {
-    if (widget.adminUid == null) throw Exception('adminUid manquant');
-    final valid = await AuthService().verifyAdminOtp(widget.adminUid!, code);
-    if (!valid) throw Exception('OTP invalide');
-    // Retourne true au parent (admin_login)
-    if (!mounted) return;
-    Navigator.pop(context, true);
   }
 
   Future<void> _resend() async {
@@ -156,7 +156,7 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
         resendToken: _resendToken,
         onCodeSent: (verificationId, resendToken) {
           _verificationId = verificationId;
-          _resendToken    = resendToken;
+          _resendToken = resendToken;
           _startCountdown();
           _snack('Nouveau code envoyé', Colors.green);
         },
@@ -169,13 +169,12 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isAdmin = widget.mode == OtpMode.adminTwoFa;
-    final color   = isAdmin ? AppColors.primary : const Color(0xFF167DB7);
+    const color = Color(0xFF167DB7);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: Text(isAdmin ? 'Vérification administrateur' : 'Vérification OTP'),
+        title: const Text('Vérification OTP'),
         backgroundColor: color,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -188,24 +187,22 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [color, color.withValues(alpha: 0.7)]),
+                gradient: LinearGradient(
+                    colors: [color, color.withValues(alpha: 0.7)]),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Column(
                 children: [
-                  Icon(isAdmin ? Icons.admin_panel_settings : Icons.smartphone,
-                      size: 60, color: Colors.white),
+                  const Icon(Icons.smartphone, size: 60, color: Colors.white),
                   const SizedBox(height: 12),
-                  Text(isAdmin
-                      ? 'Double authentification'
-                      : 'Code de vérification',
-                      style: const TextStyle(color: Colors.white,
-                          fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text('Code de vérification',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   Text(
-                    isAdmin
-                        ? 'Un code a été envoyé sur\n${widget.phone}'
-                        : 'Code envoyé par SMS au\n${widget.phone}',
+                    'Code envoyé par SMS au\n${widget.phone}',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
@@ -221,15 +218,17 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
             // Champs OTP
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: List.generate(6, (i) => _OtpBox(
-                controller: _ctrl[i],
-                focusNode: _focus[i],
-                color: color,
-                onChanged: (val) => _onDigit(i, val),
-                onBackspace: () => _onBackspace(i),
-                index: i,
-                total: 6,
-              )),
+              children: List.generate(
+                  6,
+                  (i) => _OtpBox(
+                        controller: _ctrl[i],
+                        focusNode: _focus[i],
+                        color: color,
+                        onChanged: (val) => _onDigit(i, val),
+                        onBackspace: () => _onBackspace(i),
+                        index: i,
+                        total: 6,
+                      )),
             ),
 
             const SizedBox(height: 32),
@@ -246,11 +245,15 @@ class _OtpVerifyPageState extends State<OtpVerifyPage> {
                   elevation: 4,
                 ),
                 child: _loading
-                    ? const SizedBox(width: 24, height: 24,
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2.5))
                     : const Text('Vérifier le code',
-                        style: TextStyle(color: Colors.white, fontSize: 16,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold)),
               ),
             ),
@@ -307,37 +310,37 @@ class _OtpBox extends StatelessWidget {
       label: 'Chiffre ${index + 1} sur $total du code de vérification',
       textField: true,
       child: SizedBox(
-      width: 46,
-      height: 56,
-      child: KeyboardListener(
-        focusNode: FocusNode(),
-        onKeyEvent: (event) {
-          if (event.logicalKey.keyLabel == 'Backspace') onBackspace();
-        },
-        child: TextField(
-          controller: controller,
-          focusNode: focusNode,
-          maxLength: 1,
-          textAlign: TextAlign.center,
-          keyboardType: TextInputType.number,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-          decoration: InputDecoration(
-            counterText: '',
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.grey.shade300),
+        width: 46,
+        height: 56,
+        child: KeyboardListener(
+          focusNode: FocusNode(),
+          onKeyEvent: (event) {
+            if (event.logicalKey.keyLabel == 'Backspace') onBackspace();
+          },
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            maxLength: 1,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            decoration: InputDecoration(
+              counterText: '',
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: color, width: 2),
+              ),
+              contentPadding: EdgeInsets.zero,
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: color, width: 2),
-            ),
-            contentPadding: EdgeInsets.zero,
+            onChanged: onChanged,
           ),
-          onChanged: onChanged,
         ),
-      ),
       ),
     );
   }

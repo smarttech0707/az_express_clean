@@ -21,7 +21,7 @@ class OrderTrackingMap extends StatefulWidget {
     required double clientLng,
   }) {
     return _LegacyTrackingMap(
-      driverId: driverId, clientLat: clientLat, clientLng: clientLng);
+        driverId: driverId, clientLat: clientLat, clientLng: clientLng);
   }
 
   @override
@@ -35,7 +35,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
   BitmapDescriptor? _motoIcon;
 
   late AnimationController _pulseCtrl;
-  late Animation<double>   _pulse;
+  late Animation<double> _pulse;
 
   bool _followDriver = true;
   final Set<int> _etaMilestonesNotified = {};
@@ -45,9 +45,9 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
     super.initState();
     final o = widget.order;
     _tracking = TrackingService(
-      driverId:       o.driverId ?? '',
+      driverId: o.driverId ?? '',
       clientPosition: LatLng(o.latitude, o.longitude),
-      destination:    (o.destLat != null && o.destLng != null)
+      destination: (o.destLat != null && o.destLng != null)
           ? LatLng(o.destLat!, o.destLng!)
           : null,
     );
@@ -115,11 +115,11 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
     ];
     if (pts.length < 2 || _mapCtrl == null) return;
 
-    double minLat = pts.first.latitude,  maxLat = pts.first.latitude;
+    double minLat = pts.first.latitude, maxLat = pts.first.latitude;
     double minLng = pts.first.longitude, maxLng = pts.first.longitude;
     for (final p in pts) {
-      if (p.latitude  < minLat) minLat = p.latitude;
-      if (p.latitude  > maxLat) maxLat = p.latitude;
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
       if (p.longitude < minLng) minLng = p.longitude;
       if (p.longitude > maxLng) maxLng = p.longitude;
     }
@@ -175,22 +175,22 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
       if (s.routeToClient.isNotEmpty)
         Polyline(
           polylineId: const PolylineId('to_client'),
-          points:    s.routeToClient,
-          color:     AppColors.primary,
-          width:     5,
-          startCap:  Cap.roundCap,
-          endCap:    Cap.roundCap,
+          points: s.routeToClient,
+          color: AppColors.primary,
+          width: 5,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
           jointType: JointType.round,
         ),
       if (s.routeToDestination.isNotEmpty)
         Polyline(
           polylineId: const PolylineId('to_dest'),
-          points:    s.routeToDestination,
-          color:     AppColors.blue,
-          width:     4,
-          patterns:  [PatternItem.dash(15), PatternItem.gap(8)],
-          startCap:  Cap.roundCap,
-          endCap:    Cap.roundCap,
+          points: s.routeToDestination,
+          color: AppColors.blue,
+          width: 4,
+          patterns: [PatternItem.dash(15), PatternItem.gap(8)],
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
         ),
     };
   }
@@ -199,7 +199,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
   Widget build(BuildContext context) {
     final s = _tracking.state;
     final hasDriver = s.driverPosition != null;
-    final hasDest   = s.destination   != null;
+    final hasDest = s.destination != null;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -213,7 +213,8 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
             child: Container(
               margin: const EdgeInsets.all(8),
               decoration: const BoxDecoration(
-                  color: Colors.white, shape: BoxShape.circle,
+                  color: Colors.white,
+                  shape: BoxShape.circle,
                   boxShadow: AppShadow.md),
               child: const Icon(Icons.arrow_back_rounded,
                   color: AppColors.text, size: 20),
@@ -222,11 +223,13 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
           title: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: const BoxDecoration(
-                color: Colors.white, borderRadius: AppRadius.pillR,
+                color: Colors.white,
+                borderRadius: AppRadius.pillR,
                 boxShadow: AppShadow.md),
             child: Text('Suivi livraison',
                 style: GoogleFonts.urbanist(
-                    color: AppColors.text, fontSize: 15,
+                    color: AppColors.text,
+                    fontSize: 15,
                     fontWeight: FontWeight.w700)),
           ),
           centerTitle: true,
@@ -241,7 +244,8 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                     color: _followDriver ? AppColors.primary : Colors.white,
-                    shape: BoxShape.circle, boxShadow: AppShadow.md),
+                    shape: BoxShape.circle,
+                    boxShadow: AppShadow.md),
                 child: Icon(Icons.my_location_rounded,
                     color: _followDriver ? Colors.white : AppColors.textMuted,
                     size: 20),
@@ -249,17 +253,16 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
             ),
           ],
         ),
-
         body: Stack(children: [
           GoogleMap(
-            initialCameraPosition: CameraPosition(
-                target: s.clientPosition, zoom: 14),
-            markers:             _markers,
-            polylines:           _polylines,
-            myLocationEnabled:   false,
+            initialCameraPosition:
+                CameraPosition(target: s.clientPosition, zoom: 14),
+            markers: _markers,
+            polylines: _polylines,
+            myLocationEnabled: false,
             zoomControlsEnabled: false,
-            compassEnabled:      false,
-            mapToolbarEnabled:   false,
+            compassEnabled: false,
+            mapToolbarEnabled: false,
             onMapCreated: (c) {
               _mapCtrl = c;
               Future.delayed(const Duration(milliseconds: 500), _fitBounds);
@@ -271,46 +274,59 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
 
           // Panneau info bas
           Positioned(
-            bottom: 0, left: 0, right: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
             child: Container(
               decoration: const BoxDecoration(
-                  color: Colors.white, borderRadius: AppRadius.topXxl,
-                  boxShadow: [BoxShadow(
-                      color: Color(0x22000000), blurRadius: 20,
-                      offset: Offset(0, -4))]),
+                  color: Colors.white,
+                  borderRadius: AppRadius.topXxl,
+                  boxShadow: [
+                    BoxShadow(
+                        color: Color(0x22000000),
+                        blurRadius: 20,
+                        offset: Offset(0, -4))
+                  ]),
               padding: EdgeInsets.fromLTRB(
-                  20, 16, 20,
-                  MediaQuery.of(context).padding.bottom + 16),
+                  20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 // Handle
-                Center(child: Container(
-                    width: 36, height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: const BoxDecoration(
-                        color: AppColors.border,
-                        borderRadius: AppRadius.pillR))),
+                Center(
+                    child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: const BoxDecoration(
+                            color: AppColors.border,
+                            borderRadius: AppRadius.pillR))),
 
                 // Statut en temps réel
                 Row(children: [
                   FadeTransition(
                     opacity: _pulse,
                     child: Container(
-                        width: 12, height: 12,
+                        width: 12,
+                        height: 12,
                         decoration: BoxDecoration(
                             color: hasDriver ? AppColors.green : Colors.grey,
                             shape: BoxShape.circle)),
                   ),
                   const SizedBox(width: 10),
-                  Expanded(child: Text(
+                  Expanded(
+                      child: Text(
                     hasDriver
                         ? 'Livreur en route · mise à jour en temps réel'
                         : 'Localisation du livreur…',
                     style: GoogleFonts.urbanist(
-                        fontSize: 13, fontWeight: FontWeight.w600,
-                        color: hasDriver ? AppColors.green : AppColors.textMuted),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color:
+                            hasDriver ? AppColors.green : AppColors.textMuted),
                   )),
                   if (s.routeLoading)
-                    const SizedBox(width: 16, height: 16,
+                    const SizedBox(
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: AppColors.primary)),
                 ]),
@@ -320,7 +336,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
                 // Stats
                 Row(children: [
                   _Stat(
-                    icon:  Icons.access_time_rounded,
+                    icon: Icons.access_time_rounded,
                     label: 'ETA',
                     value: hasDriver
                         ? '~${hasDest ? s.etaTotal : s.etaToClient} min'
@@ -329,7 +345,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
                   ),
                   const SizedBox(width: 12),
                   _Stat(
-                    icon:  Icons.straighten_rounded,
+                    icon: Icons.straighten_rounded,
                     label: 'Distance',
                     value: hasDriver
                         ? '${s.distanceToClient.toStringAsFixed(1)} km'
@@ -339,7 +355,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
                   if (hasDest) ...[
                     const SizedBox(width: 12),
                     _Stat(
-                      icon:  Icons.place_rounded,
+                      icon: Icons.place_rounded,
                       label: 'Total trajet',
                       value: '${s.distanceTotal.toStringAsFixed(1)} km',
                       color: AppColors.green,
@@ -351,11 +367,13 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
                 if (hasDest) ...[
                   const SizedBox(height: 12),
                   const Row(children: [
-                    _LegendLine(color: AppColors.primary,
-                        label: 'Livreur → vous'),
+                    _LegendLine(
+                        color: AppColors.primary, label: 'Livreur → vous'),
                     SizedBox(width: 12),
-                    _LegendLine(color: AppColors.blue,
-                        label: 'Vous → destination', dashed: true),
+                    _LegendLine(
+                        color: AppColors.blue,
+                        label: 'Vous → destination',
+                        dashed: true),
                   ]),
                 ],
               ]),
@@ -369,45 +387,57 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
 
 class _Stat extends StatelessWidget {
   final IconData icon;
-  final String   label, value;
-  final Color    color;
-  const _Stat({required this.icon, required this.label,
-      required this.value, required this.color});
+  final String label, value;
+  final Color color;
+  const _Stat(
+      {required this.icon,
+      required this.label,
+      required this.value,
+      required this.color});
   @override
-  Widget build(BuildContext context) => Expanded(child: Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08), borderRadius: AppRadius.mdR,
-        border: Border.all(color: color.withValues(alpha: 0.2))),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Icon(icon, color: color, size: 14),
-        const SizedBox(width: 4),
-        Text(label, style: GoogleFonts.urbanist(
-            fontSize: 10, color: AppColors.textMuted)),
-      ]),
-      const SizedBox(height: 4),
-      Text(value, style: GoogleFonts.urbanist(
-          fontSize: 16, fontWeight: FontWeight.w800, color: color)),
-    ]),
-  ));
+  Widget build(BuildContext context) => Expanded(
+          child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: AppRadius.mdR,
+            border: Border.all(color: color.withValues(alpha: 0.2))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(icon, color: color, size: 14),
+            const SizedBox(width: 4),
+            Text(label,
+                style: GoogleFonts.urbanist(
+                    fontSize: 10, color: AppColors.textMuted)),
+          ]),
+          const SizedBox(height: 4),
+          Text(value,
+              style: GoogleFonts.urbanist(
+                  fontSize: 16, fontWeight: FontWeight.w800, color: color)),
+        ]),
+      ));
 }
 
 class _LegendLine extends StatelessWidget {
-  final Color color; final String label; final bool dashed;
-  const _LegendLine({required this.color, required this.label,
-      this.dashed = false});
+  final Color color;
+  final String label;
+  final bool dashed;
+  const _LegendLine(
+      {required this.color, required this.label, this.dashed = false});
   @override
-  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(width: 20, height: 4,
+  Widget build(BuildContext context) =>
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+            width: 20,
+            height: 4,
             decoration: BoxDecoration(
                 color: dashed ? Colors.transparent : color,
                 borderRadius: AppRadius.pillR,
                 border: dashed ? Border.all(color: color) : null)),
         const SizedBox(width: 6),
-        Text(label, style: GoogleFonts.urbanist(
-            fontSize: 11, color: AppColors.textMuted)),
+        Text(label,
+            style:
+                GoogleFonts.urbanist(fontSize: 11, color: AppColors.textMuted)),
       ]);
 }
 
@@ -417,8 +447,10 @@ class _LegendLine extends StatelessWidget {
 class _LegacyTrackingMap extends StatefulWidget {
   final String driverId;
   final double clientLat, clientLng;
-  const _LegacyTrackingMap({required this.driverId,
-      required this.clientLat, required this.clientLng});
+  const _LegacyTrackingMap(
+      {required this.driverId,
+      required this.clientLat,
+      required this.clientLng});
   @override
   State<_LegacyTrackingMap> createState() => _LegacyTrackingMapState();
 }
@@ -427,10 +459,10 @@ class _LegacyTrackingMapState extends State<_LegacyTrackingMap>
     with SingleTickerProviderStateMixin {
   late TrackingService _tracking;
   GoogleMapController? _mapCtrl;
-  BitmapDescriptor?    _motoIcon;
+  BitmapDescriptor? _motoIcon;
 
   late AnimationController _pulseCtrl;
-  late Animation<double>   _pulse;
+  late Animation<double> _pulse;
 
   void _onTrackingUpdate() {
     if (mounted) setState(() {});
@@ -440,7 +472,7 @@ class _LegacyTrackingMapState extends State<_LegacyTrackingMap>
   void initState() {
     super.initState();
     _tracking = TrackingService(
-      driverId:       widget.driverId,
+      driverId: widget.driverId,
       clientPosition: LatLng(widget.clientLat, widget.clientLng),
     );
     _tracking.addListener(_onTrackingUpdate);
@@ -477,57 +509,76 @@ class _LegacyTrackingMapState extends State<_LegacyTrackingMap>
           title: const Text('Suivi de livraison'),
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
-          centerTitle: true, elevation: 0),
+          centerTitle: true,
+          elevation: 0),
       body: Stack(children: [
         GoogleMap(
-          initialCameraPosition: CameraPosition(
-              target: s.clientPosition, zoom: 14),
+          initialCameraPosition:
+              CameraPosition(target: s.clientPosition, zoom: 14),
           markers: {
-            Marker(markerId: const MarkerId('client'),
+            Marker(
+                markerId: const MarkerId('client'),
                 position: s.clientPosition,
                 infoWindow: const InfoWindow(title: 'Votre position'),
                 icon: BitmapDescriptor.defaultMarkerWithHue(
                     BitmapDescriptor.hueAzure)),
             if (s.driverPosition != null)
-              Marker(markerId: const MarkerId('driver'),
+              Marker(
+                  markerId: const MarkerId('driver'),
                   position: s.driverPosition!,
                   infoWindow: const InfoWindow(title: 'Livreur en route'),
-                  icon: _motoIcon ?? BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueOrange)),
+                  icon: _motoIcon ??
+                      BitmapDescriptor.defaultMarkerWithHue(
+                          BitmapDescriptor.hueOrange)),
           },
           polylines: {
             if (s.routeToClient.isNotEmpty)
-              Polyline(polylineId: const PolylineId('route'),
-                  points: s.routeToClient, color: AppColors.primary, width: 5),
+              Polyline(
+                  polylineId: const PolylineId('route'),
+                  points: s.routeToClient,
+                  color: AppColors.primary,
+                  width: 5),
           },
-          myLocationEnabled: false, zoomControlsEnabled: false,
+          myLocationEnabled: false,
+          zoomControlsEnabled: false,
           onMapCreated: (c) => _mapCtrl = c,
         ),
         Positioned(
-          bottom: 16, left: 16, right: 16,
+          bottom: 16,
+          left: 16,
+          right: 16,
           child: Container(
             padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(color: Colors.white,
-                borderRadius: AppRadius.lgR, boxShadow: AppShadow.md),
+            decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: AppRadius.lgR,
+                boxShadow: AppShadow.md),
             child: Row(children: [
-              FadeTransition(opacity: _pulse,
-                  child: Container(width: 12, height: 12,
+              FadeTransition(
+                  opacity: _pulse,
+                  child: Container(
+                      width: 12,
+                      height: 12,
                       decoration: BoxDecoration(
                           color: s.driverPosition != null
-                              ? AppColors.green : Colors.grey,
+                              ? AppColors.green
+                              : Colors.grey,
                           shape: BoxShape.circle))),
               const SizedBox(width: 12),
-              Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(s.driverPosition != null
-                        ? 'Livreur en route'
-                        : 'Localisation…',
-                        style: GoogleFonts.urbanist(fontWeight: FontWeight.w700,
-                            fontSize: 14)),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                    Text(
+                        s.driverPosition != null
+                            ? 'Livreur en route'
+                            : 'Localisation…',
+                        style: GoogleFonts.urbanist(
+                            fontWeight: FontWeight.w700, fontSize: 14)),
                     if (s.driverPosition != null)
-                      Text('ETA: ~${s.etaToClient} min · '
+                      Text(
+                          'ETA: ~${s.etaToClient} min · '
                           '${s.distanceToClient.toStringAsFixed(1)} km',
                           style: GoogleFonts.urbanist(
                               fontSize: 12, color: AppColors.textMuted)),

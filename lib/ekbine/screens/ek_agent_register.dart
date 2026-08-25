@@ -5,7 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../ek_constants.dart';
+import '../models/ek_deposit_account.dart';
 import '../services/ek_service.dart';
+import '../utils/ek_deposit_accounts_logic.dart';
+import '../widgets/ek_deposit_account_dialog.dart';
 
 class EkAgentRegister extends StatefulWidget {
   const EkAgentRegister({super.key});
@@ -15,18 +18,31 @@ class EkAgentRegister extends StatefulWidget {
 }
 
 class _EkAgentRegisterState extends State<EkAgentRegister> {
-  final _formKey    = GlobalKey<FormState>();
-  final _nameCtrl   = TextEditingController();
-  final _phoneCtrl  = TextEditingController();
-  final _cityCtrl   = TextEditingController();
-  final Set<String> _selectedOps = {};
-  final Map<String, TextEditingController> _opNumCtrl = {};
-  bool _submitting  = false;
-  bool _done        = false;
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _cityCtrl = TextEditingController();
+  // Master Prompt — Mission 1 : inscription multi-lignes. Chaque ligne
+  // (opérateur + numéro + libellé + principal) est un EkDepositAccount —
+  // le même modèle déjà utilisé par ek_deposit_accounts_screen.dart après
+  // inscription, pour ne jamais avoir deux représentations différentes des
+  // numéros de dépôt d'un même agent.
+  final List<EkDepositAccount> _depositAccounts = [];
+  bool _submitting = false;
+  bool _done = false;
+  String? _depositAccountsError;
 
   final _cities = [
-    'Abengourou', 'Abidjan', 'Bouaké', 'Yamoussoukro', 'Divo',
-    'San-Pédro', 'Daloa', 'Korhogo', 'Man', 'Bondoukou',
+    'Abengourou',
+    'Abidjan',
+    'Bouaké',
+    'Yamoussoukro',
+    'Divo',
+    'San-Pédro',
+    'Daloa',
+    'Korhogo',
+    'Man',
+    'Bondoukou',
   ];
 
   @override
@@ -39,12 +55,12 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('clients').doc(uid).get();
+      final doc =
+          await FirebaseFirestore.instance.collection('clients').doc(uid).get();
       if (!mounted) return;
       final d = doc.data();
       if (d != null) {
-        _nameCtrl.text  = d['name'] ?? '';
+        _nameCtrl.text = d['name'] ?? '';
         _phoneCtrl.text = d['phone'] ?? '';
       }
     } catch (_) {}
@@ -55,9 +71,38 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _cityCtrl.dispose();
-    for (final c in _opNumCtrl.values) { c.dispose(); }
     super.dispose();
   }
+
+  // ── Gestion des lignes de numéros de dépôt (Mission 1) ──────────────────
+  Future<void> _addOrEditAccount([EkDepositAccount? existing]) async {
+    final result =
+        await showEkDepositAccountDialog(context, existing: existing);
+    if (result == null) return;
+
+    if (EkDepositAccountsLogic.isDuplicate(_depositAccounts, result)) {
+      setState(() => _depositAccountsError =
+          'Ce numéro est déjà enregistré pour ${EkService.operatorLabel(result.operator)}.');
+      return;
+    }
+
+    setState(() {
+      _depositAccountsError = null;
+      final merged = EkDepositAccountsLogic.merge(_depositAccounts, result);
+      _depositAccounts
+        ..clear()
+        ..addAll(merged);
+    });
+  }
+
+  void _removeAccount(EkDepositAccount account) {
+    setState(() => _depositAccounts.removeWhere((a) => a.id == account.id));
+  }
+
+  /// Opérateurs réellement couverts par au moins un numéro actif — dérivés
+  /// des lignes, jamais une sélection séparée qui pourrait diverger.
+  List<String> get _coveredOperators =>
+      EkDepositAccountsLogic.coveredOperators(_depositAccounts);
 
   @override
   Widget build(BuildContext context) {
@@ -71,7 +116,9 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
         elevation: 0,
         title: Text('Devenir Agent E-Kbine',
             style: GoogleFonts.urbanist(
-                fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Colors.white)),
       ),
       body: Form(
         key: _formKey,
@@ -89,32 +136,34 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('💚 Rejoignez la communauté',
-                    style: GoogleFonts.urbanist(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800)),
-                const SizedBox(height: 8),
-                ...[
-                  '75% des frais de service vous reviennent',
-                  'Travaillez à votre rythme, où vous voulez',
-                  'Paiement direct dans votre wallet',
-                ].map((t) => Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Row(children: [
-                        const Icon(Icons.check_circle_rounded,
-                            color: Colors.white, size: 14),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(t,
-                              style: GoogleFonts.urbanist(
-                                  color: Colors.white.withValues(alpha: 0.9),
-                                  fontSize: 12)),
-                        ),
-                      ]),
-                    )),
-              ]),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('💚 Rejoignez la communauté',
+                        style: GoogleFonts.urbanist(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 8),
+                    ...[
+                      '75% des frais de service vous reviennent',
+                      'Travaillez à votre rythme, où vous voulez',
+                      'Paiement direct dans votre wallet',
+                    ].map((t) => Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(children: [
+                            const Icon(Icons.check_circle_rounded,
+                                color: Colors.white, size: 14),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(t,
+                                  style: GoogleFonts.urbanist(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.9),
+                                      fontSize: 12)),
+                            ),
+                          ]),
+                        )),
+                  ]),
             ),
             const SizedBox(height: 28),
 
@@ -124,8 +173,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
             _buildField('Nom complet', _nameCtrl,
                 hint: 'Votre nom et prénom',
                 icon: Icons.person_rounded,
-                validator: (v) =>
-                    (v?.isEmpty ?? true) ? 'Champ requis' : null),
+                validator: (v) => (v?.isEmpty ?? true) ? 'Champ requis' : null),
             const SizedBox(height: 14),
             _buildField('Téléphone', _phoneCtrl,
                 hint: '07 XX XX XX XX',
@@ -139,15 +187,14 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
             // City dropdown
             Text('Ville d\'activité',
                 style: GoogleFonts.urbanist(
-                    fontSize: 13, fontWeight: FontWeight.w600,
-                    color: kEkText)),
+                    fontSize: 13, fontWeight: FontWeight.w600, color: kEkText)),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               decoration: InputDecoration(
                 filled: true,
                 fillColor: Colors.white,
-                prefixIcon: const Icon(Icons.location_on_rounded,
-                    color: kEkGreen),
+                prefixIcon:
+                    const Icon(Icons.location_on_rounded, color: kEkGreen),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: const BorderSide(color: kEkDivider)),
@@ -156,15 +203,13 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                     borderSide: const BorderSide(color: kEkDivider)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(
-                        color: kEkGreen, width: 2)),
+                    borderSide: const BorderSide(color: kEkGreen, width: 2)),
               ),
               hint: Text('Sélectionner votre ville',
                   style: GoogleFonts.urbanist(color: kEkMuted)),
               validator: (v) => v == null ? 'Choisissez une ville' : null,
               items: _cities
-                  .map((c) =>
-                      DropdownMenuItem(value: c, child: Text(c)))
+                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                   .toList(),
               onChanged: (v) {
                 if (v != null) _cityCtrl.text = v;
@@ -172,141 +217,100 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
             ),
             const SizedBox(height: 28),
 
-            // Operators
-            const _SectionTitle('Opérateurs que vous supportez'),
+            // Numéros de dépôt (Mission 1 — plusieurs numéros, y compris
+            // plusieurs numéros du même opérateur).
+            const _SectionTitle('Vos numéros de dépôt Mobile Money'),
             const SizedBox(height: 6),
             Text(
-                'Sélectionnez uniquement les opérateurs sur lesquels vous pouvez effectuer des opérations.',
-                style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted,
-                    height: 1.5)),
-            const SizedBox(height: 14),
-            ...ekOperators.map((op) {
-              final id    = op['id'] as String;
-              final color = Color(op['color'] as int);
-              final bg    = Color(op['bg'] as int);
-              final sel   = _selectedOps.contains(id);
-              _opNumCtrl.putIfAbsent(id, TextEditingController.new);
-              return Column(children: [
-                GestureDetector(
-                  onTap: () => setState(() {
-                    if (sel) {
-                      _selectedOps.remove(id);
-                    } else {
-                      _selectedOps.add(id);
-                    }
-                  }),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    margin: EdgeInsets.only(bottom: sel ? 0.0 : 10.0),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: sel ? color.withValues(alpha: 0.08) : bg,
-                      borderRadius: BorderRadius.only(
-                        topLeft:     const Radius.circular(14),
-                        topRight:    const Radius.circular(14),
-                        bottomLeft:  Radius.circular(sel ? 0 : 14),
-                        bottomRight: Radius.circular(sel ? 0 : 14),
-                      ),
-                      border: Border.all(
-                          color: sel ? color : color.withValues(alpha: 0.2),
-                          width: sel ? 2 : 1),
-                    ),
-                    child: Row(children: [
-                      Text(op['emoji'] as String,
-                          style: const TextStyle(fontSize: 26)),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Text(op['label'] as String,
-                            style: GoogleFonts.urbanist(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: color)),
-                      ),
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        width: 24, height: 24,
-                        decoration: BoxDecoration(
-                          color: sel ? color : Colors.transparent,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: sel ? color : kEkDivider,
-                              width: 2),
-                        ),
-                        child: sel
-                            ? const Icon(Icons.check,
-                                color: Colors.white, size: 14)
-                            : null,
-                      ),
-                    ]),
-                  ),
-                ),
-                if (sel)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.04),
-                      borderRadius: const BorderRadius.only(
-                        bottomLeft:  Radius.circular(14),
-                        bottomRight: Radius.circular(14),
-                      ),
-                      border: Border(
-                        left:   BorderSide(color: color, width: 2),
-                        right:  BorderSide(color: color, width: 2),
-                        bottom: BorderSide(color: color, width: 2),
-                      ),
-                    ),
-                    child: TextFormField(
-                      controller: _opNumCtrl[id],
-                      keyboardType: TextInputType.phone,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      style: GoogleFonts.urbanist(
-                          fontSize: 15, fontWeight: FontWeight.w700),
-                      decoration: InputDecoration(
-                        labelText: 'Votre numéro ${op['label']}',
-                        hintText: op['id'] == 'orange' ? '07XXXXXXXX'
-                            : op['id'] == 'mtn'    ? '05XXXXXXXX'
-                            : op['id'] == 'moov'   ? '01XXXXXXXX'
-                            : '07XXXXXXXX',
-                        labelStyle: GoogleFonts.urbanist(color: color, fontSize: 13),
-                        hintStyle: GoogleFonts.urbanist(color: kEkMuted),
-                        prefixIcon: Icon(Icons.phone_android_rounded,
-                            color: color),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: color)),
-                        enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: color.withValues(alpha: 0.4))),
-                        focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: color, width: 2)),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                      ),
-                      validator: (v) {
-                        if (_selectedOps.contains(id) &&
-                            (v?.length ?? 0) < 8) {
-                          return 'Numéro ${op['label']} invalide';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-              ]);
-            }),
-
-            if (_selectedOps.isEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text('Sélectionnez au moins un opérateur',
+                'Ajoutez au moins un numéro sur lequel les clients pourront effectuer leurs dépôts. Vous pouvez ajouter plusieurs numéros, y compris plusieurs numéros pour le même opérateur.',
+                style: GoogleFonts.urbanist(
+                    fontSize: 12, color: kEkMuted, height: 1.5)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: const Color(0xFFE65100).withValues(alpha: 0.4)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.warning_amber_rounded,
+                    color: Color(0xFFE65100), size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Ne communiquez jamais votre code PIN Mobile Money à qui que ce soit, y compris à l\'équipe AZ Express.',
                     style: GoogleFonts.urbanist(
                         fontSize: 11,
-                        color: Colors.red.shade400)),
+                        color: const Color(0xFF5D4037),
+                        height: 1.4),
+                  ),
+                ),
+              ]),
+            ),
+            ..._depositAccounts.map((a) {
+              final opColor = EkService.operatorColor(a.operator);
+              return Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: opColor.withValues(alpha: 0.12),
+                    child: Text(a.operator[0].toUpperCase(),
+                        style: TextStyle(
+                            color: opColor, fontWeight: FontWeight.bold)),
+                  ),
+                  title: Text(
+                      '${EkService.operatorLabel(a.operator)} · ${a.phoneNumber}'),
+                  subtitle: Text(
+                      '${a.label ?? 'Sans libellé'} · ${a.isActive ? 'Actif' : 'Désactivé'}'),
+                  trailing: Wrap(spacing: 0, children: [
+                    if (a.isPrimary)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 4),
+                        child: Chip(
+                            label: Text('Principal',
+                                style: TextStyle(fontSize: 10)),
+                            visualDensity: VisualDensity.compact),
+                      ),
+                    IconButton(
+                        icon: const Icon(Icons.edit, size: 20),
+                        tooltip: 'Modifier',
+                        onPressed: () => _addOrEditAccount(a)),
+                    IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 20),
+                        tooltip: 'Retirer la ligne',
+                        onPressed: () => _removeAccount(a)),
+                  ]),
+                ),
+              );
+            }),
+            OutlinedButton.icon(
+              onPressed: () => _addOrEditAccount(),
+              icon: const Icon(Icons.add),
+              label: const Text('Ajouter un numéro'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: kEkGreen,
+                side: const BorderSide(color: kEkGreen),
+                minimumSize: const Size(double.infinity, 46),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+            if (_depositAccountsError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_depositAccountsError!,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 11, color: Colors.red.shade400)),
+              ),
+            if (_depositAccounts.where((a) => a.isActive).isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('Ajoutez au moins un numéro actif',
+                    style: GoogleFonts.urbanist(
+                        fontSize: 11, color: Colors.red.shade400)),
               ),
 
             const SizedBox(height: 28),
@@ -342,7 +346,8 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                 ),
                 child: _submitting
                     ? const SizedBox(
-                        width: 24, height: 24,
+                        width: 24,
+                        height: 24,
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2.5))
                     : Text('Soumettre ma candidature',
@@ -390,8 +395,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
               borderSide: const BorderSide(color: kEkDivider)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide:
-                  const BorderSide(color: kEkGreen, width: 2)),
+              borderSide: const BorderSide(color: kEkGreen, width: 2)),
           errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: const BorderSide(color: Colors.red)),
@@ -406,16 +410,12 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             const Text('🎉', style: TextStyle(fontSize: 72)),
             const SizedBox(height: 24),
             Text('Candidature envoyée !',
                 style: GoogleFonts.urbanist(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    color: kEkGreen),
+                    fontSize: 24, fontWeight: FontWeight.w900, color: kEkGreen),
                 textAlign: TextAlign.center),
             const SizedBox(height: 12),
             Text(
@@ -438,8 +438,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
                   elevation: 0,
                 ),
                 child: Text('Retour à l\'accueil',
-                    style: GoogleFonts.urbanist(
-                        fontWeight: FontWeight.w700)),
+                    style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
               ),
             ),
           ]),
@@ -450,42 +449,56 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
 
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    if (_selectedOps.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Sélectionnez au moins un opérateur'),
-              backgroundColor: Colors.red));
+    // Règle Mission 1 : au moins un compte actif requis avant inscription —
+    // sans ça, l'agent serait approuvé mais ne pourrait jamais accepter la
+    // moindre commande (voir EkAgent.accountsFor()/selectDepositAccount côté
+    // serveur, qui ne trouveraient aucun numéro valide).
+    if (_depositAccounts.where((a) => a.isActive).isEmpty) {
+      setState(
+          () => _depositAccountsError = 'Ajoutez au moins un numéro actif');
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Ajoutez au moins un numéro de dépôt actif'),
+          backgroundColor: Colors.red));
       return;
     }
 
     setState(() => _submitting = true);
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) { setState(() => _submitting = false); return; }
+    if (uid == null) {
+      setState(() => _submitting = false);
+      return;
+    }
 
-    final operatorNumbers = {
-      for (final id in _selectedOps)
-        if ((_opNumCtrl[id]?.text.trim() ?? '').isNotEmpty)
-          id: _opNumCtrl[id]!.text.trim(),
-    };
+    // `operatorNumbers` (compatibilité historique — Mission 1 : "conserver
+    // operatorNumbers uniquement comme compatibilité") reprend le numéro
+    // principal actif de chaque opérateur, à défaut le premier actif.
+    final operatorNumbers =
+        EkDepositAccountsLogic.legacyOperatorNumbers(_depositAccounts);
 
     await EkService.registerAgent(uid, {
-      'name':            _nameCtrl.text.trim(),
-      'phone':           _phoneCtrl.text.trim(),
-      'city':            _cityCtrl.text.trim(),
-      'operators':       _selectedOps.toList(),
+      'name': _nameCtrl.text.trim(),
+      'phone': _phoneCtrl.text.trim(),
+      'city': _cityCtrl.text.trim(),
+      'operators': _coveredOperators,
       'operatorNumbers': operatorNumbers,
-      'status':          'pending',
-      'isOnline':        false,
-      'isVerified':      false,
-      'isSuspended':     false,
-      'walletBalance':   0,
-      'totalCompleted':  0,
-      'rating':          0.0,
-      'ratingCount':     0,
-      'createdAt':       FieldValue.serverTimestamp(),
+      'depositAccounts': _depositAccounts.map((a) => a.toMap()).toList(),
+      'status': 'pending',
+      'isOnline': false,
+      'isVerified': false,
+      'isSuspended': false,
+      'walletBalance': 0,
+      'totalCompleted': 0,
+      'rating': 0.0,
+      'ratingCount': 0,
+      'createdAt': FieldValue.serverTimestamp(),
     });
 
-    if (mounted) setState(() { _submitting = false; _done = true; });
+    if (mounted) {
+      setState(() {
+        _submitting = false;
+        _done = true;
+      });
+    }
   }
 }
 
@@ -500,4 +513,3 @@ class _SectionTitle extends StatelessWidget {
             fontSize: 15, fontWeight: FontWeight.w800, color: kEkText));
   }
 }
-

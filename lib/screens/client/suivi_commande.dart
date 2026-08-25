@@ -29,8 +29,8 @@ class SuiviCommandePage extends StatelessWidget {
       ),
       body: SafeArea(
         child: StreamBuilder<List<OrderModel>>(
-          stream: FirestoreService().clientOrders(
-              FirebaseAuth.instance.currentUser?.uid ?? ''),
+          stream: FirestoreService()
+              .clientOrders(FirebaseAuth.instance.currentUser?.uid ?? ''),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return const Center(
@@ -48,7 +48,8 @@ class SuiviCommandePage extends StatelessWidget {
               // Master Prompt 124 — squelette shimmer plutôt qu'un spinner
               // plein écran (Partie 6/13).
               return ListView.builder(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                 itemCount: 4,
                 itemBuilder: (_, __) => const Padding(
                   padding: EdgeInsets.only(bottom: 12),
@@ -57,9 +58,8 @@ class SuiviCommandePage extends StatelessWidget {
               );
             }
 
-            final orders = snapshot.data!
-                .where((o) => o.status != "cancelled")
-                .toList();
+            final orders =
+                snapshot.data!.where((o) => o.status != "cancelled").toList();
 
             if (orders.isEmpty) {
               return const Center(
@@ -70,7 +70,7 @@ class SuiviCommandePage extends StatelessWidget {
 
             return ListView.builder(
               physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: orders.length,
               itemBuilder: (context, index) => FadeSlideIn(
                 index: index,
@@ -96,8 +96,7 @@ class _OrderCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => Dialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -125,7 +124,8 @@ class _OrderCard extends StatelessWidget {
           .doc(driverId)
           .get();
       if (!doc.exists) return;
-      final phone = ((doc.data() as Map?)??{})["phone"]?.toString().trim() ?? "";
+      final phone =
+          ((doc.data() as Map?) ?? {})["phone"]?.toString().trim() ?? "";
       if (phone.isEmpty) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -201,15 +201,13 @@ class _OrderCard extends StatelessWidget {
           // Status banner
           Container(
             width: double.infinity,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: _statusColor(order.status).withValues(alpha: 0.1),
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(16)),
               border: Border(
-                left: BorderSide(
-                    color: _statusColor(order.status), width: 4),
+                left: BorderSide(color: _statusColor(order.status), width: 4),
               ),
             ),
             child: Text(
@@ -265,8 +263,7 @@ class _OrderCard extends StatelessWidget {
           ),
 
           // Bannière pharmacie
-          if (order.type == 'pharmacie')
-            _PharmacieOrderBanner(order: order),
+          if (order.type == 'pharmacie') _PharmacieOrderBanner(order: order),
 
           // Driver info (if assigned)
           if (hasDriver)
@@ -287,8 +284,8 @@ class _OrderCard extends StatelessWidget {
                     acceptanceSelfie != null;
 
                 return Container(
-                  margin: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 6),
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -353,8 +350,8 @@ class _OrderCard extends StatelessWidget {
                               decoration: BoxDecoration(
                                 color: Colors.green.shade50,
                                 borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                    color: Colors.green.shade200),
+                                border:
+                                    Border.all(color: Colors.green.shade200),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -408,10 +405,8 @@ class _OrderCard extends StatelessWidget {
                                   // Photo de profil (inscription)
                                   Expanded(
                                     child: GestureDetector(
-                                      onTap: () => _showPhotoDialog(
-                                          context,
-                                          driverPhoto,
-                                          "Photo d'inscription"),
+                                      onTap: () => _showPhotoDialog(context,
+                                          driverPhoto, "Photo d'inscription"),
                                       child: Column(
                                         children: [
                                           ClipRRect(
@@ -473,8 +468,7 @@ class _OrderCard extends StatelessWidget {
                               const Text(
                                 "Comparez les deux photos pour confirmer\nque c'est bien votre livreur.",
                                 style: TextStyle(
-                                    color: Colors.green,
-                                    fontSize: 11),
+                                    color: Colors.green, fontSize: 11),
                               ),
                             ],
                           ),
@@ -495,7 +489,8 @@ class _OrderCard extends StatelessWidget {
                   const Icon(Icons.access_time, size: 14, color: Colors.grey),
                   const SizedBox(width: 4),
                   Text("Mise à jour en temps réel",
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                 ],
               ),
             ),
@@ -546,10 +541,13 @@ class _OrderCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Row(
                 children: [
-                  ...List.generate(5, (i) => Icon(
-                    i < order.rating! ? Icons.star : Icons.star_border,
-                    color: Colors.amber, size: 18,
-                  )),
+                  ...List.generate(
+                      5,
+                      (i) => Icon(
+                            i < order.rating! ? Icons.star : Icons.star_border,
+                            color: Colors.amber,
+                            size: 18,
+                          )),
                   const SizedBox(width: 6),
                   Text("Vous avez noté ${order.rating}/5",
                       style: const TextStyle(color: Colors.grey, fontSize: 12)),
@@ -558,7 +556,9 @@ class _OrderCard extends StatelessWidget {
             ),
 
           // Notation vendeur/restaurant
-          if (isDelivered && order.sellerId != null && order.sellerRating == null)
+          if (isDelivered &&
+              order.sellerId != null &&
+              order.sellerRating == null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: ElevatedButton.icon(
@@ -595,10 +595,15 @@ class _OrderCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Row(
                 children: [
-                  ...List.generate(5, (i) => Icon(
-                    i < order.sellerRating! ? Icons.star : Icons.star_border,
-                    color: const Color(0xFF1565C0), size: 18,
-                  )),
+                  ...List.generate(
+                      5,
+                      (i) => Icon(
+                            i < order.sellerRating!
+                                ? Icons.star
+                                : Icons.star_border,
+                            color: const Color(0xFF1565C0),
+                            size: 18,
+                          )),
                   const SizedBox(width: 6),
                   Text("Vendeur noté ${order.sellerRating}/5",
                       style: const TextStyle(color: Colors.grey, fontSize: 12)),
@@ -752,8 +757,8 @@ class _OrderCard extends StatelessWidget {
             Icon(icon, size: 16, color: color),
             const SizedBox(width: 4),
             Text(label,
-                style:
-                    TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w600)),
+                style: TextStyle(
+                    color: color, fontSize: 13, fontWeight: FontWeight.w600)),
           ],
         ),
       ),
@@ -788,10 +793,8 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
     if (uid == null) return;
 
     // Lire le solde client
-    final clientSnap = await FirebaseFirestore.instance
-        .collection('clients')
-        .doc(uid)
-        .get();
+    final clientSnap =
+        await FirebaseFirestore.instance.collection('clients').doc(uid).get();
     final balance = (clientSnap.data()?['wallet'] as num? ?? 0).toInt();
 
     final isPharmacy = widget.order.type == 'pharmacie';
@@ -808,15 +811,16 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
           final deliveryFee = widget.order.budget;
-          final medFee = isPharmacy
-              ? (int.tryParse(_medCtrl.text.trim()) ?? 0)
-              : 0;
+          final medFee =
+              isPharmacy ? (int.tryParse(_medCtrl.text.trim()) ?? 0) : 0;
           final total = deliveryFee + medFee;
           final hasEnough = balance >= total;
 
           return Padding(
             padding: EdgeInsets.only(
-              left: 20, right: 20, top: 20,
+              left: 20,
+              right: 20,
+              top: 20,
               bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
             ),
             child: Column(
@@ -825,7 +829,8 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
               children: [
                 Center(
                   child: Container(
-                    width: 40, height: 4,
+                    width: 40,
+                    height: 4,
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
                       color: Colors.grey.shade300,
@@ -884,8 +889,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                           SizedBox(width: 6),
                           Text('Médicaments (optionnel)',
                               style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13)),
+                                  fontWeight: FontWeight.w600, fontSize: 13)),
                         ],
                       ),
                       const SizedBox(height: 6),
@@ -896,18 +900,18 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                         decoration: InputDecoration(
                           hintText: 'Montant médicaments (FCFA)',
                           hintStyle: const TextStyle(fontSize: 13),
-                          prefixIcon: const Icon(Icons.payments_rounded,
-                              size: 18),
+                          prefixIcon:
+                              const Icon(Icons.payments_rounded, size: 18),
                           filled: true,
                           fillColor: Colors.grey.shade50,
                           border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                  color: Colors.grey.shade300)),
+                              borderSide:
+                                  BorderSide(color: Colors.grey.shade300)),
                           enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                  color: Colors.grey.shade300)),
+                              borderSide:
+                                  BorderSide(color: Colors.grey.shade300)),
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 12),
                         ),
@@ -969,8 +973,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                           child: Text(
                             'Solde insuffisant. Rechargez votre wallet.',
                             style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.red.shade700),
+                                fontSize: 12, color: Colors.red.shade700),
                           ),
                         ),
                       ],
@@ -1000,9 +1003,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                         onPressed: hasEnough
                             ? () {
                                 medAmount = isPharmacy
-                                    ? (int.tryParse(
-                                            _medCtrl.text.trim()) ??
-                                        0)
+                                    ? (int.tryParse(_medCtrl.text.trim()) ?? 0)
                                     : 0;
                                 Navigator.pop(ctx, true);
                               }
@@ -1015,8 +1016,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                                 fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 14),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12)),
                         ),
@@ -1078,7 +1078,8 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
   }
 
   String _fmt(int v) {
-    if (v >= 1000) return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    if (v >= 1000)
+      return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
     return v.toString();
   }
 
@@ -1121,10 +1122,8 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                         height: 20,
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2))
-                    : const Icon(
-                        Icons.account_balance_wallet_rounded,
-                        color: Colors.white,
-                        size: 20),
+                    : const Icon(Icons.account_balance_wallet_rounded,
+                        color: Colors.white, size: 20),
               ),
               const SizedBox(width: 12),
               const Expanded(
@@ -1140,8 +1139,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
                     ),
                     Text(
                       'Appuyez pour payer le livreur en ligne',
-                      style: TextStyle(
-                          color: Colors.white70, fontSize: 11),
+                      style: TextStyle(color: Colors.white70, fontSize: 11),
                     ),
                   ],
                 ),
@@ -1175,8 +1173,8 @@ class _PayRow extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(label,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w500)),
+              style:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
         ),
         Text('$amount FCFA',
             style: TextStyle(
@@ -1230,8 +1228,7 @@ class _PharmacieOrderBanner extends StatelessWidget {
               hasDriver
                   ? '✓ Un livreur a été assigné. La pharmacie a reçu sa photo et peut vérifier son identité avant de lui remettre vos médicaments.'
                   : 'Un livreur va se rendre à la pharmacie pour récupérer vos médicaments et vous les livrer.',
-              style: TextStyle(
-                  fontSize: 12, color: Colors.red.shade800),
+              style: TextStyle(fontSize: 12, color: Colors.red.shade800),
             ),
             if (hasDriver) ...[
               const SizedBox(height: 6),
@@ -1393,8 +1390,9 @@ class _SellerReviewDialogState extends State<SellerReviewDialog> {
               ? 'boulangeries'
               : 'sellers';
 
-      final sellerRef =
-          FirebaseFirestore.instance.collection(collection).doc(widget.sellerId);
+      final sellerRef = FirebaseFirestore.instance
+          .collection(collection)
+          .doc(widget.sellerId);
 
       await FirebaseFirestore.instance.runTransaction((tx) async {
         final snap = await tx.get(sellerRef);
@@ -1451,19 +1449,21 @@ class _SellerReviewDialogState extends State<SellerReviewDialog> {
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(5, (i) => GestureDetector(
-              onTap: () => setState(() => _rating = i + 1),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Icon(
-                  i < _rating
-                      ? Icons.star_rounded
-                      : Icons.star_outline_rounded,
-                  color: const Color(0xFF1565C0),
-                  size: 36,
-                ),
-              ),
-            )),
+            children: List.generate(
+                5,
+                (i) => GestureDetector(
+                      onTap: () => setState(() => _rating = i + 1),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          i < _rating
+                              ? Icons.star_rounded
+                              : Icons.star_outline_rounded,
+                          color: const Color(0xFF1565C0),
+                          size: 36,
+                        ),
+                      ),
+                    )),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -1471,8 +1471,8 @@ class _SellerReviewDialogState extends State<SellerReviewDialog> {
             maxLines: 2,
             decoration: InputDecoration(
               hintText: 'Commentaire (optionnel)',
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Color(0xFF1565C0)),
@@ -1504,4 +1504,3 @@ class _SellerReviewDialogState extends State<SellerReviewDialog> {
     );
   }
 }
-

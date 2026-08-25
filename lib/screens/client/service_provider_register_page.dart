@@ -10,60 +10,89 @@ import 'package:geolocator/geolocator.dart';
 // Liste complète des sous-catégories disponibles à l'inscription
 const _kSubcats = [
   // Artisans
-  ('macon',                  'Maçon',                       Icons.domain_rounded),
-  ('plombier',               'Plombier',                    Icons.plumbing_rounded),
-  ('electricien',            'Électricien',                 Icons.electrical_services_rounded),
-  ('ferronnier',             'Ferronnier',                  Icons.hardware_rounded),
-  ('menuisier',              'Menuisier',                   Icons.carpenter_rounded),
-  ('carreleur',              'Carreleur',                   Icons.grid_on_rounded),
-  ('peintre',                'Peintre',                     Icons.format_paint_rounded),
-  ('vitrier',                'Vitrier',                     Icons.window_rounded),
-  ('reparateur_tv',          'Réparateur TV',               Icons.tv_rounded),
-  ('installation_camera',    'Installation caméra',         Icons.videocam_rounded),
-  ('decoration',             'Décoration intérieure',       Icons.home_rounded),
-  ('reparateur_portable',    'Réparateur portable',         Icons.phone_android_rounded),
-  ('salon_coiffure_homme',   'Salon de coiffure homme',     Icons.content_cut_rounded),
-  ('barber_shop',            'Barber Shop',                 Icons.face_rounded),
-  ('salon_coiffure_femme',   'Salon de coiffure femme',     Icons.face_retouching_natural_rounded),
-  ('onglerie',               'Onglerie',                    Icons.spa_rounded),
+  ('macon', 'Maçon', Icons.domain_rounded),
+  ('plombier', 'Plombier', Icons.plumbing_rounded),
+  ('electricien', 'Électricien', Icons.electrical_services_rounded),
+  ('ferronnier', 'Ferronnier', Icons.hardware_rounded),
+  ('menuisier', 'Menuisier', Icons.carpenter_rounded),
+  ('carreleur', 'Carreleur', Icons.grid_on_rounded),
+  ('peintre', 'Peintre', Icons.format_paint_rounded),
+  ('vitrier', 'Vitrier', Icons.window_rounded),
+  ('reparateur_tv', 'Réparateur TV', Icons.tv_rounded),
+  ('installation_camera', 'Installation caméra', Icons.videocam_rounded),
+  ('decoration', 'Décoration intérieure', Icons.home_rounded),
+  ('reparateur_portable', 'Réparateur portable', Icons.phone_android_rounded),
+  (
+    'salon_coiffure_homme',
+    'Salon de coiffure homme',
+    Icons.content_cut_rounded
+  ),
+  ('barber_shop', 'Barber Shop', Icons.face_rounded),
+  (
+    'salon_coiffure_femme',
+    'Salon de coiffure femme',
+    Icons.face_retouching_natural_rounded
+  ),
+  ('onglerie', 'Onglerie', Icons.spa_rounded),
   // Mécanique
-  ('mecanicien_voiture',     'Mécanicien voiture',          Icons.directions_car_rounded),
-  ('mecanicien_moto',        'Mécanicien moto',             Icons.two_wheeler_rounded),
-  ('electrique_auto',        'Électricien automobile',      Icons.electrical_services_rounded),
-  ('carrosserie',            'Carrosserie',                 Icons.car_repair_rounded),
+  ('mecanicien_voiture', 'Mécanicien voiture', Icons.directions_car_rounded),
+  ('mecanicien_moto', 'Mécanicien moto', Icons.two_wheeler_rounded),
+  (
+    'electrique_auto',
+    'Électricien automobile',
+    Icons.electrical_services_rounded
+  ),
+  ('carrosserie', 'Carrosserie', Icons.car_repair_rounded),
   // Immobilier
-  ('location',               'Location de maison',          Icons.home_rounded),
-  ('vente_maison',           'Vente de maison',             Icons.sell_rounded),
-  ('local_commercial',       'Local commercial',            Icons.store_rounded),
-  ('terrain',                'Terrain',                     Icons.landscape_rounded),
+  ('location', 'Location de maison', Icons.home_rounded),
+  ('vente_maison', 'Vente de maison', Icons.sell_rounded),
+  ('local_commercial', 'Local commercial', Icons.store_rounded),
+  ('terrain', 'Terrain', Icons.landscape_rounded),
   // Construction
-  ('eau_pack',               'Eau en pack',                 Icons.water_drop_rounded),
-  ('ciment_briques',         'Ciment & Briques',            Icons.foundation_rounded),
+  ('eau_pack', 'Eau en pack', Icons.water_drop_rounded),
+  ('ciment_briques', 'Ciment & Briques', Icons.foundation_rounded),
   // Téléphonie
-  ('telephone',              'Téléphones portables',        Icons.smartphone_rounded),
-  ('accessoires',            'Accessoires téléphonie',      Icons.headphones_rounded),
+  ('telephone', 'Téléphones portables', Icons.smartphone_rounded),
+  ('accessoires', 'Accessoires téléphonie', Icons.headphones_rounded),
   // Cave
-  ('cave_vins',              'Vins & Spiritueux',           Icons.wine_bar_rounded),
-  ('cave_bieres',            'Bières',                      Icons.sports_bar_rounded),
-  ('cave_sans_alcool',       'Boissons sans alcool',        Icons.local_drink_rounded),
+  ('cave_vins', 'Vins & Spiritueux', Icons.wine_bar_rounded),
+  ('cave_bieres', 'Bières', Icons.sports_bar_rounded),
+  ('cave_sans_alcool', 'Boissons sans alcool', Icons.local_drink_rounded),
 ];
 
 String _catFor(String id) {
   const map = {
-    'macon': 'artisans', 'plombier': 'artisans', 'electricien': 'artisans',
-    'ferronnier': 'artisans', 'menuisier': 'artisans', 'carreleur': 'artisans',
-    'peintre': 'artisans', 'vitrier': 'artisans', 'reparateur_tv': 'artisans',
-    'installation_camera': 'artisans', 'decoration': 'artisans',
-    'reparateur_portable': 'artisans', 'salon_coiffure_homme': 'artisans',
-    'barber_shop': 'artisans', 'salon_coiffure_femme': 'artisans',
+    'macon': 'artisans',
+    'plombier': 'artisans',
+    'electricien': 'artisans',
+    'ferronnier': 'artisans',
+    'menuisier': 'artisans',
+    'carreleur': 'artisans',
+    'peintre': 'artisans',
+    'vitrier': 'artisans',
+    'reparateur_tv': 'artisans',
+    'installation_camera': 'artisans',
+    'decoration': 'artisans',
+    'reparateur_portable': 'artisans',
+    'salon_coiffure_homme': 'artisans',
+    'barber_shop': 'artisans',
+    'salon_coiffure_femme': 'artisans',
     'onglerie': 'artisans',
-    'mecanicien_voiture': 'mecanique', 'mecanicien_moto': 'mecanique',
-    'electrique_auto': 'mecanique', 'carrosserie': 'mecanique',
-    'location': 'immobilier', 'vente_maison': 'immobilier',
-    'local_commercial': 'immobilier', 'terrain': 'immobilier',
-    'eau_pack': 'construction', 'ciment_briques': 'construction',
-    'telephone': 'telephonie', 'accessoires': 'telephonie',
-    'cave_vins': 'cave', 'cave_bieres': 'cave', 'cave_sans_alcool': 'cave',
+    'mecanicien_voiture': 'mecanique',
+    'mecanicien_moto': 'mecanique',
+    'electrique_auto': 'mecanique',
+    'carrosserie': 'mecanique',
+    'location': 'immobilier',
+    'vente_maison': 'immobilier',
+    'local_commercial': 'immobilier',
+    'terrain': 'immobilier',
+    'eau_pack': 'construction',
+    'ciment_briques': 'construction',
+    'telephone': 'telephonie',
+    'accessoires': 'telephonie',
+    'cave_vins': 'cave',
+    'cave_bieres': 'cave',
+    'cave_sans_alcool': 'cave',
   };
   return map[id] ?? 'artisans';
 }
@@ -78,18 +107,18 @@ class ServiceProviderRegisterPage extends StatefulWidget {
 
 class _ServiceProviderRegisterPageState
     extends State<ServiceProviderRegisterPage> {
-  final _nameCtrl    = TextEditingController();
-  final _phoneCtrl   = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
-  final _descCtrl    = TextEditingController();
+  final _descCtrl = TextEditingController();
 
-  String _subcat     = _kSubcats.first.$1;
+  String _subcat = _kSubcats.first.$1;
   final List<File> _photos = [];
-  bool _loading      = false;
-  bool _gpsLoading   = false;
+  bool _loading = false;
+  bool _gpsLoading = false;
   double? _lat;
   double? _lng;
-  bool _done         = false;
+  bool _done = false;
 
   @override
   void dispose() {
@@ -118,9 +147,15 @@ class _ServiceProviderRegisterPageState
     setState(() => _gpsLoading = false);
   }
 
+  // Limite alignée sur celle du dashboard artisan (artisan_dashboard.dart
+  // _maxPhotos) — les deux écrans écrivent le même champ Firestore `photos`,
+  // une limite différente à l'inscription vs après approbation n'a pas de
+  // justification métier.
+  static const int _maxPhotos = 8;
+
   Future<void> _pickPhoto() async {
-    if (_photos.length >= 5) {
-      _snack('Maximum 5 photos', Colors.orange);
+    if (_photos.length >= _maxPhotos) {
+      _snack('Maximum $_maxPhotos photos', Colors.orange);
       return;
     }
     final src = await _pickSource();
@@ -159,8 +194,8 @@ class _ServiceProviderRegisterPageState
   }
 
   Future<void> _submit() async {
-    final name    = _nameCtrl.text.trim();
-    final phone   = _phoneCtrl.text.trim();
+    final name = _nameCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim();
     final address = _addressCtrl.text.trim();
     if (name.isEmpty || phone.isEmpty || address.isEmpty) {
       _snack('Nom, téléphone et adresse sont obligatoires', Colors.red);
@@ -189,22 +224,25 @@ class _ServiceProviderRegisterPageState
       // l'écriture qu'à l'admin (allow write: if isAdmin();), sans exception de
       // création pour un prestataire s'inscrivant lui-même — une écriture
       // directe ici échouait toujours avec permission-denied.
-      await FirebaseFunctions.instance
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
           .httpsCallable('submitServiceProviderApplication')
           .call({
-        'docId':       docId,
-        'name':        name,
-        'phone':       phone,
-        'address':     address,
+        'docId': docId,
+        'name': name,
+        'phone': phone,
+        'address': address,
         'description': _descCtrl.text.trim(),
         'subcategory': _subcat,
-        'category':    _catFor(_subcat),
-        'photos':      photoUrls,
-        'lat':         _lat ?? 0.0,
-        'lng':         _lng ?? 0.0,
+        'category': _catFor(_subcat),
+        'photos': photoUrls,
+        'lat': _lat ?? 0.0,
+        'lng': _lng ?? 0.0,
       });
 
-      setState(() { _loading = false; _done = true; });
+      setState(() {
+        _loading = false;
+        _done = true;
+      });
     } catch (e) {
       setState(() => _loading = false);
       _snack('Erreur : $e', Colors.red);
@@ -213,8 +251,8 @@ class _ServiceProviderRegisterPageState
 
   void _snack(String msg, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: color));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
   }
 
   @override
@@ -299,15 +337,13 @@ class _ServiceProviderRegisterPageState
                               value: s.$1,
                               child: Row(children: [
                                 Icon(s.$3,
-                                    size: 16,
-                                    color: const Color(0xFF1565C0)),
+                                    size: 16, color: const Color(0xFF1565C0)),
                                 const SizedBox(width: 8),
                                 Expanded(
                                     child: Text(s.$2,
-                                        style: GoogleFonts.urbanist(
-                                            fontSize: 13),
-                                        overflow:
-                                            TextOverflow.ellipsis)),
+                                        style:
+                                            GoogleFonts.urbanist(fontSize: 13),
+                                        overflow: TextOverflow.ellipsis)),
                               ]),
                             ))
                         .toList(),
@@ -328,8 +364,7 @@ class _ServiceProviderRegisterPageState
                 _field(_nameCtrl, 'Nom du prestataire / magasin',
                     Icons.storefront_rounded),
                 const SizedBox(height: 12),
-                _field(_phoneCtrl, 'Numéro de téléphone',
-                    Icons.phone_rounded,
+                _field(_phoneCtrl, 'Numéro de téléphone', Icons.phone_rounded,
                     type: TextInputType.phone),
                 const SizedBox(height: 12),
                 _field(_addressCtrl, 'Adresse / Quartier',
@@ -375,8 +410,7 @@ class _ServiceProviderRegisterPageState
                                 ? 'Localisation…'
                                 : 'Capturer ma position GPS',
                         style: GoogleFonts.urbanist(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600),
+                            color: Colors.white, fontWeight: FontWeight.w600),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _lat != null
@@ -401,7 +435,7 @@ class _ServiceProviderRegisterPageState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Ajoutez jusqu\'à 5 photos pour montrer votre travail.',
+                    'Ajoutez jusqu\'à $_maxPhotos photos pour montrer votre travail.',
                     style: GoogleFonts.urbanist(
                         fontSize: 12, color: Colors.grey.shade600),
                   ),
@@ -425,10 +459,11 @@ class _ServiceProviderRegisterPageState
                               child: Image.file(e.value, fit: BoxFit.cover),
                             ),
                             Positioned(
-                              top: 3, right: 11,
+                              top: 3,
+                              right: 11,
                               child: GestureDetector(
-                                onTap: () => setState(
-                                    () => _photos.removeAt(e.key)),
+                                onTap: () =>
+                                    setState(() => _photos.removeAt(e.key)),
                                 child: Container(
                                   padding: const EdgeInsets.all(3),
                                   decoration: const BoxDecoration(
@@ -460,8 +495,7 @@ class _ServiceProviderRegisterPageState
                           side: const BorderSide(color: Color(0xFF1565C0)),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12)),
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 13),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
                         ),
                       ),
                     ),
@@ -544,15 +578,12 @@ class _ServiceProviderRegisterPageState
       labelText: label,
       labelStyle: GoogleFonts.urbanist(fontSize: 13),
       prefixIcon: Icon(icon, color: const Color(0xFF1565C0), size: 20),
-      border:
-          OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide:
-            const BorderSide(color: Color(0xFF1565C0), width: 2),
+        borderSide: const BorderSide(color: Color(0xFF1565C0), width: 2),
       ),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
     );
   }
 }

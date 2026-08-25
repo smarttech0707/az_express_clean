@@ -27,16 +27,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  int    _tapCount    = 0;
+  int _tapCount = 0;
   Timer? _tapTimer;
-  int    _proTapCount = 0;
+  int _proTapCount = 0;
   Timer? _proTapTimer;
-  bool   _sosSent     = false;
+  bool _sosSent = false;
 
-  late AnimationController        _pulseCtrl;
-  late Animation<double>          _pulseAnim;
-  late AnimationController        _entryCtrl;
-  late List<Animation<double>>    _cardAnims;
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulseAnim;
+  late AnimationController _entryCtrl;
+  late List<Animation<double>> _cardAnims;
 
   @override
   void didChangeDependencies() {
@@ -48,9 +48,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _pulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 2))
-      ..repeat(reverse: true);
+    _pulseCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 2))
+          ..repeat(reverse: true);
     _pulseAnim = Tween<double>(begin: 1.0, end: 1.06)
         .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
 
@@ -58,10 +58,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         vsync: this, duration: const Duration(milliseconds: 1000));
     _cardAnims = List.generate(2, (i) {
       final start = i * 0.12;
-      final end   = (start + 0.65).clamp(0.0, 1.0);
+      final end = (start + 0.65).clamp(0.0, 1.0);
       return CurvedAnimation(
           parent: _entryCtrl,
-          curve:  Interval(start, end, curve: Curves.easeOutBack));
+          curve: Interval(start, end, curve: Curves.easeOutBack));
     });
     Future.delayed(const Duration(milliseconds: 250), () {
       if (mounted) _entryCtrl.forward();
@@ -100,8 +100,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _showSOSConfirm() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.isAnonymous) {
-      Navigator.push(context,
-          AppTransitions.fadeSlide(const ClientAuthPage()));
+      Navigator.push(context, AppTransitions.fadeSlide(const ClientAuthPage()));
       return;
     }
     showDialog(
@@ -112,8 +111,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           Icon(Icons.sos_rounded, color: Colors.red, size: 24),
           SizedBox(width: 8),
           Text('Alerte SOS',
-              style: TextStyle(
-                  color: Colors.red, fontWeight: FontWeight.bold)),
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
         ]),
         content: const Text(
           'Envoyer une alerte d\'urgence à l\'équipe AZ Express avec votre position GPS ?',
@@ -124,12 +122,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               onPressed: () => Navigator.pop(context),
               child: const Text('Annuler')),
           ScaleButton(
-            onPressed: () { Navigator.pop(context); _sendSOS(); },
+            onPressed: () {
+              Navigator.pop(context);
+              _sendSOS();
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
-              shape: const RoundedRectangleBorder(
-                  borderRadius: AppRadius.mdR),
+              shape: const RoundedRectangleBorder(borderRadius: AppRadius.mdR),
             ),
             child: const Text('Envoyer'),
           ),
@@ -169,18 +169,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     String clientName = 'Client';
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('clients').doc(user?.uid ?? '').get();
+          .collection('clients')
+          .doc(user?.uid ?? '')
+          .get();
       clientName = doc.data()?['name'] ?? 'Client';
     } catch (_) {}
 
     await FirebaseFirestore.instance.collection('sos_alerts').add({
-      'clientId':   user?.uid ?? '',
+      'clientId': user?.uid ?? '',
       'clientName': clientName,
-      'type':       'client',
-      'lat':        lat,
-      'lng':        lng,
-      'timestamp':  FieldValue.serverTimestamp(),
-      'status':     'active',
+      'type': 'client',
+      'lat': lat,
+      'lng': lng,
+      'timestamp': FieldValue.serverTimestamp(),
+      'status': 'active',
     });
 
     if (!mounted) return;
@@ -195,16 +197,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _goToDashboard() async {
-    final user   = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     final isAnon = user == null || user.isAnonymous;
     if (isAnon) {
-      Navigator.push(context,
-          AppTransitions.fadeSlide(const ClientAuthPage()));
+      Navigator.push(context, AppTransitions.fadeSlide(const ClientAuthPage()));
       return;
     }
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('sellers').doc(user.uid).get();
+          .collection('sellers')
+          .doc(user.uid)
+          .get();
       if (!mounted) return;
       if (doc.exists && (doc.data()?['isActive'] ?? false)) {
         // Master Prompt 128 (Partie 11) — ce chemin de reprise automatique
@@ -213,8 +216,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         // non délivrées après un long moment sans relancer l'app via un
         // vrai formulaire de connexion.
         NotificationService().saveToken(user.uid, 'sellers');
-        Navigator.push(context, AppTransitions.fadeSlide(
-          SellerDashboard(sellerId: user.uid, sellerData: doc.data()!)));
+        Navigator.push(
+            context,
+            AppTransitions.fadeSlide(
+                SellerDashboard(sellerId: user.uid, sellerData: doc.data()!)));
         return;
       }
     } catch (_) {}
@@ -226,7 +231,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final language = AppLanguage.of(context);
-    final text     = AppText(language.locale);
+    final text = AppText(language.locale);
 
     return PopScope(
       canPop: false,
@@ -255,62 +260,71 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: const Color(0xFF1A0A00),
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Color(0xFFBF360C),
-                Color(0xFFE64A19),
-                AppColors.primary,
-                Color(0xFFFF8F00),
-              ],
-              begin:  Alignment.topLeft,
-              end:    Alignment.bottomRight,
-              stops:  [0.0, 0.3, 0.7, 1.0],
+        value: SystemUiOverlayStyle.light,
+        child: Scaffold(
+          backgroundColor: AppColors.primary,
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFFFF8A3D),
+                  AppColors.primary,
+                  Color(0xFFFFB36B),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                stops: [0.0, 0.55, 1.0],
+              ),
             ),
-          ),
-          child: SafeArea(
-            child: Column(
-              children: [
-                // ── TOP BAR ───────────────────────────────────────────────
-                _TopBar(
-                  text:     text,
-                  language: language,
-                  sosSent:  _sosSent,
-                  onSOS:    _sosSent ? null : _showSOSConfirm,
-                  onPro:    _onProTap,
-                ),
-
-                // ── HERO ──────────────────────────────────────────────────
-                Expanded(
-                  flex: 5,
-                  child: GestureDetector(
-                    onTap: _onLogoTap,
-                    child: _HeroSection(
-                      text:      text,
-                      pulseAnim: _pulseAnim,
+            child: SafeArea(
+              child: CustomScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                slivers: [
+                  // ── TOP BAR ───────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: _TopBar(
+                      text: text,
+                      language: language,
+                      sosSent: _sosSent,
+                      onSOS: _sosSent ? null : _showSOSConfirm,
+                      onPro: _onProTap,
                     ),
                   ),
-                ),
 
-                // ── CARTES SERVICES ───────────────────────────────────────
-                _CardsSection(
-                  text:      text,
-                  cardAnims: _cardAnims,
-                  onOrder:   _goToDashboard,
-                  onEkbine:  () => Navigator.push(context,
-                      AppTransitions.fadeSlide(const EkHomeScreen())),
-                  onPro:     () => Navigator.push(context,
-                      AppTransitions.fadeSlide(const ProPortal())),
-                ),
-              ],
+                  // ── HERO ──────────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: GestureDetector(
+                      onTap: _onLogoTap,
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          vertical: AppLayout.xxl(context),
+                        ),
+                        child: _HeroSection(
+                          text: text,
+                          pulseAnim: _pulseAnim,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // ── CARTES SERVICES ───────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: _CardsSection(
+                      text: text,
+                      cardAnims: _cardAnims,
+                      onOrder: _goToDashboard,
+                      onEkbine: () => Navigator.push(context,
+                          AppTransitions.fadeSlide(const EkHomeScreen())),
+                      onPro: () => Navigator.push(
+                          context, AppTransitions.fadeSlide(const ProPortal())),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -320,11 +334,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 // TOP BAR
 // ─────────────────────────────────────────────────────────────────────────────
 class _TopBar extends StatelessWidget {
-  final AppText     text;
+  final AppText text;
   final AppLanguage language;
-  final bool        sosSent;
+  final bool sosSent;
   final VoidCallback? onSOS;
-  final VoidCallback  onPro;
+  final VoidCallback onPro;
 
   const _TopBar({
     required this.text,
@@ -337,7 +351,7 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hPad = AppLayout.xl(context);
-    final vPad = AppLayout.md(context);
+    final vPad = AppLayout.sm(context);
 
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
@@ -345,13 +359,20 @@ class _TopBar extends StatelessWidget {
         children: [
           GestureDetector(
             onTap: onPro,
-            child: Text(
-              'AZ EXPRESS',
-              style: GoogleFonts.urbanist(
-                color:         Colors.white,
-                fontSize:      AppTypography.titleLarge(context),
-                fontWeight:    FontWeight.w900,
-                letterSpacing: 2.5,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 132),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'AZ EXPRESS',
+                  style: GoogleFonts.urbanist(
+                    color: Colors.white,
+                    fontSize: AppTypography.titleLarge(context),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2.5,
+                  ),
+                ),
               ),
             ),
           ),
@@ -366,16 +387,16 @@ class _TopBar extends StatelessWidget {
 }
 
 class _SosChip extends StatelessWidget {
-  final bool       sent;
+  final bool sent;
   final VoidCallback? onTap;
   const _SosChip({required this.sent, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final hPad   = AppLayout.md(context);
-    final vPad   = AppLayout.xs(context) + 3;
+    final hPad = AppLayout.md(context);
+    final vPad = AppLayout.xs(context) + 3;
     final iconSz = AppLayout.iconSm(context);
-    final txtSz  = AppTypography.labelMedium(context);
+    final txtSz = AppTypography.labelMedium(context);
 
     return GestureDetector(
       onTap: onTap,
@@ -396,14 +417,13 @@ class _SosChip extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.sos_rounded,
-                color: sent ? Colors.white54 : Colors.white,
-                size:  iconSz),
+                color: sent ? Colors.white54 : Colors.white, size: iconSz),
             SizedBox(width: AppLayout.xs(context) + 1),
             Text(
               sent ? 'Envoyé' : 'SOS',
               style: GoogleFonts.urbanist(
-                color:      sent ? Colors.white54 : Colors.white,
-                fontSize:   txtSz,
+                color: sent ? Colors.white54 : Colors.white,
+                fontSize: txtSz,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -415,35 +435,35 @@ class _SosChip extends StatelessWidget {
 }
 
 class _LangButton extends StatelessWidget {
-  final AppText     text;
+  final AppText text;
   final AppLanguage language;
   const _LangButton({required this.text, required this.language});
 
   @override
   Widget build(BuildContext context) {
-    final btnSz  = AppLayout.r(context, 36);
+    final btnSz = AppLayout.r(context, 36);
     final iconSz = AppLayout.iconSm(context) + 2;
 
     return PopupMenuButton<String>(
       icon: Container(
-        width:  btnSz,
+        width: btnSz,
         height: btnSz,
         decoration: BoxDecoration(
-          color:  Colors.white.withValues(alpha: 0.18),
-          shape:  BoxShape.circle,
+          color: Colors.white.withValues(alpha: 0.18),
+          shape: BoxShape.circle,
           border: Border.all(color: Colors.white24),
         ),
-        child: Icon(Icons.language_rounded,
-            color: Colors.white, size: iconSz),
+        child: Icon(Icons.language_rounded, color: Colors.white, size: iconSz),
       ),
       shape: const RoundedRectangleBorder(borderRadius: AppRadius.lgR),
       elevation: 4,
       onSelected: (code) => language.onLocaleChanged(Locale(code)),
       itemBuilder: (_) => [
-        PopupMenuItem(value: 'fr',
+        PopupMenuItem(
+            value: 'fr',
             child: Text('Français', style: GoogleFonts.urbanist())),
-        PopupMenuItem(value: 'en',
-            child: Text('English', style: GoogleFonts.urbanist())),
+        PopupMenuItem(
+            value: 'en', child: Text('English', style: GoogleFonts.urbanist())),
       ],
     );
   }
@@ -453,14 +473,14 @@ class _LangButton extends StatelessWidget {
 // HERO — 100% responsive, aucune taille fixe
 // ─────────────────────────────────────────────────────────────────────────────
 class _HeroSection extends StatelessWidget {
-  final AppText            text;
-  final Animation<double>  pulseAnim;
+  final AppText text;
+  final Animation<double> pulseAnim;
   const _HeroSection({required this.text, required this.pulseAnim});
 
   @override
   Widget build(BuildContext context) {
     // Logo = 22% de la hauteur d'écran, borné entre 110 et 180
-    final logoSz = AppLayout.hf(context, 0.22).clamp(110.0, 180.0);
+    final logoSz = AppLayout.hf(context, 0.165).clamp(88.0, 136.0);
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -471,22 +491,22 @@ class _HeroSection extends StatelessWidget {
           builder: (_, child) =>
               Transform.scale(scale: pulseAnim.value, child: child),
           child: Container(
-            width:  logoSz,
+            width: logoSz,
             height: logoSz,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color:       Colors.white.withValues(alpha: 0.35),
-                  blurRadius:  48,
+                  color: Colors.white.withValues(alpha: 0.35),
+                  blurRadius: 48,
                   spreadRadius: 8,
                 ),
                 BoxShadow(
-                  color:      AppColors.primaryDark.withValues(alpha: 0.4),
+                  color: AppColors.primaryDark.withValues(alpha: 0.4),
                   blurRadius: 24,
                   spreadRadius: 2,
-                  offset:     const Offset(0, 8),
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
@@ -494,12 +514,12 @@ class _HeroSection extends StatelessWidget {
               padding: EdgeInsets.all(logoSz * 0.08),
               child: Image.asset(
                 'assets/logo.png',
-                fit:             BoxFit.contain,
+                fit: BoxFit.contain,
                 gaplessPlayback: true,
                 errorBuilder: (_, __, ___) => Icon(
                   Icons.delivery_dining,
                   color: AppColors.primary,
-                  size:  logoSz * 0.5,
+                  size: logoSz * 0.5,
                 ),
               ),
             ),
@@ -522,24 +542,25 @@ class _HeroSection extends StatelessWidget {
         Container(
           padding: EdgeInsets.symmetric(
             horizontal: AppLayout.md(context),
-            vertical:   AppLayout.xs(context) + 2,
+            vertical: AppLayout.xs(context) + 2,
           ),
           decoration: BoxDecoration(
-            color:        Colors.white.withValues(alpha: 0.15),
+            color: Colors.white.withValues(alpha: 0.15),
             borderRadius: AppRadius.pillR,
-            border:       Border.all(color: Colors.white24),
+            border: Border.all(color: Colors.white24),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.location_on_rounded,
-                  color: Colors.white,
-                  size:  AppLayout.iconSm(context)),
+                  color: Colors.white, size: AppLayout.iconSm(context)),
               SizedBox(width: AppLayout.xs(context) + 1),
-              Text(
-                'Abengourou & environs',
-                style: AppTypography.labelLargeStyle(context,
-                    color: Colors.white, weight: FontWeight.w600),
+              Flexible(
+                child: Text(
+                  'Abengourou & environs',
+                  style: AppTypography.labelLargeStyle(context,
+                      color: Colors.white, weight: FontWeight.w600),
+                ),
               ),
             ],
           ),
@@ -553,11 +574,11 @@ class _HeroSection extends StatelessWidget {
 // SECTION CARTES — responsive
 // ─────────────────────────────────────────────────────────────────────────────
 class _CardsSection extends StatelessWidget {
-  final AppText                 text;
+  final AppText text;
   final List<Animation<double>> cardAnims;
-  final VoidCallback            onOrder;
-  final VoidCallback            onEkbine;
-  final VoidCallback            onPro;
+  final VoidCallback onOrder;
+  final VoidCallback onEkbine;
+  final VoidCallback onPro;
 
   const _CardsSection({
     required this.text,
@@ -569,32 +590,33 @@ class _CardsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hPad    = AppLayout.xl(context);
-    final vTop    = AppLayout.xxl(context) + 4;
+    final hPad = AppLayout.xl(context);
+    final vTop = AppLayout.xxl(context) + 4;
     final vBottom = AppLayout.safeBottom(context) + AppLayout.md(context);
 
     final cards = [
       _CardData(
-        title:    text.t('order'),
+        title: text.t('order'),
         subtitle: text.t('fast_delivery'),
-        icon:     Icons.shopping_bag_rounded,
-        badge:    '🚀 Express',
+        icon: Icons.shopping_bag_rounded,
+        badge: '🚀 Express',
         gradient: const [Color(0xFF1A1A2E), Color(0xFF16213E)],
-        onTap:    onOrder,
+        onTap: onOrder,
       ),
       _CardData(
-        title:    'E-Kbine Services',
+        title: 'E-Kbine Services',
         subtitle: 'Crédit · Internet · Mobile Money',
-        icon:     Icons.sim_card_rounded,
-        badge:    '⚡ Instantané',
+        icon: Icons.sim_card_rounded,
+        badge: '⚡ Instantané',
         gradient: const [Color(0xFF004D40), Color(0xFF00695C)],
-        onTap:    onEkbine,
+        onTap: onEkbine,
       ),
     ];
 
     return Container(
+      width: double.infinity,
       decoration: const BoxDecoration(
-        color:        Color(0xFFF2F4F7),
+        color: Color(0xFFF2F4F7),
         borderRadius: AppRadius.topXxl,
       ),
       padding: EdgeInsets.fromLTRB(hPad, vTop, hPad, vBottom),
@@ -604,11 +626,11 @@ class _CardsSection extends StatelessWidget {
           // Handle
           Center(
             child: Container(
-              width:  AppLayout.r(context, 36),
+              width: AppLayout.r(context, 36),
               height: AppLayout.r(context, 4),
               margin: EdgeInsets.only(bottom: AppLayout.xxl(context)),
               decoration: const BoxDecoration(
-                color:        AppColors.border,
+                color: AppColors.border,
                 borderRadius: AppRadius.pillR,
               ),
             ),
@@ -617,24 +639,23 @@ class _CardsSection extends StatelessWidget {
           // Titre section
           Row(
             children: [
-              Flexible(
+              Expanded(
                 child: Text('Nos services',
                     style: AppTypography.titleMediumStyle(context)),
               ),
-              const Spacer(),
+              SizedBox(width: AppLayout.sm(context)),
               Container(
                 padding: EdgeInsets.symmetric(
                   horizontal: AppLayout.sm(context) + 2,
-                  vertical:   AppLayout.xs(context),
+                  vertical: AppLayout.xs(context),
                 ),
                 decoration: const BoxDecoration(
-                  color:        AppColors.primary10,
+                  color: AppColors.primary10,
                   borderRadius: AppRadius.pillR,
                 ),
                 child: Text('Abengourou',
                     style: AppTypography.labelSmallStyle(context,
-                        color: AppColors.primary,
-                        weight: FontWeight.w600)),
+                        color: AppColors.primary, weight: FontWeight.w600)),
               ),
             ],
           ),
@@ -651,7 +672,7 @@ class _CardsSection extends StatelessWidget {
                 child: SlideTransition(
                   position: Tween<Offset>(
                     begin: const Offset(0, 0.3),
-                    end:   Offset.zero,
+                    end: Offset.zero,
                   ).animate(cardAnims[e.key]),
                   child: _ServiceCard(data: e.value),
                 ),
@@ -674,21 +695,21 @@ class _CardsSection extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.primary.withValues(alpha: 0.06),
                 borderRadius: AppRadius.lgR,
-                border: Border.all(
-                    color: AppColors.primary.withValues(alpha: 0.2)),
+                border:
+                    Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: AppLayout.xs(context) + 2,
                 children: [
                   Icon(Icons.support_agent_rounded,
                       size: AppLayout.iconSm(context),
                       color: AppColors.primary),
-                  SizedBox(width: AppLayout.xs(context) + 2),
                   Text(
                     'Aide & Support',
                     style: AppTypography.labelLargeStyle(context,
-                        color: AppColors.primary,
-                        weight: FontWeight.w600),
+                        color: AppColors.primary, weight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -711,20 +732,19 @@ class _CardsSection extends StatelessWidget {
                 borderRadius: AppRadius.lgR,
                 border: Border.all(color: AppColors.border),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: AppLayout.xs(context) + 2,
                 children: [
                   Icon(Icons.business_center_rounded,
                       size: AppLayout.iconSm(context),
                       color: AppColors.textMuted),
-                  SizedBox(width: AppLayout.xs(context) + 2),
                   Text(
                     'Espace Professionnel',
                     style: AppTypography.labelLargeStyle(context,
-                        color: AppColors.textMuted,
-                        weight: FontWeight.w600),
+                        color: AppColors.textMuted, weight: FontWeight.w600),
                   ),
-                  SizedBox(width: AppLayout.xs(context) + 2),
                   Icon(Icons.arrow_forward_ios_rounded,
                       size: AppLayout.iconSm(context) - 4,
                       color: AppColors.textLight),
@@ -739,10 +759,10 @@ class _CardsSection extends StatelessWidget {
 }
 
 class _CardData {
-  final String      title;
-  final String      subtitle;
-  final IconData    icon;
-  final String      badge;
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final String badge;
   final List<Color> gradient;
   final VoidCallback onTap;
   const _CardData({
@@ -770,111 +790,104 @@ class _ServiceCardState extends State<_ServiceCard> {
   @override
   Widget build(BuildContext context) {
     final d = widget.data;
-    // Hauteur = fraction de l'écran, bornée
-    final cardH  = AppLayout.hf(context, 0.108).clamp(78.0, 100.0);
-    final iconSz  = AppLayout.r(context, 48);
-    final innerSz = AppLayout.iconLg(context) - 2;
+    final iconSz = AppLayout.r(context, 44);
+    final innerSz = AppLayout.iconMd(context);
+    final accent = d.gradient.last;
 
     return TapEffect(
-      onTap:     d.onTap,
+      onTap: d.onTap,
       scaleDown: 0.96,
-      haptic:    HapticType.light,
+      haptic: HapticType.light,
       child: Container(
-          height: cardH,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: d.gradient,
-              begin: Alignment.topLeft,
-              end:   Alignment.bottomRight,
+        constraints: BoxConstraints(minHeight: AppLayout.r(context, 76)),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: AppRadius.cardR,
+          boxShadow: AppShadow.card,
+        ),
+        padding: EdgeInsets.symmetric(
+          horizontal: AppLayout.lg(context) + 2,
+          vertical: AppLayout.md(context),
+        ),
+        child: Row(
+          children: [
+            // Icône
+            Container(
+              width: iconSz,
+              height: iconSz,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(d.icon, color: accent, size: innerSz),
             ),
-            borderRadius: AppRadius.lgR,
-            boxShadow: AppShadow.colored(d.gradient.last, opacity: 0.30),
-          ),
-          padding: EdgeInsets.symmetric(horizontal: AppLayout.lg(context) + 2),
-          child: Row(
-            children: [
-              // Icône
-              Container(
-                width:  iconSz,
-                height: iconSz,
-                decoration: BoxDecoration(
-                  color:        Colors.white.withValues(alpha: 0.14),
-                  borderRadius: AppRadius.mdR,
-                  border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.2)),
-                ),
-                child: Icon(d.icon, color: Colors.white, size: innerSz),
-              ),
 
-              SizedBox(width: AppLayout.lg(context)),
+            SizedBox(width: AppLayout.lg(context)),
 
-              // Texte
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Badge
-                    Container(
-                      margin: EdgeInsets.only(
-                          bottom: AppLayout.xs(context) + 1),
-                      padding: EdgeInsets.symmetric(
-                        horizontal: AppLayout.sm(context),
-                        vertical:   2,
-                      ),
-                      decoration: BoxDecoration(
-                        color:        Colors.white.withValues(alpha: 0.18),
-                        borderRadius: AppRadius.pillR,
-                      ),
-                      child: Text(
-                        d.badge,
-                        style: GoogleFonts.urbanist(
-                          color:         Colors.white,
-                          fontSize:      AppTypography.labelSmall(context) - 0.5,
-                          fontWeight:    FontWeight.w700,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
+            // Texte
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Badge
+                  Container(
+                    constraints: const BoxConstraints(minHeight: 24),
+                    margin: EdgeInsets.only(bottom: AppLayout.xs(context) + 1),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: AppLayout.sm(context),
+                      vertical: 2,
                     ),
-                    Text(
-                      d.title,
-                      style: AppTypography.titleMediumStyle(context,
-                          color: Colors.white, weight: FontWeight.w700),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.10),
+                      borderRadius: AppRadius.pillR,
                     ),
-                    SizedBox(height: AppLayout.xs(context) / 2),
-                    Text(
-                      d.subtitle,
-                      maxLines:  1,
-                      overflow:  TextOverflow.ellipsis,
+                    child: Text(
+                      d.badge,
                       style: GoogleFonts.urbanist(
-                        color:    Colors.white.withValues(alpha: 0.78),
-                        fontSize: AppTypography.bodySmall(context),
+                        color: accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.2,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  Text(
+                    d.title,
+                    style: AppTypography.titleMediumStyle(context,
+                        color: AppColors.text, weight: FontWeight.w600),
+                  ),
+                  SizedBox(height: AppLayout.xs(context) / 2),
+                  Text(
+                    d.subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.urbanist(
+                      color: AppColors.textLight,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
+            ),
 
-              // Flèche
-              Container(
-                width:  AppLayout.r(context, 32),
-                height: AppLayout.r(context, 32),
-                decoration: BoxDecoration(
-                  color:  Colors.white.withValues(alpha: 0.15),
-                  shape:  BoxShape.circle,
-                  border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.25)),
-                ),
-                child: Icon(
-                  Icons.arrow_forward_rounded,
-                  color: Colors.white,
-                  size:  AppLayout.iconSm(context) - 1,
-                ),
+            // Flèche
+            Container(
+              width: AppLayout.r(context, 32),
+              height: AppLayout.r(context, 32),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.10),
+                shape: BoxShape.circle,
               ),
-            ],
-          ),
+              child: Icon(
+                Icons.arrow_forward_rounded,
+                color: accent,
+                size: AppLayout.iconSm(context) - 1,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
-

@@ -77,7 +77,8 @@ Future<void> showAccountDeletionRequestDialog(
                       );
                       if (ctx.mounted) {
                         Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(const SnackBar(
                           content: Text(
                               'Demande envoyée. Votre compte sera désactivé sous peu.'),
                           backgroundColor: Colors.red,
@@ -94,8 +95,10 @@ Future<void> showAccountDeletionRequestDialog(
                   },
             child: sending
                 ? const SizedBox(
-                    width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
                 : const Text('Confirmer la suppression'),
           ),
         ],

@@ -2,6 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'shopping_item.dart';
 
+/// Contrat géographique de toute commande envoyée au dispatch :
+/// - [latitude]/[longitude] désignent le point de collecte ;
+/// - [destLat]/[destLng] désignent le point de livraison.
+///
+/// Ces deux points doivent être des coordonnées réelles et distinctes sur le
+/// plan sémantique, même lorsqu'un service (comme les courses) les place au
+/// même endroit par décision métier.
 class OrderModel {
   final String id;
   final String description;
@@ -32,25 +39,36 @@ class OrderModel {
   final int? medicineAmount;
   final String? pharmacieId;
   final String? pharmacieName;
-  final int?    sellerRating;
-  final double? destLat;   // latitude destination livraison (compat)
-  final double? destLng;   // longitude destination livraison (compat)
+  final int? sellerRating;
+  final double? destLat; // latitude destination livraison (compat)
+  final double? destLng; // longitude destination livraison (compat)
   // ── Nouveaux champs adresse structurés ───────────────────────────────────
-  final String? deliveryAddress;  // adresse textuelle du lieu de livraison
-  final double? pickupLat;        // coordonnées du lieu de collecte
+  final String? deliveryAddress; // adresse textuelle du lieu de livraison
+  final double? pickupLat; // coordonnées du lieu de collecte
   final double? pickupLng;
-  final bool    forSelf;          // true = pour moi, false = pour quelqu'un d'autre
-  final String  deliveryMode;     // 'standard' | 'express'
-  final String? recipientPhone;   // téléphone destinataire
-  final String? recipientName;    // nom du destinataire
-  final String? pickupContactName;  // nom du récupérateur au point de collecte
+  final bool forSelf; // true = pour moi, false = pour quelqu'un d'autre
+  final String deliveryMode; // 'standard' | 'express'
+  final String? recipientPhone; // téléphone destinataire
+  final String? recipientName; // nom du destinataire
+  final String? pickupContactName; // nom du récupérateur au point de collecte
   final String? pickupContactPhone; // téléphone du récupérateur
-  final String? pickupZone;         // zone de collecte sélectionnée
-  final String? deliveryZone;       // zone de livraison sélectionnée
-  final double? deliveredLat;       // GPS final au moment de la livraison
+  final String? pickupZone; // zone de collecte sélectionnée
+  final String? deliveryZone; // zone de livraison sélectionnée
+  final String? pickupCityId;
+  final String? deliveryCityId;
+  final String? pickupZoneId;
+  final String? deliveryZoneId;
+  final String? pickupCoordinateSource;
+  final String? deliveryCoordinateSource;
+  final String? gpsDetectedCityId;
+  final String? activeCityId;
+  final String? citySelectionSource;
+  final String? cityResolutionStatus;
+  final double? deliveredLat; // GPS final au moment de la livraison
   final double? deliveredLng;
-  final DateTime? deliveredAt;      // horodatage de livraison effective
-  final List<ShoppingItem>? items;  // liste d'articles courses (ex. AZ IA) — nullable, additif
+  final DateTime? deliveredAt; // horodatage de livraison effective
+  final List<ShoppingItem>?
+      items; // liste d'articles courses (ex. AZ IA) — nullable, additif
 
   OrderModel({
     required this.id,
@@ -95,6 +113,16 @@ class OrderModel {
     this.pickupContactPhone,
     this.pickupZone,
     this.deliveryZone,
+    this.pickupCityId,
+    this.deliveryCityId,
+    this.pickupZoneId,
+    this.deliveryZoneId,
+    this.pickupCoordinateSource,
+    this.deliveryCoordinateSource,
+    this.gpsDetectedCityId,
+    this.activeCityId,
+    this.citySelectionSource,
+    this.cityResolutionStatus,
     this.deliveredLat,
     this.deliveredLng,
     this.deliveredAt,
@@ -107,8 +135,9 @@ class OrderModel {
       description: data['description'] ?? '',
       budget: (data['budget'] as num? ?? 0).toInt(),
       status: data['status'] ?? 'pending',
-      latitude: (data['latitude'] ?? 0).toDouble(),
-      longitude: (data['longitude'] ?? 0).toDouble(),
+      latitude: (data['latitude'] ?? data['deliveryLatitude'] ?? 0).toDouble(),
+      longitude:
+          (data['longitude'] ?? data['deliveryLongitude'] ?? 0).toDouble(),
       type: data['type'] ?? 'shopping',
       driverId: data['driverId'],
       clientId: data['clientId'],
@@ -134,26 +163,37 @@ class OrderModel {
       pharmacieId: data['pharmacieId'] as String?,
       pharmacieName: data['pharmacieName'] as String?,
       sellerRating: (data['sellerRating'] as num?)?.toInt(),
-      destLat:  (data['destLat']  as num?)?.toDouble(),
-      destLng:  (data['destLng']  as num?)?.toDouble(),
+      destLat: (data['destLat'] as num?)?.toDouble(),
+      destLng: (data['destLng'] as num?)?.toDouble(),
       deliveryAddress: data['deliveryAddress'] as String?,
-      pickupLat: (data['pickupLatitude']  as num?)?.toDouble(),
+      pickupLat: (data['pickupLatitude'] as num?)?.toDouble(),
       pickupLng: (data['pickupLongitude'] as num?)?.toDouble(),
-      forSelf:       data['forSelf']       as bool?   ?? true,
-      deliveryMode:  data['deliveryMode']  as String? ?? 'standard',
-      recipientPhone:    data['recipientPhone']    as String?,
-      recipientName:     data['recipientName']     as String?,
+      forSelf: data['forSelf'] as bool? ?? true,
+      deliveryMode: data['deliveryMode'] as String? ?? 'standard',
+      recipientPhone: data['recipientPhone'] as String?,
+      recipientName: data['recipientName'] as String?,
       pickupContactName: data['pickupContactName'] as String?,
-      pickupContactPhone:data['pickupContactPhone']as String?,
-      pickupZone:        data['pickupZone']        as String?,
-      deliveryZone:      data['deliveryZone']      as String?,
-      deliveredLat:  (data['deliveredLat']  as num?)?.toDouble(),
-      deliveredLng:  (data['deliveredLng']  as num?)?.toDouble(),
-      deliveredAt:   data['deliveredAt'] != null
+      pickupContactPhone: data['pickupContactPhone'] as String?,
+      pickupZone: data['pickupZone'] as String?,
+      deliveryZone: data['deliveryZone'] as String?,
+      pickupCityId: data['pickupCityId'] as String?,
+      deliveryCityId: data['deliveryCityId'] as String?,
+      pickupZoneId: data['pickupZoneId'] as String?,
+      deliveryZoneId: data['deliveryZoneId'] as String?,
+      pickupCoordinateSource: data['pickupCoordinateSource'] as String?,
+      deliveryCoordinateSource: data['deliveryCoordinateSource'] as String?,
+      gpsDetectedCityId: data['gpsDetectedCityId'] as String?,
+      activeCityId: data['activeCityId'] as String?,
+      citySelectionSource: data['citySelectionSource'] as String?,
+      cityResolutionStatus: data['cityResolutionStatus'] as String?,
+      deliveredLat: (data['deliveredLat'] as num?)?.toDouble(),
+      deliveredLng: (data['deliveredLng'] as num?)?.toDouble(),
+      deliveredAt: data['deliveredAt'] != null
           ? (data['deliveredAt'] as Timestamp).toDate()
           : null,
       items: (data['items'] as List?)
-          ?.map((e) => ShoppingItem.fromMap(Map<String, dynamic>.from(e as Map)))
+          ?.map(
+              (e) => ShoppingItem.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
     );
   }
@@ -162,55 +202,71 @@ class OrderModel {
 
   Map<String, dynamic> toMap() {
     return {
-      'description':    description,
-      'budget':         budget,
+      'description': description,
+      'budget': budget,
       'shoppingBudget': shoppingBudget,
-      'status':         status,
-      'latitude':       latitude,
-      'longitude':      longitude,
-      'type':           type,
-      'clientId':       clientId,
-      'clientName':     clientName,
-      'clientPhone':    clientPhone,
-      'paymentMethod':  paymentMethod,
-      'isPaid':         isPaid,
-      'createdAt':      Timestamp.now(),
+      'status': status,
+      'latitude': latitude,
+      'longitude': longitude,
+      'type': type,
+      'clientId': clientId,
+      'clientName': clientName,
+      'clientPhone': clientPhone,
+      'paymentMethod': paymentMethod,
+      'isPaid': isPaid,
+      'createdAt': Timestamp.now(),
       // Champs optionnels — inclus seulement si non null
       // (notPresent('driverId') dans les règles Firestore doit être respecté)
-      if (driverId              != null) 'driverId':              driverId,
-      if (voiceMessage          != null) 'voiceMessage':          voiceMessage,
-      if (rating                != null) 'rating':                rating,
-      if (sellerRating          != null) 'sellerRating':          sellerRating,
-      if (deliveryPhoto         != null) 'deliveryPhoto':         deliveryPhoto,
-      if (driverAcceptanceSelfie != null) 'driverAcceptanceSelfie': driverAcceptanceSelfie,
-      if (driverPhotoUrl        != null) 'driverPhotoUrl':        driverPhotoUrl,
-      if (pickupAddress         != null) 'pickupAddress':         pickupAddress,
-      if (sellerId              != null) 'sellerId':              sellerId,
-      if (sellerName            != null) 'sellerName':            sellerName,
-      if (sellerType            != null) 'sellerType':            sellerType,
-      if (linkedBoutiqueOrderId != null) 'linkedBoutiqueOrderId': linkedBoutiqueOrderId,
-      if (medicineAmount        != null) 'medicineAmount':        medicineAmount,
-      if (pharmacieId           != null) 'pharmacieId':           pharmacieId,
-      if (pharmacieName         != null) 'pharmacieName':         pharmacieName,
-      if (destLat          != null) 'destLat':          destLat,
-      if (destLng          != null) 'destLng':          destLng,
+      if (driverId != null) 'driverId': driverId,
+      if (voiceMessage != null) 'voiceMessage': voiceMessage,
+      if (rating != null) 'rating': rating,
+      if (sellerRating != null) 'sellerRating': sellerRating,
+      if (deliveryPhoto != null) 'deliveryPhoto': deliveryPhoto,
+      if (driverAcceptanceSelfie != null)
+        'driverAcceptanceSelfie': driverAcceptanceSelfie,
+      if (driverPhotoUrl != null) 'driverPhotoUrl': driverPhotoUrl,
+      if (pickupAddress != null) 'pickupAddress': pickupAddress,
+      if (sellerId != null) 'sellerId': sellerId,
+      if (sellerName != null) 'sellerName': sellerName,
+      if (sellerType != null) 'sellerType': sellerType,
+      if (linkedBoutiqueOrderId != null)
+        'linkedBoutiqueOrderId': linkedBoutiqueOrderId,
+      if (medicineAmount != null) 'medicineAmount': medicineAmount,
+      if (pharmacieId != null) 'pharmacieId': pharmacieId,
+      if (pharmacieName != null) 'pharmacieName': pharmacieName,
+      if (destLat != null) 'destLat': destLat,
+      if (destLng != null) 'destLng': destLng,
       // Champs adresse structurés (nouveaux)
-      'deliveryLatitude':  latitude,
+      'deliveryLatitude': latitude,
       'deliveryLongitude': longitude,
-      'forSelf':           forSelf,
-      if (deliveryAddress  != null) 'deliveryAddress':  deliveryAddress,
-      if (pickupLat        != null) 'pickupLatitude':   pickupLat,
-      if (pickupLng        != null) 'pickupLongitude':  pickupLng,
-      'deliveryMode':    deliveryMode,
-      if (recipientPhone     != null) 'recipientPhone':     recipientPhone,
-      if (recipientName      != null) 'recipientName':      recipientName,
-      if (pickupContactName  != null) 'pickupContactName':  pickupContactName,
+      'forSelf': forSelf,
+      if (deliveryAddress != null) 'deliveryAddress': deliveryAddress,
+      if (pickupLat != null) 'pickupLatitude': pickupLat,
+      if (pickupLng != null) 'pickupLongitude': pickupLng,
+      'deliveryMode': deliveryMode,
+      if (recipientPhone != null) 'recipientPhone': recipientPhone,
+      if (recipientName != null) 'recipientName': recipientName,
+      if (pickupContactName != null) 'pickupContactName': pickupContactName,
       if (pickupContactPhone != null) 'pickupContactPhone': pickupContactPhone,
-      if (pickupZone         != null) 'pickupZone':         pickupZone,
-      if (deliveryZone       != null) 'deliveryZone':       deliveryZone,
-      if (deliveredLat       != null) 'deliveredLat':       deliveredLat,
-      if (deliveredLng       != null) 'deliveredLng':       deliveredLng,
-      if (deliveredAt        != null) 'deliveredAt':        Timestamp.fromDate(deliveredAt!),
+      if (pickupZone != null) 'pickupZone': pickupZone,
+      if (deliveryZone != null) 'deliveryZone': deliveryZone,
+      if (pickupCityId != null) 'pickupCityId': pickupCityId,
+      if (deliveryCityId != null) 'deliveryCityId': deliveryCityId,
+      if (pickupZoneId != null) 'pickupZoneId': pickupZoneId,
+      if (deliveryZoneId != null) 'deliveryZoneId': deliveryZoneId,
+      if (pickupCoordinateSource != null)
+        'pickupCoordinateSource': pickupCoordinateSource,
+      if (deliveryCoordinateSource != null)
+        'deliveryCoordinateSource': deliveryCoordinateSource,
+      if (gpsDetectedCityId != null) 'gpsDetectedCityId': gpsDetectedCityId,
+      if (activeCityId != null) 'activeCityId': activeCityId,
+      if (citySelectionSource != null)
+        'citySelectionSource': citySelectionSource,
+      if (cityResolutionStatus != null)
+        'cityResolutionStatus': cityResolutionStatus,
+      if (deliveredLat != null) 'deliveredLat': deliveredLat,
+      if (deliveredLng != null) 'deliveredLng': deliveredLng,
+      if (deliveredAt != null) 'deliveredAt': Timestamp.fromDate(deliveredAt!),
       if (items != null) 'items': items!.map((e) => e.toMap()).toList(),
     };
   }
@@ -258,6 +314,16 @@ class OrderModel {
     String? pickupContactPhone,
     String? pickupZone,
     String? deliveryZone,
+    String? pickupCityId,
+    String? deliveryCityId,
+    String? pickupZoneId,
+    String? deliveryZoneId,
+    String? pickupCoordinateSource,
+    String? deliveryCoordinateSource,
+    String? gpsDetectedCityId,
+    String? activeCityId,
+    String? citySelectionSource,
+    String? cityResolutionStatus,
     double? deliveredLat,
     double? deliveredLng,
     DateTime? deliveredAt,
@@ -280,14 +346,16 @@ class OrderModel {
       rating: rating ?? this.rating,
       deliveryPhoto: deliveryPhoto ?? this.deliveryPhoto,
       shoppingBudget: shoppingBudget ?? this.shoppingBudget,
-      driverAcceptanceSelfie: driverAcceptanceSelfie ?? this.driverAcceptanceSelfie,
+      driverAcceptanceSelfie:
+          driverAcceptanceSelfie ?? this.driverAcceptanceSelfie,
       driverPhotoUrl: driverPhotoUrl ?? this.driverPhotoUrl,
       pickupAddress: pickupAddress ?? this.pickupAddress,
       paymentMethod: paymentMethod ?? this.paymentMethod,
       sellerId: sellerId ?? this.sellerId,
       sellerName: sellerName ?? this.sellerName,
       sellerType: sellerType ?? this.sellerType,
-      linkedBoutiqueOrderId: linkedBoutiqueOrderId ?? this.linkedBoutiqueOrderId,
+      linkedBoutiqueOrderId:
+          linkedBoutiqueOrderId ?? this.linkedBoutiqueOrderId,
       isPaid: isPaid ?? this.isPaid,
       medicineAmount: medicineAmount ?? this.medicineAmount,
       pharmacieId: pharmacieId ?? this.pharmacieId,
@@ -306,6 +374,18 @@ class OrderModel {
       pickupContactPhone: pickupContactPhone ?? this.pickupContactPhone,
       pickupZone: pickupZone ?? this.pickupZone,
       deliveryZone: deliveryZone ?? this.deliveryZone,
+      pickupCityId: pickupCityId ?? this.pickupCityId,
+      deliveryCityId: deliveryCityId ?? this.deliveryCityId,
+      pickupZoneId: pickupZoneId ?? this.pickupZoneId,
+      deliveryZoneId: deliveryZoneId ?? this.deliveryZoneId,
+      pickupCoordinateSource:
+          pickupCoordinateSource ?? this.pickupCoordinateSource,
+      deliveryCoordinateSource:
+          deliveryCoordinateSource ?? this.deliveryCoordinateSource,
+      gpsDetectedCityId: gpsDetectedCityId ?? this.gpsDetectedCityId,
+      activeCityId: activeCityId ?? this.activeCityId,
+      citySelectionSource: citySelectionSource ?? this.citySelectionSource,
+      cityResolutionStatus: cityResolutionStatus ?? this.cityResolutionStatus,
       deliveredLat: deliveredLat ?? this.deliveredLat,
       deliveredLng: deliveredLng ?? this.deliveredLng,
       deliveredAt: deliveredAt ?? this.deliveredAt,
@@ -360,6 +440,16 @@ class OrderModel {
           pickupContactPhone == other.pickupContactPhone &&
           pickupZone == other.pickupZone &&
           deliveryZone == other.deliveryZone &&
+          pickupCityId == other.pickupCityId &&
+          deliveryCityId == other.deliveryCityId &&
+          pickupZoneId == other.pickupZoneId &&
+          deliveryZoneId == other.deliveryZoneId &&
+          pickupCoordinateSource == other.pickupCoordinateSource &&
+          deliveryCoordinateSource == other.deliveryCoordinateSource &&
+          gpsDetectedCityId == other.gpsDetectedCityId &&
+          activeCityId == other.activeCityId &&
+          citySelectionSource == other.citySelectionSource &&
+          cityResolutionStatus == other.cityResolutionStatus &&
           deliveredLat == other.deliveredLat &&
           deliveredLng == other.deliveredLng &&
           deliveredAt == other.deliveredAt &&
@@ -416,6 +506,18 @@ class OrderModel {
         Object.hash(
           pickupZone,
           deliveryZone,
+          pickupCityId,
+          deliveryCityId,
+          pickupZoneId,
+          deliveryZoneId,
+          pickupCoordinateSource,
+          deliveryCoordinateSource,
+          gpsDetectedCityId,
+          activeCityId,
+        ),
+        Object.hash(
+          citySelectionSource,
+          cityResolutionStatus,
           deliveredLat,
           deliveredLng,
           deliveredAt,

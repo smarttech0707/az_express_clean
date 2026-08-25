@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../utils/storage_cleanup.dart';
 
 class AdminResidencesPage extends StatelessWidget {
   const AdminResidencesPage({super.key});
@@ -59,7 +60,7 @@ class AdminResidencesPage extends StatelessWidget {
           }
           return ListView.builder(
             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             itemCount: docs.length,
             itemBuilder: (context, i) {
               final doc = docs[i];
@@ -85,7 +86,8 @@ class _ResidenceAdminCard extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Supprimer cette résidence ?"),
-        content: Text("\"${data['title'] ?? ''}\" sera supprimée définitivement."),
+        content:
+            Text("\"${data['title'] ?? ''}\" sera supprimée définitivement."),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -104,6 +106,10 @@ class _ResidenceAdminCard extends StatelessWidget {
           .collection('residences')
           .doc(docId)
           .delete();
+      await deleteStorageUrls([
+        data['photoUrl'] as String?,
+        data['idPhotoUrl'] as String?,
+      ]);
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -150,8 +156,7 @@ class _ResidenceAdminCard extends StatelessWidget {
         children: [
           // Photo
           ClipRRect(
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(18)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
             child: SizedBox(
               height: 150,
               width: double.infinity,
@@ -250,8 +255,8 @@ class _ResidenceAdminCard extends StatelessWidget {
                 if (amenities.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(amenities.take(3).join(' · '),
-                      style: TextStyle(
-                          color: Colors.grey.shade500, fontSize: 12)),
+                      style:
+                          TextStyle(color: Colors.grey.shade500, fontSize: 12)),
                 ],
                 const SizedBox(height: 12),
                 Row(
@@ -260,9 +265,7 @@ class _ResidenceAdminCard extends StatelessWidget {
                       child: OutlinedButton.icon(
                         onPressed: _toggle,
                         icon: Icon(
-                          isAvailable
-                              ? Icons.visibility_off
-                              : Icons.visibility,
+                          isAvailable ? Icons.visibility_off : Icons.visibility,
                           size: 16,
                           color: isAvailable ? Colors.orange : Colors.green,
                         ),
@@ -270,19 +273,16 @@ class _ResidenceAdminCard extends StatelessWidget {
                           isAvailable ? "Marquer indispo" : "Marquer dispo",
                           style: TextStyle(
                               fontSize: 12,
-                              color: isAvailable
-                                  ? Colors.orange
-                                  : Colors.green),
+                              color:
+                                  isAvailable ? Colors.orange : Colors.green),
                         ),
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(
-                              color: isAvailable
-                                  ? Colors.orange
-                                  : Colors.green),
+                              color:
+                                  isAvailable ? Colors.orange : Colors.green),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10)),
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 10),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                         ),
                       ),
                     ),
@@ -321,8 +321,8 @@ class _ResidenceAdminCard extends StatelessWidget {
     return Container(
       color: const Color(0xFF4A148C).withValues(alpha: 0.1),
       child: const Center(
-        child: Icon(Icons.apartment_rounded,
-            size: 60, color: Color(0xFF4A148C)),
+        child:
+            Icon(Icons.apartment_rounded, size: 60, color: Color(0xFF4A148C)),
       ),
     );
   }
@@ -363,9 +363,16 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
 
   static const _types = ['Studio', '1 pièce', '2 pièces', '3 pièces', 'Villa'];
   static const _suggestedAmenities = [
-    'Wifi', 'Climatisé', 'TV', 'Cuisine équipée',
-    'Parking', 'Eau courante', 'Électricité', 'Sécurité gardée',
-    'Piscine', 'Terrasse',
+    'Wifi',
+    'Climatisé',
+    'TV',
+    'Cuisine équipée',
+    'Parking',
+    'Eau courante',
+    'Électricité',
+    'Sécurité gardée',
+    'Piscine',
+    'Terrasse',
   ];
 
   bool get _isEditing => widget.docId != null;
@@ -415,7 +422,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
     try {
       await Geolocator.requestPermission();
       final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.high));
       setState(() {
         _latCtrl.text = pos.latitude.toStringAsFixed(7);
         _lngCtrl.text = pos.longitude.toStringAsFixed(7);
@@ -428,8 +436,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Erreur GPS : $e"), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("Erreur GPS : $e"), backgroundColor: Colors.red));
       }
     }
     setState(() => _gpsLoading = false);
@@ -450,19 +458,22 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
               title: const Text("Prendre une photo"),
               onTap: () async {
                 Navigator.pop(context);
-                final picked = await ImagePicker().pickImage(
-                    source: ImageSource.camera, imageQuality: 75);
-                if (picked != null) setState(() => _pickedImage = File(picked.path));
+                final picked = await ImagePicker()
+                    .pickImage(source: ImageSource.camera, imageQuality: 75);
+                if (picked != null)
+                  setState(() => _pickedImage = File(picked.path));
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF4A148C)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF4A148C)),
               title: const Text("Choisir depuis la galerie"),
               onTap: () async {
                 Navigator.pop(context);
-                final picked = await ImagePicker().pickImage(
-                    source: ImageSource.gallery, imageQuality: 75);
-                if (picked != null) setState(() => _pickedImage = File(picked.path));
+                final picked = await ImagePicker()
+                    .pickImage(source: ImageSource.gallery, imageQuality: 75);
+                if (picked != null)
+                  setState(() => _pickedImage = File(picked.path));
               },
             ),
             const SizedBox(height: 8),
@@ -473,7 +484,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
   }
 
   Future<void> _pickIdPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
+    final picked =
+        await ImagePicker().pickImage(source: source, imageQuality: 80);
     if (picked != null) setState(() => _idPhotoFile = File(picked.path));
   }
 
@@ -490,12 +502,19 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFF4A148C)),
               title: const Text("Photographier la pièce d'identité"),
-              onTap: () { Navigator.pop(context); _pickIdPhoto(ImageSource.camera); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickIdPhoto(ImageSource.camera);
+              },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF4A148C)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF4A148C)),
               title: const Text("Importer depuis la galerie"),
-              onTap: () { Navigator.pop(context); _pickIdPhoto(ImageSource.gallery); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickIdPhoto(ImageSource.gallery);
+              },
             ),
             const SizedBox(height: 8),
           ],
@@ -517,7 +536,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
   Future<String?> _uploadIdPhoto(String docId) async {
     if (_idPhotoFile == null) return _existingIdPhotoUrl;
     try {
-      final ref = FirebaseStorage.instance.ref('residences/$docId/id_photo.jpg');
+      final ref =
+          FirebaseStorage.instance.ref('residences/$docId/id_photo.jpg');
       await ref.putFile(_idPhotoFile!);
       return await ref.getDownloadURL();
     } catch (_) {}
@@ -569,7 +589,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_isEditing ? "Résidence modifiée" : "Résidence ajoutée"),
+            content:
+                Text(_isEditing ? "Résidence modifiée" : "Résidence ajoutée"),
             backgroundColor: const Color(0xFF4A148C),
           ),
         );
@@ -581,8 +602,7 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   void _addAmenity(String a) {
@@ -597,7 +617,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: Text(_isEditing ? "Modifier la résidence" : "Nouvelle résidence"),
+        title:
+            Text(_isEditing ? "Modifier la résidence" : "Nouvelle résidence"),
         backgroundColor: const Color(0xFF4A148C),
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -610,8 +631,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
                 child: SizedBox(
                   width: 20,
                   height: 20,
-                  child:
-                      CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2),
                 ),
               ),
             )
@@ -626,7 +647,7 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
       ),
       body: ListView(
         physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         children: [
           // ── PHOTO ─────────────────────────────────────────
           GestureDetector(
@@ -680,15 +701,14 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
               return GestureDetector(
                 onTap: () => setState(() => _type = t),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: sel ? const Color(0xFF4A148C) : Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: sel
-                          ? const Color(0xFF4A148C)
-                          : Colors.grey.shade300,
+                      color:
+                          sel ? const Color(0xFF4A148C) : Colors.grey.shade300,
                     ),
                   ),
                   child: Text(
@@ -744,12 +764,10 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
                   }
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: added
-                        ? const Color(0xFF4A148C)
-                        : Colors.white,
+                    color: added ? const Color(0xFF4A148C) : Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: added
@@ -761,8 +779,7 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (added) ...[
-                        const Icon(Icons.check,
-                            size: 12, color: Colors.white),
+                        const Icon(Icons.check, size: 12, color: Colors.white),
                         const SizedBox(width: 4),
                       ],
                       Text(
@@ -807,8 +824,8 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
                   backgroundColor: const Color(0xFF4A148C),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 14),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 ),
                 child: const Icon(Icons.add, color: Colors.white),
               ),
@@ -826,12 +843,15 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
               onPressed: _gpsLoading ? null : _getGps,
               icon: _gpsLoading
                   ? const SizedBox(
-                      width: 18, height: 18,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.my_location, color: Colors.white),
               label: Text(
-                _gpsLoading ? "Récupération…" : "Capturer ma position GPS automatiquement",
+                _gpsLoading
+                    ? "Récupération…"
+                    : "Capturer ma position GPS automatiquement",
                 style: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.bold),
               ),
@@ -850,8 +870,7 @@ class _ResidenceFormPageState extends State<_ResidenceFormPage> {
                 const Icon(Icons.gps_fixed, size: 13, color: Colors.green),
                 const SizedBox(width: 4),
                 Text("GPS : ${_latCtrl.text}, ${_lngCtrl.text}",
-                    style:
-                        const TextStyle(fontSize: 11, color: Colors.green)),
+                    style: const TextStyle(fontSize: 11, color: Colors.green)),
               ],
             ),
           ],

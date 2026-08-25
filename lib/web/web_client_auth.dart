@@ -19,24 +19,25 @@ class WebClientAuth extends ChangeNotifier {
     });
   }
 
-  User?   _user;
-  bool    _isClient = false;
+  User? _user;
+  bool _isClient = false;
   String? _clientName;
-  int     _wallet   = 0;
+  int _wallet = 0;
 
-  User?   get user       => _user;
-  bool    get isLoggedIn => _user != null && !(_user!.isAnonymous);
-  bool    get isClient   => _isClient;
-  String  get clientName => _clientName ?? '';
-  int     get wallet     => _wallet;
+  User? get user => _user;
+  bool get isLoggedIn => _user != null && !(_user!.isAnonymous);
+  bool get isClient => _isClient;
+  String get clientName => _clientName ?? '';
+  int get wallet => _wallet;
 
   Future<void> _checkClient(String uid) async {
     try {
-      final doc = await FirebaseFirestore.instance.collection('clients').doc(uid).get();
+      final doc =
+          await FirebaseFirestore.instance.collection('clients').doc(uid).get();
       if (doc.exists) {
-        _isClient   = true;
+        _isClient = true;
         _clientName = doc.data()?['name'] ?? '';
-        _wallet     = (doc.data()?['wallet'] as num? ?? 0).toInt();
+        _wallet = (doc.data()?['wallet'] as num? ?? 0).toInt();
       }
     } catch (_) {}
     notifyListeners();
@@ -51,17 +52,20 @@ class WebClientAuth extends ChangeNotifier {
   Future<String?> login(String phone, String password) async {
     try {
       final email = '${phone.replaceAll(' ', '')}@azexpress.ci';
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email, password: password);
+      await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
       AuthService().logAuthEvent('login', 'client');
       return null;
     } on FirebaseAuthException catch (e) {
       switch (e.code) {
         case 'user-not-found':
         case 'wrong-password':
-        case 'invalid-credential': return 'Numéro ou mot de passe incorrect';
-        case 'too-many-requests':  return 'Trop de tentatives, réessayez plus tard';
-        default:                   return 'Erreur de connexion';
+        case 'invalid-credential':
+          return 'Numéro ou mot de passe incorrect';
+        case 'too-many-requests':
+          return 'Trop de tentatives, réessayez plus tard';
+        default:
+          return 'Erreur de connexion';
       }
     }
   }
@@ -69,22 +73,28 @@ class WebClientAuth extends ChangeNotifier {
   Future<String?> register(String name, String phone, String password) async {
     try {
       final email = '${phone.replaceAll(' ', '')}@azexpress.ci';
-      final cred  = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email, password: password);
-      await FirebaseFirestore.instance.collection('clients').doc(cred.user!.uid).set({
-        'name':                 name,
-        'phone':                phone,
-        'wallet':               0,
+      final cred = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(email: email, password: password);
+      await FirebaseFirestore.instance
+          .collection('clients')
+          .doc(cred.user!.uid)
+          .set({
+        'name': name,
+        'phone': phone,
+        'wallet': 0,
         'cashOnDeliveryEnabled': true,
-        'fakeOrderCount':       0,
-        'createdAt':            DateTime.now(),
+        'fakeOrderCount': 0,
+        'createdAt': DateTime.now(),
       });
       return null;
     } on FirebaseAuthException catch (e) {
       switch (e.code) {
-        case 'email-already-in-use': return 'Un compte existe déjà avec ce numéro';
-        case 'weak-password':        return 'Mot de passe trop court (min 6 car.)';
-        default:                     return 'Erreur lors de la création du compte';
+        case 'email-already-in-use':
+          return 'Un compte existe déjà avec ce numéro';
+        case 'weak-password':
+          return 'Mot de passe trop court (min 6 car.)';
+        default:
+          return 'Erreur lors de la création du compte';
       }
     }
   }
@@ -92,9 +102,9 @@ class WebClientAuth extends ChangeNotifier {
   Future<void> logout() async {
     AuthService().logAuthEvent('logout', 'client');
     await FirebaseAuth.instance.signOut();
-    _isClient   = false;
+    _isClient = false;
     _clientName = null;
-    _wallet     = 0;
+    _wallet = 0;
     notifyListeners();
   }
 }

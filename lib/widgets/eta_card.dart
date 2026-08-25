@@ -15,8 +15,8 @@ class EtaCard extends StatelessWidget {
   final String? driverPhotoUrl;
   final String? driverPhone;
   final double? driverRating;
-  final String  orderStatus;
-  final String  orderId;
+  final String orderStatus;
+  final String orderId;
   final VoidCallback? onFollowToggle;
   final VoidCallback? onRecenter;
 
@@ -38,16 +38,21 @@ class EtaCard extends StatelessWidget {
   Color get _statusColor {
     if (!tracking.hasDriver) return AppColors.textMuted;
     switch (orderStatus) {
-      case 'picked_up': return const Color(0xFF1565C0);
-      case 'delivered': return AppColors.success;
-      default:          return AppColors.primary;
+      case 'picked_up':
+        return const Color(0xFF1565C0);
+      case 'delivered':
+        return AppColors.success;
+      default:
+        return AppColors.primary;
     }
   }
 
   void _callDriver() {
     if (driverPhone == null) return;
     final uri = Uri.parse('tel:$driverPhone');
-    canLaunchUrl(uri).then((can) { if (can) launchUrl(uri); });
+    canLaunchUrl(uri).then((can) {
+      if (can) launchUrl(uri);
+    });
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -55,29 +60,32 @@ class EtaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasDriver = tracking.hasDriver;
-    final r2c       = tracking.routeToClient;
-    final r2d       = tracking.routeToDest;
-    final hasDest   = tracking.hasDest;
-    final loading   = tracking.routeLoading;
-    final color     = _statusColor;
+    final r2c = tracking.routeToClient;
+    final r2d = tracking.routeToDest;
+    final hasDest = tracking.hasDest;
+    final loading = tracking.routeLoading;
+    final color = _statusColor;
 
     return Container(
       decoration: const BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         boxShadow: [
-          BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, -8)),
-          BoxShadow(color: Color(0x08000000), blurRadius: 8,  offset: Offset(0, -2)),
+          BoxShadow(
+              color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, -8)),
+          BoxShadow(
+              color: Color(0x08000000), blurRadius: 8, offset: Offset(0, -2)),
         ],
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-
         // Drag handle
-        Center(child: Container(
-          width: 36, height: 4,
+        Center(
+            child: Container(
+          width: 36,
+          height: 4,
           margin: const EdgeInsets.only(top: 10, bottom: 14),
           decoration: BoxDecoration(
-            color: AppColors.divider, borderRadius: BorderRadius.circular(4)),
+              color: AppColors.divider, borderRadius: BorderRadius.circular(4)),
         )),
 
         // ── Barre de progression livraison ────────────────────────────────────
@@ -86,7 +94,7 @@ class EtaCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
             child: _DeliveryProgressBar(
               orderStatus: orderStatus,
-              loading:     loading,
+              loading: loading,
             ),
           ),
 
@@ -99,7 +107,8 @@ class EtaCard extends StatelessWidget {
               child: Container(
                 key: ValueKey(orderStatus),
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: orderStatus == 'broadcast'
                       ? const Color(0xFFF0FDF4)
@@ -111,7 +120,8 @@ class EtaCard extends StatelessWidget {
                         : color.withValues(alpha: 0.25),
                   ),
                 ),
-                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                child:
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   Icon(
                     orderStatus == 'broadcast'
                         ? Icons.notifications_active_rounded
@@ -122,15 +132,17 @@ class EtaCard extends StatelessWidget {
                     size: 15,
                   ),
                   const SizedBox(width: 7),
-                  Flexible(child: Text(
+                  Flexible(
+                      child: Text(
                     orderStatus == 'broadcast'
                         ? 'Livreurs contactés — en attente d\'acceptation'
                         : 'Recherche d\'un livreur…',
                     style: GoogleFonts.urbanist(
-                      fontSize: 12.5, fontWeight: FontWeight.w600,
-                      color: orderStatus == 'broadcast'
-                          ? AppColors.success
-                          : AppColors.textMuted),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: orderStatus == 'broadcast'
+                            ? AppColors.success
+                            : AppColors.textMuted),
                   )),
                 ]),
               ),
@@ -144,41 +156,52 @@ class EtaCard extends StatelessWidget {
             child: Row(children: [
               // Photo
               Container(
-                width: 50, height: 50,
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
-                      color: AppColors.primary.withValues(alpha: 0.25), width: 2),
+                      color: AppColors.primary.withValues(alpha: 0.25),
+                      width: 2),
                 ),
-                child: ClipOval(child: (driverPhotoUrl?.isNotEmpty ?? false)
-                    ? Image.network(driverPhotoUrl!, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _defaultAvatar())
-                    : _defaultAvatar()),
+                child: ClipOval(
+                    child: (driverPhotoUrl?.isNotEmpty ?? false)
+                        ? Image.network(driverPhotoUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _defaultAvatar())
+                        : _defaultAvatar()),
               ),
               const SizedBox(width: 12),
 
               // Nom + rating
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(
-                  driverName ?? 'Votre livreur',
-                  style: GoogleFonts.urbanist(
-                    fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.text),
-                ),
-                const SizedBox(height: 3),
-                if (driverRating != null)
-                  _StarRating(rating: driverRating!)
-                else
-                  Row(children: [
-                    Container(
-                      width: 8, height: 8,
-                      margin: const EdgeInsets.only(right: 5),
-                      decoration: const BoxDecoration(
-                          color: AppColors.success, shape: BoxShape.circle)),
-                    Text('En ligne',
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(
+                      driverName ?? 'Votre livreur',
                       style: GoogleFonts.urbanist(
-                          fontSize: 11, color: AppColors.textMuted)),
-                  ]),
-              ])),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: AppColors.text),
+                    ),
+                    const SizedBox(height: 3),
+                    if (driverRating != null)
+                      _StarRating(rating: driverRating!)
+                    else
+                      Row(children: [
+                        Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(right: 5),
+                            decoration: const BoxDecoration(
+                                color: AppColors.success,
+                                shape: BoxShape.circle)),
+                        Text('En ligne',
+                            style: GoogleFonts.urbanist(
+                                fontSize: 11, color: AppColors.textMuted)),
+                      ]),
+                  ])),
 
               // Bouton recentrer
               Semantics(
@@ -186,16 +209,16 @@ class EtaCard extends StatelessWidget {
                 button: true,
                 excludeSemantics: true,
                 child: GestureDetector(
-                onTap: onRecenter,
-                child: Container(
-                  padding: const EdgeInsets.all(9),
-                  decoration: BoxDecoration(
-                    color:        AppColors.primary.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(12),
+                  onTap: onRecenter,
+                  child: Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.my_location_rounded,
+                        color: AppColors.primary, size: 19),
                   ),
-                  child: const Icon(Icons.my_location_rounded,
-                      color: AppColors.primary, size: 19),
-                ),
                 ),
               ),
             ]),
@@ -206,21 +229,23 @@ class EtaCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
             child: Row(children: [
-              Expanded(child: _ActionButton(
-                icon:    Icons.phone_rounded,
-                label:   'Appeler',
-                color:   AppColors.success,
+              Expanded(
+                  child: _ActionButton(
+                icon: Icons.phone_rounded,
+                label: 'Appeler',
+                color: AppColors.success,
                 enabled: driverPhone != null,
-                onTap:   () => _callDriver(),
+                onTap: () => _callDriver(),
               )),
               const SizedBox(width: 10),
-              Expanded(child: _ActionButton(
-                icon:  Icons.chat_bubble_rounded,
+              Expanded(
+                  child: _ActionButton(
+                icon: Icons.chat_bubble_rounded,
                 label: 'Chat',
                 color: const Color(0xFF1565C0),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => ChatPage(
-                    orderId:    orderId,
+                    orderId: orderId,
                     senderRole: 'client',
                   ),
                 )),
@@ -233,7 +258,7 @@ class EtaCard extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Row(children: [
             _StatChip(
-              icon:  Icons.access_time_rounded,
+              icon: Icons.access_time_rounded,
               label: 'Arrivée',
               value: hasDriver
                   ? (hasDest
@@ -244,7 +269,7 @@ class EtaCard extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             _StatChip(
-              icon:  Icons.straighten_rounded,
+              icon: Icons.straighten_rounded,
               label: 'Distance',
               value: hasDriver
                   ? (hasDest
@@ -255,7 +280,7 @@ class EtaCard extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             _StatChip(
-              icon:  Icons.payments_rounded,
+              icon: Icons.payments_rounded,
               label: 'Tarif',
               value: hasDriver && r2c.estimatedPrice > 0
                   ? '${r2c.estimatedPrice} F'
@@ -275,13 +300,13 @@ class EtaCard extends StatelessWidget {
               _LegendItem(
                 color: AppColors.primary,
                 label: 'Livreur → Récupération',
-                sub:   r2c.distanceText,
+                sub: r2c.distanceText,
               ),
               const SizedBox(width: 16),
               _LegendItem(
-                color:  const Color(0xFF1565C0),
-                label:  'Récupération → Livraison',
-                sub:    r2d.distanceText,
+                color: const Color(0xFF1565C0),
+                label: 'Récupération → Livraison',
+                sub: r2d.distanceText,
                 dashed: true,
               ),
             ]),
@@ -294,17 +319,21 @@ class EtaCard extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(
               20, 0, 20, MediaQuery.of(context).padding.bottom + 14),
           child: Row(children: [
-            Expanded(child: _ActionButton(
-              icon:  tracking.followDriver
+            Expanded(
+                child: _ActionButton(
+              icon: tracking.followDriver
                   ? Icons.location_searching_rounded
                   : Icons.location_disabled_rounded,
               label: tracking.followDriver ? 'Suivre' : 'Libre',
-              color: tracking.followDriver ? AppColors.primary : AppColors.textMuted,
+              color: tracking.followDriver
+                  ? AppColors.primary
+                  : AppColors.textMuted,
               onTap: onFollowToggle,
             )),
             const SizedBox(width: 10),
-            Expanded(child: _ActionButton(
-              icon:  Icons.center_focus_strong_rounded,
+            Expanded(
+                child: _ActionButton(
+              icon: Icons.center_focus_strong_rounded,
               label: 'Centrer',
               color: const Color(0xFF1565C0),
               onTap: onRecenter,
@@ -316,10 +345,10 @@ class EtaCard extends StatelessWidget {
   }
 
   Widget _defaultAvatar() => Container(
-    color: AppColors.primary,
-    child: const Icon(Icons.delivery_dining_rounded,
-        color: Colors.white, size: 22),
-  );
+        color: AppColors.primary,
+        child: const Icon(Icons.delivery_dining_rounded,
+            color: Colors.white, size: 22),
+      );
 }
 
 // ── Stars rating ──────────────────────────────────────────────────────────────
@@ -329,106 +358,130 @@ class _StarRating extends StatelessWidget {
   const _StarRating({required this.rating});
 
   @override
-  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
-    ...List.generate(5, (i) => Icon(
-      i < rating.floor()
-          ? Icons.star_rounded
-          : (i < rating.ceil() && rating % 1 >= 0.5)
-              ? Icons.star_half_rounded
-              : Icons.star_outline_rounded,
-      color: const Color(0xFFF59E0B),
-      size: 13,
-    )),
-    const SizedBox(width: 4),
-    Text(
-      rating.toStringAsFixed(1),
-      style: GoogleFonts.urbanist(
-          fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMuted),
-    ),
-  ]);
+  Widget build(BuildContext context) =>
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        ...List.generate(
+            5,
+            (i) => Icon(
+                  i < rating.floor()
+                      ? Icons.star_rounded
+                      : (i < rating.ceil() && rating % 1 >= 0.5)
+                          ? Icons.star_half_rounded
+                          : Icons.star_outline_rounded,
+                  color: const Color(0xFFF59E0B),
+                  size: 13,
+                )),
+        const SizedBox(width: 4),
+        Text(
+          rating.toStringAsFixed(1),
+          style: GoogleFonts.urbanist(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textMuted),
+        ),
+      ]);
 }
 
 // ── Chip statistique ──────────────────────────────────────────────────────────
 
 class _StatChip extends StatelessWidget {
   final IconData icon;
-  final String   label, value;
-  final Color    color;
-  const _StatChip({required this.icon, required this.label,
-      required this.value, required this.color});
+  final String label, value;
+  final Color color;
+  const _StatChip(
+      {required this.icon,
+      required this.label,
+      required this.value,
+      required this.color});
 
   @override
-  Widget build(BuildContext context) => Expanded(child: Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color:        color.withValues(alpha: 0.07),
-      borderRadius: BorderRadius.circular(14),
-      border:       Border.all(color: color.withValues(alpha: 0.2)),
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Icon(icon, color: color, size: 12),
-        const SizedBox(width: 4),
-        Text(label, style: GoogleFonts.urbanist(
-            fontSize: 10, color: AppColors.textMuted)),
-      ]),
-      const SizedBox(height: 4),
-      Text(value, style: GoogleFonts.urbanist(
-          fontSize: 15, fontWeight: FontWeight.w800, color: color)),
-    ]),
-  ));
+  Widget build(BuildContext context) => Expanded(
+          child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(icon, color: color, size: 12),
+            const SizedBox(width: 4),
+            Text(label,
+                style: GoogleFonts.urbanist(
+                    fontSize: 10, color: AppColors.textMuted)),
+          ]),
+          const SizedBox(height: 4),
+          Text(value,
+              style: GoogleFonts.urbanist(
+                  fontSize: 15, fontWeight: FontWeight.w800, color: color)),
+        ]),
+      ));
 }
 
 // ── Légende itinéraire ────────────────────────────────────────────────────────
 
 class _LegendItem extends StatelessWidget {
-  final Color  color;
+  final Color color;
   final String label, sub;
-  final bool   dashed;
-  const _LegendItem({required this.color, required this.label,
-      required this.sub, this.dashed = false});
+  final bool dashed;
+  const _LegendItem(
+      {required this.color,
+      required this.label,
+      required this.sub,
+      this.dashed = false});
 
   @override
-  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
-    Container(
-      width: 22, height: 4,
-      decoration: BoxDecoration(
-        color:        dashed ? Colors.transparent : color,
-        borderRadius: BorderRadius.circular(2),
-        border:       dashed ? Border.all(color: color) : null,
-      ),
-    ),
-    const SizedBox(width: 6),
-    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: GoogleFonts.urbanist(
-          fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.text)),
-      Text(sub, style: GoogleFonts.urbanist(
-          fontSize: 10, color: AppColors.textMuted)),
-    ]),
-  ]);
+  Widget build(BuildContext context) =>
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 22,
+          height: 4,
+          decoration: BoxDecoration(
+            color: dashed ? Colors.transparent : color,
+            borderRadius: BorderRadius.circular(2),
+            border: dashed ? Border.all(color: color) : null,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label,
+              style: GoogleFonts.urbanist(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.text)),
+          Text(sub,
+              style: GoogleFonts.urbanist(
+                  fontSize: 10, color: AppColors.textMuted)),
+        ]),
+      ]);
 }
 
 // ── Barre de progression livraison ───────────────────────────────────────────
 
 class _DeliveryProgressBar extends StatelessWidget {
   final String orderStatus;
-  final bool   loading;
-  const _DeliveryProgressBar({required this.orderStatus, required this.loading});
+  final bool loading;
+  const _DeliveryProgressBar(
+      {required this.orderStatus, required this.loading});
 
   // 0=En route, 1=Récupéré, 2=En livraison, 3=Livré
   int get _activeStep {
     switch (orderStatus) {
-      case 'picked_up': return 2;
-      case 'delivered': return 3;
-      default:          return 0;
+      case 'picked_up':
+        return 2;
+      case 'delivered':
+        return 3;
+      default:
+        return 0;
     }
   }
 
   static const _steps = [
-    (Icons.two_wheeler_rounded,       'En route'),
-    (Icons.inventory_2_rounded,       'Récupéré'),
-    (Icons.local_shipping_rounded,    'En livraison'),
-    (Icons.check_circle_rounded,      'Livré'),
+    (Icons.two_wheeler_rounded, 'En route'),
+    (Icons.inventory_2_rounded, 'Récupéré'),
+    (Icons.local_shipping_rounded, 'En livraison'),
+    (Icons.check_circle_rounded, 'Livré'),
   ];
 
   static const _labels = [
@@ -447,8 +500,8 @@ class _DeliveryProgressBar extends StatelessWidget {
       Row(children: [
         for (int i = 0; i < _steps.length; i++) ...[
           _ProgressDot(
-            icon:      _steps[i].$1,
-            isPast:    i < step,
+            icon: _steps[i].$1,
+            isPast: i < step,
             isCurrent: i == step,
             isLoading: i == step && loading,
           ),
@@ -475,7 +528,8 @@ class _DeliveryProgressBar extends StatelessWidget {
           _labels[step],
           key: ValueKey(step),
           style: GoogleFonts.urbanist(
-            fontSize: 12, fontWeight: FontWeight.w600,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
             color: step == 3 ? AppColors.success : AppColors.primary,
           ),
           textAlign: TextAlign.center,
@@ -487,7 +541,7 @@ class _DeliveryProgressBar extends StatelessWidget {
 
 class _ProgressDot extends StatelessWidget {
   final IconData icon;
-  final bool     isPast, isCurrent, isLoading;
+  final bool isPast, isCurrent, isLoading;
   const _ProgressDot({
     required this.icon,
     required this.isPast,
@@ -498,19 +552,23 @@ class _ProgressDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = isPast || isCurrent;
-    final size   = isCurrent ? 32.0 : 24.0;
+    final size = isCurrent ? 32.0 : 24.0;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
-      width: size, height: size,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: active ? AppColors.primary : const Color(0xFFE2E8F0),
         shape: BoxShape.circle,
-        boxShadow: isCurrent ? [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.30),
-            blurRadius: 10, spreadRadius: 1,
-          ),
-        ] : null,
+        boxShadow: isCurrent
+            ? [
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.30),
+                  blurRadius: 10,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
       ),
       child: isLoading
           ? const Padding(
@@ -519,7 +577,7 @@ class _ProgressDot extends StatelessWidget {
                   strokeWidth: 2, color: Colors.white),
             )
           : Icon(icon,
-              size:  isCurrent ? 16 : 12,
+              size: isCurrent ? 16 : 12,
               color: active ? Colors.white : AppColors.textLight),
     );
   }
@@ -528,13 +586,17 @@ class _ProgressDot extends StatelessWidget {
 // ── Bouton action ─────────────────────────────────────────────────────────────
 
 class _ActionButton extends StatelessWidget {
-  final IconData      icon;
-  final String        label;
-  final Color         color;
+  final IconData icon;
+  final String label;
+  final Color color;
   final VoidCallback? onTap;
-  final bool          enabled;
-  const _ActionButton({required this.icon, required this.label,
-      required this.color, this.onTap, this.enabled = true});
+  final bool enabled;
+  const _ActionButton(
+      {required this.icon,
+      required this.label,
+      required this.color,
+      this.onTap,
+      this.enabled = true});
 
   @override
   Widget build(BuildContext context) {
@@ -544,15 +606,18 @@ class _ActionButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color:        effectiveColor.withValues(alpha: 0.08),
+          color: effectiveColor.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          border:       Border.all(color: effectiveColor.withValues(alpha: 0.25)),
+          border: Border.all(color: effectiveColor.withValues(alpha: 0.25)),
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(icon, color: effectiveColor, size: 17),
           const SizedBox(width: 6),
-          Text(label, style: GoogleFonts.urbanist(
-              fontSize: 13, fontWeight: FontWeight.w600, color: effectiveColor)),
+          Text(label,
+              style: GoogleFonts.urbanist(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: effectiveColor)),
         ]),
       ),
     );

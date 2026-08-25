@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'restaurant_menu.dart';
 
@@ -27,7 +27,8 @@ class _RestaurantListState extends State<RestaurantList> {
         slivers: [
           // ── HEADER GRADIENT ──────────────────────────────
           SliverAppBar(
-            expandedHeight: (MediaQuery.of(context).size.height * 0.20).clamp(140.0, 220.0),
+            expandedHeight:
+                (MediaQuery.of(context).size.height * 0.20).clamp(140.0, 220.0),
             floating: false,
             pinned: true,
             backgroundColor: const Color(0xFF1565C0),
@@ -81,7 +82,8 @@ class _RestaurantListState extends State<RestaurantList> {
                 onChanged: (v) => setState(() => _search = v.toLowerCase()),
                 decoration: InputDecoration(
                   hintText: "Chercher un restaurant...",
-                  prefixIcon: const Icon(Icons.search, color: Color(0xFF1565C0)),
+                  prefixIcon:
+                      const Icon(Icons.search, color: Color(0xFF1565C0)),
                   suffixIcon: _search.isNotEmpty
                       ? IconButton(
                           icon: const Icon(Icons.clear),
@@ -183,7 +185,8 @@ class _RestaurantListState extends State<RestaurantList> {
                           minDelivery: data["minDelivery"] ?? 500,
                           isVip: data["vipStatus"] == "active",
                           avgRating: (data["avgRating"] as num?)?.toDouble(),
-                          ratingCount: (data["ratingCount"] as num?)?.toInt() ?? 0,
+                          ratingCount:
+                              (data["ratingCount"] as num?)?.toInt() ?? 0,
                         ),
                       );
                     },
@@ -340,7 +343,8 @@ class _RestaurantCard extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1565C0).withValues(alpha: 0.1),
+                            color:
+                                const Color(0xFF1565C0).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(

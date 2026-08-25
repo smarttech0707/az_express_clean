@@ -6,9 +6,8 @@ import '../l10n/app_text.dart';
 import '../theme/app_theme.dart';
 import '../marketplace/screens/mp_home_screen.dart';
 import '../widgets/tap_effect.dart';
-import 'ai/az_ia_chat_screen.dart';
 import 'client/client_map.dart';
-import 'client/create_order.dart';
+import 'client/livraison_screen.dart';
 import 'client/suivi_commande.dart';
 import 'client/profil_client.dart';
 
@@ -21,7 +20,6 @@ class MainDashboard extends StatefulWidget {
 
 class _MainDashboardState extends State<MainDashboard>
     with TickerProviderStateMixin {
-
   int _currentIndex = 0;
 
   // Pages créées à la demande — évite d'initialiser GPS+Firestore pour
@@ -29,12 +27,12 @@ class _MainDashboardState extends State<MainDashboard>
   final List<Widget?> _pages = List.filled(4, null);
 
   static Widget _buildPage(int index) => switch (index) {
-    0 => const ClientMap(),
-    1 => const MpHomeScreen(),
-    2 => const SuiviCommandePage(),
-    3 => const ProfilClient(),
-    _ => const SizedBox.shrink(),
-  };
+        0 => const ClientMap(),
+        1 => const MpHomeScreen(),
+        2 => const SuiviCommandePage(),
+        3 => const ProfilClient(),
+        _ => const SizedBox.shrink(),
+      };
 
   @override
   void initState() {
@@ -46,21 +44,15 @@ class _MainDashboardState extends State<MainDashboard>
     if (_currentIndex == index) return;
     HapticFeedback.selectionClick();
     setState(() {
-      _pages[index] ??= _buildPage(index); // créée seulement à la première visite
+      _pages[index] ??=
+          _buildPage(index); // créée seulement à la première visite
       _currentIndex = index;
     });
   }
 
   void _openCommander() {
     HapticFeedback.mediumImpact();
-    Navigator.push(context,
-        AppTransitions.fadeSlide(const CreateOrderScreen()));
-  }
-
-  void _openAzIa() {
-    HapticFeedback.mediumImpact();
-    Navigator.push(context,
-        AppTransitions.fadeSlide(const AzIaChatScreen()));
+    Navigator.push(context, AppTransitions.fadeSlide(buildClientOrderScreen()));
   }
 
   @override
@@ -86,45 +78,28 @@ class _MainDashboardState extends State<MainDashboard>
           ),
           bottomNavigationBar: _FloatingNav(
             currentIndex: _currentIndex,
-            text:         text,
-            onTap:        _navigate,
-            onCommander:  _openCommander,
+            text: text,
+            onTap: _navigate,
+            onCommander: _openCommander,
           ),
-          floatingActionButton: _AzIaFab(onTap: _openAzIa),
         ),
       ),
     );
   }
 }
 
+@visibleForTesting
+Widget buildClientOrderScreen() => const LivraisonScreen();
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BOUTON FLOTTANT AZ IA — accès rapide à l'assistant conversationnel
 // ─────────────────────────────────────────────────────────────────────────────
-class _AzIaFab extends StatelessWidget {
-  final VoidCallback onTap;
-  const _AzIaFab({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 76),
-      child: FloatingActionButton(
-        heroTag: 'az_ia_fab',
-        onPressed: onTap,
-        backgroundColor: AppColors.primary,
-        tooltip: 'AZ IA',
-        child: const Icon(Icons.auto_awesome, color: Colors.white),
-      ),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // NAVIGATION FLOTTANTE RESPONSIVE
 // ─────────────────────────────────────────────────────────────────────────────
 class _FloatingNav extends StatelessWidget {
-  final int          currentIndex;
-  final AppText      text;
+  final int currentIndex;
+  final AppText text;
   final ValueChanged<int> onTap;
   final VoidCallback onCommander;
 
@@ -138,50 +113,50 @@ class _FloatingNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final safeBottom = AppLayout.safeBottom(context);
-    final navH       = AppLayout.r(context, 64);
-    final hPad       = AppLayout.lg(context);
-    final bPad       = safeBottom + AppLayout.sm(context) + 4;
+    final navH = AppLayout.r(context, 72);
+    final hPad = AppLayout.lg(context);
+    final bPad = safeBottom + AppLayout.sm(context) + 4;
 
     return Container(
-      color:   Colors.transparent,
+      color: Colors.transparent,
       padding: EdgeInsets.fromLTRB(hPad, 0, hPad, bPad),
       child: Container(
         height: navH,
         decoration: const BoxDecoration(
-          color:        Colors.white,
+          color: Colors.white,
           borderRadius: AppRadius.xxlR,
-          boxShadow:    AppShadow.navFloat,
+          boxShadow: AppShadow.navFloat,
         ),
         child: Row(
           children: [
             _NavTab(
-              icon:     Icons.home_rounded,
-              iconOff:  Icons.home_outlined,
-              label:    text.t('home'),
+              icon: Icons.home_rounded,
+              iconOff: Icons.home_outlined,
+              label: text.t('home'),
               selected: currentIndex == 0,
-              onTap:    () => onTap(0),
+              onTap: () => onTap(0),
             ),
             _NavTab(
-              icon:     Icons.storefront_rounded,
-              iconOff:  Icons.storefront_outlined,
-              label:    'Djassa',
+              icon: Icons.storefront_rounded,
+              iconOff: Icons.storefront_outlined,
+              label: 'Djassa',
               selected: currentIndex == 1,
-              onTap:    () => onTap(1),
+              onTap: () => onTap(1),
             ),
             _CommanderButton(onTap: onCommander),
             _NavTab(
-              icon:     Icons.receipt_long_rounded,
-              iconOff:  Icons.receipt_long_outlined,
-              label:    text.t('tracking'),
+              icon: Icons.receipt_long_rounded,
+              iconOff: Icons.receipt_long_outlined,
+              label: text.t('tracking'),
               selected: currentIndex == 2,
-              onTap:    () => onTap(2),
+              onTap: () => onTap(2),
             ),
             _NavTab(
-              icon:     Icons.person_rounded,
-              iconOff:  Icons.person_outline_rounded,
-              label:    text.t('profile'),
+              icon: Icons.person_rounded,
+              iconOff: Icons.person_outline_rounded,
+              label: text.t('profile'),
               selected: currentIndex == 3,
-              onTap:    () => onTap(3),
+              onTap: () => onTap(3),
             ),
           ],
         ),
@@ -196,8 +171,8 @@ class _FloatingNav extends StatelessWidget {
 class _NavTab extends StatelessWidget {
   final IconData icon;
   final IconData iconOff;
-  final String   label;
-  final bool     selected;
+  final String label;
+  final bool selected;
   final VoidCallback onTap;
 
   const _NavTab({
@@ -226,54 +201,54 @@ class _NavTab extends StatelessWidget {
         onTap: onTap,
         excludeSemantics: true,
         child: TapEffect(
-        onTap:    onTap,
-        scaleDown: 0.92,
-        haptic:   HapticType.selection,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Indicateur pill
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve:    Curves.easeOutCubic,
-              padding: EdgeInsets.symmetric(
-                horizontal: selected
-                    ? AppLayout.md(context)
-                    : AppLayout.sm(context),
-                vertical: AppLayout.xs(context),
-              ),
-              decoration: BoxDecoration(
-                color: selected
-                    ? kPrimary.withValues(alpha: 0.12)
-                    : Colors.transparent,
-                borderRadius: AppRadius.pillR,
-              ),
-              // Master Prompt 124 — l'onglet actif grandit légèrement plutôt
-              // que de ne changer que sa couleur, pour un feedback plus vivant.
-              child: AnimatedScale(
-                scale: selected ? 1.12 : 1.0,
+          onTap: onTap,
+          scaleDown: 0.92,
+          haptic: HapticType.selection,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Indicateur pill
+              AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOutBack,
-                child: Icon(
-                  selected ? icon : iconOff,
-                  color: selected ? kPrimary : AppColors.textLight,
-                  size:  iconSize,
+                curve: Curves.easeOutCubic,
+                padding: EdgeInsets.symmetric(
+                  horizontal:
+                      selected ? AppLayout.md(context) : AppLayout.sm(context),
+                  vertical: AppLayout.xs(context),
+                ),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? kPrimary.withValues(alpha: 0.12)
+                      : Colors.transparent,
+                  borderRadius: AppRadius.pillR,
+                ),
+                // Master Prompt 124 — l'onglet actif grandit légèrement plutôt
+                // que de ne changer que sa couleur, pour un feedback plus vivant.
+                child: AnimatedScale(
+                  scale: selected ? 1.12 : 1.0,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutBack,
+                  child: Icon(
+                    selected ? icon : iconOff,
+                    color: selected ? kPrimary : AppColors.textLight,
+                    size: iconSize,
+                  ),
                 ),
               ),
-            ),
-            SizedBox(height: AppLayout.xs(context) / 2),
-            // Label
-            AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 200),
-              style: GoogleFonts.urbanist(
-                fontSize:   labelSize,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
-                color:      selected ? kPrimary : AppColors.textLight,
+              SizedBox(height: AppLayout.xs(context) / 2),
+              // Label
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 200),
+                style: GoogleFonts.urbanist(
+                  fontSize: labelSize,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  color: selected ? kPrimary : AppColors.textLight,
+                ),
+                child:
+                    Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-          ],
-        ),
+            ],
+          ),
         ),
       ),
     );
@@ -293,27 +268,29 @@ class _CommanderButton extends StatefulWidget {
 
 class _CommanderButtonState extends State<_CommanderButton>
     with SingleTickerProviderStateMixin {
-
   late AnimationController _ctrl;
-  late Animation<double>   _scale;
+  late Animation<double> _scale;
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 140));
+        vsync: this, duration: const Duration(milliseconds: 140));
     _scale = Tween<double>(begin: 1.0, end: 0.88)
         .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
 
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final btnSize  = AppLayout.r(context, 52);
+    final btnSize = AppLayout.r(context, 52);
     final iconSize = AppLayout.iconLg(context);
-    final hPad     = AppLayout.sm(context) - 2;
+    final hPad = AppLayout.sm(context) - 2;
 
     // Master Prompt 124 (Partie 17) — bouton icône seule ("+"), sans texte ni
     // tooltip : rien à annoncer pour un lecteur d'écran sans ce Semantics.
@@ -323,33 +300,39 @@ class _CommanderButtonState extends State<_CommanderButton>
       onTap: widget.onTap,
       excludeSemantics: true,
       child: GestureDetector(
-      onTapDown:   (_) { _ctrl.forward(); HapticFeedback.mediumImpact(); },
-      onTapUp:     (_) { _ctrl.reverse(); widget.onTap(); },
-      onTapCancel: () => _ctrl.reverse(),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: hPad),
-        child: ScaleTransition(
-          scale: _scale,
-          child: Container(
-            width:  btnSize,
-            height: btnSize,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [AppColors.primaryLight, AppColors.primaryDark],
-                begin:  Alignment.topLeft,
-                end:    Alignment.bottomRight,
+        onTapDown: (_) {
+          _ctrl.forward();
+          HapticFeedback.mediumImpact();
+        },
+        onTapUp: (_) {
+          _ctrl.reverse();
+          widget.onTap();
+        },
+        onTapCancel: () => _ctrl.reverse(),
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: hPad),
+          child: ScaleTransition(
+            scale: _scale,
+            child: Container(
+              width: btnSize,
+              height: btnSize,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AppColors.primaryLight, AppColors.primaryDark],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                shape: BoxShape.circle,
+                boxShadow: AppShadow.colored(AppColors.primary, opacity: 0.45),
               ),
-              shape:     BoxShape.circle,
-              boxShadow: AppShadow.colored(AppColors.primary, opacity: 0.45),
-            ),
-            child: Icon(
-              Icons.add_rounded,
-              color: Colors.white,
-              size:  iconSize,
+              child: Icon(
+                Icons.add_rounded,
+                color: Colors.white,
+                size: iconSize,
+              ),
             ),
           ),
         ),
-      ),
       ),
     );
   }

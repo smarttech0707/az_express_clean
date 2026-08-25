@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -54,7 +54,8 @@ class _SellerLoginState extends State<SellerLogin> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => SellerDashboard(sellerId: user.uid, sellerData: sellerData),
+            builder: (_) =>
+                SellerDashboard(sellerId: user.uid, sellerData: sellerData),
           ),
         );
         return;
@@ -84,24 +85,23 @@ class _SellerLoginState extends State<SellerLogin> {
     setState(() => _loading = true);
 
     try {
-      final credential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: "$phone@az-seller.ci",
         password: pass,
       );
 
       final uid = credential.user!.uid;
 
-      final doc = await FirebaseFirestore.instance
-          .collection("sellers")
-          .doc(uid)
-          .get();
+      final doc =
+          await FirebaseFirestore.instance.collection("sellers").doc(uid).get();
 
       if (!mounted) return;
 
       if (!doc.exists || !(doc.data()?['isActive'] ?? false)) {
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
         if (!mounted) return;
         setState(() => _loading = false);
 
@@ -114,9 +114,12 @@ class _SellerLoginState extends State<SellerLogin> {
         if (req.exists) {
           final status = req.data()?['status'] ?? '';
           if (status == 'pending') {
-            _snack('Votre demande est en cours d\'examen par l\'administrateur.', Colors.orange);
+            _snack(
+                'Votre demande est en cours d\'examen par l\'administrateur.',
+                Colors.orange);
           } else if (status == 'rejected') {
-            _snack('Votre demande a été refusée. Contactez l\'administrateur.', Colors.red);
+            _snack('Votre demande a été refusée. Contactez l\'administrateur.',
+                Colors.red);
           } else {
             _snack('Compte inactif. Contactez l\'administrateur.', Colors.red);
           }
@@ -146,7 +149,8 @@ class _SellerLoginState extends State<SellerLogin> {
       if (!mounted) return;
       setState(() => _loading = false);
       String msg = "Identifiants incorrects";
-      if (e.code == 'too-many-requests') msg = "Trop de tentatives. Réessayez plus tard.";
+      if (e.code == 'too-many-requests')
+        msg = "Trop de tentatives. Réessayez plus tard.";
       if (e.code == 'network-request-failed') msg = "Pas de connexion internet";
       _snack(msg, Colors.red);
     } catch (e) {
@@ -167,7 +171,8 @@ class _SellerLoginState extends State<SellerLogin> {
     if (_autoResuming) {
       return const Scaffold(
         backgroundColor: Color(0xFFF5F5F5),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF1565C0))),
+        body:
+            Center(child: CircularProgressIndicator(color: Color(0xFF1565C0))),
       );
     }
     return Scaffold(
@@ -282,9 +287,9 @@ class _SellerLoginState extends State<SellerLogin> {
                             context,
                             MaterialPageRoute(
                               builder: (_) => const GenericForgotPasswordPage(
-                                userType:    'seller',
+                                userType: 'seller',
                                 accentColor: Color(0xFF1565C0),
-                                title:       'Mot de passe oublié',
+                                title: 'Mot de passe oublié',
                               ),
                             ),
                           ),
@@ -348,4 +353,3 @@ class _SellerLoginState extends State<SellerLogin> {
     );
   }
 }
-

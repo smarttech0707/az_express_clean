@@ -45,6 +45,9 @@ dependencies:
   # Navigation GPS externe
   url_launcher: ^6.3.0
 
+  # Partage natif (fiche Immobilier — Mission 9 "Activation UI carte/itinéraire")
+  share_plus: ^10.1.4
+
   # Cryptographie
   crypto: ^3.0.3
 

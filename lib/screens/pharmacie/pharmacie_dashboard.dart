@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -77,7 +77,9 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
     // moment où l'identifiant local de reprise de session est effacé.
     (await SharedPreferences.getInstance()).remove(kPharmacieLastIdPrefKey);
     await FirebaseAuth.instance.signOut();
-    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (_) {}
     if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
@@ -116,13 +118,21 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
               phone: widget.pharmacieData['phone'] as String?,
               onLogout: _logout,
               photoUrl: _photoUrl,
-              photoStoragePath: 'pharmacie_logos/${widget.pharmacieId}/logo.jpg',
+              photoStoragePath:
+                  'pharmacie_logos/${widget.pharmacieId}/logo.jpg',
               onPhotoUploaded: (url) async {
                 await FirebaseFirestore.instance
                     .collection('pharmacies')
                     .doc(widget.pharmacieId)
                     .update({'logoUrl': url});
                 if (mounted) setState(() => _photoUrl = url);
+              },
+              onPhotoDeleted: () async {
+                await FirebaseFirestore.instance
+                    .collection('pharmacies')
+                    .doc(widget.pharmacieId)
+                    .update({'logoUrl': FieldValue.delete()});
+                if (mounted) setState(() => _photoUrl = null);
               },
             ),
           ),
@@ -137,8 +147,8 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white60,
-          labelStyle: GoogleFonts.urbanist(
-              fontWeight: FontWeight.w600, fontSize: 13),
+          labelStyle:
+              GoogleFonts.urbanist(fontWeight: FontWeight.w600, fontSize: 13),
           tabs: const [
             Tab(icon: Icon(Icons.emergency_rounded), text: 'Statut'),
             Tab(icon: Icon(Icons.local_shipping_rounded), text: 'Commandes'),
@@ -183,10 +193,10 @@ class _StatusTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name    = pharmacieData['name'] ?? 'Ma pharmacie';
+    final name = pharmacieData['name'] ?? 'Ma pharmacie';
     final address = pharmacieData['address'] ?? '';
-    final phone   = pharmacieData['phone'] ?? '';
-    final hours   = pharmacieData['hours'] ?? '';
+    final phone = pharmacieData['phone'] ?? '';
+    final hours = pharmacieData['hours'] ?? '';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -255,9 +265,7 @@ class _StatusTab extends StatelessWidget {
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isOnDuty
-                    ? Colors.red.shade200
-                    : Colors.grey.shade200,
+                color: isOnDuty ? Colors.red.shade200 : Colors.grey.shade200,
                 width: 2,
               ),
               boxShadow: [
@@ -277,14 +285,11 @@ class _StatusTab extends StatelessWidget {
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    color: isOnDuty
-                        ? Colors.red.shade50
-                        : Colors.grey.shade100,
+                    color: isOnDuty ? Colors.red.shade50 : Colors.grey.shade100,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: isOnDuty
-                          ? Colors.red.shade200
-                          : Colors.grey.shade300,
+                      color:
+                          isOnDuty ? Colors.red.shade200 : Colors.grey.shade300,
                       width: 2,
                     ),
                   ),
@@ -292,23 +297,19 @@ class _StatusTab extends StatelessWidget {
                     isOnDuty
                         ? Icons.emergency_rounded
                         : Icons.local_pharmacy_outlined,
-                    color: isOnDuty
-                        ? Colors.red.shade700
-                        : Colors.grey.shade400,
+                    color:
+                        isOnDuty ? Colors.red.shade700 : Colors.grey.shade400,
                     size: 40,
                   ),
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  isOnDuty
-                      ? 'Vous êtes de garde'
-                      : 'Vous n\'êtes pas de garde',
+                  isOnDuty ? 'Vous êtes de garde' : 'Vous n\'êtes pas de garde',
                   style: GoogleFonts.urbanist(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: isOnDuty
-                        ? Colors.red.shade700
-                        : Colors.grey.shade600,
+                    color:
+                        isOnDuty ? Colors.red.shade700 : Colors.grey.shade600,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -332,14 +333,8 @@ class _StatusTab extends StatelessWidget {
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               colors: isOnDuty
-                                  ? [
-                                      Colors.grey.shade400,
-                                      Colors.grey.shade500
-                                    ]
-                                  : [
-                                      Colors.red.shade700,
-                                      Colors.red.shade500
-                                    ],
+                                  ? [Colors.grey.shade400, Colors.grey.shade500]
+                                  : [Colors.red.shade700, Colors.red.shade500],
                               begin: Alignment.centerLeft,
                               end: Alignment.centerRight,
                             ),
@@ -392,14 +387,12 @@ class _StatusTab extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.info_outline,
-                    color: Colors.red.shade700, size: 20),
+                Icon(Icons.info_outline, color: Colors.red.shade700, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Lorsque vous êtes "de garde", les clients AZ Express peuvent voir votre pharmacie et envoyer un livreur récupérer leurs médicaments.',
-                    style: TextStyle(
-                        fontSize: 12, color: Colors.red.shade700),
+                    style: TextStyle(fontSize: 12, color: Colors.red.shade700),
                   ),
                 ),
               ],
@@ -439,8 +432,7 @@ class _PharmacieWallet extends StatelessWidget {
           .doc(pharmacieId)
           .snapshots(),
       builder: (context, snap) {
-        final wallet =
-            (snap.data?.data() as Map?)?['wallet'] as num? ?? 0;
+        final wallet = (snap.data?.data() as Map?)?['wallet'] as num? ?? 0;
         final balance = wallet.toInt();
 
         return Column(
@@ -532,8 +524,7 @@ class _PharmacieWallet extends StatelessWidget {
                         backgroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 12),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
                   ),
@@ -581,8 +572,7 @@ class _PharmacieWallet extends StatelessWidget {
                     ...txs.map((doc) {
                       final d = doc.data() as Map<String, dynamic>;
                       final type = d['type'] as String? ?? '';
-                      final amount =
-                          (d['amount'] as num? ?? 0).toInt();
+                      final amount = (d['amount'] as num? ?? 0).toInt();
                       final desc = d['description'] as String? ?? '';
                       final ts = d['createdAt'] as Timestamp?;
                       final date = ts != null
@@ -600,8 +590,7 @@ class _PharmacieWallet extends StatelessWidget {
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black
-                                  .withValues(alpha: 0.04),
+                              color: Colors.black.withValues(alpha: 0.04),
                               blurRadius: 6,
                             ),
                           ],
@@ -630,8 +619,7 @@ class _PharmacieWallet extends StatelessWidget {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(desc,
                                       style: GoogleFonts.urbanist(
@@ -678,7 +666,6 @@ class _PharmacieWallet extends StatelessWidget {
 class _OrdersTab extends StatelessWidget {
   final String pharmacieId;
   const _OrdersTab({required this.pharmacieId});
-
 
   @override
   Widget build(BuildContext context) {
@@ -741,8 +728,12 @@ class _OrderList extends StatelessWidget {
       query = FirebaseFirestore.instance
           .collection('orders')
           .where('pharmacieId', isEqualTo: pharmacieId)
-          .where('status', whereIn: ['pending', 'assigned', 'accepted', 'picked_up'])
-          .orderBy('createdAt', descending: true);
+          .where('status', whereIn: [
+        'pending',
+        'assigned',
+        'accepted',
+        'picked_up'
+      ]).orderBy('createdAt', descending: true);
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -761,9 +752,7 @@ class _OrderList extends StatelessWidget {
                     size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text(
-                  activeOnly
-                      ? 'Aucune commande en cours'
-                      : 'Aucun historique',
+                  activeOnly ? 'Aucune commande en cours' : 'Aucun historique',
                   style: GoogleFonts.urbanist(color: Colors.grey),
                 ),
               ],
@@ -790,39 +779,38 @@ class _PharmacieOrderCard extends StatelessWidget {
   const _PharmacieOrderCard({required this.data});
 
   static const _statusLabels = {
-    'pending':    'En attente d\'un livreur',
-    'assigned':   'Livreur assigné',
-    'accepted':   'Livreur en route vers vous',
-    'picked_up':  'Colis récupéré — en livraison',
-    'delivered':  'Livré',
-    'cancelled':  'Annulé',
+    'pending': 'En attente d\'un livreur',
+    'assigned': 'Livreur assigné',
+    'accepted': 'Livreur en route vers vous',
+    'picked_up': 'Colis récupéré — en livraison',
+    'delivered': 'Livré',
+    'cancelled': 'Annulé',
   };
 
   static const _statusColors = {
-    'pending':    Color(0xFFFF8F00),
-    'assigned':   Color(0xFF1565C0),
-    'accepted':   Color(0xFF1565C0),
-    'picked_up':  Color(0xFF2E7D32),
-    'delivered':  Color(0xFF2E7D32),
-    'cancelled':  Color(0xFFC62828),
+    'pending': Color(0xFFFF8F00),
+    'assigned': Color(0xFF1565C0),
+    'accepted': Color(0xFF1565C0),
+    'picked_up': Color(0xFF2E7D32),
+    'delivered': Color(0xFF2E7D32),
+    'cancelled': Color(0xFFC62828),
   };
 
   @override
   Widget build(BuildContext context) {
-    final status   = data['status'] as String? ?? 'pending';
+    final status = data['status'] as String? ?? 'pending';
     final driverId = data['driverId'] as String?;
-    final color    = _statusColors[status] ?? Colors.grey;
-    final label    = _statusLabels[status] ?? status;
-    final ts       = data['createdAt'] as Timestamp?;
-    final timeStr  = ts != null ? _fmt(ts.toDate()) : '';
+    final color = _statusColors[status] ?? Colors.grey;
+    final label = _statusLabels[status] ?? status;
+    final ts = data['createdAt'] as Timestamp?;
+    final timeStr = ts != null ? _fmt(ts.toDate()) : '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-            color: color.withValues(alpha: 0.3), width: 1.5),
+        border: Border.all(color: color.withValues(alpha: 0.3), width: 1.5),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -837,22 +825,20 @@ class _PharmacieOrderCard extends StatelessWidget {
           // Status banner
           Container(
             width: double.infinity,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.08),
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(18)),
-              border: Border(
-                  left: BorderSide(color: color, width: 4)),
+              border: Border(left: BorderSide(color: color, width: 4)),
             ),
             child: Row(
               children: [
                 Container(
                   width: 8,
                   height: 8,
-                  decoration: BoxDecoration(
-                      color: color, shape: BoxShape.circle),
+                  decoration:
+                      BoxDecoration(color: color, shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -888,8 +874,7 @@ class _PharmacieOrderCard extends StatelessWidget {
                       const SizedBox(width: 4),
                       Text(data['clientName'],
                           style: GoogleFonts.urbanist(
-                              fontSize: 12,
-                              color: Colors.grey.shade600)),
+                              fontSize: 12, color: Colors.grey.shade600)),
                     ],
                   ),
                 ],
@@ -972,11 +957,11 @@ class _DriverInfoCard extends StatelessWidget {
         if (!snap.hasData || !snap.data!.exists) {
           return const SizedBox.shrink();
         }
-        final d     = snap.data!.data() as Map<String, dynamic>;
-        final name  = d['name'] as String? ?? 'Livreur';
+        final d = snap.data!.data() as Map<String, dynamic>;
+        final name = d['name'] as String? ?? 'Livreur';
         final phone = d['phone'] as String? ?? '';
         final photo = d['photoUrl'] as String?;
-        final moto  = d['motoModel'] as String? ?? '';
+        final moto = d['motoModel'] as String? ?? '';
 
         return Container(
           padding: const EdgeInsets.all(14),
@@ -1057,8 +1042,7 @@ class _DriverInfoCard extends StatelessWidget {
                         if (moto.isNotEmpty)
                           Text(moto,
                               style: GoogleFonts.urbanist(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600)),
+                                  fontSize: 12, color: Colors.grey.shade600)),
                         const SizedBox(height: 4),
                         _StatusChip(status: status),
                       ],
@@ -1106,8 +1090,7 @@ class _DriverInfoCard extends StatelessWidget {
                       child: Text(
                         'Vérifiez que le livreur correspond à la photo ci-dessus avant de lui remettre le colis.',
                         style: GoogleFonts.urbanist(
-                            fontSize: 11,
-                            color: const Color(0xFF2E7D32)),
+                            fontSize: 11, color: const Color(0xFF2E7D32)),
                       ),
                     ),
                   ],
@@ -1124,8 +1107,7 @@ class _DriverInfoCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1137,17 +1119,15 @@ class _DriverInfoCard extends StatelessWidget {
                   textAlign: TextAlign.center),
             ),
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(20)),
+              borderRadius:
+                  const BorderRadius.vertical(bottom: Radius.circular(20)),
               child: Image.network(url,
                   fit: BoxFit.cover,
-                  loadingBuilder: (_, child, progress) =>
-                      progress == null
-                          ? child
-                          : const SizedBox(
-                              height: 200,
-                              child: Center(
-                                  child: CircularProgressIndicator()))),
+                  loadingBuilder: (_, child, progress) => progress == null
+                      ? child
+                      : const SizedBox(
+                          height: 200,
+                          child: Center(child: CircularProgressIndicator()))),
             ),
           ],
         ),
@@ -1170,22 +1150,22 @@ class _StatusChip extends StatelessWidget {
       case 'assigned':
         label = 'Assigné';
         color = const Color(0xFF1565C0);
-        icon  = Icons.assignment_ind_rounded;
+        icon = Icons.assignment_ind_rounded;
         break;
       case 'accepted':
         label = 'En route vers vous';
         color = const Color(0xFF1565C0);
-        icon  = Icons.directions_bike_rounded;
+        icon = Icons.directions_bike_rounded;
         break;
       case 'picked_up':
         label = 'Colis récupéré';
         color = const Color(0xFF2E7D32);
-        icon  = Icons.inventory_2_rounded;
+        icon = Icons.inventory_2_rounded;
         break;
       default:
         label = status;
         color = Colors.grey;
-        icon  = Icons.circle;
+        icon = Icons.circle;
     }
 
     return Container(
@@ -1201,9 +1181,7 @@ class _StatusChip extends StatelessWidget {
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
-                  color: color,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700)),
+                  color: color, fontSize: 11, fontWeight: FontWeight.w700)),
         ],
       ),
     );

@@ -1,9 +1,12 @@
-﻿import 'dart:async';
+import 'dart:async';
+import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../services/notification_service.dart';
@@ -11,6 +14,7 @@ import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/logout_confirm_dialog.dart';
+import '../../utils/storage_cleanup.dart';
 
 class RestaurantOwnerDashboard extends StatefulWidget {
   final String ownerId;
@@ -42,7 +46,8 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
   String get _name => widget.restaurantData['name'] ?? 'Mon restaurant';
 
   String _fmtWallet(int v) {
-    if (v >= 1000) return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    if (v >= 1000)
+      return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
     return v.toString();
   }
 
@@ -61,7 +66,8 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
         .doc(widget.restaurantId)
         .snapshots()
         .listen((s) {
-      if (mounted) setState(() => _wallet = (s.data()?['wallet'] as num? ?? 0).toInt());
+      if (mounted)
+        setState(() => _wallet = (s.data()?['wallet'] as num? ?? 0).toInt());
     });
 
     _orderSub = FirebaseFirestore.instance
@@ -71,13 +77,13 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
         .where('status', whereIn: ['pending', 'assigned'])
         .snapshots()
         .listen((snap) {
-      final count = snap.docs.length;
-      if (_prevPendingCount >= 0 && count > _prevPendingCount) {
-        HapticFeedback.heavyImpact();
-        if (mounted) _showNewOrderAlert();
-      }
-      _prevPendingCount = count;
-    });
+          final count = snap.docs.length;
+          if (_prevPendingCount >= 0 && count > _prevPendingCount) {
+            HapticFeedback.heavyImpact();
+            if (mounted) _showNewOrderAlert();
+          }
+          _prevPendingCount = count;
+        });
   }
 
   @override
@@ -96,7 +102,8 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Row(
           children: [
-            Icon(Icons.notifications_active_rounded, color: Colors.orange, size: 28),
+            Icon(Icons.notifications_active_rounded,
+                color: Colors.orange, size: 28),
             SizedBox(width: 10),
             Text('Nouvelle commande !'),
           ],
@@ -110,8 +117,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
             },
             child: const Text('Voir maintenant',
                 style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1565C0))),
+                    fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
           ),
         ],
       ),
@@ -134,7 +140,9 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
   Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'restaurant');
     await FirebaseAuth.instance.signOut();
-    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (_) {}
     if (!mounted) return;
     Navigator.of(context).popUntil((r) => r.isFirst);
   }
@@ -161,8 +169,8 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
               context: context,
               isScrollControlled: true,
               backgroundColor: Colors.transparent,
-              builder: (_) => _RestaurantAnalyticsSheet(
-                  restaurantId: widget.restaurantId),
+              builder: (_) =>
+                  _RestaurantAnalyticsSheet(restaurantId: widget.restaurantId),
             ),
           ),
           IconButton(
@@ -176,13 +184,21 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
               phone: widget.restaurantData['phone'] as String?,
               onLogout: _logout,
               photoUrl: _photoUrl,
-              photoStoragePath: 'restaurant_logos/${widget.restaurantId}/logo.jpg',
+              photoStoragePath:
+                  'restaurant_logos/${widget.restaurantId}/logo.jpg',
               onPhotoUploaded: (url) async {
                 await FirebaseFirestore.instance
                     .collection('restaurants')
                     .doc(widget.restaurantId)
                     .update({'logoUrl': url});
                 if (mounted) setState(() => _photoUrl = url);
+              },
+              onPhotoDeleted: () async {
+                await FirebaseFirestore.instance
+                    .collection('restaurants')
+                    .doc(widget.restaurantId)
+                    .update({'logoUrl': FieldValue.delete()});
+                if (mounted) setState(() => _photoUrl = null);
               },
             ),
           ),
@@ -197,8 +213,8 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white60,
-          labelStyle: GoogleFonts.urbanist(
-              fontWeight: FontWeight.w600, fontSize: 13),
+          labelStyle:
+              GoogleFonts.urbanist(fontWeight: FontWeight.w600, fontSize: 13),
           tabs: const [
             Tab(icon: Icon(Icons.restaurant_menu_rounded), text: 'Menu'),
             Tab(icon: Icon(Icons.receipt_long_rounded), text: 'Commandes'),
@@ -225,7 +241,8 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
                     ),
                   ),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         colors: [Color(0xFF1565C0), Color(0xFF1E88E5)],
@@ -349,13 +366,15 @@ class _MenuTab extends StatelessWidget {
 
   void _showItemDialog(BuildContext context,
       {String? docId, Map<String, dynamic>? data}) {
-    final nameCtrl  = TextEditingController(text: data?['name'] ?? '');
+    final nameCtrl = TextEditingController(text: data?['name'] ?? '');
     final priceCtrl = TextEditingController(
         text: data?['price'] != null ? '${data!['price']}' : '');
-    final descCtrl  = TextEditingController(text: data?['description'] ?? '');
+    final descCtrl = TextEditingController(text: data?['description'] ?? '');
     final stockCtrl = TextEditingController(
         text: data?['stock'] != null ? '${data!['stock']}' : '0');
-    bool available  = data?['available'] ?? true;
+    bool available = data?['available'] ?? true;
+    File? pickedImage;
+    final existingImageUrl = data?['imageUrl'] as String?;
 
     showModalBottomSheet(
       context: context,
@@ -366,7 +385,9 @@ class _MenuTab extends StatelessWidget {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => Padding(
           padding: EdgeInsets.only(
-            left: 20, right: 20, top: 20,
+            left: 20,
+            right: 20,
+            top: 20,
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
           ),
           child: Column(
@@ -375,7 +396,8 @@ class _MenuTab extends StatelessWidget {
             children: [
               Center(
                 child: Container(
-                  width: 40, height: 4,
+                  width: 40,
+                  height: 4,
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
                     color: Colors.grey.shade300,
@@ -387,17 +409,52 @@ class _MenuTab extends StatelessWidget {
                   style: GoogleFonts.urbanist(
                       fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
+              Center(
+                child: GestureDetector(
+                  onTap: () async {
+                    final img = await ImagePicker().pickImage(
+                        source: ImageSource.gallery, imageQuality: 80);
+                    if (img != null) setS(() => pickedImage = File(img.path));
+                  },
+                  child: Container(
+                    width: 90,
+                    height: 90,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1565C0).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      image: pickedImage != null
+                          ? DecorationImage(
+                              image: FileImage(pickedImage!), fit: BoxFit.cover)
+                          : (existingImageUrl != null &&
+                                  existingImageUrl.isNotEmpty)
+                              ? DecorationImage(
+                                  image: NetworkImage(existingImageUrl),
+                                  fit: BoxFit.cover)
+                              : null,
+                    ),
+                    child: (pickedImage == null &&
+                            (existingImageUrl == null ||
+                                existingImageUrl.isEmpty))
+                        ? const Icon(Icons.add_a_photo_outlined,
+                            color: Color(0xFF1565C0), size: 28)
+                        : null,
+                  ),
+                ),
+              ),
               _dialogField(nameCtrl, 'Nom du plat *', Icons.fastfood_rounded),
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
-                  child: _dialogField(priceCtrl, 'Prix (FCFA) *',
-                      Icons.payments_rounded, type: TextInputType.number),
+                  child: _dialogField(
+                      priceCtrl, 'Prix (FCFA) *', Icons.payments_rounded,
+                      type: TextInputType.number),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: _dialogField(stockCtrl, 'Stock (0=illimité)',
-                      Icons.warehouse_outlined, type: TextInputType.number),
+                  child: _dialogField(
+                      stockCtrl, 'Stock (0=illimité)', Icons.warehouse_outlined,
+                      type: TextInputType.number),
                 ),
               ]),
               const SizedBox(height: 12),
@@ -430,10 +487,11 @@ class _MenuTab extends StatelessWidget {
                               .collection('menu')
                               .doc(docId)
                               .delete();
+                          await deleteStorageUrls([existingImageUrl]);
                           if (ctx.mounted) Navigator.pop(ctx);
                         },
-                        icon: const Icon(Icons.delete_outline,
-                            color: Colors.red),
+                        icon:
+                            const Icon(Icons.delete_outline, color: Colors.red),
                         label: Text('Supprimer',
                             style: GoogleFonts.urbanist(color: Colors.red)),
                         style: OutlinedButton.styleFrom(
@@ -451,9 +509,25 @@ class _MenuTab extends StatelessWidget {
                         if (name.isEmpty || price <= 0) return;
 
                         // DEBUG — à supprimer après validation terrain
-                        debugPrint('[MENU] AUTH UID   : ${FirebaseAuth.instance.currentUser?.uid}');
+                        debugPrint(
+                            '[MENU] AUTH UID   : ${FirebaseAuth.instance.currentUser?.uid}');
                         debugPrint('[MENU] RESTAURANT : $restaurantId');
-                        debugPrint('[MENU] PATH       : restaurants/$restaurantId/menu');
+                        debugPrint(
+                            '[MENU] PATH       : restaurants/$restaurantId/menu');
+
+                        final menuRef = FirebaseFirestore.instance
+                            .collection('restaurants')
+                            .doc(restaurantId)
+                            .collection('menu');
+                        final itemId = docId ?? menuRef.doc().id;
+
+                        String? imageUrl = existingImageUrl;
+                        if (pickedImage != null) {
+                          final storageRef = FirebaseStorage.instance.ref(
+                              'restaurant_menu_items/$restaurantId/$itemId.jpg');
+                          await storageRef.putFile(pickedImage!);
+                          imageUrl = await storageRef.getDownloadURL();
+                        }
 
                         final payload = {
                           'name': name,
@@ -461,16 +535,12 @@ class _MenuTab extends StatelessWidget {
                           'description': descCtrl.text.trim(),
                           'stock': stock,
                           'available': available && (stock == 0 || stock > 0),
+                          'imageUrl': imageUrl ?? '',
                           'createdAt': FieldValue.serverTimestamp(),
                         };
 
-                        final menuRef = FirebaseFirestore.instance
-                            .collection('restaurants')
-                            .doc(restaurantId)
-                            .collection('menu');
-
                         if (docId == null) {
-                          await menuRef.add(payload);
+                          await menuRef.doc(itemId).set(payload);
                         } else {
                           await menuRef.doc(docId).update(payload);
                         }
@@ -536,6 +606,7 @@ class _MenuItemCard extends StatelessWidget {
     final available = data['available'] ?? true;
     final price = (data['price'] as num? ?? 0).toInt();
     final stock = (data['stock'] as num? ?? 0).toInt();
+    final imageUrl = data['imageUrl'] as String?;
 
     Color? stockColor;
     String? stockLabel;
@@ -562,22 +633,34 @@ class _MenuItemCard extends StatelessWidget {
         ],
       ),
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: available
-                ? const Color(0xFF1565C0).withValues(alpha: 0.1)
-                : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            Icons.fastfood_rounded,
-            color: available
-                ? const Color(0xFF1565C0)
-                : Colors.grey.shade400,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: available
+                  ? const Color(0xFF1565C0).withValues(alpha: 0.1)
+                  : Colors.grey.shade100,
+            ),
+            child: (imageUrl != null && imageUrl.isNotEmpty)
+                ? Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Icon(
+                      Icons.fastfood_rounded,
+                      color: available
+                          ? const Color(0xFF1565C0)
+                          : Colors.grey.shade400,
+                    ),
+                  )
+                : Icon(
+                    Icons.fastfood_rounded,
+                    color: available
+                        ? const Color(0xFF1565C0)
+                        : Colors.grey.shade400,
+                  ),
           ),
         ),
         title: Text(
@@ -650,21 +733,21 @@ class _OrdersTab extends StatelessWidget {
   const _OrdersTab({required this.restaurantId});
 
   static const _statusColors = {
-    'pending':    Color(0xFFFF8F00),
-    'preparing':  Color(0xFF1565C0),
-    'ready':      Color(0xFF2E7D32),
+    'pending': Color(0xFFFF8F00),
+    'preparing': Color(0xFF1565C0),
+    'ready': Color(0xFF2E7D32),
     'delivering': Color(0xFFFF5A3C),
-    'delivered':  Color(0xFF2E7D32),
-    'cancelled':  Color(0xFFC62828),
+    'delivered': Color(0xFF2E7D32),
+    'cancelled': Color(0xFFC62828),
   };
 
   static const _statusLabels = {
-    'pending':    'En attente',
-    'preparing':  'En préparation',
-    'ready':      'Prêt',
+    'pending': 'En attente',
+    'preparing': 'En préparation',
+    'ready': 'Prêt',
     'delivering': 'En livraison',
-    'delivered':  'Livré',
-    'cancelled':  'Annulé',
+    'delivered': 'Livré',
+    'cancelled': 'Annulé',
   };
 
   @override
@@ -706,9 +789,7 @@ class _OrdersTab extends StatelessWidget {
             final label = _statusLabels[status] ?? status;
             final amount = (d['budget'] as num? ?? 0).toInt();
             final ts = d['createdAt'] as Timestamp?;
-            final time = ts != null
-                ? _formatTime(ts.toDate())
-                : '';
+            final time = ts != null ? _formatTime(ts.toDate()) : '';
 
             return Container(
               margin: const EdgeInsets.only(bottom: 10),
@@ -803,7 +884,8 @@ class _WalletSheet extends StatelessWidget {
   });
 
   String _fmt(int v) {
-    if (v >= 1000) return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    if (v >= 1000)
+      return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
     return v.toString();
   }
 
@@ -819,7 +901,8 @@ class _WalletSheet extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 40, height: 4,
+            width: 40,
+            height: 4,
             margin: const EdgeInsets.only(bottom: 20),
             decoration: BoxDecoration(
               color: Colors.grey.shade300,
@@ -904,8 +987,7 @@ class _RestaurantAnalyticsSheet extends StatefulWidget {
       _RestaurantAnalyticsSheetState();
 }
 
-class _RestaurantAnalyticsSheetState
-    extends State<_RestaurantAnalyticsSheet> {
+class _RestaurantAnalyticsSheetState extends State<_RestaurantAnalyticsSheet> {
   bool _loading = true;
   List<double> _dailyRevenues = List.filled(7, 0);
   int _totalRevenue = 0;
@@ -918,8 +1000,8 @@ class _RestaurantAnalyticsSheetState
   }
 
   Future<void> _loadData() async {
-    final cutoff = Timestamp.fromDate(
-        DateTime.now().subtract(const Duration(days: 7)));
+    final cutoff =
+        Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 7)));
     try {
       final snap = await FirebaseFirestore.instance
           .collection('orders')
@@ -980,8 +1062,7 @@ class _RestaurantAnalyticsSheetState
   @override
   Widget build(BuildContext context) {
     final dayLabels = _last7Days();
-    final maxRev =
-        _dailyRevenues.fold<double>(0, (a, b) => a > b ? a : b);
+    final maxRev = _dailyRevenues.fold<double>(0, (a, b) => a > b ? a : b);
 
     return Container(
       decoration: const BoxDecoration(
@@ -993,7 +1074,8 @@ class _RestaurantAnalyticsSheetState
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 40, height: 4,
+            width: 40,
+            height: 4,
             margin: const EdgeInsets.only(bottom: 20),
             decoration: BoxDecoration(
               color: Colors.grey.shade300,
@@ -1057,8 +1139,7 @@ class _RestaurantAnalyticsSheetState
                   final barH = maxRev > 0 ? (rev / maxRev) * 100 : 0.0;
                   return Expanded(
                     child: Padding(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
@@ -1074,8 +1155,7 @@ class _RestaurantAnalyticsSheetState
                             ),
                           const SizedBox(height: 2),
                           AnimatedContainer(
-                            duration:
-                                Duration(milliseconds: 300 + i * 50),
+                            duration: Duration(milliseconds: 300 + i * 50),
                             height: barH.clamp(4.0, 100.0),
                             decoration: BoxDecoration(
                               color: rev > 0
@@ -1132,9 +1212,7 @@ class _RStatCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(value,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold)),
+                    color: color, fontSize: 12, fontWeight: FontWeight.bold)),
             Text(label,
                 style: TextStyle(
                     color: color.withValues(alpha: 0.7), fontSize: 10)),
@@ -1144,4 +1222,3 @@ class _RStatCard extends StatelessWidget {
     );
   }
 }
-

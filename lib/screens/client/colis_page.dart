@@ -29,17 +29,17 @@ class _ColisPageState extends State<ColisPage> {
   int _fragileSurcharge = 200;
 
   static final _typeAssets = <String, List<dynamic>>{
-    'Colis standard':       [Icons.inventory_2,   Colors.orange],
-    'Cadeau emballé':       [Icons.card_giftcard, Colors.pink],
-    'Document / Enveloppe': [Icons.description,   Colors.blue],
-    'Gros colis':           [Icons.all_inbox,     Colors.deepPurple],
+    'Colis standard': [Icons.inventory_2, Colors.orange],
+    'Cadeau emballé': [Icons.card_giftcard, Colors.pink],
+    'Document / Enveloppe': [Icons.description, Colors.blue],
+    'Gros colis': [Icons.all_inbox, Colors.deepPurple],
   };
 
   static const _fallbackTypes = <Map<String, dynamic>>[
-    {"label": "Colis standard",       "price": 500},
-    {"label": "Cadeau emballé",       "price": 700},
+    {"label": "Colis standard", "price": 500},
+    {"label": "Cadeau emballé", "price": 700},
     {"label": "Document / Enveloppe", "price": 300},
-    {"label": "Gros colis",           "price": 1000},
+    {"label": "Gros colis", "price": 1000},
   ];
 
   Map<String, dynamic> _enrich(Map<String, dynamic> t) {
@@ -51,7 +51,8 @@ class _ColisPageState extends State<ColisPage> {
   int get _price {
     final t = _types.firstWhere((t) => t["label"] == _colisType,
         orElse: () => {"price": 500});
-    return (t["price"] as num? ?? 500).toInt() + (_fragile ? _fragileSurcharge : 0);
+    return (t["price"] as num? ?? 500).toInt() +
+        (_fragile ? _fragileSurcharge : 0);
   }
 
   @override
@@ -71,8 +72,8 @@ class _ColisPageState extends State<ColisPage> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      setState(() =>
-          _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
+      setState(
+          () => _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
     });
   }
 
@@ -103,7 +104,8 @@ class _ColisPageState extends State<ColisPage> {
   Future<void> _submit() async {
     if (_recipientNameCtrl.text.trim().isEmpty ||
         _recipientAddressCtrl.text.trim().isEmpty) {
-      _snack("Veuillez remplir le nom et l'adresse du destinataire", Colors.red);
+      _snack(
+          "Veuillez remplir le nom et l'adresse du destinataire", Colors.red);
       return;
     }
     if (_paymentMethod == 'wallet' && _walletBalance < _price) {
@@ -154,10 +156,10 @@ class _ColisPageState extends State<ColisPage> {
         "contentDescription": _descriptionCtrl.text.trim(),
         "latitude": 0,
         "longitude": 0,
-        "clientId":      uid,
+        "clientId": uid,
         "paymentMethod": _paymentMethod,
-        "isPaid":        false,
-        "createdAt":     FieldValue.serverTimestamp(),
+        "isPaid": _paymentMethod == 'wallet',
+        "createdAt": FieldValue.serverTimestamp(),
       };
 
       if (_paymentMethod == 'wallet') {
@@ -235,8 +237,7 @@ class _ColisPageState extends State<ColisPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
         ],
       ),
       child: Column(
@@ -292,22 +293,20 @@ class _ColisPageState extends State<ColisPage> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.account_balance_wallet,
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.account_balance_wallet,
+                          color: _paymentMethod == 'wallet'
+                              ? Colors.white
+                              : Colors.grey,
+                          size: 18),
+                      const SizedBox(width: 6),
+                      Text("Wallet",
+                          style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
                                   : Colors.grey,
-                              size: 18),
-                          const SizedBox(width: 6),
-                          Text("Wallet",
-                              style: TextStyle(
-                                  color: _paymentMethod == 'wallet'
-                                      ? Colors.white
-                                      : Colors.grey,
-                                  fontWeight: FontWeight.bold)),
-                        ]),
+                              fontWeight: FontWeight.bold)),
+                    ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
@@ -349,8 +348,7 @@ class _ColisPageState extends State<ColisPage> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       SizedBox(height: 40),
-                      Icon(Icons.card_giftcard,
-                          color: Colors.white, size: 48),
+                      Icon(Icons.card_giftcard, color: Colors.white, size: 48),
                       SizedBox(height: 8),
                       Text("Colis & Cadeaux",
                           style: TextStyle(
@@ -358,7 +356,8 @@ class _ColisPageState extends State<ColisPage> {
                               fontSize: 20,
                               fontWeight: FontWeight.bold)),
                       Text("Envoi entre particuliers",
-                          style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 13)),
                     ],
                   ),
                 ),
@@ -367,7 +366,6 @@ class _ColisPageState extends State<ColisPage> {
             title: const Text("Colis & Cadeaux"),
             centerTitle: true,
           ),
-
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -388,8 +386,7 @@ class _ColisPageState extends State<ColisPage> {
                         final selected = t["label"] == _colisType;
                         final color = t["color"] as Color;
                         return GestureDetector(
-                          onTap: () =>
-                              setState(() => _colisType = t["label"]),
+                          onTap: () => setState(() => _colisType = t["label"]),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 200),
                             width: 110,
@@ -398,9 +395,7 @@ class _ColisPageState extends State<ColisPage> {
                               color: selected ? color : Colors.white,
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: selected
-                                    ? color
-                                    : Colors.grey.shade200,
+                                color: selected ? color : Colors.grey.shade200,
                                 width: selected ? 2 : 1,
                               ),
                               boxShadow: [
@@ -453,7 +448,8 @@ class _ColisPageState extends State<ColisPage> {
                       onChanged: (v) => setState(() => _fragile = v),
                       title: const Text("Colis fragile",
                           style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text("+$_fragileSurcharge FCFA — manipulation avec soin",
+                      subtitle: Text(
+                          "+$_fragileSurcharge FCFA — manipulation avec soin",
                           style: const TextStyle(fontSize: 11)),
                       secondary: const Icon(Icons.warning_amber_rounded,
                           color: Colors.orange),
@@ -473,8 +469,7 @@ class _ColisPageState extends State<ColisPage> {
                     child: Row(
                       children: [
                         Icon(Icons.payments_outlined,
-                            size: 16,
-                            color: Colors.orange.shade700),
+                            size: 16, color: Colors.orange.shade700),
                         const SizedBox(width: 8),
                         Text(
                           "Prix estimé : $_price FCFA",
@@ -535,8 +530,7 @@ class _ColisPageState extends State<ColisPage> {
                       controller: _descriptionCtrl,
                       maxLines: 3,
                       decoration: InputDecoration(
-                        hintText:
-                            "Ex : vêtements, documents importants...",
+                        hintText: "Ex : vêtements, documents importants...",
                         prefixIcon: Icon(Icons.inventory_outlined,
                             color: Colors.grey.shade400),
                         border: OutlineInputBorder(
@@ -606,9 +600,7 @@ class _ColisPageState extends State<ColisPage> {
   Widget _sectionTitle(String title) => Text(
         title,
         style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey),
+            fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey),
       );
 
   Widget _card(List<Widget> children) => Container(
@@ -623,8 +615,7 @@ class _ColisPageState extends State<ColisPage> {
         child: Column(children: children),
       );
 
-  Widget _field(
-      TextEditingController ctrl, String hint, IconData icon,
+  Widget _field(TextEditingController ctrl, String hint, IconData icon,
       {TextInputType? type}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),

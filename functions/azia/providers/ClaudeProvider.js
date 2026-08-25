@@ -72,6 +72,38 @@ class ClaudeProvider extends BaseProvider {
       outputTokens: response.usage?.output_tokens || 0,
     };
   }
+
+  supportsTools() {
+    return true;
+  }
+
+  async generateTurn({ systemPrompt, messages, tools = [], temperature, maxTokens, model }) {
+    if (!this.isConfigured()) throw new ProviderNotConfiguredError(this.name);
+    const selectedModel = model || MODEL;
+    const response = await getClient().messages.create({
+      model: selectedModel,
+      max_tokens: maxTokens || 1024,
+      ...(temperature !== undefined ? { temperature } : {}),
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages,
+      ...(tools.length > 0 ? { tools } : {}),
+    });
+    const content = response.content || [];
+    return {
+      text: content.filter((block) => block.type === 'text').map((block) => block.text).join('\n').trim(),
+      toolCalls: content.filter((block) => block.type === 'tool_use').map((block) => ({
+        id: block.id,
+        name: block.name,
+        input: block.input || {},
+      })),
+      inputTokens: response.usage?.input_tokens || 0,
+      outputTokens: response.usage?.output_tokens || 0,
+      provider: this.name,
+      model: selectedModel,
+      finishReason: response.stop_reason || 'stop',
+      assistantMessage: content,
+    };
+  }
 }
 
 module.exports = ClaudeProvider;

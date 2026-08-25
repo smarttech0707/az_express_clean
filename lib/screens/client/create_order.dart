@@ -36,17 +36,16 @@ class CreateOrderScreen extends StatefulWidget {
 }
 
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
-
   // ── Infos client ─────────────────────────────────────────────────────────
-  final _nameCtrl           = TextEditingController();
-  final _phoneCtrl          = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
 
   // ── Commande ──────────────────────────────────────────────────────────────
-  final _listCtrl           = TextEditingController();
+  final _listCtrl = TextEditingController();
   final _shoppingBudgetCtrl = TextEditingController();
 
   // ── Pour qui ──────────────────────────────────────────────────────────────
-  bool _forSelf    = true;
+  bool _forSelf = true;
   bool _forBusiness = false; // Pour un commerce
 
   // ── Adresses ──────────────────────────────────────────────────────────────
@@ -55,25 +54,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final _pickupDescCtrl = TextEditingController();
 
   // Méthode de sélection adresse : 'gps' | 'zone' | 'maps'
-  String _pickupMethod   = 'maps';
+  String _pickupMethod = 'maps';
   String _deliveryMethod = 'maps';
-  bool   _pickupGpsLoading   = false;
-  bool   _deliveryGpsLoading = false;
+  bool _pickupGpsLoading = false;
+  bool _deliveryGpsLoading = false;
 
   // Zones sélectionnées
   String? _pickupZone;
   String? _deliveryZone;
 
   // Contacts
-  final _pickupContactNameCtrl  = TextEditingController();
+  final _pickupContactNameCtrl = TextEditingController();
   final _pickupContactPhoneCtrl = TextEditingController();
-  final _recipientNameCtrl      = TextEditingController();
-  final _recipientPhoneCtrl     = TextEditingController();
+  final _recipientNameCtrl = TextEditingController();
+  final _recipientPhoneCtrl = TextEditingController();
 
   // ── Paiement ──────────────────────────────────────────────────────────────
-  String              _paymentMethod = 'cash';
-  int                 _walletBalance = 0;
-  bool                _codEnabled    = true;
+  String _paymentMethod = 'cash';
+  int _walletBalance = 0;
+  bool _codEnabled = true;
   StreamSubscription? _walletSub;
 
   // ── Prix ──────────────────────────────────────────────────────────────────
@@ -84,21 +83,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // livraison_screen.dart, qui utilise déjà exactement ce même service) et
   // le prix n'était calculé que sur un bouton "Calculer", avec une distance
   // à vol d'oiseau plutôt que la distance réelle du trajet.
-  RouteModel _previewRoute      = RouteModel.empty();
-  bool       _previewRouteLoading = false;
+  RouteModel _previewRoute = RouteModel.empty();
+  bool _previewRouteLoading = false;
   GoogleMapController? _previewMapCtrl;
-  Timer?     _routeDebounce;
+  Timer? _routeDebounce;
 
   // ── Audio ─────────────────────────────────────────────────────────────────
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
-  final AudioPlayer          _player   = AudioPlayer();
-  bool    _isRecording        = false;
+  final AudioPlayer _player = AudioPlayer();
+  bool _isRecording = false;
   String? _audioPath;
-  Timer?  _recordingTimer;
-  int     _recordingSeconds   = 0;
-  int     _audioDurationSeconds = 0;
-  bool    _isPlaying          = false;
-  int     _playPosition       = 0;
+  Timer? _recordingTimer;
+  int _recordingSeconds = 0;
+  int _audioDurationSeconds = 0;
+  bool _isPlaying = false;
+  int _playPosition = 0;
 
   // ── État envoi ────────────────────────────────────────────────────────────
   bool _sending = false;
@@ -116,13 +115,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     _walletSub = FirebaseFirestore.instance
-        .collection('clients').doc(uid).snapshots().listen((snap) {
+        .collection('clients')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
       if (!mounted) return;
-      final data  = snap.data();
+      final data = snap.data();
       final codOk = data?['cashOnDeliveryEnabled'] ?? true;
       setState(() {
         _walletBalance = (data?['wallet'] as num?)?.toInt() ?? 0;
-        _codEnabled    = codOk as bool;
+        _codEnabled = codOk as bool;
         if (!_codEnabled && _paymentMethod == 'cash') _paymentMethod = 'wallet';
       });
     });
@@ -138,7 +140,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       if (mounted) setState(() => _playPosition = pos.inSeconds);
     });
     _player.onPlayerComplete.listen((_) {
-      if (mounted) setState(() { _isPlaying = false; _playPosition = 0; });
+      if (mounted)
+        setState(() {
+          _isPlaying = false;
+          _playPosition = 0;
+        });
     });
   }
 
@@ -164,11 +170,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // ── Enregistrement vocal ──────────────────────────────────────────────────
 
   Future<void> _startRecording() async {
-    final dir  = await getTemporaryDirectory();
-    _audioPath = '${dir.path}/az_order_${DateTime.now().millisecondsSinceEpoch}.aac';
+    final dir = await getTemporaryDirectory();
+    _audioPath =
+        '${dir.path}/az_order_${DateTime.now().millisecondsSinceEpoch}.aac';
     await _recorder.startRecorder(toFile: _audioPath);
     _recordingSeconds = 0;
-    _recordingTimer   = Timer.periodic(const Duration(seconds: 1), (_) {
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _recordingSeconds++);
     });
     setState(() => _isRecording = true);
@@ -194,11 +201,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   void _deleteVoice() {
     _player.stop();
     setState(() {
-      _audioPath            = null;
-      _isPlaying            = false;
-      _playPosition         = 0;
+      _audioPath = null;
+      _isPlaying = false;
+      _playPosition = 0;
       _audioDurationSeconds = 0;
-      _recordingSeconds     = 0;
+      _recordingSeconds = 0;
     });
   }
 
@@ -212,8 +219,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (_audioPath == null) return null;
     try {
       final ref = FirebaseStorage.instance
-          .ref().child('voice_messages/$orderId/voice.aac');
-      await ref.putFile(File(_audioPath!), SettableMetadata(contentType: 'audio/aac'));
+          .ref()
+          .child('voice_messages/$orderId/voice.aac');
+      await ref.putFile(
+          File(_audioPath!), SettableMetadata(contentType: 'audio/aac'));
       return await ref.getDownloadURL();
     } catch (_) {
       return null;
@@ -229,7 +238,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   void _onAddressChanged() {
     setState(() {
       _previewRoute = RouteModel.empty();
-      _breakdown    = null;
+      _breakdown = null;
     });
     _routeDebounce?.cancel();
     if (_pickupResult == null && _deliveryResult == null) return;
@@ -239,22 +248,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Future<void> _maybeCalcRoute() async {
     if (_deliveryResult == null) return;
     final origin = LatLng(
-      _pickupResult?.latitude  ?? _abgLat,
+      _pickupResult?.latitude ?? _abgLat,
       _pickupResult?.longitude ?? _abgLng,
     );
     final dest = LatLng(_deliveryResult!.latitude, _deliveryResult!.longitude);
 
     setState(() => _previewRouteLoading = true);
-    final route = await GoogleRoutesService.getRouteModel(origin: origin, destination: dest);
+    final route = await GoogleRoutesService.getRouteModel(
+        origin: origin, destination: dest);
     if (!mounted) return;
     setState(() {
-      _previewRoute        = route;
+      _previewRoute = route;
       _previewRouteLoading = false;
     });
     if (route.isNotEmpty) {
-      final bounds = RoutePolylineBuilder.boundsFor([origin, dest, ...route.points]);
+      final bounds =
+          RoutePolylineBuilder.boundsFor([origin, dest, ...route.points]);
       if (bounds != null) {
-        _previewMapCtrl?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
+        _previewMapCtrl
+            ?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
       }
     }
     await _calculatePrice();
@@ -275,13 +287,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _snack('Choisissez d\'abord l\'adresse de livraison');
       return;
     }
-    final startLat = _pickupResult?.latitude  ?? _abgLat;
+    final startLat = _pickupResult?.latitude ?? _abgLat;
     final startLng = _pickupResult?.longitude ?? _abgLng;
     final haversine = DeliveryService.calculateDistance(
-      startLat, startLng,
-      _deliveryResult!.latitude, _deliveryResult!.longitude,
+      startLat,
+      startLng,
+      _deliveryResult!.latitude,
+      _deliveryResult!.longitude,
     );
-    final hasRealRoute = _previewRoute.isNotEmpty && _previewRoute.distanceKm > 0;
+    final hasRealRoute =
+        _previewRoute.isNotEmpty && _previewRoute.distanceKm > 0;
     final dist = hasRealRoute ? _previewRoute.distanceKm : haversine;
     final tarif = TarifService.compute(
       clientLat: _deliveryResult!.latitude,
@@ -290,18 +305,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     );
     if (!tarif.canOrder) {
       setState(() => _breakdown = null);
-      _snack(tarif.rejectionMessage ?? 'Livraison non disponible pour cette adresse.');
+      _snack(tarif.rejectionMessage ??
+          'Livraison non disponible pour cette adresse.');
       return;
     }
     setState(() => _breakdown = PriceBreakdown(
-      total:      tarif.standardPrice,
-      distanceKm: dist,
-      etaMinutes: hasRealRoute ? _previewRoute.etaMinutes : DeliveryService.calculateETA(dist),
-      isNight:    tarif.isNight,
-      detail:     tarif.isOutside
-          ? 'Hors zone centrale (${dist.toStringAsFixed(1)} km)'
-          : (tarif.isNight ? 'Tarif nuit — zone centrale' : 'Tarif jour — zone centrale'),
-    ));
+          total: tarif.standardPrice,
+          distanceKm: dist,
+          etaMinutes: hasRealRoute
+              ? _previewRoute.etaMinutes
+              : DeliveryService.calculateETA(dist),
+          isNight: tarif.isNight,
+          detail: tarif.isOutside
+              ? 'Hors zone centrale (${dist.toStringAsFixed(1)} km)'
+              : (tarif.isNight
+                  ? 'Tarif nuit — zone centrale'
+                  : 'Tarif jour — zone centrale'),
+        ));
   }
 
   // ── Envoi commande ────────────────────────────────────────────────────────
@@ -321,37 +341,43 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         locationSettings:
             const LocationSettings(accuracy: LocationAccuracy.high));
     return AddressResult(
-      latitude:  pos.latitude,
+      latitude: pos.latitude,
       longitude: pos.longitude,
-      address:   'Ma position actuelle',
+      address: 'Ma position actuelle',
     );
   }
 
   Future<void> _sendOrder() async {
-    final name   = _nameCtrl.text.trim();
-    final phone  = _phoneCtrl.text.trim();
-    final list   = _listCtrl.text.trim();
+    final name = _nameCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim();
+    final list = _listCtrl.text.trim();
 
     if (name.isEmpty || phone.isEmpty || list.isEmpty) {
-      _snack('Remplissez tous les champs obligatoires'); return;
+      _snack('Remplissez tous les champs obligatoires');
+      return;
     }
     if (_deliveryResult == null && _deliveryZone == null) {
-      _snack('Choisissez l\'adresse ou la zone de livraison'); return;
+      _snack('Choisissez l\'adresse ou la zone de livraison');
+      return;
     }
     if (_deliveryResult == null) {
-      _snack('Choisissez l\'adresse de livraison'); return;
+      _snack('Choisissez l\'adresse de livraison');
+      return;
     }
     if (_breakdown == null) {
-      _snack('Calculez le prix de livraison d\'abord'); return;
+      _snack('Calculez le prix de livraison d\'abord');
+      return;
     }
 
     final deliveryFee = _breakdown!.total;
 
     if (deliveryFee < 500) {
-      _snack('Frais de livraison minimum : 500 FCFA'); return;
+      _snack('Frais de livraison minimum : 500 FCFA');
+      return;
     }
     if (deliveryFee > 10000) {
-      _snack('Frais trop élevés. Vérifiez la distance.'); return;
+      _snack('Frais trop élevés. Vérifiez la distance.');
+      return;
     }
     if (_paymentMethod == 'wallet' && _walletBalance < deliveryFee) {
       _snack(
@@ -361,50 +387,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       return;
     }
 
-    final shoppingBudget = (int.tryParse(_shoppingBudgetCtrl.text.trim()) ?? 0)
-        .clamp(0, 9999999);
+    final shoppingBudget =
+        (int.tryParse(_shoppingBudgetCtrl.text.trim()) ?? 0).clamp(0, 9999999);
 
     setState(() => _sending = true);
 
     // Auth
     User? user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      try { final c = await FirebaseAuth.instance.signInAnonymously(); user = c.user; }
-      catch (_) {}
+      try {
+        final c = await FirebaseAuth.instance.signInAnonymously();
+        user = c.user;
+      } catch (_) {}
     }
     final uid = user?.uid;
 
-    // Débit wallet si nécessaire
-    if (_paymentMethod == 'wallet' && uid != null) {
-      try {
-        final clientRef = FirebaseFirestore.instance.collection('clients').doc(uid);
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap    = await tx.get(clientRef);
-          final current = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
-          if (current < deliveryFee) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': current - deliveryFee});
-        });
-        await FirebaseFirestore.instance
-            .collection('clients').doc(uid).collection('wallet_transactions')
-            .add({
-          'type': 'payment', 'amount': deliveryFee,
-          'description': 'Frais de livraison', 'createdAt': FieldValue.serverTimestamp(),
-        });
-      } catch (e) {
-        if (!mounted) return;
-        setState(() => _sending = false);
-        _snack(
-          e.toString().contains('SOLDE_INSUFFISANT')
-              ? 'Solde insuffisant'
-              : 'Erreur paiement : $e',
-          color: Colors.red,
-        );
-        return;
-      }
-    }
-
     try {
-      final orderId  = const Uuid().v4();
+      final orderId = const Uuid().v4();
       final audioUrl = await _uploadVoice(orderId);
 
       // Description du lieu de collecte
@@ -425,24 +424,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               : null;
 
       final order = OrderModel(
-        id:             orderId,
-        description:    list,
-        budget:         deliveryFee,
+        id: orderId,
+        description: list,
+        budget: deliveryFee,
         shoppingBudget: shoppingBudget,
-        status:         'pending',
+        status: 'pending',
         // Adresse de livraison
-        latitude:        _deliveryResult!.latitude,
-        longitude:       _deliveryResult!.longitude,
+        latitude: _deliveryResult!.latitude,
+        longitude: _deliveryResult!.longitude,
         deliveryAddress: _deliveryResult!.address,
-        deliveryZone:    _deliveryZone,
+        deliveryZone: _deliveryZone,
         // Adresse de collecte
-        pickupAddress:   pickupAddr,
-        pickupLat:       _pickupResult?.latitude,
-        pickupLng:       _pickupResult?.longitude,
-        pickupZone:      _pickupZone,
+        pickupAddress: pickupAddr,
+        pickupLat: _pickupResult?.latitude,
+        pickupLng: _pickupResult?.longitude,
+        pickupZone: _pickupZone,
         // Contacts
-        recipientName:     recipientName,
-        recipientPhone:    recipientPhone,
+        recipientName: recipientName,
+        recipientPhone: recipientPhone,
         pickupContactName: _pickupContactNameCtrl.text.trim().isNotEmpty
             ? _pickupContactNameCtrl.text.trim()
             : null,
@@ -450,33 +449,36 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ? _pickupContactPhoneCtrl.text.trim()
             : null,
         // Compatibilité tracking
-        destLat:         _deliveryResult!.latitude,
-        destLng:         _deliveryResult!.longitude,
+        destLat: _deliveryResult!.latitude,
+        destLng: _deliveryResult!.longitude,
         // Méta
-        type:            'shopping',
-        clientId:        uid,
-        clientName:      name,
-        clientPhone:     phone,
-        voiceMessage:    audioUrl,
-        paymentMethod:   _paymentMethod,
-        isPaid:          _paymentMethod == 'wallet',
-        forSelf:         _forSelf,
+        type: 'shopping',
+        clientId: uid,
+        clientName: name,
+        clientPhone: phone,
+        voiceMessage: audioUrl,
+        paymentMethod: _paymentMethod,
+        isPaid: _paymentMethod == 'wallet',
+        forSelf: _forSelf,
       );
 
-      await FirestoreService().createOrder(order);
-
-    } catch (e) {
-      // Si le wallet a été débité, rembourser automatiquement
       if (_paymentMethod == 'wallet' && uid != null) {
-        try {
-          final clientRef = FirebaseFirestore.instance.collection('clients').doc(uid);
-          await FirebaseFirestore.instance.runTransaction((tx) async {
-            final snap = await tx.get(clientRef);
-            final current = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
-            tx.update(clientRef, {'wallet': current + deliveryFee});
-          });
-        } catch (_) {}
+        final clientRef =
+            FirebaseFirestore.instance.collection('clients').doc(uid);
+        final orderRef =
+            FirebaseFirestore.instance.collection('orders').doc(order.id);
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final snap = await tx.get(clientRef);
+          final balance = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
+          if (balance < deliveryFee) throw Exception('SOLDE_INSUFFISANT');
+          tx.update(clientRef, {'wallet': balance - deliveryFee});
+          tx.set(orderRef, order.toMap());
+        });
+        await FirestoreService().createOrder(order, alreadyCreated: true);
+      } else {
+        await FirestoreService().createOrder(order);
       }
+    } catch (e) {
       if (!mounted) return;
       setState(() => _sending = false);
       _snack('Erreur envoi commande : ${e.toString()}', color: Colors.red);
@@ -485,15 +487,15 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
     if (!mounted) return;
     setState(() {
-      _sending         = false;
-      _breakdown       = null;
-      _deliveryResult  = null;
-      _pickupResult    = null;
-      _audioPath       = null;
-      _pickupZone      = null;
-      _deliveryZone    = null;
-      _pickupMethod    = 'maps';
-      _deliveryMethod  = 'maps';
+      _sending = false;
+      _breakdown = null;
+      _deliveryResult = null;
+      _pickupResult = null;
+      _audioPath = null;
+      _pickupZone = null;
+      _deliveryZone = null;
+      _pickupMethod = 'maps';
+      _deliveryMethod = 'maps';
     });
     _nameCtrl.clear();
     _phoneCtrl.clear();
@@ -515,8 +517,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  String _fmtW(int v) =>
-      v >= 1000 ? '${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}' : v.toString();
+  String _fmtW(int v) => v >= 1000
+      ? '${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}'
+      : v.toString();
 
   void _snack(String msg, {Color? color}) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -543,31 +546,36 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
-
           // ── 1. POUR QUI ? ──────────────────────────────────────────────────
-          const _SectionHeader(icon: Icons.people_rounded, title: 'Pour qui commandez-vous ?'),
+          const _SectionHeader(
+              icon: Icons.people_rounded, title: 'Pour qui commandez-vous ?'),
           const SizedBox(height: 10),
           _buildForWhoSelector(),
 
           const SizedBox(height: 24),
 
           // ── 2. ADRESSE DE LIVRAISON ────────────────────────────────────────
-          const _SectionHeader(icon: Icons.delivery_dining_rounded, title: 'Adresse de livraison'),
+          const _SectionHeader(
+              icon: Icons.delivery_dining_rounded,
+              title: 'Adresse de livraison'),
           const SizedBox(height: 10),
           Container(
             decoration: BoxDecoration(
-              color:        Colors.white,
+              color: Colors.white,
               borderRadius: BorderRadius.circular(16),
-              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)],
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+              ],
             ),
             child: Column(children: [
               _buildMethodTabs(
-                selected:  _deliveryMethod,
+                selected: _deliveryMethod,
                 onChanged: (m) {
                   setState(() {
                     _deliveryMethod = m;
                     _deliveryResult = null;
-                    _deliveryZone   = null;
+                    _deliveryZone = null;
                   });
                   _onAddressChanged();
                 },
@@ -578,7 +586,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   if (_deliveryMethod == 'gps') ...[
                     _GpsCaptureTile(
                       loading: _deliveryGpsLoading,
-                      result:  _deliveryResult,
+                      result: _deliveryResult,
                       onCapture: () async {
                         setState(() => _deliveryGpsLoading = true);
                         final r = await _getGpsPosition();
@@ -607,9 +615,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   ],
                   if (_deliveryMethod == 'maps') ...[
                     AddressPickerWidget(
-                      title:          'Livraison',
-                      hint:           'Tapez un quartier, une rue, un lieu…',
-                      initialMode:    _forSelf ? AddressMode.gps : AddressMode.manual,
+                      title: 'Livraison',
+                      hint: 'Tapez un quartier, une rue, un lieu…',
+                      initialMode:
+                          _forSelf ? AddressMode.gps : AddressMode.manual,
                       showModeToggle: !_forSelf,
                       onChanged: (result) {
                         setState(() => _deliveryResult = result);
@@ -626,19 +635,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           // dès que départ et livraison ont tous les deux des coordonnées.
           if (_pickupResult != null && _deliveryResult != null)
             _RoutePreviewCard(
-              pickup:        LatLng(_pickupResult!.latitude, _pickupResult!.longitude),
-              delivery:      LatLng(_deliveryResult!.latitude, _deliveryResult!.longitude),
-              route:         _previewRoute,
-              loading:       _previewRouteLoading,
-              onMapCreated:  (c) => _previewMapCtrl = c,
+              pickup: LatLng(_pickupResult!.latitude, _pickupResult!.longitude),
+              delivery:
+                  LatLng(_deliveryResult!.latitude, _deliveryResult!.longitude),
+              route: _previewRoute,
+              loading: _previewRouteLoading,
+              onMapCreated: (c) => _previewMapCtrl = c,
             ),
 
           const SizedBox(height: 24),
 
           // ── 3. VOS INFORMATIONS ────────────────────────────────────────────
-          const _SectionHeader(icon: Icons.person_rounded, title: 'Vos informations'),
+          const _SectionHeader(
+              icon: Icons.person_rounded, title: 'Vos informations'),
           const SizedBox(height: 10),
-          _field(_nameCtrl,  'Votre nom',       Icons.person_outline),
+          _field(_nameCtrl, 'Votre nom', Icons.person_outline),
           const SizedBox(height: 10),
           _field(_phoneCtrl, 'Votre téléphone', Icons.phone,
               type: TextInputType.phone),
@@ -646,7 +657,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           const SizedBox(height: 24),
 
           // ── 4. LISTE DE COURSES ────────────────────────────────────────────
-          const _SectionHeader(icon: Icons.shopping_basket_rounded, title: 'Liste de courses'),
+          const _SectionHeader(
+              icon: Icons.shopping_basket_rounded, title: 'Liste de courses'),
           const SizedBox(height: 8),
           _buildShoppingCard(),
 
@@ -658,7 +670,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           const SizedBox(height: 24),
 
           // ── 5. LIEU DE COLLECTE ────────────────────────────────────────────
-          const _SectionHeader(icon: Icons.store_rounded, title: 'Lieu de collecte'),
+          const _SectionHeader(
+              icon: Icons.store_rounded, title: 'Lieu de collecte'),
           const SizedBox(height: 6),
           Text(
             'Où le livreur doit-il récupérer la commande ?',
@@ -681,11 +694,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.black87,
                 minimumSize: const Size(double.infinity, 52),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
               icon: const Icon(Icons.calculate_rounded, color: Colors.white),
               label: Text(
-                  _previewRouteLoading ? 'Calcul en cours…' : 'Recalculer le prix de livraison',
+                  _previewRouteLoading
+                      ? 'Calcul en cours…'
+                      : 'Recalculer le prix de livraison',
                   style: const TextStyle(color: Colors.white, fontSize: 16)),
             ),
 
@@ -694,16 +710,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           // ── 7. RECAP + PAIEMENT + ENVOYER ─────────────────────────────────
           if (_breakdown != null) ...[
             _TotalCard(
-              breakdown:      _breakdown!,
-              shoppingBudget: int.tryParse(_shoppingBudgetCtrl.text.trim()) ?? 0,
+              breakdown: _breakdown!,
+              shoppingBudget:
+                  int.tryParse(_shoppingBudgetCtrl.text.trim()) ?? 0,
             ),
             const SizedBox(height: 14),
             _PaymentMethodCard(
-              selected:      _paymentMethod,
+              selected: _paymentMethod,
               walletBalance: _walletBalance,
-              deliveryFee:   _breakdown!.total,
-              codEnabled:    _codEnabled,
-              onChanged:     (v) => setState(() => _paymentMethod = v),
+              deliveryFee: _breakdown!.total,
+              codEnabled: _codEnabled,
+              onChanged: (v) => setState(() => _paymentMethod = v),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -755,47 +772,50 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Widget _buildForWhoSelector() {
     return Column(children: [
       Row(children: [
-        Expanded(child: _forWhoOption(
-          icon:     Icons.person_rounded,
-          label:    'Pour moi',
+        Expanded(
+            child: _forWhoOption(
+          icon: Icons.person_rounded,
+          label: 'Pour moi',
           subtitle: 'Livraison à moi-même',
           selected: _forSelf && !_forBusiness,
-          onTap:    () => setState(() {
-            _forSelf        = true;
-            _forBusiness    = false;
+          onTap: () => setState(() {
+            _forSelf = true;
+            _forBusiness = false;
             _deliveryResult = null;
-            _breakdown      = null;
-            _previewRoute   = RouteModel.empty();
+            _breakdown = null;
+            _previewRoute = RouteModel.empty();
             _recipientNameCtrl.clear();
             _recipientPhoneCtrl.clear();
           }),
         )),
         const SizedBox(width: 10),
-        Expanded(child: _forWhoOption(
-          icon:     Icons.people_alt_rounded,
-          label:    'Pour un proche',
+        Expanded(
+            child: _forWhoOption(
+          icon: Icons.people_alt_rounded,
+          label: 'Pour un proche',
           subtitle: 'Livraison à quelqu\'un',
           selected: !_forSelf && !_forBusiness,
-          onTap:    () => setState(() {
-            _forSelf        = false;
-            _forBusiness    = false;
+          onTap: () => setState(() {
+            _forSelf = false;
+            _forBusiness = false;
             _deliveryResult = null;
-            _breakdown      = null;
-            _previewRoute   = RouteModel.empty();
+            _breakdown = null;
+            _previewRoute = RouteModel.empty();
           }),
         )),
         const SizedBox(width: 10),
-        Expanded(child: _forWhoOption(
-          icon:     Icons.storefront_rounded,
-          label:    'Pour un commerce',
+        Expanded(
+            child: _forWhoOption(
+          icon: Icons.storefront_rounded,
+          label: 'Pour un commerce',
           subtitle: 'Livraison pro',
           selected: _forBusiness,
-          onTap:    () => setState(() {
-            _forSelf        = false;
-            _forBusiness    = true;
+          onTap: () => setState(() {
+            _forSelf = false;
+            _forBusiness = true;
             _deliveryResult = null;
-            _breakdown      = null;
-            _previewRoute   = RouteModel.empty();
+            _breakdown = null;
+            _previewRoute = RouteModel.empty();
           }),
         )),
       ]),
@@ -816,18 +836,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 const Icon(Icons.person_pin_rounded,
                     color: AppColors.primary, size: 18),
                 const SizedBox(width: 6),
-                Text(_forBusiness ? 'Contact destinataire' : 'Informations du destinataire',
+                Text(
+                    _forBusiness
+                        ? 'Contact destinataire'
+                        : 'Informations du destinataire',
                     style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Color(0xFFE65100),
                         fontSize: 13)),
               ]),
               const SizedBox(height: 10),
-              _field(_recipientNameCtrl,
-                  _forBusiness ? 'Nom du responsable *' : 'Nom du destinataire *',
+              _field(
+                  _recipientNameCtrl,
+                  _forBusiness
+                      ? 'Nom du responsable *'
+                      : 'Nom du destinataire *',
                   Icons.person_outline),
               const SizedBox(height: 8),
-              _field(_recipientPhoneCtrl, 'Téléphone du destinataire *', Icons.phone,
+              _field(_recipientPhoneCtrl, 'Téléphone du destinataire *',
+                  Icons.phone,
                   type: TextInputType.phone),
             ],
           ),
@@ -837,10 +864,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   }
 
   Widget _forWhoOption({
-    required IconData    icon,
-    required String      label,
-    required String      subtitle,
-    required bool        selected,
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required bool selected,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
@@ -849,20 +876,26 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
-          color:        selected ? AppColors.primary.withValues(alpha: 0.08) : Colors.white,
+          color: selected
+              ? AppColors.primary.withValues(alpha: 0.08)
+              : Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border:       Border.all(
+          border: Border.all(
             color: selected ? AppColors.primary : Colors.grey.shade300,
             width: selected ? 2 : 1,
           ),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)],
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
               Icon(icon,
-                  color: selected ? AppColors.primary : Colors.grey.shade500, size: 20),
+                  color: selected ? AppColors.primary : Colors.grey.shade500,
+                  size: 20),
               const Spacer(),
               if (selected)
                 const Icon(Icons.check_circle_rounded,
@@ -871,9 +904,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             const SizedBox(height: 6),
             Text(label,
                 style: TextStyle(
-                  fontSize:   12,
+                  fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color:      selected ? AppColors.primary : Colors.black87,
+                  color: selected ? AppColors.primary : Colors.black87,
                 )),
             Text(subtitle,
                 style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
@@ -887,19 +920,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Widget _buildPickupSection() {
     return Container(
       decoration: BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+        ],
       ),
       child: Column(children: [
         // Sélecteur de méthode
         _buildMethodTabs(
-          selected:  _pickupMethod,
+          selected: _pickupMethod,
           onChanged: (m) {
             setState(() {
-              _pickupMethod  = m;
-              _pickupResult  = null;
-              _pickupZone    = null;
+              _pickupMethod = m;
+              _pickupResult = null;
+              _pickupZone = null;
             });
             _onAddressChanged();
           },
@@ -907,12 +942,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
           child: Column(children: [
-
             // Méthode GPS
             if (_pickupMethod == 'gps') ...[
               _GpsCaptureTile(
                 loading: _pickupGpsLoading,
-                result:  _pickupResult,
+                result: _pickupResult,
                 onCapture: () async {
                   setState(() => _pickupGpsLoading = true);
                   final r = await _getGpsPosition();
@@ -931,7 +965,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 selected: _pickupZone,
                 onChanged: (z, lat, lng) {
                   setState(() {
-                    _pickupZone   = z;
+                    _pickupZone = z;
                     if (lat != null && lng != null) {
                       _pickupResult = AddressResult(
                           latitude: lat, longitude: lng, address: z);
@@ -948,21 +982,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 controller: _pickupDescCtrl,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
-                  labelText:  'Marché, boutique, restaurant…',
-                  hintText:   'ex : Marché central, boutique Awa…',
-                  hintStyle:  TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                  prefixIcon: const Icon(Icons.store_rounded, color: AppColors.primary),
+                  labelText: 'Marché, boutique, restaurant…',
+                  hintText: 'ex : Marché central, boutique Awa…',
+                  hintStyle:
+                      TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                  prefixIcon:
+                      const Icon(Icons.store_rounded, color: AppColors.primary),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none),
-                  filled: true, fillColor: const Color(0xFFF5F5F5),
+                  filled: true,
+                  fillColor: const Color(0xFFF5F5F5),
                 ),
               ),
               const SizedBox(height: 8),
               AddressPickerWidget(
-                title:          'Collecte',
-                hint:           'Épingler le lieu de collecte sur la carte',
-                initialMode:    AddressMode.manual,
+                title: 'Collecte',
+                hint: 'Épingler le lieu de collecte sur la carte',
+                initialMode: AddressMode.manual,
                 showModeToggle: false,
                 onChanged: (result) {
                   setState(() => _pickupResult = result);
@@ -970,7 +1007,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 },
               ),
             ],
-
           ]),
         ),
 
@@ -990,11 +1026,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                       fontWeight: FontWeight.w500)),
             ]),
             const SizedBox(height: 8),
-            _field(_pickupContactNameCtrl,  'Nom du récupérateur',
-                Icons.person_outline, required: false),
+            _field(_pickupContactNameCtrl, 'Nom du récupérateur',
+                Icons.person_outline,
+                required: false),
             const SizedBox(height: 8),
             _field(_pickupContactPhoneCtrl, 'Téléphone du récupérateur',
-                Icons.phone, type: TextInputType.phone, required: false),
+                Icons.phone,
+                type: TextInputType.phone, required: false),
           ]),
         ),
       ]),
@@ -1003,13 +1041,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   // ── Onglets de méthode (GPS / Zone / Maps) ─────────────────────────────────
   Widget _buildMethodTabs({
-    required String   selected,
+    required String selected,
     required void Function(String) onChanged,
   }) {
     final methods = [
-      ('gps',  Icons.my_location_rounded,  'Ma position'),
-      ('zone', Icons.map_outlined,          'Zone'),
-      ('maps', Icons.place_rounded,         'Sur la carte'),
+      ('gps', Icons.my_location_rounded, 'Ma position'),
+      ('zone', Icons.map_outlined, 'Zone'),
+      ('maps', Icons.place_rounded, 'Sur la carte'),
     ];
     return Container(
       decoration: const BoxDecoration(
@@ -1032,8 +1070,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                       : null,
                   border: isSelected
                       ? const Border(
-                          bottom: BorderSide(
-                              color: AppColors.primary, width: 2))
+                          bottom:
+                              BorderSide(color: AppColors.primary, width: 2))
                       : null,
                 ),
                 child: Column(children: [
@@ -1046,9 +1084,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   Text(m.$3,
                       style: TextStyle(
                           fontSize: 11,
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.normal,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
                           color: isSelected
                               ? AppColors.primary
                               : Colors.grey.shade500)),
@@ -1065,9 +1102,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Widget _buildShoppingCard() {
     return Container(
       decoration: BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+        ],
       ),
       child: Column(children: [
         Container(
@@ -1085,12 +1124,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         ),
         TextField(
           controller: _listCtrl,
-          maxLines:   6,
-          style:      const TextStyle(fontSize: 15, height: 1.8, fontFamily: 'monospace'),
+          maxLines: 6,
+          style: const TextStyle(
+              fontSize: 15, height: 1.8, fontFamily: 'monospace'),
           decoration: InputDecoration(
-            hintText:     'Tomates 200 FCFA\nHuile 1L 1 000 FCFA\nCube Maggi…',
-            hintStyle:    TextStyle(color: Colors.grey.shade400, fontSize: 14),
-            border:       InputBorder.none,
+            hintText: 'Tomates 200 FCFA\nHuile 1L 1 000 FCFA\nCube Maggi…',
+            hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+            border: InputBorder.none,
             contentPadding: const EdgeInsets.all(14),
           ),
         ),
@@ -1105,26 +1145,30 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Widget _buildBudgetField() {
     return Container(
       decoration: BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+        ],
       ),
       child: TextField(
-        controller:   _shoppingBudgetCtrl,
+        controller: _shoppingBudgetCtrl,
         keyboardType: TextInputType.number,
-        style:        const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         decoration: InputDecoration(
-          labelText:    'Budget total des articles (FCFA)',
-          labelStyle:   const TextStyle(fontSize: 14),
-          hintText:     'ex : 1 500',
-          prefixIcon:   const Icon(Icons.account_balance_wallet_rounded,
+          labelText: 'Budget total des articles (FCFA)',
+          labelStyle: const TextStyle(fontSize: 14),
+          hintText: 'ex : 1 500',
+          prefixIcon: const Icon(Icons.account_balance_wallet_rounded,
               color: AppColors.primary),
-          suffixText:   'FCFA',
-          suffixStyle:  TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.bold),
-          border:       OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-          filled:       true,
-          fillColor:    Colors.white,
+          suffixText: 'FCFA',
+          suffixStyle: TextStyle(
+              color: Colors.grey.shade500, fontWeight: FontWeight.bold),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide.none),
+          filled: true,
+          fillColor: Colors.white,
         ),
       ),
     );
@@ -1133,25 +1177,29 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // ── Zone vocale ────────────────────────────────────────────────────────────
   Widget _buildVoiceZone() {
     if (_audioPath != null && !_isRecording) {
-      final total    = _audioDurationSeconds;
+      final total = _audioDurationSeconds;
       final position = _playPosition.clamp(0, total > 0 ? total : 1);
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color:        const Color(0xFFDCF8C6),
+          color: const Color(0xFFDCF8C6),
           borderRadius: BorderRadius.circular(14),
-          border:       Border.all(color: Colors.green.shade200),
+          border: Border.all(color: Colors.green.shade200),
         ),
         child: Row(children: [
           Semantics(
-            label: _isPlaying ? 'Mettre en pause le message vocal' : 'Écouter le message vocal',
+            label: _isPlaying
+                ? 'Mettre en pause le message vocal'
+                : 'Écouter le message vocal',
             button: true,
             excludeSemantics: true,
             child: GestureDetector(
               onTap: _togglePlayback,
               child: Container(
-                width: 44, height: 44,
-                decoration: const BoxDecoration(color: Color(0xFF25D366), shape: BoxShape.circle),
+                width: 44,
+                height: 44,
+                decoration: const BoxDecoration(
+                    color: Color(0xFF25D366), shape: BoxShape.circle),
                 child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow,
                     color: Colors.white, size: 26),
               ),
@@ -1159,20 +1207,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  trackHeight:  3,
-                  thumbShape:   const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                  activeTrackColor:   const Color(0xFF25D366),
+                  trackHeight: 3,
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 6),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 12),
+                  activeTrackColor: const Color(0xFF25D366),
                   inactiveTrackColor: Colors.green.shade100,
-                  thumbColor:         const Color(0xFF25D366),
+                  thumbColor: const Color(0xFF25D366),
                 ),
                 child: Slider(
                   value: position.toDouble(),
-                  min:   0,
-                  max:   total > 0 ? total.toDouble() : 1,
+                  min: 0,
+                  max: total > 0 ? total.toDouble() : 1,
                   onChanged: (v) async {
                     await _player.seek(Duration(seconds: v.toInt()));
                     setState(() => _playPosition = v.toInt());
@@ -1185,7 +1236,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   _isPlaying
                       ? '${_fmtTime(position)} / ${_fmtTime(total)}'
                       : _fmtTime(total),
-                  style: TextStyle(fontSize: 11, color: Colors.green.shade700,
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.green.shade700,
                       fontWeight: FontWeight.w500),
                 ),
               ),
@@ -1199,12 +1252,15 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             child: GestureDetector(
               onTap: _deleteVoice,
               child: Container(
-                width: 44, height: 44,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  color:  Colors.red.shade50, shape: BoxShape.circle,
+                  color: Colors.red.shade50,
+                  shape: BoxShape.circle,
                   border: Border.all(color: Colors.red.shade200),
                 ),
-                child: Icon(Icons.delete_outline, color: Colors.red.shade400, size: 20),
+                child: Icon(Icons.delete_outline,
+                    color: Colors.red.shade400, size: 20),
               ),
             ),
           ),
@@ -1216,29 +1272,37 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color:        Colors.red.shade50,
+          color: Colors.red.shade50,
           borderRadius: BorderRadius.circular(14),
-          border:       Border.all(color: Colors.red.shade200),
+          border: Border.all(color: Colors.red.shade200),
         ),
         child: Row(children: [
           Container(
-            width: 44, height: 44,
-            decoration: BoxDecoration(color: Colors.red.shade400, shape: BoxShape.circle),
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+                color: Colors.red.shade400, shape: BoxShape.circle),
             child: const Icon(Icons.mic, color: Colors.white, size: 24),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Row(children: [
+          Expanded(
+              child: Row(children: [
             Text('Enregistrement…',
-                style: TextStyle(color: Colors.red.shade700,
-                    fontWeight: FontWeight.w600, fontSize: 14)),
+                style: TextStyle(
+                    color: Colors.red.shade700,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14)),
             const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                  color: Colors.red.shade400, borderRadius: BorderRadius.circular(20)),
+                  color: Colors.red.shade400,
+                  borderRadius: BorderRadius.circular(20)),
               child: Text(_fmtTime(_recordingSeconds),
-                  style: const TextStyle(color: Colors.white,
-                      fontWeight: FontWeight.bold, fontSize: 14)),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14)),
             ),
           ])),
           const SizedBox(width: 10),
@@ -1249,7 +1313,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             child: GestureDetector(
               onTap: _stopRecording,
               child: Container(
-                width: 44, height: 44,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
                     color: Colors.red.shade400, shape: BoxShape.circle),
                 child: const Icon(Icons.stop, color: Colors.white, size: 24),
@@ -1265,16 +1330,19 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color:        AppColors.primary.withValues(alpha: 0.08),
+          color: AppColors.primary.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(14),
-          border:       Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
         ),
-        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        child:
+            const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.mic_rounded, color: AppColors.primary, size: 22),
           SizedBox(width: 10),
           Text('Enregistrer un message vocal',
-              style: TextStyle(color: AppColors.primary,
-                  fontWeight: FontWeight.w600, fontSize: 14)),
+              style: TextStyle(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14)),
         ]),
       ),
     );
@@ -1283,14 +1351,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Widget _field(TextEditingController ctrl, String label, IconData icon,
       {TextInputType? type, bool required = true}) {
     return TextField(
-      controller:   ctrl,
+      controller: ctrl,
       keyboardType: type,
       decoration: InputDecoration(
-        labelText:  label,
+        labelText: label,
         prefixIcon: Icon(icon),
-        border:     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        filled:     true,
-        fillColor:  Colors.white,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        filled: true,
+        fillColor: Colors.white,
       ),
     );
   }
@@ -1307,10 +1375,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 // qu'il est disponible (onMapCreated ne fait qu'exposer le controller, le
 // recentrage réel se fait depuis _maybeCalcRoute()).
 class _RoutePreviewCard extends StatelessWidget {
-  final LatLng    pickup;
-  final LatLng    delivery;
+  final LatLng pickup;
+  final LatLng delivery;
   final RouteModel route;
-  final bool      loading;
+  final bool loading;
   final void Function(GoogleMapController) onMapCreated;
 
   const _RoutePreviewCard({
@@ -1323,17 +1391,18 @@ class _RoutePreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bounds = RoutePolylineBuilder.boundsFor([pickup, delivery, ...route.points]);
+    final bounds =
+        RoutePolylineBuilder.boundsFor([pickup, delivery, ...route.points]);
     final polylines = route.isNotEmpty
         ? {
             Polyline(
               polylineId: const PolylineId('preview_route'),
-              points:     route.points,
-              color:      AppColors.primary,
-              width:      5,
-              startCap:   Cap.roundCap,
-              endCap:     Cap.roundCap,
-              jointType:  JointType.round,
+              points: route.points,
+              color: AppColors.primary,
+              width: 5,
+              startCap: Cap.roundCap,
+              endCap: Cap.roundCap,
+              jointType: JointType.round,
             ),
           }
         : <Polyline>{};
@@ -1343,7 +1412,9 @@ class _RoutePreviewCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(children: [
@@ -1359,32 +1430,44 @@ class _RoutePreviewCard extends StatelessWidget {
                 }
               },
               markers: {
-                Marker(markerId: const MarkerId('preview_pickup'), position: pickup,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                Marker(
+                    markerId: const MarkerId('preview_pickup'),
+                    position: pickup,
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueAzure),
                     infoWindow: const InfoWindow(title: 'Départ')),
-                Marker(markerId: const MarkerId('preview_delivery'), position: delivery,
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                Marker(
+                    markerId: const MarkerId('preview_delivery'),
+                    position: delivery,
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueRed),
                     infoWindow: const InfoWindow(title: 'Livraison')),
               },
               polylines: polylines,
-              zoomControlsEnabled:   false,
+              zoomControlsEnabled: false,
               myLocationButtonEnabled: false,
-              compassEnabled:        false,
-              mapToolbarEnabled:     false,
-              liteModeEnabled:       false,
+              compassEnabled: false,
+              mapToolbarEnabled: false,
+              liteModeEnabled: false,
             ),
             if (loading)
               Positioned(
-                top: 10, right: 10,
+                top: 10,
+                right: 10,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
-                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black26, blurRadius: 4)
+                    ],
                   ),
                   child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    SizedBox(width: 12, height: 12,
+                    SizedBox(
+                        width: 12,
+                        height: 12,
                         child: CircularProgressIndicator(strokeWidth: 2)),
                     SizedBox(width: 8),
                     Text('Calcul du trajet…', style: TextStyle(fontSize: 12)),
@@ -1397,13 +1480,19 @@ class _RoutePreviewCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(children: [
-              const Icon(Icons.route_rounded, size: 16, color: AppColors.primary),
+              const Icon(Icons.route_rounded,
+                  size: 16, color: AppColors.primary),
               const SizedBox(width: 6),
-              Text(route.distanceText, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              Text(route.distanceText,
+                  style: const TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w600)),
               const SizedBox(width: 14),
-              const Icon(Icons.access_time_rounded, size: 16, color: AppColors.primary),
+              const Icon(Icons.access_time_rounded,
+                  size: 16, color: AppColors.primary),
               const SizedBox(width: 6),
-              Text('~${route.etaMinutes} min', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              Text('~${route.etaMinutes} min',
+                  style: const TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w600)),
             ]),
           ),
       ]),
@@ -1413,9 +1502,9 @@ class _RoutePreviewCard extends StatelessWidget {
 
 // ── Tuile GPS ───────────────────────────────────────────────────────────────
 class _GpsCaptureTile extends StatelessWidget {
-  final bool          loading;
+  final bool loading;
   final AddressResult? result;
-  final VoidCallback  onCapture;
+  final VoidCallback onCapture;
   const _GpsCaptureTile({
     required this.loading,
     required this.result,
@@ -1429,19 +1518,22 @@ class _GpsCaptureTile extends StatelessWidget {
         width: double.infinity,
         child: OutlinedButton.icon(
           icon: loading
-              ? const SizedBox(width: 16, height: 16,
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.my_location_rounded,
-                  color: Color(0xFF1565C0)),
+              : const Icon(Icons.my_location_rounded, color: Color(0xFF1565C0)),
           label: Text(
-            loading ? 'Localisation en cours…' : 'Utiliser ma position actuelle',
+            loading
+                ? 'Localisation en cours…'
+                : 'Utiliser ma position actuelle',
             style: const TextStyle(color: Color(0xFF1565C0)),
           ),
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: Color(0xFF1565C0)),
             padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
           onPressed: loading ? null : onCapture,
         ),
@@ -1459,11 +1551,12 @@ class _GpsCaptureTile extends StatelessWidget {
             const Icon(Icons.check_circle_rounded,
                 color: Colors.green, size: 16),
             const SizedBox(width: 8),
-            Expanded(child: Text(
+            Expanded(
+                child: Text(
               result!.address.isNotEmpty
                   ? result!.address
                   : '${result!.latitude.toStringAsFixed(4)}, '
-                    '${result!.longitude.toStringAsFixed(4)}',
+                      '${result!.longitude.toStringAsFixed(4)}',
               style: const TextStyle(fontSize: 12, color: Colors.green),
             )),
           ]),
@@ -1475,7 +1568,7 @@ class _GpsCaptureTile extends StatelessWidget {
 
 // ── Sélecteur de zone (Firestore) ───────────────────────────────────────────
 class _ZoneDropdown extends StatefulWidget {
-  final String?  selected;
+  final String? selected;
   final void Function(String name, double? lat, double? lng) onChanged;
   const _ZoneDropdown({required this.selected, required this.onChanged});
   @override
@@ -1506,8 +1599,8 @@ class _ZoneDropdownState extends State<_ZoneDropdown> {
             return {
               'name': data['name'] as String,
               'type': data['type'] as String? ?? '',
-              'lat':  (data['lat']  as num?)?.toDouble(),
-              'lng':  (data['lng']  as num?)?.toDouble(),
+              'lat': (data['lat'] as num?)?.toDouble(),
+              'lng': (data['lng'] as num?)?.toDouble(),
               'parent': data['parentName'] as String? ?? '',
             };
           }).toList();
@@ -1523,7 +1616,10 @@ class _ZoneDropdownState extends State<_ZoneDropdown> {
             final parentName = z['parent'] as String;
             if (parentName.isEmpty) continue;
             final parent = _zones.firstWhere(
-              (p) => p['name'] == parentName && p['lat'] != null && p['lng'] != null,
+              (p) =>
+                  p['name'] == parentName &&
+                  p['lat'] != null &&
+                  p['lng'] != null,
               orElse: () => const {},
             );
             if (parent.isNotEmpty) {
@@ -1560,18 +1656,18 @@ class _ZoneDropdownState extends State<_ZoneDropdown> {
     }
 
     // Regrouper par type
-    final villes    = _zones.where((z) => z['type'] == 'ville').toList();
+    final villes = _zones.where((z) => z['type'] == 'ville').toList();
     final quartiers = _zones.where((z) => z['type'] == 'quartier').toList();
-    final villages  = _zones.where((z) => z['type'] == 'village').toList();
-    final secteurs  = _zones.where((z) => z['type'] == 'secteur').toList();
+    final villages = _zones.where((z) => z['type'] == 'village').toList();
+    final secteurs = _zones.where((z) => z['type'] == 'secteur').toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (villes.isNotEmpty)    _group('Villes',    villes),
+        if (villes.isNotEmpty) _group('Villes', villes),
         if (quartiers.isNotEmpty) _group('Quartiers', quartiers),
-        if (villages.isNotEmpty)  _group('Villages',  villages),
-        if (secteurs.isNotEmpty)  _group('Secteurs',  secteurs),
+        if (villages.isNotEmpty) _group('Villages', villages),
+        if (secteurs.isNotEmpty) _group('Secteurs', secteurs),
       ],
     );
   }
@@ -1592,34 +1688,28 @@ class _ZoneDropdownState extends State<_ZoneDropdown> {
           spacing: 8,
           runSpacing: 8,
           children: zones.map((z) {
-            final name     = z['name'] as String;
+            final name = z['name'] as String;
             final isSelect = widget.selected == name;
             return GestureDetector(
               onTap: () => widget.onChanged(
-                  name,
-                  z['lat'] as double?,
-                  z['lng'] as double?),
+                  name, z['lat'] as double?, z['lng'] as double?),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isSelect
-                      ? AppColors.primary
-                      : Colors.grey.shade100,
+                  color: isSelect ? AppColors.primary : Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isSelect
-                        ? AppColors.primary
-                        : Colors.grey.shade300,
+                    color: isSelect ? AppColors.primary : Colors.grey.shade300,
                   ),
                 ),
                 child: Text(name,
                     style: TextStyle(
                         fontSize: 13,
                         color: isSelect ? Colors.white : Colors.black87,
-                        fontWeight: isSelect
-                            ? FontWeight.bold
-                            : FontWeight.normal)),
+                        fontWeight:
+                            isSelect ? FontWeight.bold : FontWeight.normal)),
               ),
             );
           }).toList(),
@@ -1634,38 +1724,40 @@ class _ZoneDropdownState extends State<_ZoneDropdown> {
 
 class _SectionHeader extends StatelessWidget {
   final IconData icon;
-  final String   title;
+  final String title;
   const _SectionHeader({required this.icon, required this.title});
 
   @override
   Widget build(BuildContext context) => Row(children: [
-    Container(
-      padding:    const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color:        AppColors.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Icon(icon, color: AppColors.primary, size: 18),
-    ),
-    const SizedBox(width: 10),
-    Text(title,
-        style: const TextStyle(
-            fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
-  ]);
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: AppColors.primary, size: 18),
+        ),
+        const SizedBox(width: 10),
+        Text(title,
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87)),
+      ]);
 }
 
 // ── Récapitulatif prix ──────────────────────────────────────────────────────
 
 class _TotalCard extends StatelessWidget {
   final PriceBreakdown breakdown;
-  final int            shoppingBudget;
+  final int shoppingBudget;
   const _TotalCard({required this.breakdown, required this.shoppingBudget});
 
   @override
   Widget build(BuildContext context) {
     final deliveryFee = breakdown.total;
-    final total       = deliveryFee + shoppingBudget;
-    final isNight     = breakdown.isNight;
+    final total = deliveryFee + shoppingBudget;
+    final isNight = breakdown.isNight;
 
     return Container(
       decoration: BoxDecoration(
@@ -1673,29 +1765,40 @@ class _TotalCard extends StatelessWidget {
           colors: isNight
               ? [const Color(0xFF1A237E), const Color(0xFF283593)]
               : [AppColors.primary, const Color(0xFFFFB300)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(
-          color:  (isNight ? Colors.indigo : AppColors.primary).withValues(alpha: 0.4),
-          blurRadius: 16, offset: const Offset(0, 6),
-        )],
+        boxShadow: [
+          BoxShadow(
+            color: (isNight ? Colors.indigo : AppColors.primary)
+                .withValues(alpha: 0.4),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          )
+        ],
       ),
       padding: const EdgeInsets.all(20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Icon(isNight ? Icons.nights_stay : Icons.wb_sunny,
-              color: isNight ? Colors.lightBlueAccent : Colors.yellow, size: 18),
+              color: isNight ? Colors.lightBlueAccent : Colors.yellow,
+              size: 18),
           const SizedBox(width: 8),
           Text(
-            isNight ? 'Tarif nuit — Récapitulatif' : 'Tarif jour — Récapitulatif',
-            style: const TextStyle(color: Colors.white70, fontSize: 13, letterSpacing: 0.5),
+            isNight
+                ? 'Tarif nuit — Récapitulatif'
+                : 'Tarif jour — Récapitulatif',
+            style: const TextStyle(
+                color: Colors.white70, fontSize: 13, letterSpacing: 0.5),
           ),
         ]),
         const SizedBox(height: 16),
-        _line(Icons.shopping_basket_rounded, 'Montant courses', '$shoppingBudget FCFA', shoppingBudget == 0),
+        _line(Icons.shopping_basket_rounded, 'Montant courses',
+            '$shoppingBudget FCFA', shoppingBudget == 0),
         const SizedBox(height: 10),
-        _line(Icons.delivery_dining_rounded, 'Frais de livraison', '$deliveryFee FCFA', false),
+        _line(Icons.delivery_dining_rounded, 'Frais de livraison',
+            '$deliveryFee FCFA', false),
         const SizedBox(height: 10),
         Text(
           '${breakdown.distanceKm.toStringAsFixed(1)} km · ~${breakdown.etaMinutes} min · ${breakdown.detail}',
@@ -1709,22 +1812,32 @@ class _TotalCard extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('TOTAL À PAYER',
-                  style: TextStyle(color: Colors.white70, fontSize: 12,
-                      fontWeight: FontWeight.w600, letterSpacing: 1.2)),
-              SizedBox(height: 4),
-              Text('Courses + Livraison',
-                  style: TextStyle(color: Colors.white38, fontSize: 11)),
-            ]),
+            const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('TOTAL À PAYER',
+                      style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.2)),
+                  SizedBox(height: 4),
+                  Text('Courses + Livraison',
+                      style: TextStyle(color: Colors.white38, fontSize: 11)),
+                ]),
             Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text(_fmt(total),
-                  style: const TextStyle(color: Colors.white, fontSize: 42,
-                      fontWeight: FontWeight.w900, height: 1)),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 42,
+                      fontWeight: FontWeight.w900,
+                      height: 1)),
               const Padding(
                 padding: EdgeInsets.only(bottom: 6, left: 6),
                 child: Text('FCFA',
-                    style: TextStyle(color: Colors.white70, fontSize: 15,
+                    style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 15,
                         fontWeight: FontWeight.bold)),
               ),
             ]),
@@ -1738,13 +1851,14 @@ class _TotalCard extends StatelessWidget {
     return Row(children: [
       Icon(icon, color: Colors.white60, size: 16),
       const SizedBox(width: 10),
-      Expanded(child: Text(label,
-          style: const TextStyle(color: Colors.white70, fontSize: 14))),
+      Expanded(
+          child: Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 14))),
       Text(
         isZero ? 'non renseigné' : value,
         style: TextStyle(
-          color:      isZero ? Colors.white38 : Colors.white,
-          fontSize:   14,
+          color: isZero ? Colors.white38 : Colors.white,
+          fontSize: 14,
           fontWeight: isZero ? FontWeight.normal : FontWeight.bold,
         ),
       ),
@@ -1754,8 +1868,9 @@ class _TotalCard extends StatelessWidget {
   String _fmt(int v) {
     if (v >= 1000) {
       return v.toString().replaceAllMapped(
-        RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]} ',
-      );
+            RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+            (m) => '${m[1]} ',
+          );
     }
     return v.toString();
   }
@@ -1764,10 +1879,10 @@ class _TotalCard extends StatelessWidget {
 // ── Sélecteur mode de paiement ──────────────────────────────────────────────
 
 class _PaymentMethodCard extends StatelessWidget {
-  final String   selected;
-  final int      walletBalance;
-  final int      deliveryFee;
-  final bool     codEnabled;
+  final String selected;
+  final int walletBalance;
+  final int deliveryFee;
+  final bool codEnabled;
   final ValueChanged<String> onChanged;
 
   const _PaymentMethodCard({
@@ -1778,17 +1893,20 @@ class _PaymentMethodCard extends StatelessWidget {
     this.codEnabled = true,
   });
 
-  String _fmt(int v) =>
-      v >= 1000 ? '${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}' : v.toString();
+  String _fmt(int v) => v >= 1000
+      ? '${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}'
+      : v.toString();
 
   @override
   Widget build(BuildContext context) {
     final hasFunds = walletBalance >= deliveryFee;
     return Container(
       decoration: BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
@@ -1797,39 +1915,43 @@ class _PaymentMethodCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color:        AppColors.primary.withValues(alpha: 0.12),
+                color: AppColors.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.payments_rounded, color: AppColors.primary, size: 18),
+              child: const Icon(Icons.payments_rounded,
+                  color: AppColors.primary, size: 18),
             ),
             const SizedBox(width: 10),
             const Text('Mode de paiement',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87)),
           ]),
         ),
         const Divider(height: 1),
         _Option(
-          icon:     Icons.money_rounded,
-          title:    'Espèces à la livraison',
+          icon: Icons.money_rounded,
+          title: 'Espèces à la livraison',
           subtitle: codEnabled
               ? 'Payer le livreur à la livraison'
               : 'Désactivé — 3 fausses commandes détectées',
-          color:    codEnabled ? const Color(0xFF2E7D32) : Colors.grey,
+          color: codEnabled ? const Color(0xFF2E7D32) : Colors.grey,
           selected: selected == 'cash',
-          onTap:    codEnabled ? () => onChanged('cash') : null,
-          badge:    codEnabled ? null : Icons.block_rounded,
+          onTap: codEnabled ? () => onChanged('cash') : null,
+          badge: codEnabled ? null : Icons.block_rounded,
         ),
         const Divider(height: 1, indent: 16, endIndent: 16),
         _Option(
-          icon:     Icons.account_balance_wallet_rounded,
-          title:    'Payer par wallet',
+          icon: Icons.account_balance_wallet_rounded,
+          title: 'Payer par wallet',
           subtitle: hasFunds
               ? 'Solde : ${_fmt(walletBalance)} FCFA'
               : 'Solde insuffisant (${_fmt(walletBalance)} FCFA)',
-          color:    hasFunds ? const Color(0xFF1565C0) : Colors.red,
+          color: hasFunds ? const Color(0xFF1565C0) : Colors.red,
           selected: selected == 'wallet',
-          onTap:    hasFunds ? () => onChanged('wallet') : null,
-          badge:    hasFunds ? null : Icons.warning_amber_rounded,
+          onTap: hasFunds ? () => onChanged('wallet') : null,
+          badge: hasFunds ? null : Icons.warning_amber_rounded,
         ),
         const SizedBox(height: 4),
       ]),
@@ -1838,55 +1960,69 @@ class _PaymentMethodCard extends StatelessWidget {
 }
 
 class _Option extends StatelessWidget {
-  final IconData   icon;
-  final String     title, subtitle;
-  final Color      color;
-  final bool       selected;
+  final IconData icon;
+  final String title, subtitle;
+  final Color color;
+  final bool selected;
   final VoidCallback? onTap;
-  final IconData?  badge;
+  final IconData? badge;
 
   const _Option({
-    required this.icon, required this.title, required this.subtitle,
-    required this.color, required this.selected, this.onTap, this.badge,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.selected,
+    this.onTap,
+    this.badge,
   });
 
   @override
   Widget build(BuildContext context) => InkWell(
-    onTap:        onTap,
-    borderRadius: BorderRadius.circular(12),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(children: [
-        Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(
-            color:        color.withValues(alpha: selected ? 0.18 : 0.08),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, color: color, size: 22),
-        ),
-        const SizedBox(width: 14),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title,
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14,
-                  color: onTap == null ? Colors.grey : Colors.black87)),
-          const SizedBox(height: 2),
-          Row(children: [
-            if (badge != null) ...[
-              Icon(badge, color: Colors.red, size: 13),
-              const SizedBox(width: 3),
-            ],
-            Text(subtitle,
-                style: TextStyle(fontSize: 12,
-                    color: badge != null ? Colors.red : Colors.grey.shade600)),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: selected ? 0.18 : 0.08),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          color: onTap == null ? Colors.grey : Colors.black87)),
+                  const SizedBox(height: 2),
+                  Row(children: [
+                    if (badge != null) ...[
+                      Icon(badge, color: Colors.red, size: 13),
+                      const SizedBox(width: 3),
+                    ],
+                    Text(subtitle,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: badge != null
+                                ? Colors.red
+                                : Colors.grey.shade600)),
+                  ]),
+                ])),
+            if (selected)
+              Icon(Icons.check_circle_rounded, color: color, size: 22)
+            else
+              Icon(Icons.radio_button_unchecked_rounded,
+                  color: Colors.grey.shade400, size: 22),
           ]),
-        ])),
-        if (selected)
-          Icon(Icons.check_circle_rounded, color: color, size: 22)
-        else
-          Icon(Icons.radio_button_unchecked_rounded,
-              color: Colors.grey.shade400, size: 22),
-      ]),
-    ),
-  );
+        ),
+      );
 }

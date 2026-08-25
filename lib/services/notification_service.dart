@@ -92,7 +92,8 @@ class NotificationService {
   Future<void> _syncUnreadCount(String uid) async {
     try {
       final snap = await FirebaseFirestore.instance
-          .collection('clients').doc(uid)
+          .collection('clients')
+          .doc(uid)
           .collection('notifications')
           .where('isRead', isEqualTo: false)
           .count()
@@ -110,14 +111,16 @@ class NotificationService {
     if (n == null) return;
     try {
       await FirebaseFirestore.instance
-          .collection('clients').doc(uid)
-          .collection('notifications').add({
-        'title':     n.title ?? '',
-        'body':      n.body ?? '',
-        'type':      message.data['type'] ?? '',
-        'orderId':   message.data['orderId'],
-        'status':    message.data['status'],
-        'isRead':    false,
+          .collection('clients')
+          .doc(uid)
+          .collection('notifications')
+          .add({
+        'title': n.title ?? '',
+        'body': n.body ?? '',
+        'type': message.data['type'] ?? '',
+        'orderId': message.data['orderId'],
+        'status': message.data['status'],
+        'isRead': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
       unreadCount.value++;
@@ -128,7 +131,8 @@ class NotificationService {
   static Future<void> markAllRead(String uid) async {
     try {
       final snap = await FirebaseFirestore.instance
-          .collection('clients').doc(uid)
+          .collection('clients')
+          .doc(uid)
           .collection('notifications')
           .where('isRead', isEqualTo: false)
           .get();
@@ -146,8 +150,11 @@ class NotificationService {
   static Future<void> deleteNotification(String uid, String notifId) async {
     try {
       await FirebaseFirestore.instance
-          .collection('clients').doc(uid)
-          .collection('notifications').doc(notifId).delete();
+          .collection('clients')
+          .doc(uid)
+          .collection('notifications')
+          .doc(notifId)
+          .delete();
     } catch (_) {}
   }
 
@@ -155,7 +162,8 @@ class NotificationService {
   static Stream<QuerySnapshot<Map<String, dynamic>>> streamNotifications(
       String uid) {
     return FirebaseFirestore.instance
-        .collection('clients').doc(uid)
+        .collection('clients')
+        .doc(uid)
         .collection('notifications')
         .orderBy('createdAt', descending: true)
         .limit(100)
@@ -168,8 +176,7 @@ class NotificationService {
     FirebaseFirestore.instance
         .collection(_userCollection!)
         .doc(_userId!)
-        .set({'fcmToken': token}, SetOptions(merge: true))
-        .catchError((e) {
+        .set({'fcmToken': token}, SetOptions(merge: true)).catchError((e) {
       debugPrint('[NotificationService] Erreur refresh token FCM : $e');
     });
   }
@@ -190,9 +197,9 @@ class NotificationService {
 
   // ── Tap sur notification → navigation ─────────────────────────────
   void _handleTap(RemoteMessage message) {
-    final type    = message.data['type']    as String?;
+    final type = message.data['type'] as String?;
     final orderId = message.data['orderId'] as String?;
-    final status  = message.data['status']  as String?;
+    final status = message.data['status'] as String?;
     _tapCallback?.call(type ?? '', orderId, status);
   }
 

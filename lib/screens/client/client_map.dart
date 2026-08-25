@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,20 +17,19 @@ import 'blanchisserie_page.dart';
 import 'colis_page.dart';
 import 'eau_boissons_page.dart';
 import 'boutique_page.dart';
-import 'locations_page.dart';
 import 'services_hub_page.dart';
 import 'simple_service_page.dart';
-import 'residences_page.dart';
 import 'client_wallet_page.dart';
 import 'boulangeries_list.dart';
 import '../immobilier/immobilier_home_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../event/screens/event_home_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTES
 // ─────────────────────────────────────────────────────────────────────────────
 const LatLng _abengourou = LatLng(6.7273, -3.4961);
-const Color _primary     = AppColors.primary;
+const Color _primary = AppColors.primary;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ÉTAT PERMISSION
@@ -49,13 +48,12 @@ class ClientMap extends StatefulWidget {
 
 class _ClientMapState extends State<ClientMap>
     with SingleTickerProviderStateMixin {
-
   GoogleMapController? _mapController;
-  LatLng?              _clientPosition;
-  _PermState           _permState = _PermState.checking;
-  Set<Marker>          _markers   = {};
+  LatLng? _clientPosition;
+  _PermState _permState = _PermState.checking;
+  Set<Marker> _markers = {};
   StreamSubscription<QuerySnapshot>? _driversSub;
-  int                  _onlineDrivers = 0;
+  int _onlineDrivers = 0;
 
   // Icônes cachées pour éviter de les recréer à chaque update
   BitmapDescriptor? _driverIcon;
@@ -63,8 +61,8 @@ class _ClientMapState extends State<ClientMap>
 
   // Animation du panneau inférieur
   late AnimationController _panelCtrl;
-  late Animation<Offset>   _panelSlide;
-  late Animation<double>   _panelFade;
+  late Animation<Offset> _panelSlide;
+  late Animation<double> _panelFade;
 
   // ── Initialisation ──────────────────────────────────────────────────────────
   @override
@@ -82,7 +80,7 @@ class _ClientMapState extends State<ClientMap>
     );
     _panelSlide = Tween<Offset>(
       begin: const Offset(0, 1),
-      end:   Offset.zero,
+      end: Offset.zero,
     ).animate(CurvedAnimation(parent: _panelCtrl, curve: Curves.easeOutCubic));
     _panelFade = CurvedAnimation(parent: _panelCtrl, curve: Curves.easeOut);
     Future.delayed(const Duration(milliseconds: 200), () {
@@ -98,9 +96,11 @@ class _ClientMapState extends State<ClientMap>
         'assets/motorbike.png',
       );
     } catch (_) {
-      _driverIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+      _driverIcon =
+          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
     }
-    _clientIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
+    _clientIcon =
+        BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
   }
 
   @override
@@ -146,15 +146,14 @@ class _ClientMapState extends State<ClientMap>
     try {
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy:       LocationAccuracy.high,
-          timeLimit:      Duration(seconds: 10),
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
         ),
       );
       if (!mounted) return;
       final latlng = LatLng(pos.latitude, pos.longitude);
       setState(() => _clientPosition = latlng);
-      _mapController?.animateCamera(
-          CameraUpdate.newLatLngZoom(latlng, 15));
+      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(latlng, 15));
       _updateClientMarker(latlng);
     } on LocationServiceDisabledException {
       if (mounted) setState(() => _permState = _PermState.serviceOff);
@@ -170,7 +169,8 @@ class _ClientMapState extends State<ClientMap>
       markerId: const MarkerId('client'),
       position: pos,
       infoWindow: const InfoWindow(title: 'Vous'),
-      icon: _clientIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+      icon: _clientIcon ??
+          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
       zIndexInt: 2,
     ));
     if (mounted) setState(() => _markers = newMarkers);
@@ -199,7 +199,8 @@ class _ClientMapState extends State<ClientMap>
         markerId: const MarkerId('client'),
         position: _clientPosition!,
         infoWindow: const InfoWindow(title: 'Vous'),
-        icon: _clientIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        icon: _clientIcon ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         zIndexInt: 2,
       ));
     }
@@ -207,8 +208,8 @@ class _ClientMapState extends State<ClientMap>
     // Marqueurs livreurs
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final lat  = (data['lat'] as num?)?.toDouble() ?? 0;
-      final lng  = (data['lng'] as num?)?.toDouble() ?? 0;
+      final lat = (data['lat'] as num?)?.toDouble() ?? 0;
+      final lng = (data['lng'] as num?)?.toDouble() ?? 0;
       if (lat == 0 || lng == 0) continue;
 
       newMarkers.add(Marker(
@@ -218,13 +219,14 @@ class _ClientMapState extends State<ClientMap>
           title: data['name'] as String? ?? 'Livreur',
           snippet: data['vehicle'] as String? ?? '',
         ),
-        icon: _driverIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+        icon: _driverIcon ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         zIndexInt: 1,
       ));
     }
 
     setState(() {
-      _markers       = newMarkers;
+      _markers = newMarkers;
       _onlineDrivers = snapshot.docs.length;
     });
   }
@@ -265,8 +267,8 @@ class _ClientMapState extends State<ClientMap>
 
   void _recenter() {
     if (_clientPosition != null) {
-      _mapController?.animateCamera(
-          CameraUpdate.newLatLngZoom(_clientPosition!, 15));
+      _mapController
+          ?.animateCamera(CameraUpdate.newLatLngZoom(_clientPosition!, 15));
     } else {
       _checkPermissionAndLocate();
     }
@@ -286,14 +288,14 @@ class _ClientMapState extends State<ClientMap>
             GoogleMap(
               initialCameraPosition: CameraPosition(
                 target: _clientPosition ?? _abengourou,
-                zoom:   _clientPosition != null ? 15 : 13,
+                zoom: _clientPosition != null ? 15 : 13,
               ),
-              myLocationEnabled:       _permState == _PermState.granted,
+              myLocationEnabled: _permState == _PermState.granted,
               myLocationButtonEnabled: false,
-              zoomControlsEnabled:     false,
-              mapToolbarEnabled:       false,
-              compassEnabled:          false,
-              markers:                 _markers,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              compassEnabled: false,
+              markers: _markers,
               onMapCreated: (ctrl) {
                 _mapController = ctrl;
                 if (_clientPosition != null) {
@@ -316,8 +318,8 @@ class _ClientMapState extends State<ClientMap>
 
             // ── BARRE DE RECHERCHE + BADGE LIVREURS ──────────────────────
             Positioned(
-              top:   MediaQuery.of(context).padding.top + 12,
-              left:  16,
+              top: MediaQuery.of(context).padding.top + 12,
+              left: 16,
               right: 16,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -325,7 +327,7 @@ class _ClientMapState extends State<ClientMap>
                   // Ligne 1 : badge livreurs + recentrage
                   Row(children: [
                     _DriversBadge(
-                      count:     _onlineDrivers,
+                      count: _onlineDrivers,
                       permState: _permState,
                     ),
                     const Spacer(),
@@ -333,10 +335,12 @@ class _ClientMapState extends State<ClientMap>
                   ]),
                   const SizedBox(height: 10),
                   // Ligne 2 : barre de recherche
-                  _SearchBar(onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const LivraisonScreen()),
-                  )),
+                  _SearchBar(
+                      onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const LivraisonScreen()),
+                          )),
                 ],
               ),
             ),
@@ -344,13 +348,13 @@ class _ClientMapState extends State<ClientMap>
             // ── PANNEAU INFÉRIEUR ─────────────────────────────────────────
             Positioned(
               bottom: 0,
-              left:   0,
-              right:  0,
+              left: 0,
+              right: 0,
               child: SlideTransition(
                 position: _panelSlide,
                 child: FadeTransition(
                   opacity: _panelFade,
-                  child:   _BottomPanel(onlineDrivers: _onlineDrivers),
+                  child: _BottomPanel(onlineDrivers: _onlineDrivers),
                 ),
               ),
             ),
@@ -379,7 +383,7 @@ class _DriversBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color:  Colors.black.withValues(alpha: 0.12),
+            color: Colors.black.withValues(alpha: 0.12),
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
@@ -390,11 +394,11 @@ class _DriversBadge extends StatelessWidget {
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 400),
-            width: 8, height: 8,
+            width: 8,
+            height: 8,
             decoration: BoxDecoration(
-              color: isAvailable
-                  ? const Color(0xFF22C55E)
-                  : Colors.grey.shade400,
+              color:
+                  isAvailable ? const Color(0xFF22C55E) : Colors.grey.shade400,
               shape: BoxShape.circle,
             ),
           ),
@@ -407,8 +411,8 @@ class _DriversBadge extends StatelessWidget {
                     : context.tr('no_driver'),
             style: GoogleFonts.urbanist(
               fontWeight: FontWeight.w600,
-              fontSize:   13,
-              color:      Colors.black87,
+              fontSize: 13,
+              color: Colors.black87,
             ),
           ),
         ],
@@ -429,13 +433,14 @@ class _RecenterButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 44, height: 44,
+        width: 44,
+        height: 44,
         decoration: BoxDecoration(
           color: Colors.white,
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color:  Colors.black.withValues(alpha: 0.12),
+              color: Colors.black.withValues(alpha: 0.12),
               blurRadius: 14,
               offset: const Offset(0, 4),
             ),
@@ -461,26 +466,27 @@ class _PermissionBanner extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color:        Colors.orange.shade50,
+          color: Colors.orange.shade50,
           borderRadius: BorderRadius.circular(20),
-          border:       Border.all(color: Colors.orange.shade300),
+          border: Border.all(color: Colors.orange.shade300),
           boxShadow: [
             BoxShadow(
-              color:  Colors.black.withValues(alpha: 0.08),
+              color: Colors.black.withValues(alpha: 0.08),
               blurRadius: 8,
             ),
           ],
         ),
         child: Row(
           children: [
-            Icon(Icons.location_off_rounded, color: Colors.orange.shade700, size: 20),
+            Icon(Icons.location_off_rounded,
+                color: Colors.orange.shade700, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 'GPS désactivé — Appuyez pour activer la localisation',
                 style: GoogleFonts.urbanist(
                   fontSize: 12,
-                  color:    Colors.orange.shade800,
+                  color: Colors.orange.shade800,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -513,9 +519,9 @@ class _SearchBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(30),
           boxShadow: [
             BoxShadow(
-              color:      Colors.black.withValues(alpha: 0.15),
+              color: Colors.black.withValues(alpha: 0.15),
               blurRadius: 16,
-              offset:     const Offset(0, 4),
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -526,19 +532,21 @@ class _SearchBar extends StatelessWidget {
             child: Text(
               'Où allez-vous ?',
               style: GoogleFonts.urbanist(
-                fontSize:   16,
-                color:      Colors.grey.shade500,
+                fontSize: 16,
+                color: Colors.grey.shade500,
                 fontWeight: FontWeight.w400,
               ),
             ),
           ),
           Container(
-            width: 40, height: 40,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color:  AppColors.primary.withValues(alpha: 0.1),
+              color: AppColors.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.mic_rounded, color: AppColors.primary, size: 20),
+            child: const Icon(Icons.mic_rounded,
+                color: AppColors.primary, size: 20),
           ),
         ]),
       ),
@@ -558,8 +566,8 @@ class _BottomPanel extends StatefulWidget {
 }
 
 class _BottomPanelState extends State<_BottomPanel> {
-  int    _walletBalance = 0;
-  String _clientName   = '';
+  int _walletBalance = 0;
+  String _clientName = '';
   StreamSubscription<DocumentSnapshot>? _clientSub;
 
   @override
@@ -580,7 +588,7 @@ class _BottomPanelState extends State<_BottomPanel> {
       final d = snap.data();
       setState(() {
         _walletBalance = (d?['wallet'] as num?)?.toInt() ?? 0;
-        _clientName    = (d?['name']   as String?) ?? '';
+        _clientName = (d?['name'] as String?) ?? '';
       });
     }, onError: (_) {});
   }
@@ -591,9 +599,8 @@ class _BottomPanelState extends State<_BottomPanel> {
     super.dispose();
   }
 
-  String get _firstName => _clientName.isNotEmpty
-      ? _clientName.split(' ').first
-      : '';
+  String get _firstName =>
+      _clientName.isNotEmpty ? _clientName.split(' ').first : '';
 
   static String _fmtWallet(int v) {
     if (v >= 1000) {
@@ -614,17 +621,18 @@ class _BottomPanelState extends State<_BottomPanel> {
             maxHeight: MediaQuery.of(ctx).size.height * 0.82,
           ),
           decoration: const BoxDecoration(
-            color:        Colors.white,
+            color: Colors.white,
             borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 40, height: 4,
+                width: 40,
+                height: 4,
                 margin: const EdgeInsets.only(top: 12, bottom: 16),
                 decoration: BoxDecoration(
-                  color:        Colors.grey.shade300,
+                  color: Colors.grey.shade300,
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
@@ -635,9 +643,9 @@ class _BottomPanelState extends State<_BottomPanel> {
                   child: Text(
                     ctx.tr('more_services'),
                     style: GoogleFonts.urbanist(
-                      fontSize:   18,
+                      fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color:      Colors.black87,
+                      color: Colors.black87,
                     ),
                   ),
                 ),
@@ -647,21 +655,61 @@ class _BottomPanelState extends State<_BottomPanel> {
                 child: SingleChildScrollView(
                   padding: EdgeInsets.fromLTRB(20, 0, 20, 24 + bottom),
                   child: const Wrap(
-                    spacing: 12, runSpacing: 12,
+                    spacing: 12,
+                    runSpacing: 12,
                     children: [
-                      _PlusCard(icon: Icons.bakery_dining_rounded,        routeKey: 'boulangerie',    color: Color(0xFF5D4037)),
-                      _PlusCard(icon: Icons.storefront_rounded,           routeKey: 'boutique',       color: Colors.deepOrange),
-                      _PlusCard(icon: Icons.local_pharmacy_rounded,       routeKey: 'pharmacy',       color: Colors.red),
-                      _PlusCard(icon: Icons.local_laundry_service_rounded, routeKey: 'laundry',       color: Colors.blue),
-                      _PlusCard(icon: Icons.card_giftcard_rounded,        routeKey: 'parcel',         color: Colors.orange),
-                      _PlusCard(icon: Icons.water_drop_rounded,           routeKey: 'water',          color: Colors.teal),
-                      _PlusCard(icon: Icons.home_rounded,                 routeKey: 'houses',         color: Color(0xFF00695C)),
-                      _PlusCard(icon: Icons.apartment_rounded,            routeKey: 'furnished',      color: Color(0xFF4A148C)),
-                      _PlusCard(icon: Icons.villa_rounded,                routeKey: 'real_estate',    color: Color(0xFF00838F)),
-                      _PlusCard(icon: Icons.construction_rounded,         routeKey: 'local_services', color: Color(0xFF1565C0)),
-                      _PlusCard(icon: Icons.wine_bar_rounded,             routeKey: 'cave',           color: Color(0xFF880E4F)),
-                      _PlusCard(icon: Icons.electric_rickshaw_rounded,    routeKey: 'tricycle',       color: Color(0xFF6D4C41)),
-                      _PlusCard(icon: Icons.local_taxi_rounded,           routeKey: 'night_taxi',     color: Color(0xFF37474F)),
+                      _PlusCard(
+                          icon: Icons.bakery_dining_rounded,
+                          routeKey: 'boulangerie',
+                          color: Color(0xFF5D4037)),
+                      _PlusCard(
+                          icon: Icons.storefront_rounded,
+                          routeKey: 'boutique',
+                          color: Colors.deepOrange),
+                      _PlusCard(
+                          icon: Icons.local_pharmacy_rounded,
+                          routeKey: 'pharmacy',
+                          color: Colors.red),
+                      _PlusCard(
+                          icon: Icons.local_laundry_service_rounded,
+                          routeKey: 'laundry',
+                          color: Colors.blue),
+                      _PlusCard(
+                          icon: Icons.card_giftcard_rounded,
+                          routeKey: 'parcel',
+                          color: Colors.orange),
+                      _PlusCard(
+                          icon: Icons.water_drop_rounded,
+                          routeKey: 'water',
+                          color: Colors.teal),
+                      _PlusCard(
+                          icon: Icons.home_rounded,
+                          routeKey: 'houses',
+                          color: Color(0xFF00695C)),
+                      _PlusCard(
+                          icon: Icons.apartment_rounded,
+                          routeKey: 'furnished',
+                          color: Color(0xFF4A148C)),
+                      _PlusCard(
+                          icon: Icons.villa_rounded,
+                          routeKey: 'real_estate',
+                          color: Color(0xFF00838F)),
+                      _PlusCard(
+                          icon: Icons.construction_rounded,
+                          routeKey: 'local_services',
+                          color: Color(0xFF1565C0)),
+                      _PlusCard(
+                          icon: Icons.wine_bar_rounded,
+                          routeKey: 'cave',
+                          color: Color(0xFF880E4F)),
+                      _PlusCard(
+                          icon: Icons.electric_rickshaw_rounded,
+                          routeKey: 'tricycle',
+                          color: Color(0xFF6D4C41)),
+                      _PlusCard(
+                          icon: Icons.local_taxi_rounded,
+                          routeKey: 'night_taxi',
+                          color: Color(0xFF37474F)),
                     ],
                   ),
                 ),
@@ -684,9 +732,9 @@ class _BottomPanelState extends State<_BottomPanel> {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         boxShadow: [
           BoxShadow(
-            color:      Colors.black.withValues(alpha: 0.15),
+            color: Colors.black.withValues(alpha: 0.15),
             blurRadius: 24,
-            offset:     const Offset(0, -4),
+            offset: const Offset(0, -4),
           ),
         ],
       ),
@@ -695,10 +743,11 @@ class _BottomPanelState extends State<_BottomPanel> {
         children: [
           // Drag handle
           Container(
-            width: 40, height: 4,
+            width: 40,
+            height: 4,
             margin: const EdgeInsets.only(top: 10, bottom: 16),
             decoration: BoxDecoration(
-              color:        Colors.grey.shade300,
+              color: Colors.grey.shade300,
               borderRadius: BorderRadius.circular(4),
             ),
           ),
@@ -718,10 +767,10 @@ class _BottomPanelState extends State<_BottomPanel> {
                             ? '${context.tr('hello')} $_firstName 👋'
                             : context.tr('hello'),
                         style: GoogleFonts.urbanist(
-                          fontSize:   18,
+                          fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color:      Colors.black87,
-                          height:     1.2,
+                          color: Colors.black87,
+                          height: 1.2,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -729,7 +778,7 @@ class _BottomPanelState extends State<_BottomPanel> {
                         context.tr('where_send'),
                         style: GoogleFonts.urbanist(
                           fontSize: 12.5,
-                          color:    Colors.grey.shade500,
+                          color: Colors.grey.shade500,
                         ),
                       ),
                     ],
@@ -741,8 +790,7 @@ class _BottomPanelState extends State<_BottomPanel> {
                 GestureDetector(
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const ClientWalletPage()),
+                    MaterialPageRoute(builder: (_) => const ClientWalletPage()),
                   ),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -750,15 +798,15 @@ class _BottomPanelState extends State<_BottomPanel> {
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         colors: [_primary, Color(0xFFFF8F00)],
-                        begin:  Alignment.topLeft,
-                        end:    Alignment.bottomRight,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
                       borderRadius: BorderRadius.circular(18),
                       boxShadow: [
                         BoxShadow(
-                          color:      _primary.withValues(alpha: 0.35),
+                          color: _primary.withValues(alpha: 0.35),
                           blurRadius: 10,
-                          offset:     const Offset(0, 4),
+                          offset: const Offset(0, 4),
                         ),
                       ],
                     ),
@@ -771,8 +819,8 @@ class _BottomPanelState extends State<_BottomPanel> {
                         Text(
                           '${_fmtWallet(_walletBalance)} F',
                           style: GoogleFonts.urbanist(
-                            color:      Colors.white,
-                            fontSize:   13,
+                            color: Colors.white,
+                            fontSize: 13,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -797,20 +845,24 @@ class _BottomPanelState extends State<_BottomPanel> {
                 Row(children: [
                   // ── Livraison ──────────────────────────────────────────
                   _ServiceCard(
-                    icon:  Icons.delivery_dining_rounded,
+                    icon: Icons.delivery_dining_rounded,
                     label: 'Livraison',
+                    description: 'Envoyer un colis rapidement',
                     color: _primary,
-                    onTap: () => Navigator.push(context,
+                    onTap: () => Navigator.push(
+                        context,
                         MaterialPageRoute(
                             builder: (_) => const LivraisonScreen())),
                   ),
                   const SizedBox(width: 12),
                   // ── Courses ────────────────────────────────────────────
                   _ServiceCard(
-                    icon:  Icons.shopping_basket_rounded,
+                    icon: Icons.shopping_basket_rounded,
                     label: 'Courses',
+                    description: 'Vos achats du quotidien',
                     color: const Color(0xFF2E7D32),
-                    onTap: () => Navigator.push(context,
+                    onTap: () => Navigator.push(
+                        context,
                         MaterialPageRoute(
                             builder: (_) => const CoursesScreen())),
                   ),
@@ -819,21 +871,40 @@ class _BottomPanelState extends State<_BottomPanel> {
                 Row(children: [
                   // ── Food ───────────────────────────────────────────────
                   _ServiceCard(
-                    icon:  Icons.restaurant_rounded,
+                    icon: Icons.restaurant_rounded,
                     label: 'Food',
+                    description: 'Commandez vos repas',
                     color: const Color(0xFF1565C0),
-                    onTap: () => Navigator.push(context,
+                    onTap: () => Navigator.push(
+                        context,
                         MaterialPageRoute(
                             builder: (_) => const RestaurantList())),
                   ),
                   const SizedBox(width: 12),
                   // ── Plus de services ───────────────────────────────────
                   _ServiceCard(
-                    icon:  Icons.grid_view_rounded,
+                    icon: Icons.grid_view_rounded,
                     label: context.tr('more_services'),
+                    description: 'Découvrir tous les services',
                     color: const Color(0xFF6A1B9A),
                     onTap: () => _showPlusMenu(context),
                   ),
+                ]),
+                const SizedBox(height: 12),
+                Row(children: [
+                  _ServiceCard(
+                    icon: Icons.celebration_rounded,
+                    label: 'Événementiel',
+                    description: 'Location, déco, traiteur & personnel',
+                    color: const Color(0xFF8E24AA),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const EventHomeScreen()),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Spacer(),
                 ]),
               ],
             ),
@@ -851,13 +922,15 @@ class _BottomPanelState extends State<_BottomPanel> {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ServiceCard extends StatefulWidget {
   final IconData icon;
-  final String   label;
-  final Color    color;
+  final String label;
+  final String description;
+  final Color color;
   final VoidCallback onTap;
 
   const _ServiceCard({
     required this.icon,
     required this.label,
+    required this.description,
     required this.color,
     required this.onTap,
   });
@@ -873,19 +946,22 @@ class _ServiceCardState extends State<_ServiceCard> {
   Widget build(BuildContext context) {
     return Expanded(
       child: GestureDetector(
-        onTapDown:  (_) => setState(() => _pressed = true),
-        onTapUp:    (_) { setState(() => _pressed = false); widget.onTap(); },
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) {
+          setState(() => _pressed = false);
+          widget.onTap();
+        },
         onTapCancel: () => setState(() => _pressed = false),
         child: AnimatedScale(
-          scale:    _pressed ? 0.94 : 1.0,
+          scale: _pressed ? 0.94 : 1.0,
           duration: const Duration(milliseconds: 100),
-          curve:    Curves.easeOut,
+          curve: Curves.easeOut,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 100),
-            height: 72,
+            height: 88,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color:  widget.color.withValues(alpha: _pressed ? 0.15 : 0.08),
+              color: widget.color.withValues(alpha: _pressed ? 0.15 : 0.08),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
                 color: widget.color.withValues(alpha: 0.25),
@@ -893,10 +969,11 @@ class _ServiceCardState extends State<_ServiceCard> {
               ),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.start,
               children: [
                 Container(
-                  width: 40, height: 40,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: widget.color.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
@@ -904,17 +981,34 @@ class _ServiceCardState extends State<_ServiceCard> {
                   child: Icon(widget.icon, color: widget.color, size: 20),
                 ),
                 const SizedBox(width: 9),
-                Flexible(
-                  child: Text(
-                    widget.label,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.urbanist(
-                      fontSize:   12,
-                      fontWeight: FontWeight.w600,
-                      color:      Colors.black87,
-                      height:     1.3,
-                    ),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.urbanist(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        widget.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.urbanist(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w400,
+                          color: Colors.black54,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -931,8 +1025,8 @@ class _ServiceCardState extends State<_ServiceCard> {
 // ─────────────────────────────────────────────────────────────────────────────
 class _PlusCard extends StatefulWidget {
   final IconData icon;
-  final String   routeKey;
-  final Color    color;
+  final String routeKey;
+  final Color color;
 
   const _PlusCard({
     required this.icon,
@@ -949,48 +1043,75 @@ class _PlusCardState extends State<_PlusCard> {
 
   void _navigate(BuildContext context) {
     Navigator.pop(context);
-    final title    = context.tr(widget.routeKey);
+    final title = context.tr(widget.routeKey);
     final subtitle = context.tr('${widget.routeKey}_sub');
     Widget? page;
     switch (widget.routeKey) {
-      case 'boulangerie':    page = const BoulangeriesList();   break;
-      case 'boutique':       page = const BoutiquePage();       break;
-      case 'pharmacy':       page = const PharmacieGardePage(); break;
-      case 'laundry':        page = const BlanchisseriePage();  break;
-      case 'parcel':         page = const ColisPage();          break;
-      case 'water':          page = const EauBoissonsPage();    break;
-      case 'houses':         page = const LocationsPage();      break;
-      case 'furnished':      page = const ResidencesPage();     break;
-      case 'real_estate':    page = const ImmobilierHomeScreen(); break;
-      case 'local_services': page = const ServicesHubPage();    break;
+      case 'boulangerie':
+        page = const BoulangeriesList();
+        break;
+      case 'boutique':
+        page = const BoutiquePage();
+        break;
+      case 'pharmacy':
+        page = const PharmacieGardePage();
+        break;
+      case 'laundry':
+        page = const BlanchisseriePage();
+        break;
+      case 'parcel':
+        page = const ColisPage();
+        break;
+      case 'water':
+        page = const EauBoissonsPage();
+        break;
+      case 'houses':
+        page = const ImmobilierHomeScreen(
+          initialPriceType: 'rent',
+          initialPropertyType: 'Maison',
+        );
+        break;
+      case 'furnished':
+        page = const ImmobilierHomeScreen(
+          initialPriceType: 'rent',
+          initialPropertyType: 'Résidence meublée',
+          initialFurnished: true,
+        );
+        break;
+      case 'real_estate':
+        page = const ImmobilierHomeScreen();
+        break;
+      case 'local_services':
+        page = const ServicesHubPage();
+        break;
       case 'cave':
         page = SimpleServicePage(
           serviceType: 'cave',
-          title:    title,
+          title: title,
           subtitle: subtitle,
-          icon:     Icons.wine_bar_rounded,
+          icon: Icons.wine_bar_rounded,
           gradient: const [Color(0xFF880E4F), Color(0xFFAD1457)],
-          color:    widget.color,
+          color: widget.color,
         );
         break;
       case 'tricycle':
         page = SimpleServicePage(
           serviceType: 'tricycle',
-          title:    title,
+          title: title,
           subtitle: subtitle,
-          icon:     Icons.electric_rickshaw_rounded,
+          icon: Icons.electric_rickshaw_rounded,
           gradient: const [Color(0xFF4E342E), Color(0xFF8D6E63)],
-          color:    widget.color,
+          color: widget.color,
         );
         break;
       case 'night_taxi':
         page = SimpleServicePage(
           serviceType: 'taxi_nuit',
-          title:    title,
+          title: title,
           subtitle: subtitle,
-          icon:     Icons.local_taxi_rounded,
+          icon: Icons.local_taxi_rounded,
           gradient: const [Color(0xFF263238), Color(0xFF546E7A)],
-          color:    widget.color,
+          color: widget.color,
         );
         break;
     }
@@ -1004,11 +1125,14 @@ class _PlusCardState extends State<_PlusCard> {
     final cardWidth = (MediaQuery.of(context).size.width - 40 - 24) / 3;
 
     return GestureDetector(
-      onTapDown:   (_) => setState(() => _pressed = true),
-      onTapUp:     (_) { setState(() => _pressed = false); _navigate(context); },
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        _navigate(context);
+      },
       onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedScale(
-        scale:    _pressed ? 0.93 : 1.0,
+        scale: _pressed ? 0.93 : 1.0,
         duration: const Duration(milliseconds: 100),
         child: SizedBox(
           width: cardWidth,
@@ -1016,16 +1140,17 @@ class _PlusCardState extends State<_PlusCard> {
             duration: const Duration(milliseconds: 100),
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
             decoration: BoxDecoration(
-              color:        widget.color.withValues(alpha: _pressed ? 0.15 : 0.07),
+              color: widget.color.withValues(alpha: _pressed ? 0.15 : 0.07),
               borderRadius: BorderRadius.circular(20),
-              border:       Border.all(
+              border: Border.all(
                   color: widget.color.withValues(alpha: 0.22), width: 1.5),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  width: 44, height: 44,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
                     color: widget.color.withValues(alpha: 0.14),
                     shape: BoxShape.circle,
@@ -1036,13 +1161,13 @@ class _PlusCardState extends State<_PlusCard> {
                 Text(
                   context.tr(widget.routeKey),
                   textAlign: TextAlign.center,
-                  maxLines:  2,
-                  overflow:  TextOverflow.ellipsis,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.urbanist(
-                    fontSize:   12,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color:      Colors.black87,
-                    height:     1.3,
+                    color: Colors.black87,
+                    height: 1.3,
                   ),
                 ),
               ],
@@ -1053,4 +1178,3 @@ class _PlusCardState extends State<_PlusCard> {
     );
   }
 }
-

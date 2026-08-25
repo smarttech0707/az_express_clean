@@ -62,7 +62,10 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final since = DateTime.now().subtract(const Duration(days: 7));
       final sinceStr = since.toIso8601String().substring(0, 10);
@@ -78,7 +81,8 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
       for (final doc in dailySnap.docs) {
         final d = doc.data();
         final provider = d['provider'] as String? ?? 'inconnu';
-        final stat = summary.byProvider.putIfAbsent(provider, () => _ProviderStat());
+        final stat =
+            summary.byProvider.putIfAbsent(provider, () => _ProviderStat());
         final requests = (d['requestCount'] as num?)?.toInt() ?? 0;
         final errors = (d['errorCount'] as num?)?.toInt() ?? 0;
         final cacheHits = (d['cacheHitCount'] as num?)?.toInt() ?? 0;
@@ -137,12 +141,14 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
             toolSummary.errorCount++;
           }
           if (d['hitTurnCap'] == true) toolSummary.hitTurnCapCount++;
-          toolSummary.totalDurationMs += ((d['durationMs'] as num?)?.toInt() ?? 0);
+          toolSummary.totalDurationMs +=
+              ((d['durationMs'] as num?)?.toInt() ?? 0);
           final tools = d['toolsUsed'];
           if (tools is List) {
             for (final t in tools) {
               final key = t.toString();
-              toolSummary.toolUsage[key] = (toolSummary.toolUsage[key] ?? 0) + 1;
+              toolSummary.toolUsage[key] =
+                  (toolSummary.toolUsage[key] ?? 0) + 1;
             }
           }
         }
@@ -157,7 +163,10 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _error = 'Erreur de chargement : $e'; _loading = false; });
+      setState(() {
+        _error = 'Erreur de chargement : $e';
+        _loading = false;
+      });
     }
   }
 
@@ -171,36 +180,47 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
         foregroundColor: Colors.white,
         centerTitle: true,
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loading ? null : _load),
+          IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loading ? null : _load),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
+              ? Center(
+                  child:
+                      Text(_error!, style: const TextStyle(color: Colors.red)))
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
                     padding: const EdgeInsets.all(14),
                     children: [
-                      Text('7 derniers jours', style: TextStyle(color: Colors.grey.shade600, fontSize: 12.5)),
+                      Text('7 derniers jours',
+                          style: TextStyle(
+                              color: Colors.grey.shade600, fontSize: 12.5)),
                       const SizedBox(height: 8),
                       _buildSummaryGrid(),
                       const SizedBox(height: 20),
                       _sectionTitle('Répartition par fournisseur'),
                       _buildProviderTable(),
                       const SizedBox(height: 20),
-                      _sectionTitle('Erreurs récentes (${_recentErrors.length})'),
+                      _sectionTitle(
+                          'Erreurs récentes (${_recentErrors.length})'),
                       _buildErrorsList(),
                       if (widget.isSuper) ...[
                         const SizedBox(height: 20),
-                        _sectionTitle('Outils AZ IA (super-admin, échantillon récent)'),
+                        _sectionTitle(
+                            'Outils AZ IA (super-admin, échantillon récent)'),
                         _buildToolSection(),
                       ] else ...[
                         const SizedBox(height: 20),
                         Text(
                           'Section "Outils AZ IA" réservée aux super-admins.',
-                          style: TextStyle(color: Colors.grey.shade500, fontSize: 12.5, fontStyle: FontStyle.italic),
+                          style: TextStyle(
+                              color: Colors.grey.shade500,
+                              fontSize: 12.5,
+                              fontStyle: FontStyle.italic),
                         ),
                       ],
                     ],
@@ -211,27 +231,60 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
 
   Widget _sectionTitle(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+        child: Text(text,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
       );
 
   Widget _buildSummaryGrid() {
     final s = _summary!;
-    final avgLatencyMs = s.requests > 0 ? (s.totalResponseMs / s.requests).round() : 0;
+    final avgLatencyMs =
+        s.requests > 0 ? (s.totalResponseMs / s.requests).round() : 0;
     final cacheableTotal = s.requests + s.cacheHits;
-    final cacheHitRate = cacheableTotal > 0 ? (s.cacheHits / cacheableTotal * 100).toStringAsFixed(0) : '0';
+    final cacheHitRate = cacheableTotal > 0
+        ? (s.cacheHits / cacheableTotal * 100).toStringAsFixed(0)
+        : '0';
 
     final tiles = [
-      _StatTile(label: 'Appels IA', value: '${s.requests}', icon: Icons.forum_outlined, color: const Color(0xFF3949AB)),
-      _StatTile(label: 'Coût estimé', value: '\$${s.cost.toStringAsFixed(4)}', icon: Icons.payments_outlined, color: const Color(0xFF2E7D32)),
-      _StatTile(label: 'Latence moyenne', value: '${avgLatencyMs}ms', icon: Icons.speed_outlined, color: const Color(0xFFEF6C00)),
-      _StatTile(label: 'Cache', value: '${s.cacheHits} ($cacheHitRate%)', icon: Icons.bolt_outlined, color: const Color(0xFF00897B)),
-      _StatTile(label: 'Tokens entrée', value: '${s.inputTokens}', icon: Icons.arrow_downward, color: const Color(0xFF6A1B9A)),
-      _StatTile(label: 'Tokens sortie', value: '${s.outputTokens}', icon: Icons.arrow_upward, color: const Color(0xFF6A1B9A)),
-      _StatTile(label: 'Erreurs', value: '${s.errors}', icon: Icons.error_outline, color: const Color(0xFFE53935)),
+      _StatTile(
+          label: 'Appels IA',
+          value: '${s.requests}',
+          icon: Icons.forum_outlined,
+          color: const Color(0xFF3949AB)),
+      _StatTile(
+          label: 'Coût estimé',
+          value: '\$${s.cost.toStringAsFixed(4)}',
+          icon: Icons.payments_outlined,
+          color: const Color(0xFF2E7D32)),
+      _StatTile(
+          label: 'Latence moyenne',
+          value: '${avgLatencyMs}ms',
+          icon: Icons.speed_outlined,
+          color: const Color(0xFFEF6C00)),
+      _StatTile(
+          label: 'Cache',
+          value: '${s.cacheHits} ($cacheHitRate%)',
+          icon: Icons.bolt_outlined,
+          color: const Color(0xFF00897B)),
+      _StatTile(
+          label: 'Tokens entrée',
+          value: '${s.inputTokens}',
+          icon: Icons.arrow_downward,
+          color: const Color(0xFF6A1B9A)),
+      _StatTile(
+          label: 'Tokens sortie',
+          value: '${s.outputTokens}',
+          icon: Icons.arrow_upward,
+          color: const Color(0xFF6A1B9A)),
+      _StatTile(
+          label: 'Erreurs',
+          value: '${s.errors}',
+          icon: Icons.error_outline,
+          color: const Color(0xFFE53935)),
     ];
 
     return Wrap(
-      spacing: 10, runSpacing: 10,
+      spacing: 10,
+      runSpacing: 10,
       children: tiles,
     );
   }
@@ -243,7 +296,8 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
       return const _EmptyHint(text: 'Aucune donnée sur les 7 derniers jours.');
     }
     return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(12)),
       child: Column(
         children: [
           for (final e in entries)
@@ -251,13 +305,18 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
               dense: true,
               leading: const Icon(Icons.smart_toy_outlined),
               title: Text(e.key),
-              subtitle: Text('${e.value.inputTokens} tok. entrée · ${e.value.outputTokens} tok. sortie · ${e.value.cacheHits} cache'),
+              subtitle: Text(
+                  '${e.value.inputTokens} tok. entrée · ${e.value.outputTokens} tok. sortie · ${e.value.cacheHits} cache'),
               trailing: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('${e.value.requests} appels', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
-                  Text('\$${e.value.cost.toStringAsFixed(4)}', style: TextStyle(color: Colors.grey.shade600, fontSize: 11.5)),
+                  Text('${e.value.requests} appels',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 12.5)),
+                  Text('\$${e.value.cost.toStringAsFixed(4)}',
+                      style: TextStyle(
+                          color: Colors.grey.shade600, fontSize: 11.5)),
                 ],
               ),
             ),
@@ -271,14 +330,16 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
       return const _EmptyHint(text: 'Aucune erreur récente 👍');
     }
     return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(12)),
       child: Column(
         children: [
           for (final e in _recentErrors.take(10))
             ListTile(
               dense: true,
               leading: const Icon(Icons.error_outline, color: Colors.red),
-              title: Text(e['errorMessage']?.toString() ?? 'Erreur inconnue', maxLines: 2, overflow: TextOverflow.ellipsis),
+              title: Text(e['errorMessage']?.toString() ?? 'Erreur inconnue',
+                  maxLines: 2, overflow: TextOverflow.ellipsis),
               subtitle: Text('${e['provider'] ?? '?'} · ${e['model'] ?? '?'}'),
             ),
         ],
@@ -292,33 +353,58 @@ class _AdminAiDashboardState extends State<AdminAiDashboard> {
       return const _EmptyHint(text: 'Aucune donnée disponible.');
     }
     final avgDuration = (t.totalDurationMs / t.turns).round();
-    final topTools = t.toolUsage.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final topTools = t.toolUsage.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Wrap(
-          spacing: 10, runSpacing: 10,
+          spacing: 10,
+          runSpacing: 10,
           children: [
-            _StatTile(label: 'Tours (échantillon)', value: '${t.turns}', icon: Icons.forum_outlined, color: const Color(0xFF3949AB)),
-            _StatTile(label: 'Succès', value: '${t.successCount}', icon: Icons.check_circle_outline, color: const Color(0xFF2E7D32)),
-            _StatTile(label: 'Échecs', value: '${t.errorCount}', icon: Icons.error_outline, color: const Color(0xFFE53935)),
-            _StatTile(label: 'Plafond de tours atteint', value: '${t.hitTurnCapCount}', icon: Icons.warning_amber_outlined, color: const Color(0xFFF9A825)),
-            _StatTile(label: 'Durée moyenne', value: '${avgDuration}ms', icon: Icons.speed_outlined, color: const Color(0xFFEF6C00)),
+            _StatTile(
+                label: 'Tours (échantillon)',
+                value: '${t.turns}',
+                icon: Icons.forum_outlined,
+                color: const Color(0xFF3949AB)),
+            _StatTile(
+                label: 'Succès',
+                value: '${t.successCount}',
+                icon: Icons.check_circle_outline,
+                color: const Color(0xFF2E7D32)),
+            _StatTile(
+                label: 'Échecs',
+                value: '${t.errorCount}',
+                icon: Icons.error_outline,
+                color: const Color(0xFFE53935)),
+            _StatTile(
+                label: 'Plafond de tours atteint',
+                value: '${t.hitTurnCapCount}',
+                icon: Icons.warning_amber_outlined,
+                color: const Color(0xFFF9A825)),
+            _StatTile(
+                label: 'Durée moyenne',
+                value: '${avgDuration}ms',
+                icon: Icons.speed_outlined,
+                color: const Color(0xFFEF6C00)),
           ],
         ),
         const SizedBox(height: 12),
-        const Text('Outils les plus utilisés', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        const Text('Outils les plus utilisés',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
         const SizedBox(height: 6),
         Container(
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(
+              color: Colors.white, borderRadius: BorderRadius.circular(12)),
           child: Column(
             children: [
               for (final e in topTools.take(10))
                 ListTile(
                   dense: true,
                   title: Text(e.key),
-                  trailing: Text('${e.value}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                  trailing: Text('${e.value}',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                 ),
             ],
           ),
@@ -333,7 +419,11 @@ class _StatTile extends StatelessWidget {
   final String value;
   final IconData icon;
   final Color color;
-  const _StatTile({required this.label, required this.value, required this.icon, required this.color});
+  const _StatTile(
+      {required this.label,
+      required this.value,
+      required this.icon,
+      required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -350,8 +440,11 @@ class _StatTile extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 20),
           const SizedBox(height: 8),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-          Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 11.5)),
+          Text(value,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          Text(label,
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 11.5)),
         ],
       ),
     );
@@ -367,7 +460,8 @@ class _EmptyHint extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       alignment: Alignment.center,
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(12)),
       child: Text(text, style: TextStyle(color: Colors.grey.shade600)),
     );
   }

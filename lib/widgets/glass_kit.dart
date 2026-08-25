@@ -53,8 +53,9 @@ class GlassCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final effectiveFill = fillColor ??
         (isDark ? const Color(0xF21E293B) : const Color(0xF2FFFFFF));
-    final effectiveBorderColor =
-        isDark ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.55);
+    final effectiveBorderColor = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.white.withValues(alpha: 0.55);
 
     final content = Container(
       width: width,
@@ -92,7 +93,8 @@ class GlassCard extends StatelessWidget {
     // utile surtout quand `child` est une image/icône sans texte.
     return semanticLabel == null
         ? wrapped
-        : Semantics(label: semanticLabel, button: onTap != null, child: wrapped);
+        : Semantics(
+            label: semanticLabel, button: onTap != null, child: wrapped);
   }
 }
 
@@ -133,8 +135,10 @@ class PremiumCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final effectiveColor = color ?? (isDark ? AppColors.cardDark : AppColors.card);
-    final effectiveBorderColor = isDark ? AppColors.dividerDark : AppColors.divider;
+    final effectiveColor =
+        color ?? (isDark ? AppColors.cardDark : AppColors.card);
+    final effectiveBorderColor =
+        isDark ? AppColors.dividerDark : AppColors.divider;
 
     final content = Container(
       width: width,
@@ -159,7 +163,8 @@ class PremiumCard extends StatelessWidget {
         onTap != null ? ScaleTap(onTap: onTap, child: content) : content;
     return semanticLabel == null
         ? wrapped
-        : Semantics(label: semanticLabel, button: onTap != null, child: wrapped);
+        : Semantics(
+            label: semanticLabel, button: onTap != null, child: wrapped);
   }
 }
 
@@ -191,9 +196,7 @@ class AzShimmer extends StatelessWidget {
         color: isDark ? AppColors.dividerDark : AppColors.divider,
         borderRadius: br,
       ),
-    )
-        .animate(onPlay: (c) => c.repeat())
-        .shimmer(
+    ).animate(onPlay: (c) => c.repeat()).shimmer(
           duration: const Duration(milliseconds: 1400),
           color: Colors.white.withValues(alpha: isDark ? 0.18 : 0.75),
           angle: 0.35,
@@ -228,7 +231,8 @@ class AzShimmerRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              AzShimmer(width: maxWidth, height: lineHeight, radius: AppRadius.xs),
+              AzShimmer(
+                  width: maxWidth, height: lineHeight, radius: AppRadius.xs),
               const SizedBox(height: 6),
               AzShimmer(
                   width: maxWidth * 0.65,
@@ -292,7 +296,7 @@ class _ScaleTapState extends State<ScaleTap>
         if (widget.haptic) HapticFeedback.lightImpact();
         _ctrl.forward();
       },
-      onPointerUp:     (_) => _ctrl.reverse(),
+      onPointerUp: (_) => _ctrl.reverse(),
       onPointerCancel: (_) => _ctrl.reverse(),
       child: GestureDetector(
         onTap: widget.onTap,

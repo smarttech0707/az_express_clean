@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -38,7 +38,8 @@ class _ClientWalletPageState extends State<ClientWalletPage> {
           return CustomScrollView(
             slivers: [
               SliverAppBar(
-                expandedHeight: (MediaQuery.of(context).size.height * 0.30).clamp(220.0, 300.0),
+                expandedHeight: (MediaQuery.of(context).size.height * 0.30)
+                    .clamp(220.0, 300.0),
                 pinned: true,
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -99,8 +100,7 @@ class _ClientWalletPageState extends State<ClientWalletPage> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(20)),
+                                      borderRadius: BorderRadius.circular(20)),
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 20, vertical: 10),
                                 ),
@@ -124,8 +124,7 @@ class _ClientWalletPageState extends State<ClientWalletPage> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(20)),
+                                      borderRadius: BorderRadius.circular(20)),
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 20, vertical: 10),
                                 ),
@@ -181,13 +180,12 @@ class _ClientWalletPageState extends State<ClientWalletPage> {
                               child: Text(
                                 context.tr('tx_history'),
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15),
+                                    fontWeight: FontWeight.bold, fontSize: 15),
                               ),
                             );
                           }
-                          final data = txs[i - 1].data()
-                              as Map<String, dynamic>;
+                          final data =
+                              txs[i - 1].data() as Map<String, dynamic>;
                           return _TxTile(data: data);
                         },
                         childCount: txs.length + 1,
@@ -239,9 +237,7 @@ class _TxTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 4)
-        ],
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
       ),
       child: Row(
         children: [
@@ -268,8 +264,7 @@ class _TxTile extends StatelessWidget {
                   "${date.year}  "
                   "${date.hour.toString().padLeft(2, '0')}:"
                   "${date.minute.toString().padLeft(2, '0')}",
-                  style: const TextStyle(
-                      color: Colors.grey, fontSize: 11),
+                  style: const TextStyle(color: Colors.grey, fontSize: 11),
                 ),
               ],
             ),
@@ -277,9 +272,7 @@ class _TxTile extends StatelessWidget {
           Text(
             "${isCredit ? '+' : '-'}$amount FCFA",
             style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: color,
-                fontSize: 14),
+                fontWeight: FontWeight.bold, color: color, fontSize: 14),
           ),
         ],
       ),

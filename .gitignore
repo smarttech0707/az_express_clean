@@ -56,6 +56,9 @@ lib/firebase_options.dart
 .env.*
 functions/.env
 functions/.env.*
+# Fichier modèle documentant les variables d'env attendues (aucune vraie
+# valeur/secret dedans) — doit rester versionné, contrairement aux .env réels.
+!functions/.env.example
 
 # Release keystore — never commit private signing keys
 *.keystore

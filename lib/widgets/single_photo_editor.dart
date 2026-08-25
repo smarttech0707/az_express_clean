@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
@@ -29,11 +30,19 @@ class SinglePhotoEditor extends StatefulWidget {
   /// cas l'erreur est affichée et la photo locale n'est pas mise à jour).
   final Future<void> Function(String url) onUploaded;
 
+  /// Appelé après suppression réussie du fichier Storage — doit effacer le
+  /// champ Firestore correspondant (ex. `FieldValue.delete()` ou `null`).
+  /// Optionnel : si non fourni, aucune option de suppression n'est proposée
+  /// (comportement strictement inchangé pour tout appelant existant qui ne
+  /// passe pas ce paramètre).
+  final Future<void> Function()? onDeleted;
+
   const SinglePhotoEditor({
     super.key,
     required this.photoUrl,
     required this.storagePath,
     required this.onUploaded,
+    this.onDeleted,
     this.size = 84,
     this.placeholderIcon = Icons.person_rounded,
   });
@@ -46,8 +55,9 @@ class _SinglePhotoEditorState extends State<SinglePhotoEditor> {
   bool _uploading = false;
   double _progress = 0;
   String? _localUrl;
+  bool _deleted = false;
 
-  String? get _displayUrl => _localUrl ?? widget.photoUrl;
+  String? get _displayUrl => _deleted ? null : (_localUrl ?? widget.photoUrl);
 
   Future<void> _pickAndUpload(ImageSource source) async {
     XFile? picked;
@@ -82,11 +92,26 @@ class _SinglePhotoEditorState extends State<SinglePhotoEditor> {
       await task;
       final url = await ref.getDownloadURL();
 
-      await widget.onUploaded(url);
+      // Timeout défensif — un canal Firestore instable (observé en conditions
+      // réelles : "WatchStream: Keepalive failed, the connection is likely
+      // gone") peut laisser cette écriture ne jamais se résoudre ni lever
+      // d'exception, bloquant l'UI indéfiniment sur le spinner. Sans cette
+      // limite, la photo Storage serait déjà envoyée mais Firestore jamais
+      // informé, et l'utilisateur resterait bloqué sans recours.
+      await widget.onUploaded(url).timeout(const Duration(seconds: 20));
 
       if (!mounted) return;
-      setState(() => _localUrl = url);
+      setState(() {
+        _localUrl = url;
+        _deleted = false;
+      });
       _snack('Photo mise à jour !', Colors.green);
+    } on TimeoutException {
+      _snack(
+        'Connexion trop lente — la photo est envoyée mais l\'enregistrement '
+        'a pris trop de temps. Réessayez.',
+        Colors.orange,
+      );
     } on FirebaseException catch (e) {
       _snack(
         e.code == 'unauthorized'
@@ -96,6 +121,70 @@ class _SinglePhotoEditorState extends State<SinglePhotoEditor> {
       );
     } catch (e) {
       _snack('Erreur lors de l\'envoi de la photo.', Colors.red);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _deletePhoto() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer la photo ?'),
+        content: const Text('Cette action est irréversible.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() {
+      _uploading = true;
+      _progress = 0;
+    });
+    try {
+      try {
+        await FirebaseStorage.instance.ref(widget.storagePath).delete();
+      } on FirebaseException catch (e) {
+        // object-not-found : le fichier n'existe déjà plus côté Storage —
+        // pas une erreur du point de vue de l'utilisateur, on continue quand
+        // même pour nettoyer le champ Firestore.
+        if (e.code != 'object-not-found') rethrow;
+      }
+      // Même garde-fou que _pickAndUpload() — voir commentaire là-bas. Ici,
+      // un timeout laisse le fichier Storage déjà supprimé mais le champ
+      // Firestore encore présent : un nouvel appui sur "Supprimer" retombera
+      // proprement sur la branche object-not-found ci-dessus et retentera
+      // uniquement l'écriture Firestore, sans redemander de fichier.
+      await widget.onDeleted!().timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      setState(() {
+        _localUrl = null;
+        _deleted = true;
+      });
+      _snack('Photo supprimée.', Colors.green);
+    } on TimeoutException {
+      _snack(
+        'Connexion trop lente pour confirmer la suppression. Réessayez.',
+        Colors.orange,
+      );
+    } on FirebaseException catch (e) {
+      _snack(
+        e.code == 'unauthorized'
+            ? 'Vous n\'êtes pas autorisé à supprimer cette photo.'
+            : 'Erreur réseau — vérifiez votre connexion et réessayez.',
+        Colors.red,
+      );
+    } catch (e) {
+      _snack('Erreur lors de la suppression de la photo.', Colors.red);
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -134,6 +223,17 @@ class _SinglePhotoEditorState extends State<SinglePhotoEditor> {
                 _pickAndUpload(ImageSource.gallery);
               },
             ),
+            if (_displayUrl != null && widget.onDeleted != null)
+              ListTile(
+                leading:
+                    const Icon(Icons.delete_outline_rounded, color: Colors.red),
+                title: const Text('Supprimer la photo',
+                    style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _deletePhoto();
+                },
+              ),
           ],
         ),
       ),
@@ -157,8 +257,7 @@ class _SinglePhotoEditorState extends State<SinglePhotoEditor> {
               CircleAvatar(
                 radius: widget.size / 2,
                 backgroundColor: AppColors.primaryBg,
-                backgroundImage:
-                    url != null ? NetworkImage(url) : null,
+                backgroundImage: url != null ? NetworkImage(url) : null,
                 child: url == null
                     ? Icon(widget.placeholderIcon,
                         size: widget.size * 0.5, color: AppColors.primary)

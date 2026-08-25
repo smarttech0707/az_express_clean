@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -51,9 +51,9 @@ class _SellerDashboardState extends State<SellerDashboard>
       if (!mounted) return;
       if (type == 'new_seller_order') _tabCtrl.animateTo(0);
     });
-    _walletSub = FirestoreService()
-        .sellerWallet(widget.sellerId)
-        .listen((v) { if (mounted) setState(() => _wallet = v); });
+    _walletSub = FirestoreService().sellerWallet(widget.sellerId).listen((v) {
+      if (mounted) setState(() => _wallet = v);
+    });
 
     _orderSub = FirebaseFirestore.instance
         .collection('orders')
@@ -61,13 +61,13 @@ class _SellerDashboardState extends State<SellerDashboard>
         .where('status', whereIn: ['pending', 'assigned'])
         .snapshots()
         .listen((snap) {
-      final count = snap.docs.length;
-      if (_prevPendingCount >= 0 && count > _prevPendingCount) {
-        HapticFeedback.heavyImpact();
-        if (mounted) _showNewOrderAlert();
-      }
-      _prevPendingCount = count;
-    });
+          final count = snap.docs.length;
+          if (_prevPendingCount >= 0 && count > _prevPendingCount) {
+            HapticFeedback.heavyImpact();
+            if (mounted) _showNewOrderAlert();
+          }
+          _prevPendingCount = count;
+        });
   }
 
   @override
@@ -86,7 +86,8 @@ class _SellerDashboardState extends State<SellerDashboard>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Row(
           children: [
-            Icon(Icons.notifications_active_rounded, color: Colors.orange, size: 28),
+            Icon(Icons.notifications_active_rounded,
+                color: Colors.orange, size: 28),
             SizedBox(width: 10),
             Text('Nouvelle commande !'),
           ],
@@ -99,7 +100,8 @@ class _SellerDashboardState extends State<SellerDashboard>
               _tabCtrl.animateTo(0);
             },
             child: const Text('Voir maintenant',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
           ),
         ],
       ),
@@ -107,7 +109,8 @@ class _SellerDashboardState extends State<SellerDashboard>
   }
 
   String _fmtWallet(int v) {
-    if (v >= 1000) return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    if (v >= 1000)
+      return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
     return v.toString();
   }
 
@@ -125,7 +128,8 @@ class _SellerDashboardState extends State<SellerDashboard>
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               margin: const EdgeInsets.only(bottom: 20),
               decoration: BoxDecoration(
                 color: Colors.grey.shade300,
@@ -135,7 +139,8 @@ class _SellerDashboardState extends State<SellerDashboard>
             Text(
               "${_fmtWallet(_wallet)} FCFA",
               style: const TextStyle(
-                  fontSize: 32, fontWeight: FontWeight.w900,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
                   color: Color(0xFF1565C0)),
             ),
             const Text("Solde wallet",
@@ -210,9 +215,7 @@ class _SellerDashboardState extends State<SellerDashboard>
             const SizedBox(height: 6),
             Text(label,
                 style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14)),
+                    color: color, fontWeight: FontWeight.bold, fontSize: 14)),
           ],
         ),
       ),
@@ -227,7 +230,9 @@ class _SellerDashboardState extends State<SellerDashboard>
   Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'seller');
     await FirebaseAuth.instance.signOut();
-    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (_) {}
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
@@ -249,8 +254,8 @@ class _SellerDashboardState extends State<SellerDashboard>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(_sellerName,
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold)),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             Text(_sellerType,
                 style: const TextStyle(fontSize: 11, color: Colors.white70)),
           ],
@@ -272,16 +277,16 @@ class _SellerDashboardState extends State<SellerDashboard>
                   const SizedBox(width: 4),
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 400),
-                    transitionBuilder: (child, anim) =>
-                        FadeTransition(opacity: anim,
-                          child: SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(0, 0.3),
-                              end: Offset.zero,
-                            ).animate(anim),
-                            child: child,
-                          ),
-                        ),
+                    transitionBuilder: (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, 0.3),
+                          end: Offset.zero,
+                        ).animate(anim),
+                        child: child,
+                      ),
+                    ),
                     child: Text(
                       "${_fmtWallet(_wallet)} FCFA",
                       key: ValueKey(_wallet),
@@ -292,7 +297,8 @@ class _SellerDashboardState extends State<SellerDashboard>
                     ),
                   ),
                   const SizedBox(width: 4),
-                  const Icon(Icons.expand_more, size: 14, color: Colors.white70),
+                  const Icon(Icons.expand_more,
+                      size: 14, color: Colors.white70),
                 ],
               ),
             ),
@@ -326,6 +332,13 @@ class _SellerDashboardState extends State<SellerDashboard>
                     .set({'photoUrl': url}, SetOptions(merge: true));
                 if (mounted) setState(() => _photoUrl = url);
               },
+              onPhotoDeleted: () async {
+                await FirebaseFirestore.instance
+                    .collection('sellers')
+                    .doc(widget.sellerId)
+                    .update({'photoUrl': FieldValue.delete()});
+                if (mounted) setState(() => _photoUrl = null);
+              },
             ),
           ),
           IconButton(
@@ -339,7 +352,8 @@ class _SellerDashboardState extends State<SellerDashboard>
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white54,
-          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          labelStyle:
+              const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           tabs: const [
             Tab(text: "Nouvelles"),
             Tab(text: "En cours"),
@@ -355,9 +369,18 @@ class _SellerDashboardState extends State<SellerDashboard>
             child: TabBarView(
               controller: _tabCtrl,
               children: [
-                _OrdersTab(sellerId: widget.sellerId, sellerType: _sellerType, statusFilter: const ['pending', 'assigned']),
-                _OrdersTab(sellerId: widget.sellerId, sellerType: _sellerType, statusFilter: const ['accepted', 'picked_up']),
-                _OrdersTab(sellerId: widget.sellerId, sellerType: _sellerType, statusFilter: const ['delivered']),
+                _OrdersTab(
+                    sellerId: widget.sellerId,
+                    sellerType: _sellerType,
+                    statusFilter: const ['pending', 'assigned']),
+                _OrdersTab(
+                    sellerId: widget.sellerId,
+                    sellerType: _sellerType,
+                    statusFilter: const ['accepted', 'picked_up']),
+                _OrdersTab(
+                    sellerId: widget.sellerId,
+                    sellerType: _sellerType,
+                    statusFilter: const ['delivered']),
                 _ProductsTab(sellerId: widget.sellerId),
               ],
             ),
@@ -397,7 +420,10 @@ class _SubscriptionBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Abonnement suspendu — Rechargez votre wallet pour réactiver votre compte.',
-                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ]),
@@ -422,7 +448,9 @@ class _SubscriptionBanner extends StatelessWidget {
                       ? 'Compte VIP actif — Vos produits apparaissent en premier. Expire le ${_fmtDate(vipExpiry)}.'
                       : 'Compte VIP actif — Vos produits apparaissent en premier.',
                   style: const TextStyle(
-                      color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w600),
+                      color: Colors.black87,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ]),
@@ -465,9 +493,8 @@ class _OrdersTab extends StatelessWidget {
         }
 
         final all = snap.data ?? [];
-        final orders = all
-            .where((o) => statusFilter.contains(o.status))
-            .toList();
+        final orders =
+            all.where((o) => statusFilter.contains(o.status)).toList();
 
         if (orders.isEmpty) {
           return Center(
@@ -546,7 +573,8 @@ class _ProductsTabState extends State<_ProductsTab> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey),
+                  Icon(Icons.inventory_2_outlined,
+                      size: 64, color: Colors.grey),
                   SizedBox(height: 12),
                   Text('Aucun produit',
                       style: TextStyle(color: Colors.grey, fontSize: 15)),
@@ -566,7 +594,8 @@ class _ProductsTabState extends State<_ProductsTab> {
               return _ProductCard(
                 docId: doc.id,
                 data: data,
-                onEdit: () => _showProductDialog(ctx, docId: doc.id, existing: data),
+                onEdit: () =>
+                    _showProductDialog(ctx, docId: doc.id, existing: data),
               );
             },
           );
@@ -577,13 +606,14 @@ class _ProductsTabState extends State<_ProductsTab> {
 
   void _showProductDialog(BuildContext context,
       {String? docId, Map<String, dynamic>? existing}) {
-    final nameCtrl  = TextEditingController(text: existing?['name'] ?? '');
+    final nameCtrl = TextEditingController(text: existing?['name'] ?? '');
     final priceCtrl = TextEditingController(
         text: existing?['price'] != null ? '${existing!['price']}' : '');
-    final descCtrl  = TextEditingController(text: existing?['description'] ?? '');
+    final descCtrl =
+        TextEditingController(text: existing?['description'] ?? '');
     final stockCtrl = TextEditingController(
         text: existing?['stock'] != null ? '${existing!['stock']}' : '0');
-    bool available  = existing?['available'] ?? true;
+    bool available = existing?['available'] ?? true;
 
     showModalBottomSheet(
       context: context,
@@ -594,7 +624,9 @@ class _ProductsTabState extends State<_ProductsTab> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => Padding(
           padding: EdgeInsets.only(
-            left: 20, right: 20, top: 20,
+            left: 20,
+            right: 20,
+            top: 20,
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
           ),
           child: Column(
@@ -603,7 +635,8 @@ class _ProductsTabState extends State<_ProductsTab> {
             children: [
               Center(
                 child: Container(
-                  width: 40, height: 4,
+                  width: 40,
+                  height: 4,
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
                     color: Colors.grey.shade300,
@@ -619,13 +652,14 @@ class _ProductsTabState extends State<_ProductsTab> {
               const SizedBox(height: 10),
               Row(children: [
                 Expanded(
-                  child: _pField(priceCtrl, 'Prix (FCFA) *',
-                      Icons.payments_outlined, type: TextInputType.number),
+                  child: _pField(
+                      priceCtrl, 'Prix (FCFA) *', Icons.payments_outlined,
+                      type: TextInputType.number),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: _pField(stockCtrl, 'Stock',
-                      Icons.warehouse_outlined, type: TextInputType.number),
+                  child: _pField(stockCtrl, 'Stock', Icons.warehouse_outlined,
+                      type: TextInputType.number),
                 ),
               ]),
               const SizedBox(height: 10),
@@ -666,7 +700,7 @@ class _ProductsTabState extends State<_ProductsTab> {
                 Expanded(
                   child: ScaleButton(
                     onPressed: () async {
-                      final name  = nameCtrl.text.trim();
+                      final name = nameCtrl.text.trim();
                       final price = int.tryParse(priceCtrl.text.trim()) ?? 0;
                       final stock = int.tryParse(stockCtrl.text.trim()) ?? 0;
                       if (name.isEmpty || price <= 0) return;
@@ -698,8 +732,7 @@ class _ProductsTabState extends State<_ProductsTab> {
                     ),
                     child: const Text('Enregistrer',
                         style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600)),
+                            color: Colors.white, fontWeight: FontWeight.w600)),
                   ),
                 ),
               ]),
@@ -742,9 +775,9 @@ class _ProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name      = data['name'] ?? 'Produit';
-    final price     = (data['price'] as num? ?? 0).toInt();
-    final stock     = (data['stock'] as num? ?? 0).toInt();
+    final name = data['name'] ?? 'Produit';
+    final price = (data['price'] as num? ?? 0).toInt();
+    final stock = (data['stock'] as num? ?? 0).toInt();
     final available = data['available'] ?? true;
 
     Color stockColor;
@@ -773,8 +806,7 @@ class _ProductCard extends StatelessWidget {
         ],
       ),
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: Container(
           width: 48,
           height: 48,
@@ -786,9 +818,7 @@ class _ProductCard extends StatelessWidget {
           ),
           child: Icon(
             Icons.inventory_2_rounded,
-            color: available
-                ? const Color(0xFF1565C0)
-                : Colors.grey.shade400,
+            color: available ? const Color(0xFF1565C0) : Colors.grey.shade400,
           ),
         ),
         title: Text(name,
@@ -866,8 +896,8 @@ class _AnalyticsSheetState extends State<_AnalyticsSheet> {
   }
 
   Future<void> _loadData() async {
-    final cutoff = Timestamp.fromDate(
-        DateTime.now().subtract(const Duration(days: 7)));
+    final cutoff =
+        Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 7)));
     try {
       final snap = await FirebaseFirestore.instance
           .collection('boutique_orders')
@@ -909,7 +939,8 @@ class _AnalyticsSheetState extends State<_AnalyticsSheet> {
   }
 
   String _fmt(int v) {
-    if (v >= 1000) return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    if (v >= 1000)
+      return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
     return v.toString();
   }
 
@@ -937,7 +968,8 @@ class _AnalyticsSheetState extends State<_AnalyticsSheet> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 40, height: 4,
+            width: 40,
+            height: 4,
             margin: const EdgeInsets.only(bottom: 20),
             decoration: BoxDecoration(
               color: Colors.grey.shade300,
@@ -1016,8 +1048,7 @@ class _AnalyticsSheetState extends State<_AnalyticsSheet> {
                             ),
                           const SizedBox(height: 2),
                           AnimatedContainer(
-                            duration:
-                                Duration(milliseconds: 300 + i * 50),
+                            duration: Duration(milliseconds: 300 + i * 50),
                             height: barH.clamp(4.0, 100.0),
                             decoration: BoxDecoration(
                               color: rev > 0
@@ -1074,9 +1105,7 @@ class _StatCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(value,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold)),
+                    color: color, fontSize: 12, fontWeight: FontWeight.bold)),
             Text(label,
                 style: TextStyle(
                     color: color.withValues(alpha: 0.7), fontSize: 10)),
@@ -1095,23 +1124,35 @@ class _OrderCard extends StatelessWidget {
 
   Color get _statusColor {
     switch (order.status) {
-      case 'pending': return Colors.orange;
-      case 'assigned': return const Color(0xFF1565C0);
-      case 'accepted': return Colors.teal;
-      case 'picked_up': return Colors.deepPurple;
-      case 'delivered': return Colors.green;
-      default: return Colors.grey;
+      case 'pending':
+        return Colors.orange;
+      case 'assigned':
+        return const Color(0xFF1565C0);
+      case 'accepted':
+        return Colors.teal;
+      case 'picked_up':
+        return Colors.deepPurple;
+      case 'delivered':
+        return Colors.green;
+      default:
+        return Colors.grey;
     }
   }
 
   String get _statusLabel {
     switch (order.status) {
-      case 'pending': return 'En attente de livreur';
-      case 'assigned': return 'Livreur assigné';
-      case 'accepted': return 'Livreur en route';
-      case 'picked_up': return 'Commande récupérée';
-      case 'delivered': return 'Livré ✓';
-      default: return order.status;
+      case 'pending':
+        return 'En attente de livreur';
+      case 'assigned':
+        return 'Livreur assigné';
+      case 'accepted':
+        return 'Livreur en route';
+      case 'picked_up':
+        return 'Commande récupérée';
+      case 'delivered':
+        return 'Livré ✓';
+      default:
+        return order.status;
     }
   }
 
@@ -1170,7 +1211,6 @@ class _OrderCard extends StatelessWidget {
               ],
             ),
           ),
-
           Padding(
             padding: const EdgeInsets.all(14),
             child: Column(
@@ -1186,12 +1226,9 @@ class _OrderCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   "${order.budget} FCFA — ${order.paymentMethod == 'wallet' ? '💳 Wallet' : '💵 Espèces'}",
-                  style: TextStyle(
-                      color: Colors.grey.shade600, fontSize: 13),
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                 ),
-
                 const Divider(height: 20),
-
                 _InfoSection(
                   icon: Icons.person_rounded,
                   color: AppColors.primary,
@@ -1204,9 +1241,7 @@ class _OrderCard extends StatelessWidget {
                   lat: order.latitude != 0 ? order.latitude : null,
                   lng: order.longitude != 0 ? order.longitude : null,
                 ),
-
                 const SizedBox(height: 12),
-
                 if (hasDriver)
                   _DriverSection(driverId: order.driverId!)
                 else
@@ -1227,8 +1262,7 @@ class _OrderCard extends StatelessWidget {
                         Text(
                           "Recherche d'un livreur disponible…",
                           style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontSize: 13),
+                              color: Colors.orange.shade700, fontSize: 13),
                         ),
                       ],
                     ),
@@ -1302,8 +1336,8 @@ class _InfoSection extends StatelessWidget {
                   const SizedBox(height: 4),
                   GestureDetector(
                     onTap: () async {
-                      final uri = Uri.parse(
-                          'https://maps.google.com/?q=$lat,$lng');
+                      final uri =
+                          Uri.parse('https://maps.google.com/?q=$lat,$lng');
                       if (await canLaunchUrl(uri)) launchUrl(uri);
                     },
                     child: Container(
@@ -1363,16 +1397,15 @@ class _DriverSection extends StatelessWidget {
         if (!snap.hasData) {
           return const SizedBox(
               height: 48,
-              child: Center(
-                  child: CircularProgressIndicator(strokeWidth: 2)));
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
         }
         final data = snap.data!.data() as Map<String, dynamic>?;
         if (data == null) return const SizedBox.shrink();
 
-        final name    = data['name'] ?? 'Livreur';
-        final phone   = data['phone'] as String?;
-        final lat     = (data['lat'] as num?)?.toDouble();
-        final lng     = (data['lng'] as num?)?.toDouble();
+        final name = data['name'] ?? 'Livreur';
+        final phone = data['phone'] as String?;
+        final lat = (data['lat'] as num?)?.toDouble();
+        final lng = (data['lng'] as num?)?.toDouble();
         final isOnline = data['isOnline'] ?? false;
 
         return Container(
@@ -1406,8 +1439,7 @@ class _DriverSection extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: isOnline ? Colors.green : Colors.grey,
                         shape: BoxShape.circle,
-                        border:
-                            Border.all(color: Colors.white, width: 1.5),
+                        border: Border.all(color: Colors.white, width: 1.5),
                       ),
                     ),
                   ),
@@ -1427,35 +1459,32 @@ class _DriverSection extends StatelessWidget {
                     const SizedBox(height: 3),
                     Text(name,
                         style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600)),
+                            fontSize: 13, fontWeight: FontWeight.w600)),
                     if (phone != null)
                       Text(phone,
                           style: TextStyle(
-                              color: Colors.grey.shade600,
-                              fontSize: 12)),
+                              color: Colors.grey.shade600, fontSize: 12)),
                     if (lat != null && lng != null && lat != 0) ...[
                       const SizedBox(height: 6),
                       GestureDetector(
                         onTap: () async {
-                          final uri = Uri.parse(
-                              'https://maps.google.com/?q=$lat,$lng');
+                          final uri =
+                              Uri.parse('https://maps.google.com/?q=$lat,$lng');
                           if (await canLaunchUrl(uri)) launchUrl(uri);
                         },
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1565C0)
-                                .withValues(alpha: 0.1),
+                            color:
+                                const Color(0xFF1565C0).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               const Icon(Icons.gps_fixed_rounded,
-                                  size: 12,
-                                  color: Color(0xFF1565C0)),
+                                  size: 12, color: Color(0xFF1565C0)),
                               const SizedBox(width: 4),
                               Text(
                                 isOnline
@@ -1536,4 +1565,3 @@ class _FadeSlideInState extends State<_FadeSlideIn>
         child: SlideTransition(position: _slide, child: widget.child),
       );
 }
-

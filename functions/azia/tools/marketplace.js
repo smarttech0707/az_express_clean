@@ -1,7 +1,7 @@
 'use strict';
 
 const { createPendingAction } = require('../pendingActions');
-const { dispatchOrder } = require('../../dispatch');
+const { dispatchOrder, resolveDispatchGeography } = require('../../dispatch');
 
 const RESULT_LIMIT = 10;
 
@@ -91,7 +91,20 @@ function createMarketplaceOrder({ db, admin, HttpsError }) {
 
       const deliveryLat = Number(input?.deliveryLat);
       const deliveryLng = Number(input?.deliveryLng);
-      if (!deliveryLat || !deliveryLng) throw new Error('Coordonnées de livraison manquantes.');
+      const sellerId = String(product.sellerId || '');
+      const sellerSnap = sellerId
+        ? await db.collection('sellers').doc(sellerId).get()
+        : null;
+      const pickupLat = Number(sellerSnap?.data()?.lat);
+      const pickupLng = Number(sellerSnap?.data()?.lng);
+      const geography = await resolveDispatchGeography(db, {
+        pickupLat,
+        pickupLng,
+        deliveryLat,
+        deliveryLng,
+        pickupCoordinateSource: 'local_place',
+        deliveryCoordinateSource: 'gps',
+      });
 
       const paymentMethod = input?.paymentMethod === 'wallet' ? 'wallet' : 'cash';
 
@@ -113,7 +126,8 @@ function createMarketplaceOrder({ db, admin, HttpsError }) {
           title:      product.title || 'Produit',
           sellerId:   product.sellerId,
           sellerName: product.sellerName || 'Vendeur',
-          deliveryLat, deliveryLng, paymentMethod,
+          pickupLat, pickupLng, deliveryLat, deliveryLng, paymentMethod,
+          ...geography,
         },
         summaryFr,
         amount: paymentMethod === 'wallet' ? budget : null,
@@ -123,7 +137,8 @@ function createMarketplaceOrder({ db, admin, HttpsError }) {
     },
 
     confirmHandler: async (tx, uid, toolInput) => {
-      const { productId, quantity, budget, title, sellerId, sellerName, deliveryLat, deliveryLng, paymentMethod } = toolInput;
+      const { productId, quantity, budget, title, sellerId, sellerName,
+        pickupLat, pickupLng, deliveryLat, deliveryLng, paymentMethod } = toolInput;
 
       const productRef  = db.collection('marketplace_products').doc(productId);
       const productSnap = await tx.get(productRef);
@@ -160,10 +175,10 @@ function createMarketplaceOrder({ db, admin, HttpsError }) {
         shoppingBudget: 0,
         items: [{ name: `${quantity}x ${title}`, budgetFcfa: budget }],
         status:      'pending',
-        latitude:    deliveryLat,
-        longitude:   deliveryLng,
-        deliveryLatitude:  deliveryLat,
-        deliveryLongitude: deliveryLng,
+        latitude:    pickupLat,
+        longitude:   pickupLng,
+        destLat:     deliveryLat,
+        destLng:     deliveryLng,
         type:        'marketplace',
         clientId:    uid,
         sellerId,
@@ -172,15 +187,32 @@ function createMarketplaceOrder({ db, admin, HttpsError }) {
         paymentMethod,
         isPaid:      paymentMethod === 'wallet',
         source:      'ai_chat',
+        pickupCityId: toolInput.pickupCityId,
+        pickupZoneId: toolInput.pickupZoneId,
+        deliveryCityId: toolInput.deliveryCityId,
+        deliveryZoneId: toolInput.deliveryZoneId,
+        pickupCoordinateSource: toolInput.pickupCoordinateSource,
+        deliveryCoordinateSource: toolInput.deliveryCoordinateSource,
+        cityResolutionStatus: toolInput.cityResolutionStatus,
         createdAt:   admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      return { orderId: orderRef.id, lat: deliveryLat, lng: deliveryLng, budget };
+      return {
+        orderId: orderRef.id,
+        lat: pickupLat,
+        lng: pickupLng,
+        pickupCityId: toolInput.pickupCityId,
+        cityResolutionStatus: toolInput.cityResolutionStatus,
+        budget,
+      };
     },
 
     afterConfirm: async (uid, result) => {
       const dispatch = await dispatchOrder(db, admin, {
-        orderId: result.orderId, lat: result.lat, lng: result.lng, budget: result.budget,
+        orderId: result.orderId, lat: result.lat, lng: result.lng,
+        pickupCityId: result.pickupCityId,
+        cityResolutionStatus: result.cityResolutionStatus,
+        budget: result.budget,
       });
       return {
         orderId: result.orderId,

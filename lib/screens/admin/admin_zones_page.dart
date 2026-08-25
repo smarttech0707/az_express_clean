@@ -1,326 +1,361 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+
+import '../../models/delivery_zone.dart';
+import '../../models/delivery_zone_form.dart';
 import '../../theme/app_theme.dart';
 
 class AdminZonesPage extends StatefulWidget {
   const AdminZonesPage({super.key});
+
   @override
   State<AdminZonesPage> createState() => _AdminZonesPageState();
 }
 
 class _AdminZonesPageState extends State<AdminZonesPage>
     with SingleTickerProviderStateMixin {
-  late TabController _tabCtrl;
-  bool _seeding = false;
-
-  static const _tabs  = ['Tout', 'Villes', 'Quartiers', 'Villages', 'Secteurs'];
+  static const _tabs = ['Tout', 'Villes', 'Quartiers', 'Villages', 'Secteurs'];
   static const _types = ['', 'ville', 'quartier', 'village', 'secteur'];
+
+  late final TabController _tabController;
+  CollectionReference<Map<String, dynamic>> get _zones =>
+      FirebaseFirestore.instance.collection('zones_livraison');
 
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: _tabs.length, vsync: this);
+    _tabController = TabController(length: _tabs.length, vsync: this);
   }
 
   @override
   void dispose() {
-    _tabCtrl.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 
-  // ── Firestore ref ───────────────────────────────────────────────────────────
-  CollectionReference get _col =>
-      FirebaseFirestore.instance.collection('zones_livraison');
-
-  // ── Seed initial ─────────────────────────────────────────────────────────────
-  static const _initialZones = [
-    // Ville
-    {'name': 'Abengourou', 'type': 'ville', 'lat': 6.7273, 'lng': -3.4961,
-     'parentName': '', 'order': 0},
-    // Quartiers d'Abengourou
-    {'name': 'Commerce',      'type': 'quartier', 'parentName': 'Abengourou', 'order': 1},
-    {'name': 'Château',       'type': 'quartier', 'parentName': 'Abengourou', 'order': 2},
-    {'name': 'Baoulékro',     'type': 'quartier', 'parentName': 'Abengourou', 'order': 3},
-    {'name': 'Cafétou',       'type': 'quartier', 'parentName': 'Abengourou', 'order': 4},
-    {'name': 'Plateau',       'type': 'quartier', 'parentName': 'Abengourou', 'order': 5},
-    {'name': 'Pokoukro',      'type': 'quartier', 'parentName': 'Abengourou', 'order': 6},
-    {'name': 'Résidentiel',   'type': 'quartier', 'parentName': 'Abengourou', 'order': 7},
-    {'name': 'Administratif', 'type': 'quartier', 'parentName': 'Abengourou', 'order': 8},
-    // Villages desservis
-    {'name': 'Niablé',           'type': 'village', 'parentName': 'Abengourou', 'order': 10},
-    {'name': 'Amélékia',         'type': 'village', 'parentName': 'Abengourou', 'order': 11},
-    {'name': 'Sankadiokro',      'type': 'village', 'parentName': 'Abengourou', 'order': 12},
-    {'name': 'Zinzenou',         'type': 'village', 'parentName': 'Abengourou', 'order': 13},
-    {'name': 'Yakassé-Feyassé',  'type': 'village', 'parentName': 'Abengourou', 'order': 14},
-    {'name': 'Aniassué',         'type': 'village', 'parentName': 'Abengourou', 'order': 15},
-    {'name': 'Kodjinan',         'type': 'village', 'parentName': 'Abengourou', 'order': 16},
-    {'name': 'Zamaka',           'type': 'village', 'parentName': 'Abengourou', 'order': 17},
-    {'name': 'Assakra',          'type': 'village', 'parentName': 'Abengourou', 'order': 18},
-    {'name': 'Apprompronou',     'type': 'village', 'parentName': 'Abengourou', 'order': 19},
-  ];
-
-  Future<void> _seedZones() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Initialiser les zones ?'),
-        content: const Text(
-          'Ceci ajoutera les 19 zones initiales (1 ville, 8 quartiers, 10 villages). '
-          'Les zones déjà existantes ne seront pas dupliquées.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-              child: const Text('Annuler')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true),
-              child: const Text('Initialiser')),
-        ],
-      ),
-    );
-    if (confirm != true || !mounted) return;
-
-    setState(() => _seeding = true);
-    try {
-      final existing = await _col.get();
-      final existingNames = existing.docs
-          .map((d) => (d['name'] as String).toLowerCase())
-          .toSet();
-
-      final batch = FirebaseFirestore.instance.batch();
-      int added = 0;
-      for (final z in _initialZones) {
-        final name = z['name'] as String;
-        if (existingNames.contains(name.toLowerCase())) continue;
-        final ref = _col.doc();
-        batch.set(ref, {
-          'name':       name,
-          'type':       z['type'],
-          'parentName': z['parentName'] ?? '',
-          'lat':        z['lat'],
-          'lng':        z['lng'],
-          'isActive':   true,
-          'order':      z['order'],
-          'createdAt':  FieldValue.serverTimestamp(),
-        });
-        added++;
-      }
-      await batch.commit();
-      if (mounted) {
-        _snack('$added zone(s) ajoutée(s)', Colors.green);
-      }
-    } catch (e) {
-      if (mounted) _snack('Erreur : $e', Colors.red);
-    } finally {
-      if (mounted) setState(() => _seeding = false);
-    }
-  }
-
-  // ── GPS terrain ─────────────────────────────────────────────────────────────
   Future<Position?> _captureGps() async {
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
     }
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
-      if (mounted) _snack('Permission GPS refusée', Colors.red);
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      if (mounted) _snack('Permission GPS refusée.', Colors.red);
       return null;
     }
     return Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high));
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
   }
 
-  // ── Ajouter / Modifier zone ─────────────────────────────────────────────────
-  Future<void> _openForm([DocumentSnapshot? doc]) async {
-    final data = doc?.data() as Map<String, dynamic>?;
-
-    final nameCtrl   = TextEditingController(text: data?['name'] ?? '');
-    final parentCtrl = TextEditingController(text: data?['parentName'] ?? '');
-    String type      = data?['type'] ?? 'quartier';
-    double? lat      = (data?['lat'] as num?)?.toDouble();
-    double? lng      = (data?['lng'] as num?)?.toDouble();
-    bool gpsLoading  = false;
-
-    await showDialog(
+  Future<LatLng?> _pickOnMap(LatLng? initial) {
+    return showDialog<LatLng>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: Text(doc == null ? 'Nouvelle zone' : 'Modifier la zone'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Nom
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Nom de la zone *',
-                      border: OutlineInputBorder()),
-                  textCapitalization: TextCapitalization.words,
-                ),
-                const SizedBox(height: 12),
+      builder: (context) => _MapPointDialog(initial: initial),
+    );
+  }
 
-                // Type
-                DropdownButtonFormField<String>(
-                  initialValue: type,
-                  decoration: const InputDecoration(
-                      labelText: 'Type', border: OutlineInputBorder()),
-                  items: const [
-                    DropdownMenuItem(value: 'ville',    child: Text('Ville')),
-                    DropdownMenuItem(value: 'quartier', child: Text('Quartier')),
-                    DropdownMenuItem(value: 'village',  child: Text('Village')),
-                    DropdownMenuItem(value: 'secteur',  child: Text('Secteur')),
-                  ],
-                  onChanged: (v) => setS(() => type = v ?? type),
-                ),
-                const SizedBox(height: 12),
+  Future<void> _openForm(
+      [DocumentSnapshot<Map<String, dynamic>>? document]) async {
+    final snapshot = await _zones.get();
+    if (!mounted) return;
+    final allZones = snapshot.docs
+        .map((doc) => DeliveryZone.fromMap(doc.id, doc.data()))
+        .toList(growable: false);
+    final cities = allZones.where((zone) => zone.type == 'ville').toList();
+    final zone = document == null
+        ? null
+        : DeliveryZone.fromMap(document.id, document.data()!);
 
-                // Parent
-                TextField(
-                  controller: parentCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Ville parente (ex: Abengourou)',
-                      border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 12),
+    final nameController = TextEditingController(text: zone?.name ?? '');
+    final cityIdController = TextEditingController(text: zone?.cityId ?? '');
+    final aliasController = TextEditingController();
+    final latController = TextEditingController(text: _number(zone?.lat));
+    final lngController = TextEditingController(text: _number(zone?.lng));
+    final radiusController =
+        TextEditingController(text: _number(zone?.radiusKm));
+    final orderController =
+        TextEditingController(text: zone?.order?.toInt().toString() ?? '0');
+    var type = zone?.type ?? 'ville';
+    var parentZoneId = zone?.parentZoneId;
+    var aliases = [...?zone?.aliases];
+    var isServiceable = zone?.isServiceable ?? false;
+    var isActive = zone?.isActive ?? true;
+    var cityIdWasEdited = zone != null;
+    var gpsLoading = false;
 
-                // GPS
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F5),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Coordonnées GPS',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey.shade700)),
-                      const SizedBox(height: 4),
-                      if (lat != null && lng != null)
-                        Text(
-                          'Lat: ${lat!.toStringAsFixed(5)}\n'
-                          'Lng: ${lng!.toStringAsFixed(5)}',
-                          style: const TextStyle(
-                              fontSize: 12, color: Color(0xFF1565C0)),
-                        )
-                      else
-                        const Text('Aucune coordonnée enregistrée',
-                            style:
-                                TextStyle(fontSize: 12, color: Colors.grey)),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          icon: gpsLoading
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2))
-                              : const Icon(Icons.my_location,
-                                  color: Color(0xFF1565C0)),
-                          label: Text(
-                            gpsLoading
-                                ? 'Localisation…'
-                                : 'Capturer ma position GPS',
-                            style:
-                                const TextStyle(color: Color(0xFF1565C0)),
-                          ),
-                          onPressed: gpsLoading
-                              ? null
-                              : () async {
-                                  setS(() => gpsLoading = true);
-                                  final pos = await _captureGps();
-                                  setS(() {
-                                    gpsLoading = false;
-                                    if (pos != null) {
-                                      lat = pos.latitude;
-                                      lng = pos.longitude;
-                                    }
-                                  });
-                                },
-                        ),
-                      ),
+    nameController.addListener(() {
+      if (!cityIdWasEdited) {
+        cityIdController.text =
+            DeliveryZoneFormData.cityIdFromName(nameController.text);
+      }
+    });
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(zone == null ? 'Nouvelle zone' : 'Modifier la zone'),
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _field(nameController, 'Nom *'),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: type,
+                    decoration: const InputDecoration(
+                      labelText: 'Type *',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'ville', child: Text('Ville')),
+                      DropdownMenuItem(
+                          value: 'quartier', child: Text('Quartier')),
+                      DropdownMenuItem(
+                          value: 'village', child: Text('Village')),
+                      DropdownMenuItem(
+                          value: 'secteur', child: Text('Secteur')),
                     ],
+                    onChanged: (value) => setDialogState(() {
+                      type = value ?? type;
+                      if (type == 'ville') {
+                        parentZoneId = null;
+                        cityIdController.text =
+                            DeliveryZoneFormData.cityIdFromName(
+                                nameController.text);
+                      }
+                    }),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: cityIdController,
+                    decoration: const InputDecoration(
+                      labelText: 'cityId *',
+                      helperText: 'Généré depuis le nom, puis modifiable.',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => cityIdWasEdited = true,
+                  ),
+                  if (type != 'ville') ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: cities.any((c) => c.id == parentZoneId)
+                          ? parentZoneId
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Ville parente *',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: cities
+                          .map((city) => DropdownMenuItem(
+                                value: city.id,
+                                child: Text(city.name ?? city.id),
+                              ))
+                          .toList(),
+                      onChanged: (value) => setDialogState(() {
+                        parentZoneId = value;
+                        final parent = cities
+                            .where((city) => city.id == value)
+                            .firstOrNull;
+                        if (parent?.cityId != null) {
+                          cityIdController.text = parent!.cityId!;
+                        }
+                      }),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  _aliasesEditor(
+                    aliasController,
+                    aliases,
+                    () => setDialogState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                        child:
+                            _field(latController, 'Latitude', decimal: true)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child:
+                            _field(lngController, 'Longitude', decimal: true)),
+                  ]),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: gpsLoading
+                            ? null
+                            : () async {
+                                setDialogState(() => gpsLoading = true);
+                                final position = await _captureGps();
+                                if (!dialogContext.mounted) return;
+                                setDialogState(() {
+                                  gpsLoading = false;
+                                  if (position != null) {
+                                    latController.text =
+                                        position.latitude.toString();
+                                    lngController.text =
+                                        position.longitude.toString();
+                                  }
+                                });
+                              },
+                        icon: gpsLoading
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.my_location),
+                        label: const Text('Capturer le GPS'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final point = await _pickOnMap(_pointFromControllers(
+                              latController, lngController));
+                          if (point != null && dialogContext.mounted) {
+                            setDialogState(() {
+                              latController.text = point.latitude.toString();
+                              lngController.text = point.longitude.toString();
+                            });
+                          }
+                        },
+                        icon: const Icon(Icons.map_outlined),
+                        label: const Text('Choisir sur carte'),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                      child:
+                          _field(radiusController, 'Rayon (km)', decimal: true),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: _field(orderController, 'Ordre')),
+                  ]),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Zone desservie'),
+                    subtitle: const Text(
+                        'Exige latitude, longitude et rayon supérieur à 0.'),
+                    value: isServiceable,
+                    onChanged: (value) {
+                      if (value &&
+                          !_hasGeometry(
+                              latController, lngController, radiusController)) {
+                        _dialogSnack(dialogContext,
+                            'Renseignez un point propre et un rayon supérieur à 0.');
+                        return;
+                      }
+                      setDialogState(() => isServiceable = value);
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Zone active'),
+                    value: isActive,
+                    onChanged: (value) =>
+                        setDialogState(() => isActive = value),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Annuler')),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary),
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
               onPressed: () async {
-                final name = nameCtrl.text.trim();
-                if (name.isEmpty) return;
-                final payload = <String, dynamic>{
-                  'name':       name,
-                  'type':       type,
-                  'parentName': parentCtrl.text.trim(),
-                  'isActive':   data?['isActive'] ?? true,
-                  'order':      data?['order'] ?? 99,
-                  'updatedAt':  FieldValue.serverTimestamp(),
-                  if (lat != null) 'lat': lat,
-                  if (lng != null) 'lng': lng,
-                };
-                if (doc == null) {
-                  payload['createdAt'] = FieldValue.serverTimestamp();
-                  await _col.add(payload);
-                } else {
-                  await doc.reference.update(payload);
+                final form = DeliveryZoneFormData(
+                  name: nameController.text,
+                  type: type,
+                  cityId: cityIdController.text.trim(),
+                  parentZoneId: parentZoneId,
+                  aliases: aliases,
+                  lat: _parseDouble(latController.text),
+                  lng: _parseDouble(lngController.text),
+                  radiusKm: _parseDouble(radiusController.text),
+                  isServiceable: isServiceable,
+                  isActive: isActive,
+                  order: int.tryParse(orderController.text.trim()) ?? 0,
+                );
+                final otherCityIds = cities
+                    .where((city) => city.id != zone?.id)
+                    .map((city) => city.cityId)
+                    .whereType<String>();
+                final error = form.validate(existingCityIds: otherCityIds);
+                if (error != null) {
+                  _dialogSnack(dialogContext, error);
+                  return;
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
+                final payload = form.toMap()
+                  ..['updatedAt'] = FieldValue.serverTimestamp();
+                if (zone != null) {
+                  if (form.type == 'ville') {
+                    payload['parentZoneId'] = FieldValue.delete();
+                  }
+                  if (form.lat == null) payload['lat'] = FieldValue.delete();
+                  if (form.lng == null) payload['lng'] = FieldValue.delete();
+                  if (form.radiusKm == null) {
+                    payload['radiusKm'] = FieldValue.delete();
+                  }
+                }
+                if (zone == null) {
+                  payload['createdAt'] = FieldValue.serverTimestamp();
+                  await _zones.add(payload);
+                } else {
+                  await document!.reference
+                      .set(payload, SetOptions(merge: true));
+                }
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
               },
-              child: Text(doc == null ? 'Ajouter' : 'Enregistrer',
-                  style: const TextStyle(color: Colors.white)),
+              child: Text(zone == null ? 'Ajouter' : 'Enregistrer'),
             ),
           ],
         ),
       ),
     );
+
+    nameController.dispose();
+    cityIdController.dispose();
+    aliasController.dispose();
+    latController.dispose();
+    lngController.dispose();
+    radiusController.dispose();
+    orderController.dispose();
   }
 
-  // ── Toggle actif ────────────────────────────────────────────────────────────
-  Future<void> _toggleActive(DocumentSnapshot doc) async {
-    final current = doc['isActive'] as bool? ?? true;
-    await doc.reference.update({'isActive': !current});
-  }
-
-  // ── Supprimer ────────────────────────────────────────────────────────────────
-  Future<void> _delete(DocumentSnapshot doc) async {
-    final confirm = await showDialog<bool>(
+  Future<void> _delete(DocumentSnapshot<Map<String, dynamic>> document) async {
+    final zone = DeliveryZone.fromMap(document.id, document.data()!);
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (context) => AlertDialog(
         title: const Text('Supprimer la zone ?'),
-        content: Text('Supprimer "${doc['name']}" ? Cette action est irréversible.'),
+        content: Text('Supprimer « ${zone.name ?? zone.id} » ?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
               child: const Text('Annuler')),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Supprimer', style: TextStyle(color: Colors.red))),
+              child: const Text('Supprimer')),
         ],
       ),
     );
-    if (confirm == true) await doc.reference.delete();
+    if (confirmed == true) await document.reference.delete();
   }
 
-  void _snack(String msg, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: color,
-            duration: const Duration(seconds: 3)));
-  }
-
-  // ── BUILD ────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -328,258 +363,238 @@ class _AdminZonesPageState extends State<AdminZonesPage>
       appBar: AppBar(
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
-        title: const Text('Gestion Géographique',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        actions: [
-          if (_seeding)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                  width: 20, height: 20,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2)),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.download_rounded),
-              tooltip: 'Initialiser les zones de départ',
-              onPressed: _seedZones,
-            ),
-        ],
+        title: const Text('Gestion géographique'),
         bottom: TabBar(
-          controller: _tabCtrl,
+          controller: _tabController,
           isScrollable: true,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white60,
-          indicatorColor: Colors.white,
-          tabs: _tabs.map((t) => Tab(text: t)).toList(),
+          tabs: _tabs.map((label) => Tab(text: label)).toList(),
         ),
       ),
       body: TabBarView(
-        controller: _tabCtrl,
-        children: List.generate(_tabs.length, (i) => _ZonesList(
-          typeFilter: _types[i],
-          onEdit: _openForm,
-          onToggle: _toggleActive,
-          onDelete: _delete,
-        )),
+        controller: _tabController,
+        children: List.generate(
+          _types.length,
+          (index) => _ZonesList(
+            type: _types[index],
+            onEdit: _openForm,
+            onDelete: _delete,
+          ),
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF1565C0),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.add_location_alt_rounded),
+        onPressed: _openForm,
+        icon: const Icon(Icons.add_location_alt),
         label: const Text('Ajouter une zone'),
-        onPressed: () => _openForm(),
       ),
+    );
+  }
+
+  Widget _field(TextEditingController controller, String label,
+      {bool decimal = false}) {
+    return TextField(
+      controller: controller,
+      keyboardType: decimal
+          ? const TextInputType.numberWithOptions(decimal: true, signed: true)
+          : TextInputType.text,
+      decoration:
+          InputDecoration(labelText: label, border: const OutlineInputBorder()),
+    );
+  }
+
+  Widget _aliasesEditor(TextEditingController controller, List<String> aliases,
+      VoidCallback refresh) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TextField(
+        controller: controller,
+        decoration: InputDecoration(
+          labelText: 'Alias',
+          border: const OutlineInputBorder(),
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isNotEmpty && !aliases.contains(value)) {
+                aliases.add(value);
+              }
+              controller.clear();
+              refresh();
+            },
+          ),
+        ),
+        onSubmitted: (value) {
+          final alias = value.trim();
+          if (alias.isNotEmpty && !aliases.contains(alias)) {
+            aliases.add(alias);
+          }
+          controller.clear();
+          refresh();
+        },
+      ),
+      if (aliases.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          children: aliases
+              .map((alias) => InputChip(
+                    label: Text(alias),
+                    onDeleted: () {
+                      aliases.remove(alias);
+                      refresh();
+                    },
+                  ))
+              .toList(),
+        ),
+      ],
+    ]);
+  }
+
+  static bool _hasGeometry(TextEditingController lat, TextEditingController lng,
+      TextEditingController radius) {
+    return _parseDouble(lat.text) != null &&
+        _parseDouble(lng.text) != null &&
+        (_parseDouble(radius.text) ?? 0) > 0;
+  }
+
+  static LatLng? _pointFromControllers(
+      TextEditingController lat, TextEditingController lng) {
+    final latitude = _parseDouble(lat.text);
+    final longitude = _parseDouble(lng.text);
+    return latitude == null || longitude == null
+        ? null
+        : LatLng(latitude, longitude);
+  }
+
+  static double? _parseDouble(String text) => text.trim().isEmpty
+      ? null
+      : double.tryParse(text.trim().replaceAll(',', '.'));
+
+  static String _number(num? value) => value?.toString() ?? '';
+
+  void _snack(String message, Color color) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
+  }
+
+  static void _dialogSnack(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
   }
 }
 
-// ── Liste des zones (par type) ───────────────────────────────────────────────
-
 class _ZonesList extends StatelessWidget {
-  final String typeFilter;
-  final Future<void> Function(DocumentSnapshot) onEdit;
-  final Future<void> Function(DocumentSnapshot) onToggle;
-  final Future<void> Function(DocumentSnapshot) onDelete;
+  final String type;
+  final Future<void> Function(DocumentSnapshot<Map<String, dynamic>>?) onEdit;
+  final Future<void> Function(DocumentSnapshot<Map<String, dynamic>>) onDelete;
 
   const _ZonesList({
-    required this.typeFilter,
+    required this.type,
     required this.onEdit,
-    required this.onToggle,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    Query query = FirebaseFirestore.instance
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance
         .collection('zones_livraison')
         .orderBy('order')
         .orderBy('name');
-
-    if (typeFilter.isNotEmpty) {
-      query = query.where('type', isEqualTo: typeFilter);
-    }
-
-    return StreamBuilder<QuerySnapshot>(
+    if (type.isNotEmpty) query = query.where('type', isEqualTo: type);
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: query.snapshots(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        final docs = snap.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.location_off_rounded,
-                    size: 56, color: Colors.grey.shade400),
-                const SizedBox(height: 12),
-                Text(
-                  typeFilter.isEmpty
-                      ? 'Aucune zone définie\nAppuyez sur ↓ pour initialiser'
-                      : 'Aucune zone de type "$typeFilter"',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade500, fontSize: 15),
-                ),
-              ],
-            ),
-          );
+        final documents = snapshot.data?.docs ?? const [];
+        if (documents.isEmpty) {
+          return const Center(child: Text('Aucune zone définie.'));
         }
         return ListView.builder(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
-          itemCount: docs.length,
-          itemBuilder: (_, i) => _ZoneCard(
-            doc: docs[i],
-            onEdit: onEdit,
-            onToggle: onToggle,
-            onDelete: onDelete,
-          ),
+          itemCount: documents.length,
+          itemBuilder: (context, index) {
+            final document = documents[index];
+            final zone = DeliveryZone.fromMap(document.id, document.data());
+            return Card(
+              child: ListTile(
+                leading: Icon(zone.type == 'ville'
+                    ? Icons.location_city
+                    : Icons.place_outlined),
+                title: Text(zone.name ?? zone.id),
+                subtitle: Text([
+                  zone.type,
+                  zone.cityId,
+                  if (zone.isServiceable) 'desservie',
+                  if (zone.isActive == false) 'inactive',
+                ].whereType<String>().join(' · ')),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'edit') onEdit(document);
+                    if (value == 'delete') onDelete(document);
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Modifier')),
+                    PopupMenuItem(value: 'delete', child: Text('Supprimer')),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
   }
 }
 
-// ── Carte zone ───────────────────────────────────────────────────────────────
+class _MapPointDialog extends StatefulWidget {
+  final LatLng? initial;
 
-class _ZoneCard extends StatelessWidget {
-  final DocumentSnapshot doc;
-  final Future<void> Function(DocumentSnapshot) onEdit;
-  final Future<void> Function(DocumentSnapshot) onToggle;
-  final Future<void> Function(DocumentSnapshot) onDelete;
+  const _MapPointDialog({required this.initial});
 
-  const _ZoneCard({
-    required this.doc,
-    required this.onEdit,
-    required this.onToggle,
-    required this.onDelete,
-  });
+  @override
+  State<_MapPointDialog> createState() => _MapPointDialogState();
+}
 
-  static const _typeColors = {
-    'ville':    Color(0xFF1565C0),
-    'quartier': Color(0xFF2E7D32),
-    'village':  Color(0xFF6A1B9A),
-    'secteur':  Color(0xFFBF360C),
-  };
-
-  static const _typeIcons = {
-    'ville':    Icons.location_city_rounded,
-    'quartier': Icons.holiday_village_rounded,
-    'village':  Icons.cabin_rounded,
-    'secteur':  Icons.grid_view_rounded,
-  };
+class _MapPointDialogState extends State<_MapPointDialog> {
+  static const _abengourou = LatLng(6.7273, -3.4961);
+  late LatLng _selected = widget.initial ?? _abengourou;
 
   @override
   Widget build(BuildContext context) {
-    final data     = doc.data() as Map<String, dynamic>;
-    final name     = data['name'] as String? ?? '';
-    final type     = data['type'] as String? ?? '';
-    final parent   = data['parentName'] as String? ?? '';
-    final isActive = data['isActive'] as bool? ?? true;
-    final lat      = (data['lat'] as num?)?.toDouble();
-    final lng      = (data['lng'] as num?)?.toDouble();
-    final color    = _typeColors[type] ?? Colors.grey;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        leading: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10)),
-          child: Icon(_typeIcons[type] ?? Icons.place_rounded,
-              color: color, size: 22),
-        ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(name,
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: isActive ? Colors.black87 : Colors.grey)),
+    return Dialog(
+      child: SizedBox(
+        width: 640,
+        height: 560,
+        child: Column(children: [
+          const ListTile(
+            title: Text('Choisir le point propre de la zone'),
+            subtitle: Text('Touchez la carte pour placer le repère.'),
+          ),
+          Expanded(
+            child: GoogleMap(
+              initialCameraPosition:
+                  CameraPosition(target: _selected, zoom: 14),
+              markers: {
+                Marker(markerId: const MarkerId('zone'), position: _selected),
+              },
+              onTap: (point) => setState(() => _selected = point),
+              mapToolbarEnabled: false,
             ),
-            if (!isActive)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.red.shade200)),
-                child: const Text('Inactif',
-                    style: TextStyle(fontSize: 11, color: Colors.red)),
-              ),
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Container(
-                margin: const EdgeInsets.only(top: 4),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(20)),
-                child: Text(type,
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: color,
-                        fontWeight: FontWeight.w600)),
-              ),
-              if (parent.isNotEmpty) ...[
-                const SizedBox(width: 6),
-                Text('· $parent',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              ],
-            ]),
-            if (lat != null && lng != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  '📍 ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}',
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                ),
-              ),
-          ],
-        ),
-        trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: Colors.grey),
-          onSelected: (v) {
-            if (v == 'edit')   onEdit(doc);
-            if (v == 'toggle') onToggle(doc);
-            if (v == 'delete') onDelete(doc);
-          },
-          itemBuilder: (_) => [
-            const PopupMenuItem(value: 'edit',
-                child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.edit_rounded, color: Colors.blue),
-                    title: Text('Modifier'))),
-            PopupMenuItem(value: 'toggle',
-                child: ListTile(
-                    dense: true,
-                    leading: Icon(
-                        isActive
-                            ? Icons.visibility_off_rounded
-                            : Icons.visibility_rounded,
-                        color: isActive ? Colors.orange : Colors.green),
-                    title: Text(isActive ? 'Désactiver' : 'Réactiver'))),
-            const PopupMenuItem(value: 'delete',
-                child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.delete_rounded, color: Colors.red),
-                    title: Text('Supprimer',
-                        style: TextStyle(color: Colors.red)))),
-          ],
-        ),
+          ),
+          OverflowBar(children: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Annuler')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, _selected),
+                child: const Text('Utiliser ce point')),
+          ]),
+        ]),
       ),
     );
   }

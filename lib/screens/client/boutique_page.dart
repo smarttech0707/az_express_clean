@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -27,7 +27,6 @@ class _BoutiquePageState extends State<BoutiquePage>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
-    _checkAutoRefunds();
   }
 
   @override
@@ -46,34 +45,6 @@ class _BoutiquePageState extends State<BoutiquePage>
   // (`permission-denied`), avalé silencieusement par le catch ci-dessous —
   // ce remboursement automatique n'a donc jamais fonctionné en production
   // (Master Prompt 48 bis).
-  Future<void> _checkAutoRefunds() async {
-    if (_uid == null) return;
-    final now = DateTime.now();
-    try {
-      final snap = await FirebaseFirestore.instance
-          .collection("boutique_orders")
-          .where("clientId", isEqualTo: _uid)
-          .where("status", isEqualTo: "paid")
-          .get();
-
-      final fn = FirebaseFunctions.instanceFor(region: 'europe-west1')
-          .httpsCallable('refundExpiredBoutiqueOrderCF');
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        final deadline =
-            (data["deliveryDeadline"] as Timestamp?)?.toDate();
-        if (deadline != null && now.isAfter(deadline)) {
-          try {
-            await fn.call(<String, dynamic>{'orderId': doc.id});
-          } catch (_) {
-            // Best-effort — un échec ici sera retenté à la prochaine
-            // ouverture de cet écran, comme avant.
-          }
-        }
-      }
-    } catch (_) {}
-  }
-
   // ── ACHAT ─────────────────────────────────────────────────────
   // Paiement wallet : délègue entièrement au Cloud Function
   // `payBoutiqueOrderCF` (débit client + crédit vendeur + décrément stock +
@@ -199,7 +170,8 @@ class _BoutiquePageState extends State<BoutiquePage>
 
     int qty = 1;
     String payMethod = 'wallet';
-    bool buying = false; // anti double-tap — payBoutiqueOrderCF n'est pas idempotent
+    bool buying =
+        false; // anti double-tap — payBoutiqueOrderCF n'est pas idempotent
 
     showModalBottomSheet(
       context: context,
@@ -242,8 +214,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                         children: [
                           Text(product["name"],
                               style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 17)),
+                                  fontWeight: FontWeight.bold, fontSize: 17)),
                           Text(product["category"] ?? "",
                               style: const TextStyle(
                                   color: Colors.grey, fontSize: 13)),
@@ -270,12 +241,11 @@ class _BoutiquePageState extends State<BoutiquePage>
 
                 // Stock
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: stock > 0
-                        ? Colors.green.shade50
-                        : Colors.red.shade50,
+                    color:
+                        stock > 0 ? Colors.green.shade50 : Colors.red.shade50,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -296,9 +266,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     IconButton(
-                      onPressed: qty > 1
-                          ? () => setS(() => qty--)
-                          : null,
+                      onPressed: qty > 1 ? () => setS(() => qty--) : null,
                       icon: const Icon(Icons.remove_circle_outline),
                       color: AppColors.primary,
                       iconSize: 30,
@@ -308,8 +276,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                       children: [
                         Text("$qty",
                             style: const TextStyle(
-                                fontSize: 30,
-                                fontWeight: FontWeight.bold)),
+                                fontSize: 30, fontWeight: FontWeight.bold)),
                         Text(ctx.tr('qty_label'),
                             style: const TextStyle(
                                 color: Colors.grey, fontSize: 12)),
@@ -317,9 +284,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                     ),
                     const SizedBox(width: 16),
                     IconButton(
-                      onPressed: qty < stock
-                          ? () => setS(() => qty++)
-                          : null,
+                      onPressed: qty < stock ? () => setS(() => qty++) : null,
                       icon: const Icon(Icons.add_circle_outline),
                       color: AppColors.primary,
                       iconSize: 30,
@@ -376,9 +341,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                         subtitle: hasWallet
                             ? "Solde : $walletBalance FCFA"
                             : "Solde insuffisant ($walletBalance FCFA)",
-                        color: hasWallet
-                            ? const Color(0xFF1565C0)
-                            : Colors.red,
+                        color: hasWallet ? const Color(0xFF1565C0) : Colors.red,
                         selected: payMethod == 'wallet',
                         enabled: hasWallet,
                         onTap: hasWallet
@@ -393,9 +356,8 @@ class _BoutiquePageState extends State<BoutiquePage>
                         subtitle: codEnabled
                             ? "Payer le livreur à la livraison"
                             : "Désactivé — 3 fausses commandes",
-                        color: codEnabled
-                            ? const Color(0xFF2E7D32)
-                            : Colors.grey,
+                        color:
+                            codEnabled ? const Color(0xFF2E7D32) : Colors.grey,
                         selected: payMethod == 'cash',
                         enabled: codEnabled,
                         onTap: codEnabled
@@ -462,7 +424,8 @@ class _BoutiquePageState extends State<BoutiquePage>
       body: NestedScrollView(
         headerSliverBuilder: (context, _) => [
           SliverAppBar(
-            expandedHeight: (MediaQuery.of(context).size.height * 0.22).clamp(160.0, 240.0),
+            expandedHeight:
+                (MediaQuery.of(context).size.height * 0.22).clamp(160.0, 240.0),
             pinned: true,
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
@@ -474,8 +437,7 @@ class _BoutiquePageState extends State<BoutiquePage>
                     .doc(_uid)
                     .snapshots(),
                 builder: (context, snap) {
-                  final wallet =
-                      (snap.data?.data() as Map?)?["wallet"] ?? 0;
+                  final wallet = (snap.data?.data() as Map?)?["wallet"] ?? 0;
                   return GestureDetector(
                     onTap: () => Navigator.push(
                         context,
@@ -523,7 +485,8 @@ class _BoutiquePageState extends State<BoutiquePage>
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.storefront, color: Colors.white, size: 40),
+                        const Icon(Icons.storefront,
+                            color: Colors.white, size: 40),
                         const SizedBox(height: 10),
                         Text(context.tr('shop_title'),
                             style: const TextStyle(
@@ -544,8 +507,12 @@ class _BoutiquePageState extends State<BoutiquePage>
               labelColor: Colors.white,
               unselectedLabelColor: Colors.white70,
               tabs: [
-                Tab(icon: const Icon(Icons.grid_view, size: 18), text: context.tr('products_tab')),
-                Tab(icon: const Icon(Icons.receipt_long, size: 18), text: context.tr('my_orders_tab')),
+                Tab(
+                    icon: const Icon(Icons.grid_view, size: 18),
+                    text: context.tr('products_tab')),
+                Tab(
+                    icon: const Icon(Icons.receipt_long, size: 18),
+                    text: context.tr('my_orders_tab')),
               ],
             ),
           ),
@@ -555,8 +522,7 @@ class _BoutiquePageState extends State<BoutiquePage>
           children: [
             _ProductsTab(
               selectedCategory: _selectedCategory,
-              onCategoryChanged: (c) =>
-                  setState(() => _selectedCategory = c),
+              onCategoryChanged: (c) => setState(() => _selectedCategory = c),
               onProductTap: _showProductDetail,
             ),
             _MyOrdersTab(
@@ -632,16 +598,14 @@ class _ProductsTab extends StatelessWidget {
         // Catégories
         final categories = {"Tout"};
         for (final d in activeDocs) {
-          categories.add(
-              ((d.data() as Map)["category"] ?? "Autre") as String);
+          categories.add(((d.data() as Map)["category"] ?? "Autre") as String);
         }
 
         final filtered = selectedCategory == "Tout"
             ? activeDocs
             : activeDocs
-                .where((d) =>
-                    ((d.data() as Map)["category"]) ==
-                    selectedCategory)
+                .where(
+                    (d) => ((d.data() as Map)["category"]) == selectedCategory)
                 .toList();
 
         return Column(
@@ -651,8 +615,8 @@ class _ProductsTab extends StatelessWidget {
               height: 50,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 children: categories
                     .map((cat) => GestureDetector(
                           onTap: () => onCategoryChanged(cat),
@@ -704,8 +668,7 @@ class _ProductsTab extends StatelessWidget {
                 ),
                 itemCount: filtered.length,
                 itemBuilder: (context, i) {
-                  final data =
-                      filtered[i].data() as Map<String, dynamic>;
+                  final data = filtered[i].data() as Map<String, dynamic>;
                   data["id"] = filtered[i].id;
                   final stock = data["stock"] as int? ?? 0;
                   return GestureDetector(
@@ -742,15 +705,20 @@ class _ProductsTab extends StatelessWidget {
                               ),
                               if (data['sellerVipActive'] == true)
                                 Positioned(
-                                  top: 6, left: 6,
+                                  top: 6,
+                                  left: 6,
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFFFFD700),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: const Text('👑 VIP',
-                                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.black87)),
+                                        style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w800,
+                                            color: Colors.black87)),
                                   ),
                                 ),
                             ],
@@ -759,8 +727,7 @@ class _ProductsTab extends StatelessWidget {
                           Padding(
                             padding: const EdgeInsets.all(10),
                             child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(data["name"],
                                     maxLines: 2,
@@ -815,8 +782,7 @@ class _ProductsTab extends StatelessWidget {
 
 class _MyOrdersTab extends StatelessWidget {
   final String? uid;
-  final Future<void> Function(String orderId, int amount, String name)
-      onRefund;
+  final Future<void> Function(String orderId, int amount, String name) onRefund;
 
   const _MyOrdersTab({required this.uid, required this.onRefund});
 
@@ -857,12 +823,10 @@ class _MyOrdersTab extends StatelessWidget {
           itemBuilder: (context, i) {
             final data = docs[i].data() as Map<String, dynamic>;
             final status = data["status"] ?? "paid";
-            final deadline =
-                (data["deliveryDeadline"] as Timestamp?)?.toDate();
+            final deadline = (data["deliveryDeadline"] as Timestamp?)?.toDate();
             final now = DateTime.now();
-            final isExpired = deadline != null &&
-                now.isAfter(deadline) &&
-                status == "paid";
+            final isExpired =
+                deadline != null && now.isAfter(deadline) && status == "paid";
 
             Color statusColor;
             String statusLabel;
@@ -928,8 +892,7 @@ class _MyOrdersTab extends StatelessWidget {
                         Expanded(
                           child: Text(data["productName"] ?? "—",
                               style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15)),
+                                  fontWeight: FontWeight.bold, fontSize: 15)),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -941,8 +904,7 @@ class _MyOrdersTab extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(statusIcon,
-                                  size: 12, color: statusColor),
+                              Icon(statusIcon, size: 12, color: statusColor),
                               const SizedBox(width: 4),
                               Text(statusLabel,
                                   style: TextStyle(
@@ -957,8 +919,7 @@ class _MyOrdersTab extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       "Qté : ${data['qty']}  •  ${data['totalPrice']} FCFA",
-                      style: const TextStyle(
-                          color: Colors.grey, fontSize: 13),
+                      style: const TextStyle(color: Colors.grey, fontSize: 13),
                     ),
                     if (deadline != null && status == "paid") ...[
                       const SizedBox(height: 6),
@@ -969,20 +930,18 @@ class _MyOrdersTab extends StatelessWidget {
                                 ? Icons.warning_amber
                                 : Icons.timer_outlined,
                             size: 14,
-                            color: isExpired
-                                ? Colors.red
-                                : Colors.orange,
+                            color: isExpired ? Colors.red : Colors.orange,
                           ),
                           const SizedBox(width: 4),
                           Text(
                             isExpired
                                 ? context.tr('deadline_exceeded')
-                                : context.tr('delivery_before').replaceAll('{date}', _fmt(deadline)),
+                                : context
+                                    .tr('delivery_before')
+                                    .replaceAll('{date}', _fmt(deadline)),
                             style: TextStyle(
                                 fontSize: 11,
-                                color: isExpired
-                                    ? Colors.red
-                                    : Colors.orange),
+                                color: isExpired ? Colors.red : Colors.orange),
                           ),
                         ],
                       ),
@@ -991,7 +950,8 @@ class _MyOrdersTab extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(top: 6),
                         child: Text(
-                            data["refundReason"] ?? context.tr('status_refunded'),
+                            data["refundReason"] ??
+                                context.tr('status_refunded'),
                             style: const TextStyle(
                                 color: Colors.purple, fontSize: 11)),
                       ),
@@ -1074,5 +1034,3 @@ class _PayOption extends StatelessWidget {
     );
   }
 }
-
-

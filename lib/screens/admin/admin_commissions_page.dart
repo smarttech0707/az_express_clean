@@ -56,7 +56,8 @@ class _AdminCommissionsPageState extends State<AdminCommissionsPage>
       body: TabBarView(
         controller: _tabs,
         children: [
-          _StatsTab(filterPeriod: _filterPeriod,
+          _StatsTab(
+              filterPeriod: _filterPeriod,
               onPeriodChanged: (v) => setState(() => _filterPeriod = v)),
           const _HistoryTab(),
         ],
@@ -75,11 +76,15 @@ class _StatsTab extends StatelessWidget {
   DateTime _startDate() {
     final now = DateTime.now();
     switch (filterPeriod) {
-      case 0: return DateTime(now.year, now.month, now.day);
-      case 1: return DateTime(now.year, now.month, now.day)
-                    .subtract(Duration(days: now.weekday - 1));
-      case 2: return DateTime(now.year, now.month, 1);
-      default: return DateTime(2020);
+      case 0:
+        return DateTime(now.year, now.month, now.day);
+      case 1:
+        return DateTime(now.year, now.month, now.day)
+            .subtract(Duration(days: now.weekday - 1));
+      case 2:
+        return DateTime(now.year, now.month, 1);
+      default:
+        return DateTime(2020);
     }
   }
 
@@ -92,40 +97,47 @@ class _StatsTab extends StatelessWidget {
           .snapshots(),
       builder: (ctx, snap) {
         if (snap.hasError) {
-          return const StreamErrorState(message: "Impossible de charger les commissions.");
+          return const StreamErrorState(
+              message: "Impossible de charger les commissions.");
         }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final all  = snap.data!.docs;
-        final now  = DateTime.now();
+        final all = snap.data!.docs;
+        final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
         final month = DateTime(now.year, now.month, 1);
         final start = _startDate();
 
-        int totalAll        = 0;
-        int totalToday      = 0;
-        int totalMonth      = 0;
-        int countAll        = 0;
-        int countToday      = 0;
-        int countMonth      = 0;
-        int totalPeriod     = 0;
-        int countPeriod     = 0;
+        int totalAll = 0;
+        int totalToday = 0;
+        int totalMonth = 0;
+        int countAll = 0;
+        int countToday = 0;
+        int countMonth = 0;
+        int totalPeriod = 0;
+        int countPeriod = 0;
         int totalDriverGain = 0;
 
         for (final doc in all) {
-          final d    = doc.data() as Map<String, dynamic>;
-          final ts   = (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2020);
-          final amt  = (d['amount'] as num? ?? 0).toInt();
+          final d = doc.data() as Map<String, dynamic>;
+          final ts = (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2020);
+          final amt = (d['amount'] as num? ?? 0).toInt();
           final gain = (d['driverGain'] as num? ?? 0).toInt();
 
           totalAll++;
           countAll++;
           totalDriverGain += gain;
 
-          if (!ts.isBefore(today)) { totalToday++; countToday++; }
-          if (!ts.isBefore(month)) { totalMonth++; countMonth++; }
+          if (!ts.isBefore(today)) {
+            totalToday++;
+            countToday++;
+          }
+          if (!ts.isBefore(month)) {
+            totalMonth++;
+            countMonth++;
+          }
           if (!ts.isBefore(start)) {
             totalPeriod += amt;
             countPeriod++;
@@ -133,11 +145,11 @@ class _StatsTab extends StatelessWidget {
         }
 
         // Real totals using amount field
-        totalAll   = 0;
+        totalAll = 0;
         totalToday = 0;
         totalMonth = 0;
         for (final doc in all) {
-          final d  = doc.data() as Map<String, dynamic>;
+          final d = doc.data() as Map<String, dynamic>;
           final ts = (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2020);
           final amt = (d['amount'] as num? ?? _kCommission).toInt();
           totalAll += amt;
@@ -209,7 +221,8 @@ class _StatsTab extends StatelessWidget {
                       children: [
                         const _MiniStat('Commission/livraison',
                             '$_kCommission FCFA', Colors.white),
-                        _MiniStat('Gain livreur moyen',
+                        _MiniStat(
+                            'Gain livreur moyen',
                             countPeriod > 0
                                 ? '${totalDriverGain ~/ countAll} FCFA'
                                 : '—',
@@ -282,10 +295,14 @@ class _StatsTab extends StatelessWidget {
 
   String _periodLabel(int p) {
     switch (p) {
-      case 0: return "Commissions aujourd'hui";
-      case 1: return 'Commissions cette semaine';
-      case 2: return 'Commissions ce mois';
-      default: return 'Commissions totales';
+      case 0:
+        return "Commissions aujourd'hui";
+      case 1:
+        return 'Commissions cette semaine';
+      case 2:
+        return 'Commissions ce mois';
+      default:
+        return 'Commissions totales';
     }
   }
 }
@@ -302,13 +319,13 @@ class _TopDrivers extends StatelessWidget {
     final Map<String, Map<String, dynamic>> byDriver = {};
 
     for (final doc in docs) {
-      final d   = doc.data() as Map<String, dynamic>;
-      final ts  = (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2020);
+      final d = doc.data() as Map<String, dynamic>;
+      final ts = (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2020);
       if (ts.isBefore(start)) continue;
 
-      final id   = d['driverId'] as String? ?? '';
+      final id = d['driverId'] as String? ?? '';
       final name = d['driverName'] as String? ?? id;
-      final amt  = (d['amount'] as num? ?? _kCommission).toInt();
+      final amt = (d['amount'] as num? ?? _kCommission).toInt();
 
       if (!byDriver.containsKey(id)) {
         byDriver[id] = {'name': name, 'total': 0, 'count': 0};
@@ -352,7 +369,8 @@ class _TopDrivers extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 32, height: 32,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   color: rank == 1
                       ? Colors.amber
@@ -368,7 +386,9 @@ class _TopDrivers extends StatelessWidget {
                       style: GoogleFonts.urbanist(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
-                          color: rank <= 3 ? Colors.white : const Color(0xFF1565C0))),
+                          color: rank <= 3
+                              ? Colors.white
+                              : const Color(0xFF1565C0))),
                 ),
               ),
               const SizedBox(width: 10),
@@ -410,7 +430,7 @@ class _CommissionChart extends StatelessWidget {
     final daily = List<int>.filled(7, 0);
 
     for (final doc in docs) {
-      final d  = doc.data() as Map<String, dynamic>;
+      final d = doc.data() as Map<String, dynamic>;
       final ts = (d['createdAt'] as Timestamp?)?.toDate();
       if (ts == null) continue;
       final diff = now.difference(ts).inDays;
@@ -449,7 +469,7 @@ class _CommissionChart extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: List.generate(7, (i) {
                 final ratio = maxVal > 0 ? daily[i] / maxVal : 0.0;
-                final barH  = 80.0 * ratio;
+                final barH = 80.0 * ratio;
                 final isToday = i == 6;
                 return Expanded(
                   child: Padding(
@@ -479,8 +499,14 @@ class _CommissionChart extends StatelessWidget {
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               colors: isToday
-                                  ? [const Color(0xFF1565C0), const Color(0xFF42A5F5)]
-                                  : [Colors.blue.shade200, Colors.blue.shade400],
+                                  ? [
+                                      const Color(0xFF1565C0),
+                                      const Color(0xFF42A5F5)
+                                    ]
+                                  : [
+                                      Colors.blue.shade200,
+                                      Colors.blue.shade400
+                                    ],
                               begin: Alignment.bottomCenter,
                               end: Alignment.topCenter,
                             ),
@@ -492,7 +518,8 @@ class _CommissionChart extends StatelessWidget {
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 10,
-                              fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                              fontWeight:
+                                  isToday ? FontWeight.bold : FontWeight.normal,
                               color: isToday
                                   ? const Color(0xFF1565C0)
                                   : Colors.grey.shade500,
@@ -553,7 +580,8 @@ class _HistoryTabState extends State<_HistoryTab> {
               style: GoogleFonts.urbanist(fontSize: 13.5),
               decoration: InputDecoration(
                 hintText: 'Rechercher un livreur…',
-                hintStyle: GoogleFonts.urbanist(fontSize: 13.5, color: Colors.grey),
+                hintStyle:
+                    GoogleFonts.urbanist(fontSize: 13.5, color: Colors.grey),
                 prefixIcon: const Icon(Icons.search_rounded,
                     color: Color(0xFF1565C0), size: 20),
                 suffixIcon: _search.isNotEmpty
@@ -580,7 +608,8 @@ class _HistoryTabState extends State<_HistoryTab> {
                 .snapshots(),
             builder: (ctx, snap) {
               if (snap.hasError) {
-                return const StreamErrorState(message: "Impossible de charger les commissions.");
+                return const StreamErrorState(
+                    message: "Impossible de charger les commissions.");
               }
               if (!snap.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -589,7 +618,8 @@ class _HistoryTabState extends State<_HistoryTab> {
               if (_search.isNotEmpty) {
                 docs = docs.where((d) {
                   final data = d.data() as Map<String, dynamic>;
-                  final name = (data['driverName'] as String? ?? '').toLowerCase();
+                  final name =
+                      (data['driverName'] as String? ?? '').toLowerCase();
                   return name.contains(_search);
                 }).toList();
               }
@@ -629,13 +659,13 @@ class _CommissionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final d           = doc.data() as Map<String, dynamic>;
-    final driverName  = d['driverName'] as String? ?? '—';
+    final d = doc.data() as Map<String, dynamic>;
+    final driverName = d['driverName'] as String? ?? '—';
     final deliveryFee = (d['deliveryFee'] as num? ?? 0).toInt();
-    final driverGain  = (d['driverGain'] as num? ?? 0).toInt();
-    final amount      = (d['amount'] as num? ?? _kCommission).toInt();
-    final payMethod   = d['paymentMethod'] as String? ?? '';
-    final ts          = (d['createdAt'] as Timestamp?)?.toDate();
+    final driverGain = (d['driverGain'] as num? ?? 0).toInt();
+    final amount = (d['amount'] as num? ?? _kCommission).toInt();
+    final payMethod = d['paymentMethod'] as String? ?? '';
+    final ts = (d['createdAt'] as Timestamp?)?.toDate();
 
     final dateStr = ts != null
         ? '${_z(ts.day)}/${_z(ts.month)}/${ts.year} ${_z(ts.hour)}:${_z(ts.minute)}'
@@ -659,7 +689,8 @@ class _CommissionTile extends StatelessWidget {
           children: [
             // Icône
             Container(
-              width: 44, height: 44,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 color: const Color(0xFF1565C0).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
@@ -740,9 +771,7 @@ class _CommissionTile extends StatelessWidget {
       ),
       child: Text(label,
           style: TextStyle(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.w600)),
+              color: color, fontSize: 10, fontWeight: FontWeight.w600)),
     );
   }
 
@@ -771,9 +800,7 @@ class _PeriodBtn extends StatelessWidget {
             color: sel ? const Color(0xFF1565C0) : Colors.white,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-                color: sel
-                    ? const Color(0xFF1565C0)
-                    : Colors.grey.shade300),
+                color: sel ? const Color(0xFF1565C0) : Colors.grey.shade300),
             boxShadow: sel
                 ? [
                     BoxShadow(
@@ -837,9 +864,7 @@ class _StatCard extends StatelessWidget {
           const Spacer(),
           Text(value,
               style: GoogleFonts.urbanist(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: color)),
+                  fontWeight: FontWeight.bold, fontSize: 16, color: color)),
           Text(label,
               style: GoogleFonts.urbanist(
                   fontSize: 11, color: Colors.grey.shade600)),
@@ -864,9 +889,7 @@ class _MiniStat extends StatelessWidget {
       children: [
         Text(value,
             style: GoogleFonts.urbanist(
-                color: color,
-                fontWeight: FontWeight.bold,
-                fontSize: 15)),
+                color: color, fontWeight: FontWeight.bold, fontSize: 15)),
         Text(label,
             style: GoogleFonts.urbanist(
                 color: color.withValues(alpha: 0.7), fontSize: 10.5)),

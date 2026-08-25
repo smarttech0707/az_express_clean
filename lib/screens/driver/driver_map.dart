@@ -10,13 +10,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../models/order_model.dart';
+import '../../services/active_city_service.dart';
 import '../../services/google_routes_service.dart';
 import '../../theme/app_theme.dart';
 
 /// Carte du livreur — suivi GPS temps réel, itinéraire, ETA.
 class DriverMap extends StatefulWidget {
   final OrderModel order;
-  final String     driverId;
+  final String driverId;
 
   const DriverMap({
     super.key,
@@ -29,14 +30,19 @@ class DriverMap extends StatefulWidget {
     required double clientLat,
     required double clientLng,
     required String driverId,
-  }) => DriverMap(
-    driverId: driverId,
-    order: OrderModel(
-      id: '', description: '', budget: 0,
-      status: 'accepted', latitude: clientLat, longitude: clientLng,
-      type: 'shopping',
-    ),
-  );
+  }) =>
+      DriverMap(
+        driverId: driverId,
+        order: OrderModel(
+          id: '',
+          description: '',
+          budget: 0,
+          status: 'accepted',
+          latitude: clientLat,
+          longitude: clientLng,
+          type: 'shopping',
+        ),
+      );
 
   @override
   State<DriverMap> createState() => _DriverMapState();
@@ -45,31 +51,33 @@ class DriverMap extends StatefulWidget {
 class _DriverMapState extends State<DriverMap>
     with SingleTickerProviderStateMixin {
   GoogleMapController? _mapCtrl;
-  LatLng?  _driverPos;
-  LatLng   get _clientPos => LatLng(widget.order.latitude, widget.order.longitude);
-  LatLng?  get _destPos   => (widget.order.destLat != null)
+  LatLng? _driverPos;
+  LatLng get _clientPos =>
+      LatLng(widget.order.latitude, widget.order.longitude);
+  LatLng? get _destPos => (widget.order.destLat != null)
       ? LatLng(widget.order.destLat!, widget.order.destLng!)
       : null;
 
   List<LatLng> _routeToClient = [];
-  List<LatLng> _routeToDest   = [];
+  List<LatLng> _routeToDest = [];
 
   double _distToClient = 0;
-  double _distToDest   = 0;
-  int    _etaToClient  = 0;
-  int    _etaToDest    = 0;
-  double _heading      = 0;
-  bool   _loadingRoute = false;
-  bool   _followDriver = true;
-  bool   _firstFit     = false;
+  double _distToDest = 0;
+  int _etaToClient = 0;
+  int _etaToDest = 0;
+  double _heading = 0;
+  bool _loadingRoute = false;
+  bool _followDriver = true;
+  bool _firstFit = false;
 
-  BitmapDescriptor?             _motoIcon;
+  BitmapDescriptor? _motoIcon;
   StreamSubscription<Position>? _gpsSub;
-  LatLng?                       _lastRoutePos;
-  bool                          _bgGranted = true;
+  LatLng? _lastRoutePos;
+  bool _bgGranted = true;
+  final ActiveCityService _activeCityService = ActiveCityService();
 
   late AnimationController _pulseCtrl;
-  late Animation<double>   _pulse;
+  late Animation<double> _pulse;
 
   @override
   void initState() {
@@ -131,30 +139,21 @@ class _DriverMapState extends State<DriverMap>
     if (!mounted) return;
     final latlng = LatLng(pos.latitude, pos.longitude);
 
-    // Envoie position + cap + vitesse à Firestore
-    FirebaseFirestore.instance
-        .collection('livreurs')
-        .doc(widget.driverId)
-        .set({
-          'lat':       pos.latitude,
-          'lng':       pos.longitude,
-          'heading':   pos.heading,
-          'speed':     pos.speed,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+    // Envoie position + ville GPS, sans reverse geocoding ni appel externe.
+    unawaited(_writePosition(pos));
 
     setState(() {
-      _driverPos    = latlng;
-      _heading      = pos.heading;
-      _distToClient = Geolocator.distanceBetween(
-        pos.latitude, pos.longitude,
-        _clientPos.latitude, _clientPos.longitude) / 1000;
+      _driverPos = latlng;
+      _heading = pos.heading;
+      _distToClient = Geolocator.distanceBetween(pos.latitude, pos.longitude,
+              _clientPos.latitude, _clientPos.longitude) /
+          1000;
       _etaToClient = _eta(_distToClient, pos.speed);
       if (_destPos != null) {
-        _distToDest = Geolocator.distanceBetween(
-          _clientPos.latitude, _clientPos.longitude,
-          _destPos!.latitude, _destPos!.longitude) / 1000;
-        _etaToDest  = _eta(_distToDest, pos.speed);
+        _distToDest = Geolocator.distanceBetween(_clientPos.latitude,
+                _clientPos.longitude, _destPos!.latitude, _destPos!.longitude) /
+            1000;
+        _etaToDest = _eta(_distToDest, pos.speed);
       }
     });
 
@@ -163,9 +162,9 @@ class _DriverMapState extends State<DriverMap>
     }
 
     final shouldRefresh = _lastRoutePos == null ||
-        Geolocator.distanceBetween(
-          _lastRoutePos!.latitude, _lastRoutePos!.longitude,
-          latlng.latitude, latlng.longitude) >= 200;
+        Geolocator.distanceBetween(_lastRoutePos!.latitude,
+                _lastRoutePos!.longitude, latlng.latitude, latlng.longitude) >=
+            200;
 
     if (shouldRefresh && !_loadingRoute) {
       _lastRoutePos = latlng;
@@ -173,12 +172,31 @@ class _DriverMapState extends State<DriverMap>
     }
   }
 
+  Future<void> _writePosition(Position pos) async {
+    final cityState = await _activeCityService.resolveGps(
+      latitude: pos.latitude,
+      longitude: pos.longitude,
+    );
+    await FirebaseFirestore.instance
+        .collection('livreurs')
+        .doc(widget.driverId)
+        .set({
+      'lat': pos.latitude,
+      'lng': pos.longitude,
+      'heading': pos.heading,
+      'speed': pos.speed,
+      'currentCityId': cityState.gpsDetectedCityId ?? FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   Future<void> _calcRoutes(LatLng from) async {
     setState(() => _loadingRoute = true);
     // GoogleRoutesService : cache 5 min grille 100m — évite appels répétitifs
     final model1 = await GoogleRoutesService.getRouteModel(
         origin: from, destination: _clientPos);
-    _routeToClient = model1.points.isNotEmpty ? model1.points : [from, _clientPos];
+    _routeToClient =
+        model1.points.isNotEmpty ? model1.points : [from, _clientPos];
 
     if (_destPos != null) {
       final model2 = await GoogleRoutesService.getRouteModel(
@@ -187,7 +205,10 @@ class _DriverMapState extends State<DriverMap>
     }
     if (mounted) {
       setState(() => _loadingRoute = false);
-      if (!_firstFit) { _firstFit = true; _fitAll(); }
+      if (!_firstFit) {
+        _firstFit = true;
+        _fitAll();
+      }
     }
   }
 
@@ -196,20 +217,22 @@ class _DriverMapState extends State<DriverMap>
     final pts = <LatLng>[
       _clientPos,
       if (_driverPos != null) _driverPos!,
-      if (_destPos   != null) _destPos!,
+      if (_destPos != null) _destPos!,
     ];
     if (pts.length < 2) return;
-    double minLat = pts.first.latitude,  maxLat = pts.first.latitude;
+    double minLat = pts.first.latitude, maxLat = pts.first.latitude;
     double minLng = pts.first.longitude, maxLng = pts.first.longitude;
     for (final p in pts) {
-      if (p.latitude  < minLat) minLat = p.latitude;
-      if (p.latitude  > maxLat) maxLat = p.latitude;
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
       if (p.longitude < minLng) minLng = p.longitude;
       if (p.longitude > maxLng) maxLng = p.longitude;
     }
     _mapCtrl!.animateCamera(CameraUpdate.newLatLngBounds(
-        LatLngBounds(southwest: LatLng(minLat, minLng),
-                     northeast: LatLng(maxLat, maxLng)), 70));
+        LatLngBounds(
+            southwest: LatLng(minLat, minLng),
+            northeast: LatLng(maxLat, maxLng)),
+        70));
   }
 
   // speedMs : vitesse GPS en m/s — utilise la vraie vitesse si > 3 km/h, sinon 25 km/h
@@ -219,8 +242,7 @@ class _DriverMapState extends State<DriverMap>
   }
 
   Future<void> _navigateTo(LatLng dest) async {
-    final url = Uri.parse(
-        'https://www.google.com/maps/dir/?api=1'
+    final url = Uri.parse('https://www.google.com/maps/dir/?api=1'
         '&destination=${dest.latitude},${dest.longitude}'
         '&travelmode=driving');
     if (await canLaunchUrl(url)) {
@@ -237,52 +259,61 @@ class _DriverMapState extends State<DriverMap>
   }
 
   Set<Marker> get _markers => {
-    Marker(
-      markerId: const MarkerId('client'),
-      position: _clientPos,
-      infoWindow: InfoWindow(
-          title: 'Client', snippet: widget.order.clientName ?? ''),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-      zIndexInt: 2,
-    ),
-    if (_destPos != null)
-      Marker(
-        markerId: const MarkerId('dest'),
-        position: _destPos!,
-        infoWindow: const InfoWindow(title: 'Destination finale'),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-        zIndexInt: 1,
-      ),
-    if (_driverPos != null)
-      Marker(
-        markerId:   const MarkerId('driver'),
-        position:   _driverPos!,
-        flat:       true,
-        rotation:   _heading,
-        anchor:     const Offset(0.5, 0.5),
-        infoWindow: const InfoWindow(title: 'Vous'),
-        icon:       _motoIcon ??
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-        zIndexInt:  3,
-      ),
-  };
+        Marker(
+          markerId: const MarkerId('client'),
+          position: _clientPos,
+          infoWindow: InfoWindow(
+              title: 'Client', snippet: widget.order.clientName ?? ''),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          zIndexInt: 2,
+        ),
+        if (_destPos != null)
+          Marker(
+            markerId: const MarkerId('dest'),
+            position: _destPos!,
+            infoWindow: const InfoWindow(title: 'Destination finale'),
+            icon:
+                BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+            zIndexInt: 1,
+          ),
+        if (_driverPos != null)
+          Marker(
+            markerId: const MarkerId('driver'),
+            position: _driverPos!,
+            flat: true,
+            rotation: _heading,
+            anchor: const Offset(0.5, 0.5),
+            infoWindow: const InfoWindow(title: 'Vous'),
+            icon: _motoIcon ??
+                BitmapDescriptor.defaultMarkerWithHue(
+                    BitmapDescriptor.hueOrange),
+            zIndexInt: 3,
+          ),
+      };
 
   Set<Polyline> get _polylines => {
-    if (_routeToClient.isNotEmpty)
-      Polyline(
-        polylineId: const PolylineId('to_client'),
-        points: _routeToClient, color: AppColors.primary, width: 6,
-        startCap: Cap.roundCap, endCap: Cap.roundCap,
-        jointType: JointType.round,
-      ),
-    if (_routeToDest.isNotEmpty)
-      Polyline(
-        polylineId: const PolylineId('to_dest'),
-        points: _routeToDest, color: AppColors.blue, width: 4,
-        patterns: [PatternItem.dash(15), PatternItem.gap(8)],
-        startCap: Cap.roundCap, endCap: Cap.roundCap,
-      ),
-  };
+        if (_routeToClient.isNotEmpty)
+          Polyline(
+            polylineId: const PolylineId('to_client'),
+            points: _routeToClient,
+            color: AppColors.primary,
+            width: 6,
+            startCap: Cap.roundCap,
+            endCap: Cap.roundCap,
+            jointType: JointType.round,
+          ),
+        if (_routeToDest.isNotEmpty)
+          Polyline(
+            polylineId: const PolylineId('to_dest'),
+            points: _routeToDest,
+            color: AppColors.blue,
+            width: 4,
+            patterns: [PatternItem.dash(15), PatternItem.gap(8)],
+            startCap: Cap.roundCap,
+            endCap: Cap.roundCap,
+          ),
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -293,24 +324,31 @@ class _DriverMapState extends State<DriverMap>
       child: Scaffold(
         extendBodyBehindAppBar: true,
         appBar: AppBar(
-          backgroundColor: Colors.transparent, elevation: 0,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
           leading: GestureDetector(
             onTap: () => Navigator.pop(context),
             child: Container(
               margin: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(color: Colors.white,
-                  shape: BoxShape.circle, boxShadow: AppShadow.md),
+              decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  boxShadow: AppShadow.md),
               child: const Icon(Icons.arrow_back_rounded,
                   color: AppColors.text, size: 20),
             ),
           ),
           title: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: const BoxDecoration(color: Colors.white,
-                borderRadius: AppRadius.pillR, boxShadow: AppShadow.md),
+            decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: AppRadius.pillR,
+                boxShadow: AppShadow.md),
             child: Text('Carte livraison',
-                style: GoogleFonts.urbanist(color: AppColors.text,
-                    fontSize: 15, fontWeight: FontWeight.w700)),
+                style: GoogleFonts.urbanist(
+                    color: AppColors.text,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700)),
           ),
           centerTitle: true,
           actions: [
@@ -319,46 +357,52 @@ class _DriverMapState extends State<DriverMap>
                 setState(() => _followDriver = true);
                 if (_driverPos != null) {
                   _mapCtrl?.animateCamera(
-                    CameraUpdate.newLatLngZoom(_driverPos!, 15));
+                      CameraUpdate.newLatLngZoom(_driverPos!, 15));
                 }
               },
               child: Container(
-                margin: const EdgeInsets.all(8), padding: const EdgeInsets.all(8),
+                margin: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                     color: _followDriver ? AppColors.primary : Colors.white,
-                    shape: BoxShape.circle, boxShadow: AppShadow.md),
+                    shape: BoxShape.circle,
+                    boxShadow: AppShadow.md),
                 child: Icon(Icons.my_location_rounded,
                     color: _followDriver ? Colors.white : AppColors.textMuted,
                     size: 20),
               ),
             ),
             GestureDetector(
-              onTap: () { setState(() => _followDriver = false); _fitAll(); },
+              onTap: () {
+                setState(() => _followDriver = false);
+                _fitAll();
+              },
               child: Container(
                 margin: const EdgeInsets.only(right: 8),
                 padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(color: Colors.white,
-                    shape: BoxShape.circle, boxShadow: AppShadow.md),
+                decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: AppShadow.md),
                 child: const Icon(Icons.zoom_out_map_rounded,
                     color: AppColors.textMuted, size: 20),
               ),
             ),
           ],
         ),
-
         body: _driverPos == null
-            ? const Center(child: CircularProgressIndicator(
-                color: AppColors.primary))
+            ? const Center(
+                child: CircularProgressIndicator(color: AppColors.primary))
             : Stack(children: [
                 GoogleMap(
                   initialCameraPosition:
                       CameraPosition(target: _driverPos!, zoom: 15),
-                  markers:             _markers,
-                  polylines:           _polylines,
-                  myLocationEnabled:   false,
+                  markers: _markers,
+                  polylines: _polylines,
+                  myLocationEnabled: false,
                   zoomControlsEnabled: false,
-                  compassEnabled:      true,
-                  mapToolbarEnabled:   false,
+                  compassEnabled: true,
+                  mapToolbarEnabled: false,
                   onMapCreated: (c) {
                     _mapCtrl = c;
                     Future.delayed(const Duration(milliseconds: 600), _fitAll);
@@ -367,23 +411,31 @@ class _DriverMapState extends State<DriverMap>
                     if (_followDriver) setState(() => _followDriver = false);
                   },
                 ),
-
                 Positioned(
-                  bottom: 0, left: 0, right: 0,
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
                   child: Container(
                     decoration: const BoxDecoration(
-                        color: Colors.white, borderRadius: AppRadius.topXxl,
-                        boxShadow: [BoxShadow(color: Color(0x22000000),
-                            blurRadius: 20, offset: Offset(0, -4))]),
-                    padding: EdgeInsets.fromLTRB(20, 16, 20,
-                        MediaQuery.of(context).padding.bottom + 16),
+                        color: Colors.white,
+                        borderRadius: AppRadius.topXxl,
+                        boxShadow: [
+                          BoxShadow(
+                              color: Color(0x22000000),
+                              blurRadius: 20,
+                              offset: Offset(0, -4))
+                        ]),
+                    padding: EdgeInsets.fromLTRB(
+                        20, 16, 20, MediaQuery.of(context).padding.bottom + 16),
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Center(child: Container(
-                          width: 36, height: 4,
-                          margin: const EdgeInsets.only(bottom: 16),
-                          decoration: const BoxDecoration(
-                              color: AppColors.border,
-                              borderRadius: AppRadius.pillR))),
+                      Center(
+                          child: Container(
+                              width: 36,
+                              height: 4,
+                              margin: const EdgeInsets.only(bottom: 16),
+                              decoration: const BoxDecoration(
+                                  color: AppColors.border,
+                                  borderRadius: AppRadius.pillR))),
 
                       // Bannière GPS arrière-plan (Android 10+)
                       if (!_bgGranted) ...[
@@ -429,25 +481,32 @@ class _DriverMapState extends State<DriverMap>
                       ],
 
                       Row(children: [
-                        FadeTransition(opacity: _pulse,
-                          child: Container(width: 12, height: 12,
-                              decoration: BoxDecoration(
-                                  color: _bgGranted
-                                      ? AppColors.green
-                                      : Colors.orange.shade400,
-                                  shape: BoxShape.circle))),
+                        FadeTransition(
+                            opacity: _pulse,
+                            child: Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(
+                                    color: _bgGranted
+                                        ? AppColors.green
+                                        : Colors.orange.shade400,
+                                    shape: BoxShape.circle))),
                         const SizedBox(width: 10),
-                        Expanded(child: Text(
-                            _bgGranted
-                                ? 'GPS actif · Position transmise en temps réel'
-                                : 'GPS actif · arrière-plan limité',
-                            style: GoogleFonts.urbanist(fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: _bgGranted
-                                    ? AppColors.green
-                                    : Colors.orange.shade700))),
+                        Expanded(
+                            child: Text(
+                                _bgGranted
+                                    ? 'GPS actif · Position transmise en temps réel'
+                                    : 'GPS actif · arrière-plan limité',
+                                style: GoogleFonts.urbanist(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: _bgGranted
+                                        ? AppColors.green
+                                        : Colors.orange.shade700))),
                         if (_loadingRoute)
-                          const SizedBox(width: 16, height: 16,
+                          const SizedBox(
+                              width: 16,
+                              height: 16,
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: AppColors.primary)),
                       ]),
@@ -478,7 +537,8 @@ class _DriverMapState extends State<DriverMap>
                       const SizedBox(height: 14),
 
                       Row(children: [
-                        Expanded(child: ElevatedButton.icon(
+                        Expanded(
+                            child: ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
@@ -487,18 +547,19 @@ class _DriverMapState extends State<DriverMap>
                                   borderRadius: AppRadius.lgR)),
                           onPressed: () => _navigateTo(_clientPos),
                           icon: const Icon(Icons.navigation_rounded, size: 18),
-                          label: Text(
-                              hasDest ? 'Vers le client' : 'Naviguer',
+                          label: Text(hasDest ? 'Vers le client' : 'Naviguer',
                               style: GoogleFonts.urbanist(
                                   fontWeight: FontWeight.w700)),
                         )),
                         if (hasDest) ...[
                           const SizedBox(width: 10),
-                          Expanded(child: ElevatedButton.icon(
+                          Expanded(
+                              child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
                                 backgroundColor: AppColors.blue,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
                                 shape: const RoundedRectangleBorder(
                                     borderRadius: AppRadius.lgR)),
                             onPressed: () => _navigateTo(_destPos!),
@@ -520,28 +581,41 @@ class _DriverMapState extends State<DriverMap>
 
 class _DStat extends StatelessWidget {
   final IconData icon;
-  final String   label, value, sub;
-  final Color    color;
-  const _DStat({required this.icon, required this.label,
-      required this.value, required this.sub, required this.color});
+  final String label, value, sub;
+  final Color color;
+  const _DStat(
+      {required this.icon,
+      required this.label,
+      required this.value,
+      required this.sub,
+      required this.color});
   @override
-  Widget build(BuildContext context) => Expanded(child: Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08), borderRadius: AppRadius.mdR,
-        border: Border.all(color: color.withValues(alpha: 0.25))),
-    child: Row(children: [
-      Icon(icon, color: color, size: 22),
-      const SizedBox(width: 10),
-      Expanded(child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: GoogleFonts.urbanist(
-            fontSize: 11, color: AppColors.textMuted)),
-        Text(value, style: GoogleFonts.urbanist(
-            fontSize: 15, fontWeight: FontWeight.w800, color: color)),
-        Text(sub, style: GoogleFonts.urbanist(
-            fontSize: 11, color: AppColors.textMuted)),
-      ])),
-    ]),
-  ));
+  Widget build(BuildContext context) => Expanded(
+          child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: AppRadius.mdR,
+            border: Border.all(color: color.withValues(alpha: 0.25))),
+        child: Row(children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(label,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 11, color: AppColors.textMuted)),
+                Text(value,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: color)),
+                Text(sub,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 11, color: AppColors.textMuted)),
+              ])),
+        ]),
+      ));
 }

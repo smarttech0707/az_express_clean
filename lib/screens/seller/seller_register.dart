@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../utils/partner_location_validator.dart';
+import '../../widgets/partner_location_input.dart';
 
 class SellerRegister extends StatefulWidget {
   const SellerRegister({super.key});
@@ -13,18 +14,17 @@ class SellerRegister extends StatefulWidget {
 }
 
 class _SellerRegisterState extends State<SellerRegister> {
-  final _ownerCtrl    = TextEditingController();
-  final _shopCtrl     = TextEditingController();
-  final _phoneCtrl    = TextEditingController();
-  final _addressCtrl  = TextEditingController();
-  final _passCtrl     = TextEditingController();
-  final _latCtrl      = TextEditingController();
-  final _lngCtrl      = TextEditingController();
+  final _ownerCtrl = TextEditingController();
+  final _shopCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  final _latCtrl = TextEditingController();
+  final _lngCtrl = TextEditingController();
   final _categoryCtrl = TextEditingController();
 
-  bool _loading    = false;
-  bool _obscure    = true;
-  bool _gpsLoading = false;
+  bool _loading = false;
+  bool _obscure = true;
 
   static const _categories = [
     'Alimentation',
@@ -40,46 +40,42 @@ class _SellerRegisterState extends State<SellerRegister> {
 
   @override
   void dispose() {
-    _ownerCtrl.dispose(); _shopCtrl.dispose(); _phoneCtrl.dispose();
-    _addressCtrl.dispose(); _passCtrl.dispose(); _categoryCtrl.dispose();
-    _latCtrl.dispose(); _lngCtrl.dispose();
+    _ownerCtrl.dispose();
+    _shopCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    _passCtrl.dispose();
+    _categoryCtrl.dispose();
+    _latCtrl.dispose();
+    _lngCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _captureGPS() async {
-    setState(() => _gpsLoading = true);
-    try {
-      await Geolocator.requestPermission();
-      final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
-      if (mounted) {
-        setState(() {
-          _latCtrl.text = pos.latitude.toStringAsFixed(6);
-          _lngCtrl.text = pos.longitude.toStringAsFixed(6);
-        });
-      }
-    } catch (_) {
-      if (mounted) _snack('Impossible de récupérer la position GPS', Colors.red);
-    } finally {
-      if (mounted) setState(() => _gpsLoading = false);
-    }
-  }
-
   Future<void> _submit() async {
-    final owner   = _ownerCtrl.text.trim();
-    final shop    = _shopCtrl.text.trim();
-    final phone   = _phoneCtrl.text.trim().replaceAll(' ', '');
+    final owner = _ownerCtrl.text.trim();
+    final shop = _shopCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim().replaceAll(' ', '');
     final address = _addressCtrl.text.trim();
-    final pass    = _passCtrl.text;
+    final pass = _passCtrl.text;
 
     final category = _categoryCtrl.text.trim();
-    if (owner.isEmpty || shop.isEmpty || phone.isEmpty ||
-        address.isEmpty || category.isEmpty || pass.isEmpty) {
+    if (owner.isEmpty ||
+        shop.isEmpty ||
+        phone.isEmpty ||
+        address.isEmpty ||
+        category.isEmpty ||
+        pass.isEmpty) {
       _snack('Veuillez remplir tous les champs obligatoires', Colors.orange);
       return;
     }
     if (pass.length < 6) {
       _snack('Mot de passe minimum 6 caractères', Colors.orange);
+      return;
+    }
+    final locationError =
+        PartnerLocationValidator.validateText(_latCtrl.text, _lngCtrl.text);
+    if (locationError != null) {
+      _snack(locationError, Colors.orange);
       return;
     }
 
@@ -91,8 +87,7 @@ class _SellerRegisterState extends State<SellerRegister> {
         await FirebaseAuth.instance.signOut();
       }
 
-      final cred = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
+      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: '$phone@az-seller.ci',
         password: pass,
       );
@@ -102,23 +97,26 @@ class _SellerRegisterState extends State<SellerRegister> {
           .collection('seller_requests')
           .doc(uid)
           .set({
-        'uid':       uid,
+        'uid': uid,
         'ownerName': owner,
-        'shopName':  shop,
-        'phone':     phone,
-        'address':   address,
-        'category':  category,
-        'lat':       double.tryParse(_latCtrl.text) ?? 0.0,
-        'lng':       double.tryParse(_lngCtrl.text) ?? 0.0,
-        'status':    'pending',
+        'shopName': shop,
+        'phone': phone,
+        'address': address,
+        'category': category,
+        'lat': double.parse(_latCtrl.text.trim()),
+        'lng': double.parse(_lngCtrl.text.trim()),
+        'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
       });
 
       await FirebaseAuth.instance.signOut();
-      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (_) {}
 
       if (!mounted) return;
-      _snack('Demande envoyée ! L\'admin va valider votre boutique.', Colors.green);
+      _snack('Demande envoyée ! L\'admin va valider votre boutique.',
+          Colors.green);
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
@@ -170,7 +168,8 @@ class _SellerRegisterState extends State<SellerRegister> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Column(children: [
-                const Icon(Icons.storefront_rounded, size: 52, color: Colors.white),
+                const Icon(Icons.storefront_rounded,
+                    size: 52, color: Colors.white),
                 const SizedBox(height: 10),
                 Text('Rejoignez AZ Express',
                     style: GoogleFonts.urbanist(
@@ -183,7 +182,6 @@ class _SellerRegisterState extends State<SellerRegister> {
                         color: Colors.white70, fontSize: 12)),
               ]),
             ),
-
             const SizedBox(height: 24),
             _section('Informations personnelles'),
             const SizedBox(height: 10),
@@ -191,7 +189,6 @@ class _SellerRegisterState extends State<SellerRegister> {
             const SizedBox(height: 12),
             _field(_phoneCtrl, 'Numéro de téléphone *', Icons.phone_outlined,
                 type: TextInputType.phone),
-
             const SizedBox(height: 20),
             _section('Votre boutique'),
             const SizedBox(height: 10),
@@ -199,12 +196,12 @@ class _SellerRegisterState extends State<SellerRegister> {
             const SizedBox(height: 12),
             _field(_addressCtrl, 'Adresse *', Icons.location_on_outlined),
             const SizedBox(height: 12),
-
             DropdownButtonFormField<String>(
               decoration: InputDecoration(
                 labelText: 'Catégorie *',
                 prefixIcon: const Icon(Icons.category_outlined, color: _blue),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: const BorderSide(color: _blue, width: 2),
@@ -220,41 +217,11 @@ class _SellerRegisterState extends State<SellerRegister> {
                 if (v != null) _categoryCtrl.text = v;
               },
             ),
-
             const SizedBox(height: 12),
-            Row(children: [
-              Expanded(
-                child: _field(_latCtrl, 'Latitude', Icons.gps_fixed,
-                    type: const TextInputType.numberWithOptions(
-                        decimal: true, signed: true)),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _field(_lngCtrl, 'Longitude', Icons.gps_not_fixed,
-                    type: const TextInputType.numberWithOptions(
-                        decimal: true, signed: true)),
-              ),
-            ]),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _gpsLoading ? null : _captureGPS,
-              icon: _gpsLoading
-                  ? const SizedBox(
-                      width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.my_location_rounded, color: _blue),
-              label: Text(
-                _gpsLoading ? 'Localisation...' : 'Utiliser ma position GPS',
-                style: const TextStyle(color: _blue),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: _blue),
-                minimumSize: const Size(double.infinity, 44),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
+            PartnerLocationInput(
+              latitudeController: _latCtrl,
+              longitudeController: _lngCtrl,
             ),
-
             const SizedBox(height: 20),
             _section('Mot de passe de connexion'),
             const SizedBox(height: 10),
@@ -273,7 +240,8 @@ class _SellerRegisterState extends State<SellerRegister> {
                   ),
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: const BorderSide(color: _blue, width: 2),
@@ -282,9 +250,7 @@ class _SellerRegisterState extends State<SellerRegister> {
                 fillColor: Colors.white,
               ),
             ),
-
             const SizedBox(height: 28),
-
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -305,7 +271,6 @@ class _SellerRegisterState extends State<SellerRegister> {
                             fontWeight: FontWeight.bold)),
               ),
             ),
-
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),
@@ -360,4 +325,3 @@ class _SellerRegisterState extends State<SellerRegister> {
     );
   }
 }
-

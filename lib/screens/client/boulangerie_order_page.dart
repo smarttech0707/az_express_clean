@@ -5,9 +5,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
+import 'package:provider/provider.dart';
 
 import '../../services/tarif_service.dart';
 import '../../services/firestore_service.dart';
+import '../../providers/active_city_provider.dart';
 
 class BoulangerieOrderPage extends StatefulWidget {
   final String boulangerieId;
@@ -34,7 +36,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
   bool _placing = false;
   bool _loadingWallet = true;
   int _walletBalance = 0;
-  bool _cashEnabled  = true;
+  bool _cashEnabled = true;
 
   final _addressCtrl = TextEditingController();
   double? _lat;
@@ -43,9 +45,18 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
 
   static const _timeSlots = [
     'Maintenant',
-    '06:30', '07:00', '07:30', '08:00',
-    '08:30', '09:00', '09:30', '10:00',
-    '10:30', '11:00', '11:30', '12:00',
+    '06:30',
+    '07:00',
+    '07:30',
+    '08:00',
+    '08:30',
+    '09:00',
+    '09:30',
+    '10:00',
+    '10:30',
+    '11:00',
+    '11:30',
+    '12:00',
   ];
 
   @override
@@ -66,14 +77,11 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('clients')
-          .doc(uid)
-          .get();
+      final doc =
+          await FirebaseFirestore.instance.collection('clients').doc(uid).get();
       if (doc.exists && mounted) {
         setState(() {
-          _walletBalance =
-              (doc.data()?['wallet'] as num?)?.toInt() ?? 0;
+          _walletBalance = (doc.data()?['wallet'] as num?)?.toInt() ?? 0;
           _cashEnabled = doc.data()?['cashOnDeliveryEnabled'] ?? true;
           _loadingWallet = false;
         });
@@ -91,7 +99,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
         await Geolocator.requestPermission();
       }
       final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.high));
       if (mounted) {
         setState(() {
           _lat = pos.latitude;
@@ -105,8 +114,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
   int get _itemsTotal {
     int total = 0;
     for (final entry in _cart.entries) {
-      final price =
-          (_itemData[entry.key]?['price'] as num?)?.toInt() ?? 0;
+      final price = (_itemData[entry.key]?['price'] as num?)?.toInt() ?? 0;
       total += price * entry.value;
     }
     return total;
@@ -146,10 +154,10 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
     return _cart.entries
         .where((e) => e.value > 0)
         .map((e) => {
-              'id':    e.key,
-              'name':  _itemData[e.key]?['name'] ?? '—',
+              'id': e.key,
+              'name': _itemData[e.key]?['name'] ?? '—',
               'price': (_itemData[e.key]?['price'] as num?)?.toInt() ?? 0,
-              'qty':   e.value,
+              'qty': e.value,
             })
         .toList();
   }
@@ -179,6 +187,29 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
 
     setState(() => _placing = true);
     try {
+      final pickupLat = (widget.boulangerieData['lat'] as num?)?.toDouble();
+      final pickupLng = (widget.boulangerieData['lng'] as num?)?.toDouble();
+      if (pickupLat == null ||
+          pickupLng == null ||
+          (pickupLat == 0 && pickupLng == 0)) {
+        throw StateError(
+          'Les coordonnées de la boulangerie ne sont pas renseignées. '
+          'La commande ne peut pas être envoyée.',
+        );
+      }
+      if (_lat == null || _lng == null || (_lat == 0 && _lng == 0)) {
+        throw StateError(
+          'Votre position de livraison est indisponible. '
+          'Activez le GPS puis réessayez.',
+        );
+      }
+      final cityService = context.read<ActiveCityProvider>().service;
+      final geography = await cityService.resolveDispatchGeography(
+        pickupLatitude: pickupLat,
+        pickupLongitude: pickupLng,
+        deliveryLatitude: _lat!,
+        deliveryLongitude: _lng!,
+      );
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         _snack('Connexion requise', Colors.red);
@@ -189,7 +220,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
           .collection('clients')
           .doc(user.uid)
           .get();
-      final clientName  = clientDoc.data()?['name']  ?? 'Client';
+      final clientName = clientDoc.data()?['name'] ?? 'Client';
       final clientPhone = clientDoc.data()?['phone'] ?? '';
 
       final orderId = const Uuid().v4();
@@ -198,34 +229,47 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
           : 'Position GPS';
 
       await FirebaseFirestore.instance.collection('orders').doc(orderId).set({
-        'id':             orderId,
-        'type':           'boulangerie',
-        'sellerType':     'boulangerie',
-        'sellerId':       widget.boulangerieId,
-        'sellerName':     widget.boulangerieData['name'] ?? '',
-        'clientId':       user.uid,
-        'clientName':     clientName,
-        'clientPhone':    clientPhone,
-        'description':    deliveryAddress,
-        'items':          _cartItems,
-        'itemsAmount':    _itemsTotal,
-        'budget':         _deliveryFee,
-        'totalAmount':    _totalAmount,
-        'paymentMethod':  _paymentMethod,
-        'isPaid':         false,
-        'status':         'pending',
-        'sellerStatus':   null,
-        'requestedTime':  _requestedTime == 'Maintenant'
-            ? null
-            : _requestedTime,
-        'latitude':       _lat ?? 6.7273,
-        'longitude':      _lng ?? -3.4961,
-        'createdAt':      FieldValue.serverTimestamp(),
+        'id': orderId,
+        'type': 'boulangerie',
+        'sellerType': 'boulangerie',
+        'sellerId': widget.boulangerieId,
+        'sellerName': widget.boulangerieData['name'] ?? '',
+        'clientId': user.uid,
+        'clientName': clientName,
+        'clientPhone': clientPhone,
+        'description': deliveryAddress,
+        'items': _cartItems,
+        'itemsAmount': _itemsTotal,
+        'budget': _deliveryFee,
+        'totalAmount': _totalAmount,
+        'paymentMethod': _paymentMethod,
+        'isPaid': false,
+        'status': 'pending',
+        'sellerStatus': null,
+        'requestedTime': _requestedTime == 'Maintenant' ? null : _requestedTime,
+        'latitude': pickupLat,
+        'longitude': pickupLng,
+        'destLat': _lat,
+        'destLng': _lng,
+        'pickupCityId': geography.pickupCityId,
+        'pickupZoneId': geography.pickupZoneId,
+        'deliveryCityId': geography.deliveryCityId,
+        'deliveryZoneId': geography.deliveryZoneId,
+        'pickupCoordinateSource': 'local_place',
+        'deliveryCoordinateSource': 'gps',
+        'gpsDetectedCityId': cityService.gpsDetectedCityId,
+        'activeCityId': cityService.activeCityId,
+        'citySelectionSource': cityService.citySelectionSource,
+        'cityResolutionStatus': geography.cityResolutionStatus,
+        'createdAt': FieldValue.serverTimestamp(),
       });
 
       try {
         await FirestoreService().findNearestDriver(
-          _lat ?? 6.7273, _lng ?? -3.4961, orderId, budget: _deliveryFee,
+          pickupLat,
+          pickupLng,
+          orderId,
+          budget: _deliveryFee,
         );
       } catch (_) {}
 
@@ -233,8 +277,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: const Row(children: [
-          Icon(Icons.check_circle_rounded,
-              color: Colors.white, size: 20),
+          Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
           SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -361,13 +404,11 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
 
                         // Heure souhaitée
                         const Row(children: [
-                          Icon(Icons.schedule_rounded,
-                              size: 16, color: brown),
+                          Icon(Icons.schedule_rounded, size: 16, color: brown),
                           SizedBox(width: 8),
                           Text('Heure souhaitée :',
                               style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13)),
+                                  fontWeight: FontWeight.w600, fontSize: 13)),
                         ]),
                         const SizedBox(height: 8),
                         SizedBox(
@@ -387,11 +428,9 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 14, vertical: 10),
                                   decoration: BoxDecoration(
-                                    color: selected
-                                        ? brown
-                                        : Colors.grey.shade100,
-                                    borderRadius:
-                                        BorderRadius.circular(20),
+                                    color:
+                                        selected ? brown : Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
                                         color: selected
                                             ? brown
@@ -515,7 +554,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
               final Map<String, List<DocumentSnapshot>> byCategory = {};
               for (final doc in docs) {
                 final cat = (doc.data() as Map<String, dynamic>)['category']
-                    as String? ?? 'Autres';
+                        as String? ??
+                    'Autres';
                 byCategory.putIfAbsent(cat, () => []).add(doc);
               }
 
@@ -545,12 +585,13 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                   ),
                 );
                 for (final doc in byCategory[cat]!) {
-                  final d     = doc.data() as Map<String, dynamic>;
+                  final d = doc.data() as Map<String, dynamic>;
                   final itemId = doc.id;
-                  final iName = d['name']        ?? '—';
+                  final iName = d['name'] ?? '—';
                   final price = (d['price'] as num?)?.toInt() ?? 0;
-                  final desc  = d['description'] as String?;
-                  final qty   = _cart[itemId] ?? 0;
+                  final desc = d['description'] as String?;
+                  final imageUrl = d['imageUrl'] as String?;
+                  final qty = _cart[itemId] ?? 0;
 
                   widgets.add(
                     Padding(
@@ -566,26 +607,35 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                           ],
                         ),
                         child: ListTile(
-                          contentPadding: const EdgeInsets.fromLTRB(
-                              14, 8, 10, 8),
-                          leading: Container(
-                            width: 46,
-                            height: 46,
-                            decoration: BoxDecoration(
+                          contentPadding:
+                              const EdgeInsets.fromLTRB(14, 8, 10, 8),
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              width: 46,
+                              height: 46,
                               color: Colors.brown.shade50,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Center(
-                              child: Text(
-                                _categoryEmoji(cat),
-                                style: const TextStyle(fontSize: 22),
-                              ),
+                              child: (imageUrl != null && imageUrl.isNotEmpty)
+                                  ? Image.network(
+                                      imageUrl,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Center(
+                                        child: Text(_categoryEmoji(cat),
+                                            style:
+                                                const TextStyle(fontSize: 22)),
+                                      ),
+                                    )
+                                  : Center(
+                                      child: Text(
+                                        _categoryEmoji(cat),
+                                        style: const TextStyle(fontSize: 22),
+                                      ),
+                                    ),
                             ),
                           ),
                           title: Text(iName,
                               style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14)),
+                                  fontWeight: FontWeight.w600, fontSize: 14)),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -603,15 +653,14 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                           ),
                           trailing: qty == 0
                               ? GestureDetector(
-                                  onTap: () => setState(
-                                      () => _cart[itemId] = 1),
+                                  onTap: () =>
+                                      setState(() => _cart[itemId] = 1),
                                   child: Container(
                                     width: 44,
                                     height: 44,
                                     decoration: BoxDecoration(
                                       color: brown,
-                                      borderRadius:
-                                          BorderRadius.circular(10),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: const Icon(Icons.add_rounded,
                                         color: Colors.white, size: 22),
@@ -620,7 +669,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                               : Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    _qtyBtn(Icons.remove_rounded,
+                                    _qtyBtn(
+                                        Icons.remove_rounded,
                                         () => setState(() {
                                               if (qty <= 1) {
                                                 _cart.remove(itemId);
@@ -636,7 +686,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                                               fontWeight: FontWeight.bold,
                                               fontSize: 15)),
                                     ),
-                                    _qtyBtn(Icons.add_rounded,
+                                    _qtyBtn(
+                                        Icons.add_rounded,
                                         () => setState(
                                             () => _cart[itemId] = qty + 1)),
                                   ],
@@ -685,8 +736,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                           : 'Solde : $_walletBalance FCFA',
                       icon: Icons.account_balance_wallet_rounded,
                       color: Colors.green.shade700,
-                      onTap: () =>
-                          setState(() => _paymentMethod = 'wallet'),
+                      onTap: () => setState(() => _paymentMethod = 'wallet'),
                     ),
                     const SizedBox(height: 8),
                     _PayChoice(
@@ -775,7 +825,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                       ),
                       child: _placing
                           ? const SizedBox(
-                              width: 20, height: 20,
+                              width: 20,
+                              height: 20,
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2))
                           : Row(
@@ -824,7 +875,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Row(children: [
                   Container(
-                    width: 26, height: 26,
+                    width: 26,
+                    height: 26,
                     decoration: BoxDecoration(
                       color: const Color(0xFF5D4037).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(6),
@@ -838,8 +890,9 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Expanded(child: Text('${item['name']}',
-                      style: GoogleFonts.urbanist(fontSize: 14))),
+                  Expanded(
+                      child: Text('${item['name']}',
+                          style: GoogleFonts.urbanist(fontSize: 14))),
                   Text(_fmt(total),
                       style: GoogleFonts.urbanist(fontWeight: FontWeight.w600)),
                 ]),
@@ -859,8 +912,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
             ]),
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
                 color: const Color(0xFF5D4037).withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(12),
@@ -899,23 +951,29 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
 
   String _categoryEmoji(String category) {
     switch (category.toLowerCase()) {
-      case 'pains':         return '🍞';
-      case 'viennoiseries': return '🥐';
-      case 'gâteaux':       return '🎂';
-      case 'boissons':      return '☕';
-      case 'formules':      return '🍱';
-      default:              return '🧁';
+      case 'pains':
+        return '🍞';
+      case 'viennoiseries':
+        return '🥐';
+      case 'gâteaux':
+        return '🎂';
+      case 'boissons':
+        return '☕';
+      case 'formules':
+        return '🍱';
+      default:
+        return '🧁';
     }
   }
 
   // ── GÂTEAU PERSONNALISÉ ─────────────────────────────────────────────
 
   void _showCustomCakeSheet() {
-    final descCtrl    = TextEditingController();
-    final budgetCtrl  = TextEditingController();
+    final descCtrl = TextEditingController();
+    final budgetCtrl = TextEditingController();
     DateTime? deadline;
-    String payMethod  = _cashEnabled ? 'cash' : 'wallet';
-    bool placing      = false;
+    String payMethod = _cashEnabled ? 'cash' : 'wallet';
+    bool placing = false;
 
     showModalBottomSheet(
       context: context,
@@ -923,8 +981,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -938,7 +996,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                 children: [
                   Center(
                     child: Container(
-                      width: 40, height: 4,
+                      width: 40,
+                      height: 4,
                       margin: const EdgeInsets.only(bottom: 16),
                       decoration: BoxDecoration(
                           color: Colors.grey.shade300,
@@ -964,7 +1023,8 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                     maxLines: 4,
                     decoration: InputDecoration(
                       labelText: 'Description du gâteau',
-                      hintText: 'Ex: Gâteau chocolat 2 étages, prénom "Marie", fleurs en crème, 20 parts...',
+                      hintText:
+                          'Ex: Gâteau chocolat 2 étages, prénom "Marie", fleurs en crème, 20 parts...',
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12)),
                       focusedBorder: OutlineInputBorder(
@@ -1006,11 +1066,10 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                     onTap: () async {
                       final picked = await showDatePicker(
                         context: ctx,
-                        initialDate: DateTime.now().add(
-                            const Duration(days: 1)),
+                        initialDate:
+                            DateTime.now().add(const Duration(days: 1)),
                         firstDate: DateTime.now(),
-                        lastDate: DateTime.now()
-                            .add(const Duration(days: 60)),
+                        lastDate: DateTime.now().add(const Duration(days: 60)),
                         builder: (context, child) => Theme(
                           data: Theme.of(context).copyWith(
                             colorScheme: const ColorScheme.light(
@@ -1092,29 +1151,28 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                       onPressed: placing
                           ? null
                           : () async {
-                              final desc   = descCtrl.text.trim();
-                              final budget = int.tryParse(
-                                      budgetCtrl.text.trim()) ??
-                                  0;
+                              final desc = descCtrl.text.trim();
+                              final budget =
+                                  int.tryParse(budgetCtrl.text.trim()) ?? 0;
                               if (desc.isEmpty) {
                                 ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          'Décrivez votre gâteau')));
+                                    const SnackBar(
+                                        content:
+                                            Text('Décrivez votre gâteau')));
                                 return;
                               }
                               if (budget < 1000) {
                                 ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          'Budget minimum : 1 000 FCFA')));
+                                    const SnackBar(
+                                        content: Text(
+                                            'Budget minimum : 1 000 FCFA')));
                                 return;
                               }
                               if (deadline == null) {
                                 ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          'Choisissez une date de livraison')));
+                                    const SnackBar(
+                                        content: Text(
+                                            'Choisissez une date de livraison')));
                                 return;
                               }
                               setS(() => placing = true);
@@ -1123,12 +1181,10 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
                               if (ok && ctx.mounted) Navigator.pop(ctx);
                             },
                       child: placing
-                          ? const CircularProgressIndicator(
-                              color: Colors.white)
+                          ? const CircularProgressIndicator(color: Colors.white)
                           : Text('Envoyer la commande 🎂',
                               style: GoogleFonts.urbanist(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15)),
+                                  fontWeight: FontWeight.bold, fontSize: 15)),
                     ),
                   ),
                 ],
@@ -1140,11 +1196,37 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
     );
   }
 
-  Future<bool> _placeCustomCakeOrder(
-      String description, int budget, DateTime deadline, String payMethod) async {
+  Future<bool> _placeCustomCakeOrder(String description, int budget,
+      DateTime deadline, String payMethod) async {
     try {
+      final pickupLat = (widget.boulangerieData['lat'] as num?)?.toDouble();
+      final pickupLng = (widget.boulangerieData['lng'] as num?)?.toDouble();
+      if (pickupLat == null ||
+          pickupLng == null ||
+          (pickupLat == 0 && pickupLng == 0)) {
+        throw StateError(
+          'Les coordonnées de la boulangerie ne sont pas renseignées. '
+          'La commande ne peut pas être envoyée.',
+        );
+      }
+      if (_lat == null || _lng == null || (_lat == 0 && _lng == 0)) {
+        throw StateError(
+          'Votre position de livraison est indisponible. '
+          'Activez le GPS puis réessayez.',
+        );
+      }
+      final cityService = context.read<ActiveCityProvider>().service;
+      final geography = await cityService.resolveDispatchGeography(
+        pickupLatitude: pickupLat,
+        pickupLongitude: pickupLng,
+        deliveryLatitude: _lat!,
+        deliveryLongitude: _lng!,
+      );
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) { _snack('Connexion requise', Colors.red); return false; }
+      if (user == null) {
+        _snack('Connexion requise', Colors.red);
+        return false;
+      }
 
       if (payMethod == 'wallet' && _walletBalance < budget + _deliveryFee) {
         _snack('Solde insuffisant. Wallet : $_walletBalance FCFA', Colors.red);
@@ -1152,8 +1234,10 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
       }
 
       final clientDoc = await FirebaseFirestore.instance
-          .collection('clients').doc(user.uid).get();
-      final clientName  = clientDoc.data()?['name']  ?? 'Client';
+          .collection('clients')
+          .doc(user.uid)
+          .get();
+      final clientName = clientDoc.data()?['name'] ?? 'Client';
       final clientPhone = clientDoc.data()?['phone'] ?? '';
 
       final orderId = const Uuid().v4();
@@ -1164,38 +1248,50 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
           : 'Position GPS';
 
       final orderData = {
-        'id':              orderId,
-        'type':            'boulangerie',
-        'sellerType':      'boulangerie',
-        'orderSubType':    'custom_cake',
-        'sellerId':        widget.boulangerieId,
-        'sellerName':      widget.boulangerieData['name'] ?? '',
-        'clientId':        user.uid,
-        'clientName':      clientName,
-        'clientPhone':     clientPhone,
-        'description':     deliveryAddress,
+        'id': orderId,
+        'type': 'boulangerie',
+        'sellerType': 'boulangerie',
+        'orderSubType': 'custom_cake',
+        'sellerId': widget.boulangerieId,
+        'sellerName': widget.boulangerieData['name'] ?? '',
+        'clientId': user.uid,
+        'clientName': clientName,
+        'clientPhone': clientPhone,
+        'description': deliveryAddress,
         'cakeDescription': description,
-        'cakeDeadline':    Timestamp.fromDate(deadline),
-        'items':           [],
-        'itemsAmount':     budget,
-        'budget':          deliveryFee,
-        'totalAmount':     totalAmount,
-        'paymentMethod':   payMethod,
-        'status':          'pending',
-        'sellerStatus':    null,
-        'isPaid':          payMethod == 'wallet',
-        'createdAt':       FieldValue.serverTimestamp(),
-        if (_lat != null) 'clientLat': _lat,
-        if (_lng != null) 'clientLng': _lng,
+        'cakeDeadline': Timestamp.fromDate(deadline),
+        'items': [],
+        'itemsAmount': budget,
+        'budget': deliveryFee,
+        'totalAmount': totalAmount,
+        'paymentMethod': payMethod,
+        'status': 'pending',
+        'sellerStatus': null,
+        'isPaid': payMethod == 'wallet',
+        'createdAt': FieldValue.serverTimestamp(),
+        'latitude': pickupLat,
+        'longitude': pickupLng,
+        'destLat': _lat,
+        'destLng': _lng,
+        'pickupCityId': geography.pickupCityId,
+        'pickupZoneId': geography.pickupZoneId,
+        'deliveryCityId': geography.deliveryCityId,
+        'deliveryZoneId': geography.deliveryZoneId,
+        'pickupCoordinateSource': 'local_place',
+        'deliveryCoordinateSource': 'gps',
+        'gpsDetectedCityId': cityService.gpsDetectedCityId,
+        'activeCityId': cityService.activeCityId,
+        'citySelectionSource': cityService.citySelectionSource,
+        'cityResolutionStatus': geography.cityResolutionStatus,
       };
 
       if (payMethod == 'wallet') {
-        final clientRef = FirebaseFirestore.instance
-            .collection('clients').doc(user.uid);
-        final orderRef  = FirebaseFirestore.instance
-            .collection('orders').doc(orderId);
+        final clientRef =
+            FirebaseFirestore.instance.collection('clients').doc(user.uid);
+        final orderRef =
+            FirebaseFirestore.instance.collection('orders').doc(orderId);
         await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap   = await tx.get(clientRef);
+          final snap = await tx.get(clientRef);
           final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
           if (wallet < totalAmount) throw Exception('SOLDE_INSUFFISANT');
           tx.update(clientRef, {'wallet': wallet - totalAmount});
@@ -1203,11 +1299,21 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
         });
       } else {
         await FirebaseFirestore.instance
-            .collection('orders').doc(orderId).set(orderData);
+            .collection('orders')
+            .doc(orderId)
+            .set(orderData);
       }
 
+      await FirestoreService().findNearestDriver(
+        pickupLat,
+        pickupLng,
+        orderId,
+        budget: deliveryFee,
+      );
+
       if (mounted) {
-        _snack('🎂 Commande envoyée ! La boulangerie vous contactera.', Colors.green);
+        _snack('🎂 Commande envoyée ! La boulangerie vous contactera.',
+            Colors.green);
       }
       return true;
     } catch (e) {
@@ -1261,8 +1367,7 @@ class _PayChoice extends StatelessWidget {
               width: selected ? 2 : 1),
         ),
         child: Row(children: [
-          Icon(icon,
-              color: disabled ? Colors.grey : color, size: 22),
+          Icon(icon, color: disabled ? Colors.grey : color, size: 22),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1273,8 +1378,8 @@ class _PayChoice extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         color: disabled ? Colors.grey : null)),
                 Text(subtitle,
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey.shade500)),
+                    style:
+                        TextStyle(fontSize: 11, color: Colors.grey.shade500)),
               ],
             ),
           ),
@@ -1343,4 +1448,3 @@ class _PayChip extends StatelessWidget {
     );
   }
 }
-

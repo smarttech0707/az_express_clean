@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -20,7 +20,7 @@ import '../../widgets/stream_error_state.dart';
 // Sender: 'buyer' | 'seller'
 class MpChatPage extends StatefulWidget {
   final MpProduct product;
-  final String? buyerId;   // null si on est le vendeur qui répond
+  final String? buyerId; // null si on est le vendeur qui répond
   final String? buyerName; // null si on est le vendeur qui répond
 
   const MpChatPage({
@@ -35,19 +35,19 @@ class MpChatPage extends StatefulWidget {
 }
 
 class _MpChatPageState extends State<MpChatPage> {
-  final _textCtrl   = TextEditingController();
+  final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
-  final _recorder   = AudioRecorder();
-  final _player     = AudioPlayer();
+  final _recorder = AudioRecorder();
+  final _player = AudioPlayer();
 
-  bool _isRecording  = false;
-  bool _uploading    = false;
-  int  _recordSecs   = 0;
+  bool _isRecording = false;
+  bool _uploading = false;
+  int _recordSecs = 0;
   Timer? _recTimer;
 
   String? _playingMsgId;
   PlayerState _playerState = PlayerState.stopped;
-  Duration    _playPos     = Duration.zero;
+  Duration _playPos = Duration.zero;
 
   late final String _uid;
   late final String _chatId;
@@ -60,8 +60,8 @@ class _MpChatPageState extends State<MpChatPage> {
 
     // If buyerId is passed we're the buyer; if not we're the seller
     final bId = widget.buyerId ?? _uid;
-    _chatId  = 'mp_${widget.product.id}_$bId';
-    _myRole  = (widget.buyerId == null && _uid == widget.product.sellerId)
+    _chatId = 'mp_${widget.product.id}_$bId';
+    _myRole = (widget.buyerId == null && _uid == widget.product.sellerId)
         ? 'seller'
         : 'buyer';
 
@@ -75,28 +75,31 @@ class _MpChatPageState extends State<MpChatPage> {
       if (mounted) setState(() => _playPos = p);
     });
     _player.onPlayerComplete.listen((_) {
-      if (mounted) setState(() { _playingMsgId = null; _playPos = Duration.zero; });
+      if (mounted)
+        setState(() {
+          _playingMsgId = null;
+          _playPos = Duration.zero;
+        });
     });
   }
 
   Future<void> _initChat(String buyerId) async {
-    final ref = FirebaseFirestore.instance
-        .collection('marketplace_chats')
-        .doc(_chatId);
+    final ref =
+        FirebaseFirestore.instance.collection('marketplace_chats').doc(_chatId);
     final doc = await ref.get();
     if (!doc.exists) {
       await ref.set({
-        'productId':    widget.product.id,
+        'productId': widget.product.id,
         'productTitle': widget.product.title,
-        'productImage': widget.product.images.isNotEmpty
-            ? widget.product.images.first : '',
-        'sellerId':   widget.product.sellerId,
+        'productImage':
+            widget.product.images.isNotEmpty ? widget.product.images.first : '',
+        'sellerId': widget.product.sellerId,
         'sellerName': widget.product.sellerName,
-        'buyerId':    buyerId,
-        'buyerName':  widget.buyerName ?? 'Acheteur',
-        'updatedAt':  FieldValue.serverTimestamp(),
+        'buyerId': buyerId,
+        'buyerName': widget.buyerName ?? 'Acheteur',
+        'updatedAt': FieldValue.serverTimestamp(),
         'unreadSeller': 0,
-        'unreadBuyer':  0,
+        'unreadBuyer': 0,
       });
     }
   }
@@ -131,8 +134,9 @@ class _MpChatPageState extends State<MpChatPage> {
         return;
       }
     }
-    final dir  = await getTemporaryDirectory();
-    final path = '${dir.path}/mp_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final dir = await getTemporaryDirectory();
+    final path =
+        '${dir.path}/mp_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
     await _recorder.start(
       const RecordConfig(
           encoder: AudioEncoder.aacLc,
@@ -142,8 +146,7 @@ class _MpChatPageState extends State<MpChatPage> {
       path: path,
     );
     _recordSecs = 0;
-    _recTimer = Timer.periodic(
-        const Duration(seconds: 1), (_) {
+    _recTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _recordSecs++);
     });
     setState(() => _isRecording = true);
@@ -151,7 +154,7 @@ class _MpChatPageState extends State<MpChatPage> {
 
   Future<void> _stopAndSend() async {
     _recTimer?.cancel();
-    final dur  = _recordSecs;
+    final dur = _recordSecs;
     final path = await _recorder.stop();
     setState(() => _isRecording = false);
     if (path == null || dur < 1) return;
@@ -161,7 +164,10 @@ class _MpChatPageState extends State<MpChatPage> {
   Future<void> _cancelRecording() async {
     _recTimer?.cancel();
     await _recorder.stop();
-    setState(() { _isRecording = false; _recordSecs = 0; });
+    setState(() {
+      _isRecording = false;
+      _recordSecs = 0;
+    });
   }
 
   Future<void> _uploadAudio(String path, int duration) async {
@@ -174,11 +180,12 @@ class _MpChatPageState extends State<MpChatPage> {
         return;
       }
       final bytes = await file.readAsBytes();
-      final name  = 'mp_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      final ref   = FirebaseStorage.instance.ref('mp_chat_audio/$_chatId/$name');
+      final name = 'mp_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final ref = FirebaseStorage.instance.ref('mp_chat_audio/$_chatId/$name');
       await ref.putData(bytes, SettableMetadata(contentType: 'audio/mp4'));
       final url = await ref.getDownloadURL();
-      await _addMessage({'type': 'audio', 'audioUrl': url, 'duration': duration});
+      await _addMessage(
+          {'type': 'audio', 'audioUrl': url, 'duration': duration});
     } catch (e) {
       _snack('Erreur : $e');
     }
@@ -194,9 +201,9 @@ class _MpChatPageState extends State<MpChatPage> {
         .collection('messages');
     await col.add({
       ...extra,
-      'sender':    _myRole,
+      'sender': _myRole,
       'senderUid': _uid,
-      'time':      FieldValue.serverTimestamp(),
+      'time': FieldValue.serverTimestamp(),
     });
     // Update chat metadata
     await FirebaseFirestore.instance
@@ -217,7 +224,10 @@ class _MpChatPageState extends State<MpChatPage> {
       }
     } else {
       await _player.stop();
-      setState(() { _playingMsgId = msgId; _playPos = Duration.zero; });
+      setState(() {
+        _playingMsgId = msgId;
+        _playPos = Duration.zero;
+      });
       await _player.play(UrlSource(url));
     }
   }
@@ -235,11 +245,11 @@ class _MpChatPageState extends State<MpChatPage> {
   }
 
   void _snack(String msg) =>
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(msg),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
 
   String get _phone =>
       widget.product.sellerPhone.replaceAll(RegExp(r'[^0-9+]'), '');
@@ -261,8 +271,7 @@ class _MpChatPageState extends State<MpChatPage> {
                   ? widget.product.sellerName[0].toUpperCase()
                   : '?',
               style: GoogleFonts.urbanist(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700),
+                  color: Colors.white, fontWeight: FontWeight.w700),
             ),
           ),
           const SizedBox(width: 10),
@@ -306,15 +315,13 @@ class _MpChatPageState extends State<MpChatPage> {
             ),
             // Appel
             IconButton(
-              onPressed: () =>
-                  launchUrl(Uri.parse('tel:$_phone')),
+              onPressed: () => launchUrl(Uri.parse('tel:$_phone')),
               icon: const Icon(Icons.phone_rounded, color: Colors.white),
               tooltip: 'Appeler',
             ),
           ],
         ],
       ),
-
       body: Column(
         children: [
           // Product info mini-banner
@@ -331,7 +338,8 @@ class _MpChatPageState extends State<MpChatPage> {
                   .snapshots(),
               builder: (_, snap) {
                 if (snap.hasError) {
-                  return const StreamErrorState(message: "Impossible de charger les messages.");
+                  return const StreamErrorState(
+                      message: "Impossible de charger les messages.");
                 }
                 if (!snap.hasData) {
                   return const Center(
@@ -357,12 +365,10 @@ class _MpChatPageState extends State<MpChatPage> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.chat_bubble_outline_rounded,
-                              size: 56,
-                              color: Colors.grey.shade300),
+                              size: 56, color: Colors.grey.shade300),
                           const SizedBox(height: 12),
                           Text('Posez vos questions sur ce produit',
-                              style: GoogleFonts.urbanist(
-                                  color: Colors.grey)),
+                              style: GoogleFonts.urbanist(color: Colors.grey)),
                         ]),
                   );
                 }
@@ -372,10 +378,10 @@ class _MpChatPageState extends State<MpChatPage> {
                   padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
                   itemCount: docs.length,
                   itemBuilder: (_, i) {
-                    final doc  = docs[i];
+                    final doc = docs[i];
                     final data = doc.data() as Map<String, dynamic>;
                     final isMine = data['sender'] == _myRole;
-                    final type  = data['type'] ?? 'text';
+                    final type = data['type'] ?? 'text';
 
                     if (type == 'audio') {
                       return _AudioBubble(
@@ -384,8 +390,8 @@ class _MpChatPageState extends State<MpChatPage> {
                         isMine: isMine,
                         isPlaying: _playingMsgId == doc.id &&
                             _playerState == PlayerState.playing,
-                        position: _playingMsgId == doc.id
-                            ? _playPos : Duration.zero,
+                        position:
+                            _playingMsgId == doc.id ? _playPos : Duration.zero,
                         onToggle: () =>
                             _togglePlay(doc.id, data['audioUrl'] ?? ''),
                       );
@@ -484,17 +490,17 @@ class _TextBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ts      = data['time'] as Timestamp?;
+    final ts = data['time'] as Timestamp?;
     final timeStr = ts != null
-        ? '${ts.toDate().hour.toString().padLeft(2,'0')}:${ts.toDate().minute.toString().padLeft(2,'0')}'
+        ? '${ts.toDate().hour.toString().padLeft(2, '0')}:${ts.toDate().minute.toString().padLeft(2, '0')}'
         : '';
 
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 3),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.72),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
         decoration: BoxDecoration(
           color: isMine ? kMpOrange : Colors.white,
@@ -505,7 +511,8 @@ class _TextBubble extends StatelessWidget {
             bottomRight: Radius.circular(isMine ? 4 : 16),
           ),
           boxShadow: const [
-            BoxShadow(color: Colors.black12, blurRadius: 3, offset: Offset(0, 1))
+            BoxShadow(
+                color: Colors.black12, blurRadius: 3, offset: Offset(0, 1))
           ],
         ),
         child: Column(
@@ -549,13 +556,13 @@ class _AudioBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dur     = (data['duration'] as num? ?? 0).toInt();
-    final ts      = data['time'] as Timestamp?;
+    final dur = (data['duration'] as num? ?? 0).toInt();
+    final ts = data['time'] as Timestamp?;
     final timeStr = ts != null
-        ? '${ts.toDate().hour.toString().padLeft(2,'0')}:${ts.toDate().minute.toString().padLeft(2,'0')}'
+        ? '${ts.toDate().hour.toString().padLeft(2, '0')}:${ts.toDate().minute.toString().padLeft(2, '0')}'
         : '';
-    final secs    = position.inSeconds;
-    final total   = dur > 0 ? dur : 1;
+    final secs = position.inSeconds;
+    final total = dur > 0 ? dur : 1;
     final progress = (secs / total).clamp(0.0, 1.0);
 
     return Align(
@@ -573,7 +580,8 @@ class _AudioBubble extends StatelessWidget {
             bottomRight: Radius.circular(isMine ? 4 : 16),
           ),
           boxShadow: const [
-            BoxShadow(color: Colors.black12, blurRadius: 3, offset: Offset(0, 1))
+            BoxShadow(
+                color: Colors.black12, blurRadius: 3, offset: Offset(0, 1))
           ],
         ),
         child: Column(children: [
@@ -590,9 +598,7 @@ class _AudioBubble extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  isPlaying
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
+                  isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                   color: isMine ? Colors.white : kMpOrange,
                   size: 22,
                 ),
@@ -614,9 +620,7 @@ class _AudioBubble extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    isPlaying
-                        ? '${secs}s / ${dur}s'
-                        : '${dur}s',
+                    isPlaying ? '${secs}s / ${dur}s' : '${dur}s',
                     style: TextStyle(
                         fontSize: 10,
                         color: isMine
@@ -674,11 +678,11 @@ class _InputBar extends StatelessWidget {
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
                   hintText: 'Message...',
-                  hintStyle: GoogleFonts.urbanist(
-                      color: Colors.grey, fontSize: 14),
+                  hintStyle:
+                      GoogleFonts.urbanist(color: Colors.grey, fontSize: 14),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
             ),
@@ -775,7 +779,8 @@ class _RecordingBar extends StatelessWidget {
               const SizedBox(width: 8),
               Text('Enregistrement...',
                   style: GoogleFonts.urbanist(
-                      fontSize: 13, color: Colors.red,
+                      fontSize: 13,
+                      color: Colors.red,
                       fontWeight: FontWeight.w600)),
               const Spacer(),
               Text(
@@ -794,10 +799,10 @@ class _RecordingBar extends StatelessWidget {
             child: Container(
               width: 44,
               height: 44,
-              decoration: const BoxDecoration(
-                  color: kMpOrange, shape: BoxShape.circle),
-              child: const Icon(Icons.send_rounded,
-                  color: Colors.white, size: 20),
+              decoration:
+                  const BoxDecoration(color: kMpOrange, shape: BoxShape.circle),
+              child:
+                  const Icon(Icons.send_rounded, color: Colors.white, size: 20),
             ),
           ),
         ]),
@@ -838,8 +843,8 @@ class _PulsingDotState extends State<_PulsingDot>
       child: Container(
         width: 10,
         height: 10,
-        decoration: const BoxDecoration(
-            color: Colors.red, shape: BoxShape.circle),
+        decoration:
+            const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
       ),
     );
   }

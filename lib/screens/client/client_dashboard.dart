@@ -29,7 +29,7 @@ class _ClientDashboardState extends State<ClientDashboard>
   ];
 
   late AnimationController _fabCtrl;
-  late Animation<double>   _fabScale;
+  late Animation<double> _fabScale;
 
   @override
   void initState() {
@@ -43,8 +43,13 @@ class _ClientDashboardState extends State<ClientDashboard>
 
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
-      if (['order_update', 'driver_found', 'order_confirmed',
-           'order_cancelled', 'mission_end'].contains(type)) {
+      if ([
+        'order_update',
+        'driver_found',
+        'order_confirmed',
+        'order_cancelled',
+        'mission_end'
+      ].contains(type)) {
         setState(() => _currentIndex = 2);
       }
     });
@@ -107,7 +112,7 @@ class _ClientDashboardState extends State<ClientDashboard>
   Widget _buildFAB() {
     return Listener(
       onPointerDown: (_) => _fabCtrl.forward(),
-      onPointerUp:   (_) => _fabCtrl.reverse(),
+      onPointerUp: (_) => _fabCtrl.reverse(),
       onPointerCancel: (_) => _fabCtrl.reverse(),
       child: GestureDetector(
         onTap: _openNewOrder,
@@ -171,37 +176,37 @@ class _ClientDashboardState extends State<ClientDashboard>
           child: Row(
             children: [
               _NavItem(
-                icon:       Icons.home_outlined,
+                icon: Icons.home_outlined,
                 activeIcon: Icons.home_rounded,
-                label:      'Accueil',
-                index:      0,
-                current:    _currentIndex,
-                onTap:      (i) => setState(() => _currentIndex = i),
+                label: 'Accueil',
+                index: 0,
+                current: _currentIndex,
+                onTap: (i) => setState(() => _currentIndex = i),
               ),
               _NavItem(
-                icon:       Icons.account_balance_wallet_outlined,
+                icon: Icons.account_balance_wallet_outlined,
                 activeIcon: Icons.account_balance_wallet_rounded,
-                label:      'Wallet',
-                index:      1,
-                current:    _currentIndex,
-                onTap:      (i) => setState(() => _currentIndex = i),
+                label: 'Wallet',
+                index: 1,
+                current: _currentIndex,
+                onTap: (i) => setState(() => _currentIndex = i),
               ),
               const SizedBox(width: 72),
               _NavItem(
-                icon:       Icons.location_on_outlined,
+                icon: Icons.location_on_outlined,
                 activeIcon: Icons.location_on_rounded,
-                label:      'Suivi',
-                index:      2,
-                current:    _currentIndex,
-                onTap:      (i) => setState(() => _currentIndex = i),
+                label: 'Suivi',
+                index: 2,
+                current: _currentIndex,
+                onTap: (i) => setState(() => _currentIndex = i),
               ),
               _NavItem(
-                icon:       Icons.person_outline_rounded,
+                icon: Icons.person_outline_rounded,
                 activeIcon: Icons.person_rounded,
-                label:      'Profil',
-                index:      3,
-                current:    _currentIndex,
-                onTap:      (i) => setState(() => _currentIndex = i),
+                label: 'Profil',
+                index: 3,
+                current: _currentIndex,
+                onTap: (i) => setState(() => _currentIndex = i),
               ),
             ],
           ),
@@ -266,8 +271,8 @@ class _NotificationBell extends StatelessWidget {
 // ── Premium NavItem with animated pill indicator ─────────────────────────────
 class _NavItem extends StatelessWidget {
   final IconData icon, activeIcon;
-  final String   label;
-  final int      index, current;
+  final String label;
+  final int index, current;
   final void Function(int) onTap;
 
   const _NavItem({
@@ -282,23 +287,23 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = index == current;
-    const primary  = AppColors.primary;
+    const primary = AppColors.primary;
 
     return Expanded(
       child: ScaleTap(
-        onTap:     () => onTap(index),
+        onTap: () => onTap(index),
         scaleDown: 0.88,
-        haptic:    true,
+        haptic: true,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             // Pill indicator around icon
             AnimatedContainer(
               duration: const Duration(milliseconds: 220),
-              curve:    Curves.easeOutCubic,
-              padding:  EdgeInsets.symmetric(
+              curve: Curves.easeOutCubic,
+              padding: EdgeInsets.symmetric(
                 horizontal: selected ? 18 : 10,
-                vertical:   5,
+                vertical: 5,
               ),
               decoration: BoxDecoration(
                 color: selected
@@ -309,16 +314,16 @@ class _NavItem extends StatelessWidget {
               child: Icon(
                 selected ? activeIcon : icon,
                 color: selected ? primary : AppColors.textLight,
-                size:  24,
+                size: 24,
               ),
             ),
             const SizedBox(height: 2),
             AnimatedDefaultTextStyle(
               duration: const Duration(milliseconds: 180),
               style: TextStyle(
-                fontSize:   12,
+                fontSize: 12,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color:      selected ? primary : AppColors.textLight,
+                color: selected ? primary : AppColors.textLight,
               ),
               child: Text(label),
             ),

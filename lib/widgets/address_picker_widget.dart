@@ -12,11 +12,13 @@ class AddressResult {
   final double latitude;
   final double longitude;
   final String address;
+  final String coordinateSource;
 
   const AddressResult({
     required this.latitude,
     required this.longitude,
     required this.address,
+    this.coordinateSource = 'map_pin',
   });
 }
 
@@ -27,12 +29,12 @@ enum AddressMode { gps, manual }
 // Widget principal — sélecteur d'adresse deux modes
 // ═══════════════════════════════════════════════════════════════════════════
 class AddressPickerWidget extends StatefulWidget {
-  final String          title;
-  final String          hint;
-  final AddressMode     initialMode;
-  final AddressResult?  initialValue;
-  final bool            showModeToggle;
-  final LatLng?         referencePosition;
+  final String title;
+  final String hint;
+  final AddressMode initialMode;
+  final AddressResult? initialValue;
+  final bool showModeToggle;
+  final LatLng? referencePosition;
   final ValueChanged<AddressResult?> onChanged;
 
   const AddressPickerWidget({
@@ -40,9 +42,9 @@ class AddressPickerWidget extends StatefulWidget {
     required this.title,
     required this.hint,
     required this.onChanged,
-    this.initialMode     = AddressMode.gps,
+    this.initialMode = AddressMode.gps,
     this.initialValue,
-    this.showModeToggle  = true,
+    this.showModeToggle = true,
     this.referencePosition,
   });
 
@@ -51,15 +53,15 @@ class AddressPickerWidget extends StatefulWidget {
 }
 
 class _AddressPickerWidgetState extends State<AddressPickerWidget> {
-  AddressMode    _mode    = AddressMode.gps;
+  AddressMode _mode = AddressMode.gps;
   AddressResult? _result;
-  bool           _loading = false;
-  String?        _error;
+  bool _loading = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _mode   = widget.initialMode;
+    _mode = widget.initialMode;
     _result = widget.initialValue;
     if (_mode == AddressMode.gps && _result == null) {
       _detectGPS();
@@ -68,12 +70,20 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
 
   // ── GPS : détection + géocodage inverse ───────────────────────────────────
   Future<void> _detectGPS() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        if (mounted) setState(() { _loading = false; _error = 'GPS désactivé'; });
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = 'GPS désactivé';
+          });
+        }
         return;
       }
 
@@ -83,30 +93,45 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
       }
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
-        if (mounted) setState(() { _loading = false; _error = 'Permission GPS refusée'; });
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = 'Permission GPS refusée';
+          });
+        }
         return;
       }
 
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy:  LocationAccuracy.high,
+          accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 12),
         ),
       );
 
-      final address = await PlacesService.reverseGeocode(pos.latitude, pos.longitude)
-          ?? '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
+      final address = await PlacesService.reverseGeocode(
+              pos.latitude, pos.longitude) ??
+          '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
 
       if (!mounted) return;
       final result = AddressResult(
-        latitude:  pos.latitude,
+        latitude: pos.latitude,
         longitude: pos.longitude,
-        address:   address,
+        address: address,
+        coordinateSource: 'gps',
       );
-      setState(() { _result = result; _loading = false; });
+      setState(() {
+        _result = result;
+        _loading = false;
+      });
       widget.onChanged(result);
     } catch (_) {
-      if (mounted) setState(() { _loading = false; _error = 'Impossible de localiser'; });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Impossible de localiser';
+        });
+      }
     }
   }
 
@@ -125,9 +150,10 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
 
     if (selected != null && mounted) {
       final result = AddressResult(
-        latitude:  selected.position.latitude,
+        latitude: selected.position.latitude,
         longitude: selected.position.longitude,
-        address:   selected.address,
+        address: selected.address,
+        coordinateSource: 'map_pin',
       );
       setState(() => _result = result);
       widget.onChanged(result);
@@ -138,9 +164,9 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
   void _switchMode(AddressMode mode) {
     if (_mode == mode) return;
     setState(() {
-      _mode   = mode;
+      _mode = mode;
       _result = null;
-      _error  = null;
+      _error = null;
     });
     widget.onChanged(null);
     if (mode == AddressMode.gps) _detectGPS();
@@ -151,7 +177,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
@@ -183,7 +209,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
       padding: const EdgeInsets.all(6),
       child: Row(
         children: [
-          _modeTab('📍 Ma position',   AddressMode.gps),
+          _modeTab('📍 Ma position', AddressMode.gps),
           _modeTab('🔍 Autre adresse', AddressMode.manual),
         ],
       ),
@@ -199,16 +225,16 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color:        sel ? AppColors.primary : Colors.transparent,
+            color: sel ? AppColors.primary : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Text(
             label,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize:   13,
+              fontSize: 13,
               fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-              color:      sel ? Colors.white : Colors.grey.shade600,
+              color: sel ? Colors.white : Colors.grey.shade600,
             ),
           ),
         ),
@@ -221,8 +247,10 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
     if (_loading) {
       return Row(children: [
         const SizedBox(
-          width: 20, height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(
+              strokeWidth: 2, color: AppColors.primary),
         ),
         const SizedBox(width: 12),
         Text('Localisation GPS en cours…',
@@ -236,14 +264,18 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color:        Colors.red.shade50,
+            color: Colors.red.shade50,
             borderRadius: BorderRadius.circular(12),
-            border:       Border.all(color: Colors.red.shade200),
+            border: Border.all(color: Colors.red.shade200),
           ),
           child: Row(children: [
-            Icon(Icons.location_off_rounded, color: Colors.red.shade400, size: 20),
+            Icon(Icons.location_off_rounded,
+                color: Colors.red.shade400, size: 20),
             const SizedBox(width: 10),
-            Expanded(child: Text(_error!, style: TextStyle(color: Colors.red.shade700, fontSize: 13))),
+            Expanded(
+                child: Text(_error!,
+                    style:
+                        TextStyle(color: Colors.red.shade700, fontSize: 13))),
             Icon(Icons.refresh_rounded, color: Colors.red.shade400, size: 18),
           ]),
         ),
@@ -253,12 +285,13 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
     if (_result == null) {
       return GestureDetector(
         onTap: _detectGPS,
-        child: _emptyState(Icons.my_location_rounded, 'Appuyer pour détecter votre position'),
+        child: _emptyState(
+            Icons.my_location_rounded, 'Appuyer pour détecter votre position'),
       );
     }
 
     return _buildResultCard(
-      icon:  Icons.my_location_rounded,
+      icon: Icons.my_location_rounded,
       color: const Color(0xFF2E7D32),
       trailing: IconButton(
         icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -277,12 +310,13 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color:        const Color(0xFFF5F5F5),
+            color: const Color(0xFFF5F5F5),
             borderRadius: BorderRadius.circular(12),
-            border:       Border.all(color: Colors.grey.shade300),
+            border: Border.all(color: Colors.grey.shade300),
           ),
           child: Row(children: [
-            const Icon(Icons.search_rounded, color: AppColors.primary, size: 22),
+            const Icon(Icons.search_rounded,
+                color: AppColors.primary, size: 22),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -297,7 +331,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
     }
 
     return _buildResultCard(
-      icon:  Icons.place_rounded,
+      icon: Icons.place_rounded,
       color: AppColors.primary,
       trailing: IconButton(
         icon: const Icon(Icons.edit_rounded, size: 18),
@@ -317,19 +351,21 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color:        color.withValues(alpha: 0.06),
+        color: color.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border:       Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(children: [
         Container(
           padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
+          decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
           child: Icon(icon, color: color, size: 20),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(
               _result!.address,
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -352,14 +388,16 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color:        const Color(0xFFF5F5F5),
+        color: const Color(0xFFF5F5F5),
         borderRadius: BorderRadius.circular(12),
-        border:       Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: Colors.grey.shade300),
       ),
       child: Row(children: [
         Icon(icon, color: AppColors.primary, size: 22),
         const SizedBox(width: 12),
-        Expanded(child: Text(label, style: TextStyle(color: Colors.grey.shade500, fontSize: 14))),
+        Expanded(
+            child: Text(label,
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 14))),
         Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
       ]),
     );

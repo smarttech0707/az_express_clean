@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -6,8 +6,8 @@ class CoursesDisponibles extends StatelessWidget {
   const CoursesDisponibles({super.key});
 
   Future<void> _openMap(double lat, double lng) async {
-    final uri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    final uri =
+        Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
@@ -47,7 +47,7 @@ class CoursesDisponibles extends StatelessWidget {
           }
           return ListView.builder(
             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(12),
             itemCount: orders.length,
             itemBuilder: (context, index) {
               final data = orders[index].data() as Map<String, dynamic>;

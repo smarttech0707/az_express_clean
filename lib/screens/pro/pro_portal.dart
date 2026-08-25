@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../artisan/artisan_login.dart';
@@ -9,6 +9,7 @@ import '../restaurant/restaurant_owner_login.dart';
 import '../pharmacie/pharmacie_login.dart';
 import '../boulangerie/boulangerie_login.dart';
 import '../../theme/app_theme.dart';
+import '../../event/screens/event_provider_portal.dart';
 
 class ProPortal extends StatelessWidget {
   const ProPortal({super.key});
@@ -28,9 +29,7 @@ class ProPortal extends StatelessWidget {
         title: Text(
           'Espace Professionnel',
           style: GoogleFonts.urbanist(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 17),
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
         ),
         centerTitle: true,
       ),
@@ -46,8 +45,7 @@ class ProPortal extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1)),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
               ),
               child: Row(
                 children: [
@@ -73,8 +71,7 @@ class ProPortal extends StatelessWidget {
                         Text(
                             'Comptes créés par l\'administrateur AZ Express uniquement.',
                             style: GoogleFonts.urbanist(
-                                color: Colors.white54,
-                                fontSize: 11)),
+                                color: Colors.white54, fontSize: 11)),
                       ],
                     ),
                   ),
@@ -87,9 +84,7 @@ class ProPortal extends StatelessWidget {
             Text(
               'Choisissez votre espace',
               style: GoogleFonts.urbanist(
-                  color: Colors.white54,
-                  fontSize: 12,
-                  letterSpacing: 1.2),
+                  color: Colors.white54, fontSize: 12, letterSpacing: 1.2),
             ),
             const SizedBox(height: 14),
 
@@ -126,7 +121,8 @@ class ProPortal extends StatelessWidget {
               title: 'Restaurant',
               subtitle: 'Gérez votre menu et vos commandes',
               gradient: const [Color(0xFF1565C0), Color(0xFF1E88E5)],
-              onTap: () => Navigator.push(context,
+              onTap: () => Navigator.push(
+                  context,
                   MaterialPageRoute(
                       builder: (_) => const RestaurantOwnerLogin())),
             ),
@@ -157,14 +153,25 @@ class ProPortal extends StatelessWidget {
               onTap: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const BoulangerieLogin())),
             ),
+            const SizedBox(height: 12),
+            _ProCard(
+              icon: Icons.celebration_rounded,
+              title: 'Prestataire événementiel',
+              subtitle: 'Locations, décoration, traiteur & personnel',
+              gradient: const [Color(0xFF6A1B9A), Color(0xFFE65100)],
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const EventProviderPortal()),
+              ),
+            ),
 
             const SizedBox(height: 32),
 
             Center(
               child: Text(
                 'AZ Express — Abengourou',
-                style: GoogleFonts.urbanist(
-                    color: Colors.white24, fontSize: 11),
+                style:
+                    GoogleFonts.urbanist(color: Colors.white24, fontSize: 11),
               ),
             ),
           ],
@@ -250,8 +257,7 @@ class _ProCardState extends State<_ProCard> {
                             fontSize: 16)),
                     Text(widget.subtitle,
                         style: GoogleFonts.urbanist(
-                            color: Colors.white70,
-                            fontSize: 12)),
+                            color: Colors.white70, fontSize: 12)),
                   ],
                 ),
               ),

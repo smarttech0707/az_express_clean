@@ -8,53 +8,54 @@ import 'google_routes_service.dart';
 
 /// État de suivi partagé entre la vue client et la vue livreur.
 class TrackingState {
-  final LatLng?       driverPosition;
-  final LatLng        clientPosition;
-  final LatLng?       destination;
-  final List<LatLng>  routeToClient;      // livreur → client
-  final List<LatLng>  routeToDestination; // client → destination
-  final double        distanceToClient;   // km
-  final double        distanceToDest;     // km
-  final int           etaToClient;        // minutes
-  final int           etaToDest;          // minutes
-  final bool          routeLoading;
+  final LatLng? driverPosition;
+  final LatLng clientPosition;
+  final LatLng? destination;
+  final List<LatLng> routeToClient; // livreur → client
+  final List<LatLng> routeToDestination; // client → destination
+  final double distanceToClient; // km
+  final double distanceToDest; // km
+  final int etaToClient; // minutes
+  final int etaToDest; // minutes
+  final bool routeLoading;
 
   const TrackingState({
     this.driverPosition,
     required this.clientPosition,
     this.destination,
-    this.routeToClient      = const [],
+    this.routeToClient = const [],
     this.routeToDestination = const [],
-    this.distanceToClient   = 0,
-    this.distanceToDest     = 0,
-    this.etaToClient        = 0,
-    this.etaToDest          = 0,
-    this.routeLoading       = false,
+    this.distanceToClient = 0,
+    this.distanceToDest = 0,
+    this.etaToClient = 0,
+    this.etaToDest = 0,
+    this.routeLoading = false,
   });
 
   TrackingState copyWith({
-    LatLng?      driverPosition,
-    LatLng?      clientPosition,
-    LatLng?      destination,
+    LatLng? driverPosition,
+    LatLng? clientPosition,
+    LatLng? destination,
     List<LatLng>? routeToClient,
     List<LatLng>? routeToDestination,
-    double?      distanceToClient,
-    double?      distanceToDest,
-    int?         etaToClient,
-    int?         etaToDest,
-    bool?        routeLoading,
-  }) => TrackingState(
-    driverPosition:      driverPosition      ?? this.driverPosition,
-    clientPosition:      clientPosition      ?? this.clientPosition,
-    destination:         destination         ?? this.destination,
-    routeToClient:       routeToClient       ?? this.routeToClient,
-    routeToDestination:  routeToDestination  ?? this.routeToDestination,
-    distanceToClient:    distanceToClient    ?? this.distanceToClient,
-    distanceToDest:      distanceToDest      ?? this.distanceToDest,
-    etaToClient:         etaToClient         ?? this.etaToClient,
-    etaToDest:           etaToDest           ?? this.etaToDest,
-    routeLoading:        routeLoading        ?? this.routeLoading,
-  );
+    double? distanceToClient,
+    double? distanceToDest,
+    int? etaToClient,
+    int? etaToDest,
+    bool? routeLoading,
+  }) =>
+      TrackingState(
+        driverPosition: driverPosition ?? this.driverPosition,
+        clientPosition: clientPosition ?? this.clientPosition,
+        destination: destination ?? this.destination,
+        routeToClient: routeToClient ?? this.routeToClient,
+        routeToDestination: routeToDestination ?? this.routeToDestination,
+        distanceToClient: distanceToClient ?? this.distanceToClient,
+        distanceToDest: distanceToDest ?? this.distanceToDest,
+        etaToClient: etaToClient ?? this.etaToClient,
+        etaToDest: etaToDest ?? this.etaToDest,
+        routeLoading: routeLoading ?? this.routeLoading,
+      );
 
   int get etaTotal => etaToClient + etaToDest;
   double get distanceTotal => distanceToClient + distanceToDest;
@@ -69,18 +70,18 @@ class TrackingService extends ChangeNotifier {
     required String driverId,
     required LatLng clientPosition,
     LatLng? destination,
-  })  : _driverId       = driverId,
+  })  : _driverId = driverId,
         _clientPosition = clientPosition,
-        _destination    = destination {
+        _destination = destination {
     _state = TrackingState(
       clientPosition: clientPosition,
-      destination:    destination,
+      destination: destination,
     );
     _start();
   }
 
-  final String  _driverId;
-  final LatLng  _clientPosition;
+  final String _driverId;
+  final LatLng _clientPosition;
   final LatLng? _destination;
 
   late TrackingState _state;
@@ -88,7 +89,7 @@ class TrackingService extends ChangeNotifier {
 
   StreamSubscription<DocumentSnapshot>? _driverSub;
   LatLng? _lastRouteCalcPos;
-  Timer?  _animTimer;
+  Timer? _animTimer;
 
   // Recalcule la route si le livreur a bougé de plus de 200m — aligné avec RealtimeTrackingService
   static const double _routeRefreshMeters = 200;
@@ -140,7 +141,7 @@ class TrackingService extends ChangeNotifier {
         step++;
         final progress = _easeInOut(step / steps);
         final interpolated = LatLng(
-          _lerp(start.latitude,  target.latitude,  progress),
+          _lerp(start.latitude, target.latitude, progress),
           _lerp(start.longitude, target.longitude, progress),
         );
         _state = _state.copyWith(driverPosition: interpolated);
@@ -157,9 +158,12 @@ class TrackingService extends ChangeNotifier {
   void _refreshRouteIfNeeded(LatLng pos) {
     final shouldRefresh = _lastRouteCalcPos == null ||
         Geolocator.distanceBetween(
-          _lastRouteCalcPos!.latitude, _lastRouteCalcPos!.longitude,
-          pos.latitude, pos.longitude,
-        ) >= _routeRefreshMeters;
+              _lastRouteCalcPos!.latitude,
+              _lastRouteCalcPos!.longitude,
+              pos.latitude,
+              pos.longitude,
+            ) >=
+            _routeRefreshMeters;
 
     if (shouldRefresh) {
       _lastRouteCalcPos = pos;
@@ -173,9 +177,7 @@ class TrackingService extends ChangeNotifier {
   // Courbe ease-in-out pour un mouvement naturel (pas de départ/arrivée brusque)
   static double _easeInOut(double t) {
     final c = t.clamp(0.0, 1.0);
-    return c < 0.5
-        ? 2 * c * c
-        : 1 - math.pow(-2 * c + 2, 2) / 2;
+    return c < 0.5 ? 2 * c * c : 1 - math.pow(-2 * c + 2, 2) / 2;
   }
 
   Future<void> _calculateRoutes(LatLng driverPos) async {
@@ -184,15 +186,18 @@ class TrackingService extends ChangeNotifier {
 
     // Distance livreur → client
     final distToClient = Geolocator.distanceBetween(
-      driverPos.latitude, driverPos.longitude,
-      _clientPosition.latitude, _clientPosition.longitude,
-    ) / 1000;
+          driverPos.latitude,
+          driverPos.longitude,
+          _clientPosition.latitude,
+          _clientPosition.longitude,
+        ) /
+        1000;
 
     final etaToClient = _eta(distToClient);
 
     // Route livreur → client — via GoogleRoutesService (avec cache 5 min)
     final routeModel1 = await GoogleRoutesService.getRouteModel(
-      origin:      driverPos,
+      origin: driverPos,
       destination: _clientPosition,
     );
     final routeToClient = routeModel1.points;
@@ -204,26 +209,31 @@ class TrackingService extends ChangeNotifier {
 
     if (_destination != null) {
       distToDest = Geolocator.distanceBetween(
-        _clientPosition.latitude, _clientPosition.longitude,
-        _destination!.latitude, _destination!.longitude,
-      ) / 1000;
+            _clientPosition.latitude,
+            _clientPosition.longitude,
+            _destination!.latitude,
+            _destination!.longitude,
+          ) /
+          1000;
       etaToDest = _eta(distToDest);
 
       final routeModel2 = await GoogleRoutesService.getRouteModel(
-        origin:      _clientPosition,
+        origin: _clientPosition,
         destination: _destination!,
       );
       routeToDest = routeModel2.points;
     }
 
     _state = _state.copyWith(
-      routeToClient:      routeToClient.isNotEmpty ? routeToClient : [driverPos, _clientPosition],
+      routeToClient: routeToClient.isNotEmpty
+          ? routeToClient
+          : [driverPos, _clientPosition],
       routeToDestination: routeToDest,
-      distanceToClient:   distToClient,
-      distanceToDest:     distToDest,
-      etaToClient:        etaToClient,
-      etaToDest:          etaToDest,
-      routeLoading:       false,
+      distanceToClient: distToClient,
+      distanceToDest: distToDest,
+      etaToClient: etaToClient,
+      etaToDest: etaToDest,
+      routeLoading: false,
     );
     notifyListeners();
   }

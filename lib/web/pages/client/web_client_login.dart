@@ -13,23 +13,25 @@ class WebClientLoginPage extends StatefulWidget {
 }
 
 class _WebClientLoginPageState extends State<WebClientLoginPage> {
-  bool    _isLogin  = true;
-  bool    _loading  = false;
+  bool _isLogin = true;
+  bool _loading = false;
   String? _error;
 
-  final _nameCtrl  = TextEditingController();
+  final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
+  final _passCtrl = TextEditingController();
 
   @override
   void dispose() {
-    _nameCtrl.dispose(); _phoneCtrl.dispose(); _passCtrl.dispose();
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _passCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     final phone = _phoneCtrl.text.trim();
-    final pass  = _passCtrl.text.trim();
+    final pass = _passCtrl.text.trim();
     if (phone.isEmpty || pass.isEmpty) {
       setState(() => _error = 'Remplis tous les champs');
       return;
@@ -39,11 +41,15 @@ class _WebClientLoginPageState extends State<WebClientLoginPage> {
       return;
     }
 
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     final err = _isLogin
         ? await WebClientAuth.instance.login(phone, pass)
-        : await WebClientAuth.instance.register(_nameCtrl.text.trim(), phone, pass);
+        : await WebClientAuth.instance
+            .register(_nameCtrl.text.trim(), phone, pass);
 
     if (!mounted) return;
     setState(() => _loading = false);
@@ -69,14 +75,15 @@ class _WebClientLoginPageState extends State<WebClientLoginPage> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 420),
                   child: _FormCard(
-                    isLogin:  _isLogin,
-                    loading:  _loading,
-                    error:    _error,
+                    isLogin: _isLogin,
+                    loading: _loading,
+                    error: _error,
                     nameCtrl: _nameCtrl,
                     phoneCtrl: _phoneCtrl,
                     passCtrl: _passCtrl,
                     onToggle: () => setState(() {
-                      _isLogin = !_isLogin; _error = null;
+                      _isLogin = !_isLogin;
+                      _error = null;
                     }),
                     onSubmit: _submit,
                   ).animate().fadeIn(duration: 500.ms).slideY(begin: 0.05),
@@ -103,32 +110,38 @@ class _LeftPanel extends StatelessWidget {
             const SizedBox(height: 24),
             Text('AZ Express',
                 style: GoogleFonts.inter(
-                    fontSize: 36, fontWeight: FontWeight.w900, color: Colors.white)),
+                    fontSize: 36,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white)),
             const SizedBox(height: 12),
             Text('Livraison express à Abengourou',
                 style: GoogleFonts.inter(fontSize: 16, color: Colors.white70)),
             const SizedBox(height: 48),
             ...[
-              (Icons.bolt_rounded,           'Livraison en 30 min'),
-              (Icons.account_balance_wallet,  'Wallet intégré'),
-              (Icons.restaurant_rounded,      'Restaurants & Boulangeries'),
-              (Icons.local_pharmacy_rounded,  'Pharmacies de garde'),
+              (Icons.bolt_rounded, 'Livraison en 30 min'),
+              (Icons.account_balance_wallet, 'Wallet intégré'),
+              (Icons.restaurant_rounded, 'Restaurants & Boulangeries'),
+              (Icons.local_pharmacy_rounded, 'Pharmacies de garde'),
             ].map((e) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 48),
-              child: Row(children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(e.$1, color: Colors.white, size: 20),
-                ),
-                const SizedBox(width: 16),
-                Text(e.$2, style: GoogleFonts.inter(
-                    color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500)),
-              ]),
-            )),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 48),
+                  child: Row(children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(e.$1, color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 16),
+                    Text(e.$2,
+                        style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500)),
+                  ]),
+                )),
           ],
         ),
       ),
@@ -137,16 +150,21 @@ class _LeftPanel extends StatelessWidget {
 }
 
 class _FormCard extends StatelessWidget {
-  final bool     isLogin;
-  final bool     loading;
-  final String?  error;
+  final bool isLogin;
+  final bool loading;
+  final String? error;
   final TextEditingController nameCtrl, phoneCtrl, passCtrl;
   final VoidCallback onToggle, onSubmit;
 
   const _FormCard({
-    required this.isLogin, required this.loading, required this.error,
-    required this.nameCtrl, required this.phoneCtrl, required this.passCtrl,
-    required this.onToggle, required this.onSubmit,
+    required this.isLogin,
+    required this.loading,
+    required this.error,
+    required this.nameCtrl,
+    required this.phoneCtrl,
+    required this.passCtrl,
+    required this.onToggle,
+    required this.onSubmit,
   });
 
   @override
@@ -165,13 +183,16 @@ class _FormCard extends StatelessWidget {
           const SizedBox(height: 24),
           Text(isLogin ? 'Connexion' : 'Créer un compte',
               style: GoogleFonts.inter(
-                  fontSize: 24, fontWeight: FontWeight.w800, color: Colors.white)),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white)),
           const SizedBox(height: 6),
-          Text(isLogin ? 'Entre tes identifiants pour accéder à ton espace'
-                       : 'Crée ton compte pour commander sur AZ Express',
+          Text(
+              isLogin
+                  ? 'Entre tes identifiants pour accéder à ton espace'
+                  : 'Crée ton compte pour commander sur AZ Express',
               style: GoogleFonts.inter(fontSize: 13, color: kTextMuted)),
           const SizedBox(height: 28),
-
           if (!isLogin) ...[
             _field(nameCtrl, 'Nom complet', Icons.person_rounded),
             const SizedBox(height: 16),
@@ -181,7 +202,6 @@ class _FormCard extends StatelessWidget {
           const SizedBox(height: 16),
           _field(passCtrl, 'Mot de passe', Icons.lock_rounded,
               obscure: true, hint: 'Minimum 6 caractères'),
-
           if (error != null) ...[
             const SizedBox(height: 16),
             Container(
@@ -192,14 +212,16 @@ class _FormCard extends StatelessWidget {
                 border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
               ),
               child: Row(children: [
-                const Icon(Icons.error_outline_rounded, color: Colors.red, size: 18),
+                const Icon(Icons.error_outline_rounded,
+                    color: Colors.red, size: 18),
                 const SizedBox(width: 10),
-                Expanded(child: Text(error!,
-                    style: GoogleFonts.inter(color: Colors.red, fontSize: 13))),
+                Expanded(
+                    child: Text(error!,
+                        style: GoogleFonts.inter(
+                            color: Colors.red, fontSize: 13))),
               ]),
             ),
           ],
-
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
@@ -209,17 +231,21 @@ class _FormCard extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: kOrange,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
                 elevation: 0,
               ),
               child: loading
-                  ? const SizedBox(width: 22, height: 22,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2.5))
                   : Text(isLogin ? 'Se connecter' : 'Créer mon compte',
-                      style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700)),
+                      style: GoogleFonts.inter(
+                          fontSize: 16, fontWeight: FontWeight.w700)),
             ),
           ),
-
           const SizedBox(height: 20),
           Center(
             child: TextButton(
@@ -228,10 +254,14 @@ class _FormCard extends StatelessWidget {
                 text: TextSpan(
                   style: GoogleFonts.inter(fontSize: 13, color: kTextMuted),
                   children: [
-                    TextSpan(text: isLogin ? "Pas encore de compte ? " : "Déjà un compte ? "),
+                    TextSpan(
+                        text: isLogin
+                            ? "Pas encore de compte ? "
+                            : "Déjà un compte ? "),
                     TextSpan(
                       text: isLogin ? "S'inscrire" : "Se connecter",
-                      style: const TextStyle(color: kOrange, fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                          color: kOrange, fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
@@ -246,13 +276,13 @@ class _FormCard extends StatelessWidget {
   Widget _field(TextEditingController ctrl, String label, IconData icon,
       {bool obscure = false, TextInputType? type, String? hint}) {
     return TextField(
-      controller:   ctrl,
-      obscureText:  obscure,
+      controller: ctrl,
+      obscureText: obscure,
       keyboardType: type,
       style: GoogleFonts.inter(color: Colors.white, fontSize: 15),
       decoration: InputDecoration(
-        labelText:  label,
-        hintText:   hint,
+        labelText: label,
+        hintText: hint,
         prefixIcon: Icon(icon, color: kTextMuted, size: 20),
       ),
     );

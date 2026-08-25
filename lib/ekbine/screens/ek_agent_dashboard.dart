@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' show FieldValue;
 import '../../widgets/scale_button.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -16,6 +17,7 @@ import '../../screens/home/home_screen.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/stream_error_state.dart';
 import '../../widgets/logout_confirm_dialog.dart';
+import 'ek_deposit_accounts_screen.dart';
 
 class EkAgentDashboard extends StatefulWidget {
   const EkAgentDashboard({super.key});
@@ -34,10 +36,7 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
     _tabCtrl = TabController(length: 3, vsync: this);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      SubscriptionService.checkAndRenew(
-          'ekbine_agents', uid,
-          customAmount: SubscriptionService.ekbineAgentAmount,
-          walletKey: 'walletBalance');
+      SubscriptionService.checkAndRenew('ekbine_agents', uid);
     }
   }
 
@@ -53,7 +52,9 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
       final agent = ek.myAgent;
       if (agent == null) {
         return Scaffold(
-          appBar: AppBar(backgroundColor: kEkDark, foregroundColor: Colors.white,
+          appBar: AppBar(
+              backgroundColor: kEkDark,
+              foregroundColor: Colors.white,
               title: const Text('Dashboard Agent')),
           body: const Center(child: CircularProgressIndicator()),
         );
@@ -136,7 +137,9 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
   Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'ekbine_agent');
     await FirebaseAuth.instance.signOut();
-    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (_) {}
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
@@ -153,6 +156,11 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
       foregroundColor: Colors.white,
       actions: [
         IconButton(
+          icon: const Icon(Icons.phone_android_rounded),
+          tooltip: 'Mes numéros de dépôt',
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EkDepositAccountsScreen())),
+        ),
+        IconButton(
           icon: const Icon(Icons.account_circle_outlined),
           tooltip: 'Mon compte',
           onPressed: () => showPartnerAccountSheet(
@@ -166,6 +174,8 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
             photoStoragePath: 'ekbine_agent_photos/${agent.id}/photo.jpg',
             onPhotoUploaded: (url) =>
                 EkService.updateAgentProfile(agent.id, {'photoUrl': url}),
+            onPhotoDeleted: () => EkService.updateAgentProfile(
+                agent.id, {'photoUrl': FieldValue.delete()}),
           ),
         ),
       ],
@@ -184,7 +194,8 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                   child: Text(
                     agent.name.isNotEmpty ? agent.name[0].toUpperCase() : 'A',
                     style: GoogleFonts.urbanist(
-                        fontSize: 22, fontWeight: FontWeight.w800,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
                         color: Colors.white),
                   ),
                 ),
@@ -193,26 +204,27 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text(agent.name,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 16, fontWeight: FontWeight.w800,
-                            color: Colors.white)),
-                    Row(children: [
-                      const Icon(Icons.star_rounded,
-                          color: Color(0xFFFFBB00), size: 14),
-                      const SizedBox(width: 4),
-                      Text(agent.displayRating,
-                          style: GoogleFonts.urbanist(
-                              fontSize: 12, color: Colors.white70)),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text('${agent.totalCompleted} commandes',
+                        Text(agent.name,
                             style: GoogleFonts.urbanist(
-                                fontSize: 12, color: Colors.white70),
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                    ]),
-                  ]),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white)),
+                        Row(children: [
+                          const Icon(Icons.star_rounded,
+                              color: Color(0xFFFFBB00), size: 14),
+                          const SizedBox(width: 4),
+                          Text(agent.displayRating,
+                              style: GoogleFonts.urbanist(
+                                  fontSize: 12, color: Colors.white70)),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text('${agent.totalCompleted} commandes',
+                                style: GoogleFonts.urbanist(
+                                    fontSize: 12, color: Colors.white70),
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                        ]),
+                      ]),
                 ),
                 // Online toggle
                 Column(children: [
@@ -245,7 +257,9 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
                 const SizedBox(width: 8),
                 _StatChip(
                   label: 'Note',
-                  value: agent.ratingCount == 0 ? '-' : agent.rating.toStringAsFixed(1),
+                  value: agent.ratingCount == 0
+                      ? '-'
+                      : agent.rating.toStringAsFixed(1),
                   color: const Color(0xFFFFBB00),
                 ),
               ]),
@@ -259,8 +273,8 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
         unselectedLabelColor: Colors.white60,
         indicatorColor: kEkGreen,
         indicatorWeight: 3,
-        labelStyle: GoogleFonts.urbanist(
-            fontSize: 12, fontWeight: FontWeight.w700),
+        labelStyle:
+            GoogleFonts.urbanist(fontSize: 12, fontWeight: FontWeight.w700),
         tabs: const [
           Tab(text: 'Nouvelles'),
           Tab(text: 'En cours'),
@@ -333,7 +347,8 @@ class _PendingTab extends StatelessWidget {
       stream: EkService.streamPendingForAgent(agent.operators),
       builder: (context, snap) {
         if (snap.hasError) {
-          return const StreamErrorState(message: "Impossible de charger les demandes en attente.");
+          return const StreamErrorState(
+              message: "Impossible de charger les demandes en attente.");
         }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -341,12 +356,14 @@ class _PendingTab extends StatelessWidget {
         final orders = snap.data!;
         if (orders.isEmpty) {
           return Center(
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
               const Text('🔍', style: TextStyle(fontSize: 52)),
               const SizedBox(height: 16),
               Text('Aucune nouvelle commande',
                   style: GoogleFonts.urbanist(
-                      fontSize: 16, fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                       color: kEkText)),
               const SizedBox(height: 8),
               Text('Restez connecté, les commandes arrivent !',
@@ -382,8 +399,8 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
 
   @override
   Widget build(BuildContext context) {
-    final order    = widget.order;
-    final opColor  = EkService.operatorColor(order.operator);
+    final order = widget.order;
+    final opColor = EkService.operatorColor(order.operator);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -393,14 +410,15 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: kEkDivider),
         boxShadow: const [
-          BoxShadow(color: Color(0x08000000), blurRadius: 8,
-              offset: Offset(0, 3))
+          BoxShadow(
+              color: Color(0x08000000), blurRadius: 8, offset: Offset(0, 3))
         ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: opColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
@@ -408,17 +426,19 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
             child: Center(
               child: Text(order.operator[0].toUpperCase(),
                   style: GoogleFonts.urbanist(
-                      fontSize: 18, fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
                       color: opColor)),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(order.serviceLabel,
                   style: GoogleFonts.urbanist(
-                      fontSize: 14, fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
                       color: kEkText)),
               Text('Pour : ${order.beneficiaryNumber}',
                   style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
@@ -433,7 +453,8 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
                   ? '+${_fmt(order.agentEarning)}'
                   : 'Paiement direct',
               style: GoogleFonts.urbanist(
-                  fontSize: 11, fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
                   color: order.agentEarning > 0 ? kEkGreen : kEkMuted),
             ),
           ]),
@@ -442,8 +463,10 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
         Row(children: [
           Expanded(
             child: OutlinedButton(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => EkOrderTracking(order: order))),
+              onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => EkOrderTracking(order: order))),
               style: OutlinedButton.styleFrom(
                 foregroundColor: kEkMuted,
                 side: const BorderSide(color: kEkDivider),
@@ -452,8 +475,8 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: Text('Voir détails',
-                  style: GoogleFonts.urbanist(fontSize: 13,
-                      fontWeight: FontWeight.w600)),
+                  style: GoogleFonts.urbanist(
+                      fontSize: 13, fontWeight: FontWeight.w600)),
             ),
           ),
           const SizedBox(width: 10),
@@ -470,7 +493,8 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
               ),
               child: _accepting
                   ? const SizedBox(
-                      width: 18, height: 18,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
                   : Text(
@@ -489,12 +513,13 @@ class _PendingOrderCardState extends State<_PendingOrderCard> {
   Future<void> _accept() async {
     setState(() => _accepting = true);
     try {
-      await EkService.agentAcceptOrder(
-          widget.order.id, widget.agent,
+      await EkService.agentAcceptOrder(widget.order.id, widget.agent,
           widget.order.paymentMethod, widget.order.operator);
       if (mounted) {
-        Navigator.push(context, MaterialPageRoute(
-            builder: (_) => EkOrderTracking(order: widget.order)));
+        Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => EkOrderTracking(order: widget.order)));
       }
     } catch (_) {
       if (mounted) setState(() => _accepting = false);
@@ -514,7 +539,8 @@ class _ActiveTab extends StatelessWidget {
       stream: EkService.streamAgentActiveOrders(agentId),
       builder: (context, snap) {
         if (snap.hasError) {
-          return const StreamErrorState(message: "Impossible de charger les courses actives.");
+          return const StreamErrorState(
+              message: "Impossible de charger les courses actives.");
         }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -522,12 +548,14 @@ class _ActiveTab extends StatelessWidget {
         final orders = snap.data!;
         if (orders.isEmpty) {
           return Center(
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
               const Text('✅', style: TextStyle(fontSize: 52)),
               const SizedBox(height: 16),
               Text('Aucune commande en cours',
                   style: GoogleFonts.urbanist(
-                      fontSize: 16, fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                       color: kEkText)),
             ]),
           );
@@ -551,14 +579,14 @@ class _ActiveOrderAgentCard extends StatefulWidget {
 }
 
 class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
-  bool _uploading  = false;
-  bool _starting   = false;
-  bool _verifying  = false;
+  bool _uploading = false;
+  bool _starting = false;
+  bool _verifying = false;
 
   @override
   Widget build(BuildContext context) {
-    final order     = widget.order;
-    final opColor   = EkService.operatorColor(order.operator);
+    final order = widget.order;
+    final opColor = EkService.operatorColor(order.operator);
     final statusCol = ekStatusColor(order.status);
 
     return Container(
@@ -569,14 +597,15 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: statusCol.withValues(alpha: 0.3)),
         boxShadow: const [
-          BoxShadow(color: Color(0x08000000), blurRadius: 8,
-              offset: Offset(0, 3))
+          BoxShadow(
+              color: Color(0x08000000), blurRadius: 8, offset: Offset(0, 3))
         ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: opColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
@@ -584,17 +613,19 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
             child: Center(
               child: Text(order.operator[0].toUpperCase(),
                   style: GoogleFonts.urbanist(
-                      fontSize: 18, fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
                       color: opColor)),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(order.serviceLabel,
                   style: GoogleFonts.urbanist(
-                      fontSize: 14, fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
                       color: kEkText)),
               Text(order.beneficiaryNumber,
                   style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
@@ -603,8 +634,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(_fmt(order.amount),
                 style: GoogleFonts.urbanist(
-                    fontSize: 14, fontWeight: FontWeight.w800,
-                    color: kEkText)),
+                    fontSize: 14, fontWeight: FontWeight.w800, color: kEkText)),
             Container(
               margin: const EdgeInsets.only(top: 4),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -615,15 +645,15 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
               child: Text(
                 ekStatusLabels[order.status] ?? order.status,
                 style: GoogleFonts.urbanist(
-                    fontSize: 9, fontWeight: FontWeight.w700,
-                    color: statusCol),
+                    fontSize: 9, fontWeight: FontWeight.w700, color: statusCol),
               ),
             ),
           ]),
         ]),
         const SizedBox(height: 12),
         // Deposit proof section (non-wallet orders)
-        if (order.status == 'awaiting_deposit') ...[
+        if (order.status == 'awaiting_deposit' ||
+            order.status == 'deposit_proof_sent') ...[
           Container(
             padding: const EdgeInsets.all(12),
             margin: const EdgeInsets.only(bottom: 10),
@@ -633,8 +663,8 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
               border: Border.all(
                   color: const Color(0xFFE65100).withValues(alpha: 0.4)),
             ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
                 order.depositProofUrl == null
                     ? 'En attente de la preuve de paiement du client…'
@@ -650,25 +680,32 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                     borderRadius: BorderRadius.circular(8),
                     child: Image.network(
                       order.depositProofUrl!,
-                      height: 120, width: double.infinity,
+                      height: 120,
+                      width: double.infinity,
                       fit: BoxFit.cover,
-                      loadingBuilder: (_, child, prog) =>
-                          prog == null ? child : Container(
-                              height: 120, color: kEkDivider,
+                      loadingBuilder: (_, child, prog) => prog == null
+                          ? child
+                          : Container(
+                              height: 120,
+                              color: kEkDivider,
                               child: const Center(
                                   child: CircularProgressIndicator())),
-                      errorBuilder: (_, __, ___) =>
-                          Container(height: 120, color: kEkDivider,
-                              child: const Icon(Icons.broken_image,
-                                  color: kEkMuted)),
+                      errorBuilder: (_, __, ___) => Container(
+                          height: 120,
+                          color: kEkDivider,
+                          child:
+                              const Icon(Icons.broken_image, color: kEkMuted)),
                     ),
                   ),
                 ),
                 const SizedBox(height: 8),
                 SizedBox(
-                  width: double.infinity, height: 42,
+                  width: double.infinity,
+                  height: 42,
                   child: ElevatedButton.icon(
-                    onPressed: _verifying ? null : _verifyDeposit,
+                    onPressed: order.status == 'deposit_proof_sent' && !_verifying
+                        ? _verifyDeposit
+                        : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF9C27B0),
                       foregroundColor: Colors.white,
@@ -677,7 +714,9 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                       elevation: 0,
                     ),
                     icon: _verifying
-                        ? const SizedBox(width: 14, height: 14,
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
                             child: CircularProgressIndicator(
                                 color: Colors.white, strokeWidth: 2))
                         : const Icon(Icons.verified_rounded, size: 16),
@@ -691,7 +730,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
           ),
         ],
         Row(children: [
-          if (order.status == 'assigned')
+          if (order.status == 'deposit_confirmed')
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: _starting ? null : _start,
@@ -704,7 +743,9 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
                 icon: _starting
-                    ? const SizedBox(width: 16, height: 16,
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.play_arrow_rounded, size: 18),
@@ -726,7 +767,9 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
                 icon: _uploading
-                    ? const SizedBox(width: 16, height: 16,
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.upload_rounded, size: 18),
@@ -745,14 +788,15 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: const Color(0xFF00BCD4)),
                 ),
-                child: Row(mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
+                child:
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   const Icon(Icons.hourglass_top_rounded,
                       color: Color(0xFF00BCD4), size: 16),
                   const SizedBox(width: 8),
                   Text('En attente de confirmation',
                       style: GoogleFonts.urbanist(
-                          fontSize: 12, fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
                           color: const Color(0xFF00BCD4))),
                 ]),
               ),
@@ -760,12 +804,11 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
         ]),
         const SizedBox(height: 8),
         GestureDetector(
-          onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => EkOrderTracking(order: order))),
+          onTap: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => EkOrderTracking(order: order))),
           child: Text('Voir les détails →',
               style: GoogleFonts.urbanist(
-                  fontSize: 12, color: kEkGreen,
-                  fontWeight: FontWeight.w600)),
+                  fontSize: 12, color: kEkGreen, fontWeight: FontWeight.w600)),
         ),
       ]),
     );
@@ -792,7 +835,8 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
         child: Stack(children: [
           InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
           Positioned(
-            top: 40, right: 16,
+            top: 40,
+            right: 16,
             child: IconButton(
               onPressed: () => Navigator.pop(context),
               tooltip: 'Fermer',
@@ -806,8 +850,8 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
 
   Future<void> _uploadProof(EkOrder order) async {
     final picker = ImagePicker();
-    final file   = await picker.pickImage(
-        source: ImageSource.gallery, imageQuality: 80);
+    final file =
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
     if (file == null) return;
 
     setState(() => _uploading = true);
@@ -816,9 +860,8 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
       await EkService.agentSendProof(order.id, url);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erreur upload: $e'),
-                backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Erreur upload: $e'), backgroundColor: Colors.red));
       }
     }
     if (mounted) setState(() => _uploading = false);
@@ -836,7 +879,8 @@ class _AgentHistoryTab extends StatelessWidget {
       stream: EkService.streamAgentHistory(agentId),
       builder: (context, snap) {
         if (snap.hasError) {
-          return const StreamErrorState(message: "Impossible de charger l'historique.");
+          return const StreamErrorState(
+              message: "Impossible de charger l'historique.");
         }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -844,12 +888,14 @@ class _AgentHistoryTab extends StatelessWidget {
         final orders = snap.data!;
         if (orders.isEmpty) {
           return Center(
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
               const Text('📋', style: TextStyle(fontSize: 52)),
               const SizedBox(height: 16),
               Text('Aucun historique',
                   style: GoogleFonts.urbanist(
-                      fontSize: 16, fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                       color: kEkText)),
             ]),
           );
@@ -858,9 +904,9 @@ class _AgentHistoryTab extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           itemCount: orders.length,
           itemBuilder: (_, i) {
-            final o          = orders[i];
-            final statusCol  = ekStatusColor(o.status);
-            final opColor    = EkService.operatorColor(o.operator);
+            final o = orders[i];
+            final statusCol = ekStatusColor(o.status);
+            final opColor = EkService.operatorColor(o.operator);
             return Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(14),
@@ -871,7 +917,8 @@ class _AgentHistoryTab extends StatelessWidget {
               ),
               child: Row(children: [
                 Container(
-                  width: 40, height: 40,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: opColor.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
@@ -879,7 +926,8 @@ class _AgentHistoryTab extends StatelessWidget {
                   child: Center(
                     child: Text(o.operator[0].toUpperCase(),
                         style: GoogleFonts.urbanist(
-                            fontSize: 15, fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
                             color: opColor)),
                   ),
                 ),
@@ -888,27 +936,32 @@ class _AgentHistoryTab extends StatelessWidget {
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text(o.serviceLabel,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 13, fontWeight: FontWeight.w700,
-                            color: kEkText)),
-                    Text(o.beneficiaryNumber,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 11, color: kEkMuted)),
-                  ]),
+                        Text(o.serviceLabel,
+                            style: GoogleFonts.urbanist(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: kEkText)),
+                        Text(o.beneficiaryNumber,
+                            style: GoogleFonts.urbanist(
+                                fontSize: 11, color: kEkMuted)),
+                      ]),
                 ),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text(o.status == 'completed'
-                      ? (o.agentEarning > 0 ? '+${_fmt(o.agentEarning)}' : _fmt(o.totalPaid))
-                      : _fmt(o.totalPaid),
+                  Text(
+                      o.status == 'completed'
+                          ? (o.agentEarning > 0
+                              ? '+${_fmt(o.agentEarning)}'
+                              : _fmt(o.totalPaid))
+                          : _fmt(o.totalPaid),
                       style: GoogleFonts.urbanist(
-                          fontSize: 13, fontWeight: FontWeight.w800,
-                          color: o.status == 'completed'
-                              ? kEkGreen : kEkMuted)),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color:
+                              o.status == 'completed' ? kEkGreen : kEkMuted)),
                   const SizedBox(height: 3),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
                       color: statusCol.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
@@ -916,7 +969,8 @@ class _AgentHistoryTab extends StatelessWidget {
                     child: Text(
                       ekStatusLabels[o.status] ?? o.status,
                       style: GoogleFonts.urbanist(
-                          fontSize: 8, fontWeight: FontWeight.w700,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
                           color: statusCol),
                     ),
                   ),
@@ -939,4 +993,3 @@ String _fmt(int price) {
   }
   return '${buf.toString()} F';
 }
-

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -39,9 +39,12 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
           _buildAppBar(context),
           _buildCategories(),
           _buildBanner(),
-          _buildSection('🆕  Nouveautés', context, selector: (p) => p.newProducts),
-          _buildSection('✨  Quasi neufs', context, selector: (p) => p.likeNewProducts),
-          _buildSection('💡  Bonnes affaires', context, selector: (p) => p.usedProducts),
+          _buildSection('🆕  Nouveautés', context,
+              selector: (p) => p.newProducts),
+          _buildSection('✨  Quasi neufs', context,
+              selector: (p) => p.likeNewProducts),
+          _buildSection('💡  Bonnes affaires', context,
+              selector: (p) => p.usedProducts),
           _buildAllGrid(),
           const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
@@ -87,8 +90,10 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                 ),
                 const Spacer(),
                 IconButton(
-                  onPressed: () => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const MpFavoritesScreen())),
+                  onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const MpFavoritesScreen())),
                   tooltip: 'Mes favoris',
                   icon: const Icon(Icons.favorite_border_rounded,
                       color: Colors.white),
@@ -100,11 +105,13 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                       _showAuthSnack(context);
                       return;
                     }
-                    Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const MpSellerScreen()));
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const MpSellerScreen()));
                   },
-                  icon: const Icon(Icons.storefront_rounded,
-                      color: Colors.white),
+                  icon:
+                      const Icon(Icons.storefront_rounded, color: Colors.white),
                   tooltip: 'Mes annonces',
                 ),
               ]),
@@ -136,8 +143,7 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                 const Icon(Icons.search_rounded, color: kMpMuted, size: 20),
                 const SizedBox(width: 8),
                 Text('iPhone, Samsung, HP...',
-                    style: GoogleFonts.urbanist(
-                        fontSize: 14, color: kMpMuted)),
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpMuted)),
               ]),
             ),
           ),
@@ -164,11 +170,11 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                 onTap: () => mp.selectCategory('all'),
               ),
               ...mpCategories.map((c) => _CatChip(
-                emoji: c['emoji']!,
-                label: c['label']!,
-                selected: mp.selectedCategory == c['id'],
-                onTap: () => mp.selectCategory(c['id']!),
-              )),
+                    emoji: c['emoji']!,
+                    label: c['label']!,
+                    selected: mp.selectedCategory == c['id'],
+                    onTap: () => mp.selectCategory(c['id']!),
+                  )),
             ]),
           ),
         );
@@ -217,8 +223,10 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                         _showAuthSnack(context);
                         return;
                       }
-                      Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => const MpSellerScreen()));
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const MpSellerScreen()));
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -269,8 +277,10 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                     )),
                 const Spacer(),
                 GestureDetector(
-                  onTap: () => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const MpSearchScreen())),
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const MpSearchScreen())),
                   child: Text('Voir tout',
                       style: GoogleFonts.urbanist(
                           fontSize: 12,
@@ -306,7 +316,8 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
               child: Column(children: [
                 const CircularProgressIndicator(color: kMpOrange),
                 const SizedBox(height: 12),
-                Text('Chargement...', style: GoogleFonts.urbanist(color: kMpMuted)),
+                Text('Chargement...',
+                    style: GoogleFonts.urbanist(color: kMpMuted)),
               ]),
             ),
           ),

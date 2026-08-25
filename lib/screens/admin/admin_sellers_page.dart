@@ -1,8 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/subscription_service.dart';
+import '../../utils/partner_location_validator.dart';
+import '../../widgets/partner_location_input.dart';
 
 class AdminSellersPage extends StatelessWidget {
   const AdminSellersPage({super.key});
@@ -57,7 +59,7 @@ class AdminSellersPage extends StatelessWidget {
           }
           return ListView.builder(
             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             itemCount: docs.length,
             itemBuilder: (_, i) {
               final doc = docs[i];
@@ -137,8 +139,7 @@ class _SellerCard extends StatelessWidget {
         ],
       ),
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: Container(
           width: 48,
           height: 48,
@@ -158,12 +159,15 @@ class _SellerCard extends StatelessWidget {
             ),
             // Subscription status dot
             Container(
-              width: 10, height: 10,
+              width: 10,
+              height: 10,
               margin: const EdgeInsets.only(right: 4),
               decoration: BoxDecoration(
-                color: subStatus == 'active' ? Colors.green
-                    : subStatus == 'trial' ? Colors.blue
-                    : Colors.red,
+                color: subStatus == 'active'
+                    ? Colors.green
+                    : subStatus == 'trial'
+                        ? Colors.blue
+                        : Colors.red,
                 shape: BoxShape.circle,
               ),
             ),
@@ -172,8 +176,7 @@ class _SellerCard extends StatelessWidget {
               const Text('👑', style: TextStyle(fontSize: 14)),
             const SizedBox(width: 4),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: isActive
                     ? Colors.green.withValues(alpha: 0.1)
@@ -196,13 +199,11 @@ class _SellerCard extends StatelessWidget {
           children: [
             const SizedBox(height: 4),
             Text(phone,
-                style:
-                    TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
             if (type.isNotEmpty)
               Container(
                 margin: const EdgeInsets.only(top: 4),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1565C0).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
@@ -225,8 +226,7 @@ class _SellerCard extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) =>
-                      _SellerFormPage(docId: docId, existing: data),
+                  builder: (_) => _SellerFormPage(docId: docId, existing: data),
                 ),
               );
             }
@@ -250,8 +250,7 @@ class _SellerCard extends StatelessWidget {
               value: 'edit',
               child: Row(
                 children: [
-                  Icon(Icons.edit_rounded,
-                      color: Color(0xFF1565C0), size: 18),
+                  Icon(Icons.edit_rounded, color: Color(0xFF1565C0), size: 18),
                   SizedBox(width: 8),
                   Text("Modifier"),
                 ],
@@ -290,6 +289,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _latCtrl = TextEditingController();
+  final _lngCtrl = TextEditingController();
 
   // Type prédéfinis + valeur libre
   String _type = 'boutique';
@@ -315,6 +316,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
       _phoneCtrl.text = d['phone'] ?? '';
       _type = d['type'] ?? 'boutique';
       _isActive = d['isActive'] ?? true;
+      _latCtrl.text = d['lat']?.toString() ?? '';
+      _lngCtrl.text = d['lng']?.toString() ?? '';
     }
   }
 
@@ -323,6 +326,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _passCtrl.dispose();
+    _latCtrl.dispose();
+    _lngCtrl.dispose();
     super.dispose();
   }
 
@@ -339,6 +344,12 @@ class _SellerFormPageState extends State<_SellerFormPage> {
       _snack("Mot de passe minimum 6 caractères");
       return;
     }
+    final locationError =
+        PartnerLocationValidator.validateText(_latCtrl.text, _lngCtrl.text);
+    if (locationError != null) {
+      _snack(locationError);
+      return;
+    }
 
     setState(() => _saving = true);
 
@@ -349,8 +360,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
         uid = widget.docId!;
       } else {
         // Créer compte Firebase Auth
-        final credential = await FirebaseAuth.instance
-            .createUserWithEmailAndPassword(
+        final credential =
+            await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: "$phone@az-seller.ci",
           password: pass,
         );
@@ -362,6 +373,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
         'phone': phone,
         'type': _type,
         'isActive': _isActive,
+        'lat': double.parse(_latCtrl.text.trim()),
+        'lng': double.parse(_lngCtrl.text.trim()),
         'wallet': 0,
         'createdAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -389,8 +402,7 @@ class _SellerFormPageState extends State<_SellerFormPage> {
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -415,7 +427,7 @@ class _SellerFormPageState extends State<_SellerFormPage> {
       ),
       body: ListView(
         physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         children: [
           // Infos
           _field(_nameCtrl, "Nom de la boutique / du vendeur *",
@@ -424,6 +436,11 @@ class _SellerFormPageState extends State<_SellerFormPage> {
           _field(_phoneCtrl, "Téléphone (identifiant) *", Icons.phone_rounded,
               type: TextInputType.phone),
           const SizedBox(height: 12),
+          PartnerLocationInput(
+            latitudeController: _latCtrl,
+            longitudeController: _lngCtrl,
+          ),
+          const SizedBox(height: 12),
           if (!_isEditing)
             TextField(
               controller: _passCtrl,
@@ -431,14 +448,13 @@ class _SellerFormPageState extends State<_SellerFormPage> {
               decoration: InputDecoration(
                 labelText: "Mot de passe *",
                 hintText: "Min. 6 caractères",
-                prefixIcon: const Icon(Icons.lock_rounded,
-                    color: Color(0xFF1565C0)),
+                prefixIcon:
+                    const Icon(Icons.lock_rounded, color: Color(0xFF1565C0)),
                 suffixIcon: IconButton(
                   icon: Icon(
                       _showPass ? Icons.visibility_off : Icons.visibility,
                       color: Colors.grey),
-                  onPressed: () =>
-                      setState(() => _showPass = !_showPass),
+                  onPressed: () => setState(() => _showPass = !_showPass),
                 ),
                 filled: true,
                 fillColor: Colors.white,
@@ -453,8 +469,7 @@ class _SellerFormPageState extends State<_SellerFormPage> {
 
           // Type de service
           const Text("Type de service",
-              style:
-                  TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -464,17 +479,14 @@ class _SellerFormPageState extends State<_SellerFormPage> {
               return GestureDetector(
                 onTap: () => setState(() => _type = t),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    color: sel
-                        ? const Color(0xFF1565C0)
-                        : Colors.white,
+                    color: sel ? const Color(0xFF1565C0) : Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: sel
-                          ? const Color(0xFF1565C0)
-                          : Colors.grey.shade300,
+                      color:
+                          sel ? const Color(0xFF1565C0) : Colors.grey.shade300,
                     ),
                   ),
                   child: Text(
@@ -500,9 +512,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
             child: SwitchListTile(
               title: const Text("Compte actif",
                   style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(_isActive
-                  ? "Le vendeur peut se connecter"
-                  : "Accès bloqué"),
+              subtitle: Text(
+                  _isActive ? "Le vendeur peut se connecter" : "Accès bloqué"),
               value: _isActive,
               activeThumbColor: const Color(0xFF1565C0),
               onChanged: (v) => setState(() => _isActive = v),
@@ -522,8 +533,7 @@ class _SellerFormPageState extends State<_SellerFormPage> {
               ),
               child: _saving
                   ? const CircularProgressIndicator(color: Colors.white)
-                  : Text(
-                      _isEditing ? "Enregistrer" : "Créer le compte",
+                  : Text(_isEditing ? "Enregistrer" : "Créer le compte",
                       style: const TextStyle(
                           fontSize: 16,
                           color: Colors.white,
@@ -558,8 +568,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
                   Expanded(
                     child: Text(
                       "Le vendeur se connecte avec son numéro de téléphone et le mot de passe défini ici.",
-                      style: TextStyle(
-                          color: Colors.blue.shade700, fontSize: 12),
+                      style:
+                          TextStyle(color: Colors.blue.shade700, fontSize: 12),
                     ),
                   ),
                 ],
@@ -621,7 +631,9 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
       await action();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Opération réussie'), backgroundColor: Colors.green),
+          const SnackBar(
+              content: Text('Opération réussie'),
+              backgroundColor: Colors.green),
         );
       }
     } catch (e) {
@@ -673,12 +685,16 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
               // ── Abonnement standard ───────────────────────────────
               Row(children: [
                 _StatusChip(
-                  label: subStatus == 'active' ? 'Actif'
-                      : subStatus == 'trial' ? 'Trial'
-                      : 'Suspendu',
-                  color: subStatus == 'active' ? Colors.green
-                      : subStatus == 'trial' ? Colors.blue
-                      : Colors.red,
+                  label: subStatus == 'active'
+                      ? 'Actif'
+                      : subStatus == 'trial'
+                          ? 'Trial'
+                          : 'Suspendu',
+                  color: subStatus == 'active'
+                      ? Colors.green
+                      : subStatus == 'trial'
+                          ? Colors.blue
+                          : Colors.red,
                 ),
                 const SizedBox(width: 8),
                 Text(
@@ -693,20 +709,25 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
                       _AdminBtn(
                         label: 'Activer abo (1 000 F)',
                         color: const Color(0xFF1565C0),
-                        onTap: () => _run(() => SubscriptionService.adminActivateSubscription(
-                            widget.collection, widget.docId, chargeWallet: true)),
+                        onTap: () => _run(() =>
+                            SubscriptionService.adminActivateSubscription(
+                                widget.collection, widget.docId,
+                                chargeWallet: true)),
                       ),
                       _AdminBtn(
                         label: 'Gratuit',
                         color: Colors.green,
-                        onTap: () => _run(() => SubscriptionService.adminActivateSubscription(
-                            widget.collection, widget.docId, chargeWallet: false)),
+                        onTap: () => _run(() =>
+                            SubscriptionService.adminActivateSubscription(
+                                widget.collection, widget.docId,
+                                chargeWallet: false)),
                       ),
                       _AdminBtn(
                         label: 'Suspendre',
                         color: Colors.red,
-                        onTap: () => _run(() => SubscriptionService.adminSuspend(
-                            widget.collection, widget.docId)),
+                        onTap: () => _run(() =>
+                            SubscriptionService.adminSuspend(
+                                widget.collection, widget.docId)),
                       ),
                     ]),
 
@@ -715,13 +736,18 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
               // ── VIP ────────────────────────────────────────────────
               Row(children: [
                 _StatusChip(
-                  label: vipStatus == 'active' ? '👑 VIP Actif'
-                      : vipStatus == 'expired' ? 'VIP Expiré'
-                      : 'Aucun VIP',
-                  color: vipStatus == 'active' ? const Color(0xFFFFD700)
-                      : vipStatus == 'expired' ? Colors.orange
-                      : Colors.grey,
-                  textColor: vipStatus == 'active' ? Colors.black87 : Colors.white,
+                  label: vipStatus == 'active'
+                      ? '👑 VIP Actif'
+                      : vipStatus == 'expired'
+                          ? 'VIP Expiré'
+                          : 'Aucun VIP',
+                  color: vipStatus == 'active'
+                      ? const Color(0xFFFFD700)
+                      : vipStatus == 'expired'
+                          ? Colors.orange
+                          : Colors.grey,
+                  textColor:
+                      vipStatus == 'active' ? Colors.black87 : Colors.white,
                 ),
                 const SizedBox(width: 8),
                 if (vipExpiry != null)
@@ -737,20 +763,23 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
                   color: const Color(0xFFFFD700),
                   textColor: Colors.black87,
                   onTap: () => _run(() => SubscriptionService.adminActivateVip(
-                      widget.collection, widget.docId, chargeWallet: true)),
+                      widget.collection, widget.docId,
+                      chargeWallet: true)),
                 ),
                 _AdminBtn(
                   label: 'VIP Gratuit',
                   color: Colors.amber,
                   textColor: Colors.black87,
                   onTap: () => _run(() => SubscriptionService.adminActivateVip(
-                      widget.collection, widget.docId, chargeWallet: false)),
+                      widget.collection, widget.docId,
+                      chargeWallet: false)),
                 ),
                 _AdminBtn(
                   label: 'Retirer VIP',
                   color: Colors.grey.shade600,
-                  onTap: () => _run(() => SubscriptionService.adminDeactivateVip(
-                      widget.collection, widget.docId)),
+                  onTap: () => _run(() =>
+                      SubscriptionService.adminDeactivateVip(
+                          widget.collection, widget.docId)),
                 ),
               ]),
             ],
@@ -765,7 +794,10 @@ class _StatusChip extends StatelessWidget {
   final String label;
   final Color color;
   final Color textColor;
-  const _StatusChip({required this.label, required this.color, this.textColor = Colors.white});
+  const _StatusChip(
+      {required this.label,
+      required this.color,
+      this.textColor = Colors.white});
 
   @override
   Widget build(BuildContext context) {
@@ -776,7 +808,8 @@ class _StatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(label,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textColor)),
+          style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.bold, color: textColor)),
     );
   }
 }
@@ -786,7 +819,11 @@ class _AdminBtn extends StatelessWidget {
   final Color color;
   final Color textColor;
   final VoidCallback onTap;
-  const _AdminBtn({required this.label, required this.color, required this.onTap, this.textColor = Colors.white});
+  const _AdminBtn(
+      {required this.label,
+      required this.color,
+      required this.onTap,
+      this.textColor = Colors.white});
 
   @override
   Widget build(BuildContext context) {
@@ -799,7 +836,8 @@ class _AdminBtn extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Text(label,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor)),
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600, color: textColor)),
       ),
     );
   }

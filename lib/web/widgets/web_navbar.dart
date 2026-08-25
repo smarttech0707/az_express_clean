@@ -17,12 +17,12 @@ class _WebNavBarState extends State<WebNavBar> {
   bool _menuOpen = false;
 
   static const _links = [
-    ('Services',        '/services'),
+    ('Services', '/services'),
     ('Comment ça marche', '/comment-ca-marche'),
-    ('Commerçants',     '/commercants'),
-    ('Livreurs',        '/livreurs'),
-    ('À propos',        '/a-propos'),
-    ('Contact',         '/contact'),
+    ('Commerçants', '/commercants'),
+    ('Livreurs', '/livreurs'),
+    ('À propos', '/a-propos'),
+    ('Contact', '/contact'),
   ];
 
   @override
@@ -41,7 +41,12 @@ class _WebNavBarState extends State<WebNavBar> {
         decoration: BoxDecoration(
           color: kWhite,
           boxShadow: _scrolled || _menuOpen
-              ? [const BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 2))]
+              ? [
+                  const BoxShadow(
+                      color: Color(0x14000000),
+                      blurRadius: 12,
+                      offset: Offset(0, 2))
+                ]
               : [],
         ),
         child: desk ? _desktopBar() : _mobileBar(),
@@ -93,7 +98,8 @@ class _WebNavBarState extends State<WebNavBar> {
           child: _menuOpen
               ? Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -157,7 +163,8 @@ class _WebNavBarState extends State<WebNavBar> {
               if (active)
                 Container(
                   margin: const EdgeInsets.only(top: 3),
-                  width: 20, height: 2,
+                  width: 20,
+                  height: 2,
                   decoration: BoxDecoration(
                     color: kOrange,
                     borderRadius: BorderRadius.circular(1),

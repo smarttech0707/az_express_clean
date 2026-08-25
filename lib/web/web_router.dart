@@ -24,13 +24,13 @@ final webRouter = GoRouter(
     WebClientAuth.instance,
   ]),
   redirect: (context, state) {
-    final loc          = state.matchedLocation;
+    final loc = state.matchedLocation;
     final isAdminRoute = loc.startsWith('/admin');
     final isLoginRoute = loc == '/admin/login';
-    final isClientApp  = loc.startsWith('/app');
+    final isClientApp = loc.startsWith('/app');
     final isClientLogin = loc == '/connexion';
-    final isAdmin      = AdminAuthService.instance.isAdmin;
-    final isClient     = WebClientAuth.instance.isLoggedIn;
+    final isAdmin = AdminAuthService.instance.isAdmin;
+    final isClient = WebClientAuth.instance.isLoggedIn;
 
     // Admin routes
     if (isAdminRoute && !isLoginRoute && !isAdmin) return '/admin/login';
@@ -45,41 +45,66 @@ final webRouter = GoRouter(
   errorBuilder: (_, state) => const WebHomePage(),
   routes: [
     // ── Pages publiques ───────────────────────────────────────────────────────
-    GoRoute(path: '/',                   builder: (_, __) => const WebHomePage()),
-    GoRoute(path: '/services',           builder: (_, __) => const WebServicesPage()),
-    GoRoute(path: '/comment-ca-marche',  builder: (_, __) => const WebHowItWorksPage()),
-    GoRoute(path: '/commercants',        builder: (_, __) => const WebMerchantsPage()),
-    GoRoute(path: '/livreurs',           builder: (_, __) => const WebDriversPage()),
-    GoRoute(path: '/contact',            builder: (_, __) => const WebContactPage()),
-    GoRoute(path: '/a-propos',           builder: (_, __) => const WebAboutPage()),
-    GoRoute(path: '/confidentialite',    builder: (_, __) => const WebPrivacyPage()),
-    GoRoute(path: '/conditions',         builder: (_, __) => const WebTermsPage()),
-    GoRoute(path: '/delete-account',     builder: (_, __) => const WebDeleteAccountPage()),
+    GoRoute(path: '/', builder: (_, __) => const WebHomePage()),
+    GoRoute(path: '/services', builder: (_, __) => const WebServicesPage()),
+    GoRoute(
+        path: '/comment-ca-marche',
+        builder: (_, __) => const WebHowItWorksPage()),
+    GoRoute(path: '/commercants', builder: (_, __) => const WebMerchantsPage()),
+    GoRoute(path: '/livreurs', builder: (_, __) => const WebDriversPage()),
+    GoRoute(path: '/contact', builder: (_, __) => const WebContactPage()),
+    GoRoute(path: '/a-propos', builder: (_, __) => const WebAboutPage()),
+    GoRoute(
+        path: '/confidentialite', builder: (_, __) => const WebPrivacyPage()),
+    GoRoute(path: '/conditions', builder: (_, __) => const WebTermsPage()),
+    GoRoute(
+        path: '/delete-account',
+        builder: (_, __) => const WebDeleteAccountPage()),
 
     // ── Auth client ───────────────────────────────────────────────────────────
-    GoRoute(path: '/connexion',          builder: (_, __) => const WebClientLoginPage()),
+    GoRoute(path: '/connexion', builder: (_, __) => const WebClientLoginPage()),
 
     // ── App client (protégée) ─────────────────────────────────────────────────
-    GoRoute(path: '/app',                builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/commander',      builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/restaurants',    builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/boulangeries',   builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/pharmacies',     builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/ekbine',         builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/boutique',       builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/eau',            builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/blanchisserie',  builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/artisans',       builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/residences',     builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/locations',      builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/colis',          builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/recharge',       builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/retrait',        builder: (_, __) => const WebClientDashboard()),
+    GoRoute(path: '/app', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/commander', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/restaurants',
+        builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/boulangeries',
+        builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/pharmacies',
+        builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/ekbine', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/boutique', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(path: '/app/eau', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/blanchisserie',
+        builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/artisans', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/residences',
+        builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/locations', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(path: '/app/colis', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/recharge', builder: (_, __) => const WebClientDashboard()),
+    GoRoute(
+        path: '/app/retrait', builder: (_, __) => const WebClientDashboard()),
 
     // ── Pages admin (protégées) ───────────────────────────────────────────────
-    GoRoute(path: '/admin',              redirect: (_, __) => '/admin/login'),
-    GoRoute(path: '/admin/login',        builder: (_, __) => const WebAdminLoginPage()),
-    GoRoute(path: '/admin/dashboard',    builder: (_, __) => const WebAdminDashboard()),
+    GoRoute(path: '/admin', redirect: (_, __) => '/admin/login'),
+    GoRoute(
+        path: '/admin/login', builder: (_, __) => const WebAdminLoginPage()),
+    GoRoute(
+        path: '/admin/dashboard',
+        builder: (_, __) => const WebAdminDashboard()),
   ],
 );
 

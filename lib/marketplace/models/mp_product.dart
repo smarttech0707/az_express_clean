@@ -10,10 +10,10 @@ class MpProduct {
   final String title;
   final String description;
   final int price;
-  final String category;    // phones / tablets / computers / accessories
+  final String category; // phones / tablets / computers / accessories
   final String? subcategory;
   final String brand;
-  final String condition;   // new / like_new / used
+  final String condition; // new / like_new / used
   final String? storage;
   final String? ram;
   final String? color;
@@ -24,9 +24,11 @@ class MpProduct {
   final double lng;
   final int views;
   final int favoritesCount;
-  final String status;      // active / sold / hidden
+  final String status; // active / sold / hidden
   final DateTime? createdAt;
   final String sellerVipStatus;
+  final int priorityLevel;
+  final DateTime? expiresAt;
 
   const MpProduct({
     required this.id,
@@ -55,6 +57,8 @@ class MpProduct {
     this.status = 'active',
     this.createdAt,
     this.sellerVipStatus = 'none',
+    this.priorityLevel = 0,
+    this.expiresAt,
   });
 
   factory MpProduct.fromDoc(DocumentSnapshot doc) {
@@ -86,38 +90,42 @@ class MpProduct {
       status: d['status'] ?? 'active',
       createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
       sellerVipStatus: d['sellerVipStatus'] as String? ?? 'none',
+      priorityLevel: (d['priorityLevel'] as num?)?.toInt() ?? 0,
+      expiresAt: (d['expiresAt'] as Timestamp?)?.toDate(),
     );
   }
 
   Map<String, dynamic> toMap() => {
-    'sellerId': sellerId,
-    'sellerName': sellerName,
-    'sellerPhone': sellerPhone,
-    'sellerCity': sellerCity,
-    'sellerVerified': sellerVerified,
-    'title': title,
-    'titleSearch': title.toLowerCase(),
-    'description': description,
-    'price': price,
-    'category': category,
-    'subcategory': subcategory,
-    'brand': brand,
-    'brandSearch': brand.toLowerCase(),
-    'condition': condition,
-    'storage': storage,
-    'ram': ram,
-    'color': color,
-    'battery': battery,
-    'images': images,
-    'city': city,
-    'lat': lat,
-    'lng': lng,
-    'views': views,
-    'favoritesCount': favoritesCount,
-    'status': status,
-    'createdAt': FieldValue.serverTimestamp(),
-    'sellerVipStatus': sellerVipStatus,
-  };
+        'sellerId': sellerId,
+        'sellerName': sellerName,
+        'sellerPhone': sellerPhone,
+        'sellerCity': sellerCity,
+        'sellerVerified': sellerVerified,
+        'title': title,
+        'titleSearch': title.toLowerCase(),
+        'description': description,
+        'price': price,
+        'category': category,
+        'subcategory': subcategory,
+        'brand': brand,
+        'brandSearch': brand.toLowerCase(),
+        'condition': condition,
+        'storage': storage,
+        'ram': ram,
+        'color': color,
+        'battery': battery,
+        'images': images,
+        'city': city,
+        'lat': lat,
+        'lng': lng,
+        'views': views,
+        'favoritesCount': favoritesCount,
+        'status': status,
+        'createdAt': FieldValue.serverTimestamp(),
+        'sellerVipStatus': sellerVipStatus,
+        'priorityLevel': priorityLevel,
+        'expiresAt': expiresAt == null ? null : Timestamp.fromDate(expiresAt!),
+      };
 
   MpProduct copyWith({
     String? title,
@@ -135,32 +143,37 @@ class MpProduct {
     String? city,
     String? status,
     String? sellerVipStatus,
-  }) => MpProduct(
-    id: id,
-    sellerId: sellerId,
-    sellerName: sellerName,
-    sellerPhone: sellerPhone,
-    sellerCity: sellerCity,
-    sellerVerified: sellerVerified,
-    title: title ?? this.title,
-    description: description ?? this.description,
-    price: price ?? this.price,
-    category: category ?? this.category,
-    subcategory: subcategory ?? this.subcategory,
-    brand: brand ?? this.brand,
-    condition: condition ?? this.condition,
-    storage: storage ?? this.storage,
-    ram: ram ?? this.ram,
-    color: color ?? this.color,
-    battery: battery ?? this.battery,
-    images: images ?? this.images,
-    city: city ?? this.city,
-    lat: lat,
-    lng: lng,
-    views: views,
-    favoritesCount: favoritesCount,
-    status: status ?? this.status,
-    createdAt: createdAt,
-    sellerVipStatus: sellerVipStatus ?? this.sellerVipStatus,
-  );
+    int? priorityLevel,
+    DateTime? expiresAt,
+  }) =>
+      MpProduct(
+        id: id,
+        sellerId: sellerId,
+        sellerName: sellerName,
+        sellerPhone: sellerPhone,
+        sellerCity: sellerCity,
+        sellerVerified: sellerVerified,
+        title: title ?? this.title,
+        description: description ?? this.description,
+        price: price ?? this.price,
+        category: category ?? this.category,
+        subcategory: subcategory ?? this.subcategory,
+        brand: brand ?? this.brand,
+        condition: condition ?? this.condition,
+        storage: storage ?? this.storage,
+        ram: ram ?? this.ram,
+        color: color ?? this.color,
+        battery: battery ?? this.battery,
+        images: images ?? this.images,
+        city: city ?? this.city,
+        lat: lat,
+        lng: lng,
+        views: views,
+        favoritesCount: favoritesCount,
+        status: status ?? this.status,
+        createdAt: createdAt,
+        sellerVipStatus: sellerVipStatus ?? this.sellerVipStatus,
+        priorityLevel: priorityLevel ?? this.priorityLevel,
+        expiresAt: expiresAt ?? this.expiresAt,
+      );
 }

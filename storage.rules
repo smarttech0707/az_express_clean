@@ -23,6 +23,10 @@ service firebase.storage {
       return request.resource.contentType.matches('audio/.*');
     }
 
+    function isVideo() {
+      return request.resource.contentType.matches('video/.*');
+    }
+
     function isOwnerPath(uid) {
       return request.auth.uid == uid;
     }
@@ -109,6 +113,26 @@ service firebase.storage {
             .data.get('restaurantId', '') == restaurantId;
     }
 
+    // ── PHOTOS DES PLATS DU MENU RESTAURANT (propriétaire) ─────────────────
+    // Même preuve de propriété que restaurant_logos ci-dessus (lookup
+    // restaurant_owners), mais un dossier séparé par plat plutôt qu'un seul
+    // fichier par restaurant — plusieurs plats, chacun sa propre photo.
+    match /restaurant_menu_items/{restaurantId}/{file} {
+      allow read:  if isAuth();
+      // L'admin gère déjà les restaurants et peut les supprimer en cascade
+      // depuis admin_restaurants_page.dart. Sans cette exception, les
+      // documents de menu étaient supprimés mais leurs photos restaient
+      // orphelines dans Storage.
+      allow create, update: if isRealUser() && isImage() && maxSize(5)
+        && (isAdmin()
+          || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid))
+              .data.get('restaurantId', '') == restaurantId);
+      allow delete: if isRealUser()
+        && (isAdmin()
+          || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid))
+              .data.get('restaurantId', '') == restaurantId);
+    }
+
     // ── LOGO PHARMACIE ──────────────────────────────────────────────────────
     // Pharmacie n'a pas de Firebase Auth propre — la session anonyme active
     // est liée via pharmacies/{pharmacieId}.currentUid (voir firestore.rules),
@@ -157,6 +181,25 @@ service firebase.storage {
       allow read:  if isOwnerPath(uid) || isAdmin();
       allow create, update: if isRealUser() && isOwnerPath(uid) && isImage() && maxSize(5);
       allow delete: if isRealUser() && isOwnerPath(uid);
+    }
+
+    // ── PHOTO DE PROFIL PATRON DE FLOTTE ────────────────────────────────────
+    // Photo de profil affichée sur le dashboard flotte (distincte du selfie
+    // KYC ci-dessous) — même modèle que driver_photos (lecture publique,
+    // écriture/suppression réservées au propriétaire).
+    match /fleet_photos/{fleetId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(fleetId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(fleetId);
+    }
+
+    // ── PHOTO DE PROFIL ADMIN ───────────────────────────────────────────────
+    // adminId = UID Firebase Auth du document admins/{adminId} lui-même —
+    // isOwnerPath() suffit, pas de lookup supplémentaire nécessaire.
+    match /admin_photos/{adminId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(adminId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(adminId);
     }
 
     // ── SELFIES INSCRIPTION FLOTTE ─────────────────────────────────────────
@@ -257,6 +300,16 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/real_estate_listings/$(listingId)).data.agentId == request.auth.uid;
       allow delete: if isRealUser()
         && firestore.get(/databases/(default)/documents/real_estate_listings/$(listingId)).data.agentId == request.auth.uid;
+    }
+
+    // ── PHOTO DE PROFIL AGENT IMMOBILIER ───────────────────────────────────
+    // Distincte des photos d'annonces (real_estate/{listingId}) ci-dessus —
+    // même modèle que driver_photos/fleet_photos (lecture publique, écriture
+    // réservée au propriétaire, prouvé par l'UID dans le chemin).
+    match /real_estate_agent_photos/{agentId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(agentId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(agentId);
     }
 
     // ── MARKETPLACE : AUDIO CHAT ───────────────────────────────────────────
@@ -365,6 +418,14 @@ service firebase.storage {
       allow delete: if isRealUser() && isAdmin();
     }
 
+    // ── BOULANGERIES — photos des articles du menu (admin uniquement,
+    // pas de tableau de bord propriétaire pour ce catalogue aujourd'hui) ───
+    match /bakery/{boulangerieId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
+    }
+
     // ── LOCATIONS (admin) ─────────────────────────────────────────────────
     match /locations/{docId}/{file} {
       allow read:  if isAuth();
@@ -399,6 +460,30 @@ service firebase.storage {
       allow read:  if isAuth() && isOwnerPath(uid);
       allow create, update: if isAuth() && isOwnerPath(uid) && isImage() && maxSize(5);
       allow delete: if isAuth() && isOwnerPath(uid);
+    }
+
+    // Événementiel — médias détenus par le compte prestataire. Les images
+    // sont limitées à 10 Mo et les vidéos à 50 Mo.
+    match /event_offers/{uid}/{offerId}/{file} {
+      allow read: if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(uid)
+        && ((isImage() && maxSize(10)) || (isVideo() && maxSize(50)));
+      allow delete: if isRealUser() && (isOwnerPath(uid) || isAdmin());
+    }
+
+    match /event_providers/{uid}/{providerId}/{kind}/{file} {
+      allow read: if isAuth() && kind != 'documents';
+      allow create, update: if isRealUser() && isOwnerPath(uid)
+        && kind != 'documents'
+        && ((isImage() && maxSize(10)) || (isVideo() && maxSize(50)));
+      allow delete: if isRealUser() && (isOwnerPath(uid) || isAdmin());
+    }
+
+    match /event_providers/{uid}/{providerId}/documents/{file} {
+      allow read: if isRealUser() && (isOwnerPath(uid) || isAdmin());
+      allow create, update: if isRealUser() && isOwnerPath(uid)
+        && isImage() && maxSize(10);
+      allow delete: if isRealUser() && (isOwnerPath(uid) || isAdmin());
     }
 
     // ── TOUT LE RESTE : REFUSÉ ─────────────────────────────────────────────

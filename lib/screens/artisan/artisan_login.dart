@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -60,7 +60,8 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => ArtisanDashboard(docId: lastDocId, initialData: doc.data()!),
+          builder: (_) =>
+              ArtisanDashboard(docId: lastDocId, initialData: doc.data()!),
         ),
       );
     } catch (_) {
@@ -99,7 +100,7 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
       // ce flux, déjà documenté dans firestore.rules) — la mise à jour
       // artisanUid par un compte anonyme échouait donc toujours avec
       // permission-denied à la première connexion.
-      final result = await FirebaseFunctions.instance
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
           .httpsCallable('artisanLogin')
           .call({'phone': phone, 'pin': pin});
       final loginData = Map<String, dynamic>.from(result.data as Map);
@@ -114,7 +115,8 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
       final data = Map<String, dynamic>.from(loginData['data'] as Map);
 
       NotificationService().saveToken(docId, 'service_providers');
-      (await SharedPreferences.getInstance()).setString(kArtisanLastDocIdPrefKey, docId);
+      (await SharedPreferences.getInstance())
+          .setString(kArtisanLastDocIdPrefKey, docId);
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -145,7 +147,8 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
             padding: const EdgeInsets.all(24),
             child: Column(
               children: [
-                const Icon(Icons.handyman_rounded, color: Colors.white, size: 64),
+                const Icon(Icons.handyman_rounded,
+                    color: Colors.white, size: 64),
                 const SizedBox(height: 16),
                 const Text(
                   "Espace Artisan",
@@ -254,9 +257,9 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
                             context,
                             MaterialPageRoute(
                               builder: (_) => const GenericForgotPasswordPage(
-                                userType:    'artisan',
+                                userType: 'artisan',
                                 accentColor: Color(0xFF1565C0),
-                                title:       'PIN oublié',
+                                title: 'PIN oublié',
                               ),
                             ),
                           ),
@@ -314,4 +317,3 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
     );
   }
 }
-

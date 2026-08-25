@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -24,28 +24,59 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
   int _deliveryFee = 500;
 
   static final _catAssets = <String, List<dynamic>>{
-    'Eau':         [Icons.water_drop,           const Color(0xFF0288D1)],
-    'Sodas':       [Icons.local_drink,          const Color(0xFFD32F2F)],
-    'Jus':         [Icons.emoji_food_beverage,  const Color(0xFFF57F17)],
-    'Laitiers':    [Icons.coffee,               const Color(0xFF5D4037)],
-    'Énergisants': [Icons.bolt,                 const Color(0xFFFFD600)],
+    'Eau': [Icons.water_drop, const Color(0xFF0288D1)],
+    'Sodas': [Icons.local_drink, const Color(0xFFD32F2F)],
+    'Jus': [Icons.emoji_food_beverage, const Color(0xFFF57F17)],
+    'Laitiers': [Icons.coffee, const Color(0xFF5D4037)],
+    'Énergisants': [Icons.bolt, const Color(0xFFFFD600)],
   };
 
   static const _fallbackProducts = <Map<String, dynamic>>[
-    {"id": "eau_500",    "name": "Eau 500ml",             "category": "Eau",          "price": 200},
-    {"id": "eau_1500",   "name": "Eau 1.5L",              "category": "Eau",          "price": 400},
-    {"id": "casier_eau", "name": "Casier d'eau (12×1.5L)","category": "Eau",          "price": 3500},
-    {"id": "coca_33",    "name": "Coca-Cola 33cl",         "category": "Sodas",       "price": 500},
-    {"id": "fanta_33",   "name": "Fanta 33cl",             "category": "Sodas",       "price": 500},
-    {"id": "sprite_33",  "name": "Sprite 33cl",            "category": "Sodas",       "price": 500},
-    {"id": "jus_tropics","name": "Jus de fruits 50cl",     "category": "Jus",         "price": 600},
-    {"id": "lait_500",   "name": "Lait 500ml",             "category": "Laitiers",    "price": 700},
-    {"id": "energie",    "name": "Boisson énergisante",    "category": "Énergisants", "price": 800},
+    {"id": "eau_500", "name": "Eau 500ml", "category": "Eau", "price": 200},
+    {"id": "eau_1500", "name": "Eau 1.5L", "category": "Eau", "price": 400},
+    {
+      "id": "casier_eau",
+      "name": "Casier d'eau (12×1.5L)",
+      "category": "Eau",
+      "price": 3500
+    },
+    {
+      "id": "coca_33",
+      "name": "Coca-Cola 33cl",
+      "category": "Sodas",
+      "price": 500
+    },
+    {"id": "fanta_33", "name": "Fanta 33cl", "category": "Sodas", "price": 500},
+    {
+      "id": "sprite_33",
+      "name": "Sprite 33cl",
+      "category": "Sodas",
+      "price": 500
+    },
+    {
+      "id": "jus_tropics",
+      "name": "Jus de fruits 50cl",
+      "category": "Jus",
+      "price": 600
+    },
+    {
+      "id": "lait_500",
+      "name": "Lait 500ml",
+      "category": "Laitiers",
+      "price": 700
+    },
+    {
+      "id": "energie",
+      "name": "Boisson énergisante",
+      "category": "Énergisants",
+      "price": 800
+    },
   ];
 
   Map<String, dynamic> _enrich(Map<String, dynamic> p) {
     final cat = p['category'] as String? ?? '';
-    final assets = _catAssets[cat] ?? [Icons.shopping_bag, const Color(0xFF607D8B)];
+    final assets =
+        _catAssets[cat] ?? [Icons.shopping_bag, const Color(0xFF607D8B)];
     return {...p, 'icon': assets[0] as IconData, 'color': assets[1] as Color};
   }
 
@@ -87,8 +118,8 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      setState(() =>
-          _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
+      setState(
+          () => _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
     });
   }
 
@@ -161,10 +192,10 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
         "address": _addressCtrl.text.trim(),
         "latitude": 0,
         "longitude": 0,
-        "clientId":      uid,
+        "clientId": uid,
         "paymentMethod": _paymentMethod,
-        "isPaid":        false,
-        "createdAt":     FieldValue.serverTimestamp(),
+        "isPaid": _paymentMethod == 'wallet',
+        "createdAt": FieldValue.serverTimestamp(),
       };
 
       if (_paymentMethod == 'wallet') {
@@ -189,8 +220,7 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
             .add({
           'type': 'purchase',
           'amount': _totalToPay,
-          'description':
-              'Eau & Boissons (${descParts.join(', ')}) + livraison',
+          'description': 'Eau & Boissons (${descParts.join(', ')}) + livraison',
           'orderId': id,
           'createdAt': Timestamp.now(),
         });
@@ -238,8 +268,7 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
         ],
       ),
       child: Column(
@@ -295,22 +324,20 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.account_balance_wallet,
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.account_balance_wallet,
+                          color: _paymentMethod == 'wallet'
+                              ? Colors.white
+                              : Colors.grey,
+                          size: 18),
+                      const SizedBox(width: 6),
+                      Text("Wallet",
+                          style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
                                   : Colors.grey,
-                              size: 18),
-                          const SizedBox(width: 6),
-                          Text("Wallet",
-                              style: TextStyle(
-                                  color: _paymentMethod == 'wallet'
-                                      ? Colors.white
-                                      : Colors.grey,
-                                  fontWeight: FontWeight.bold)),
-                        ]),
+                              fontWeight: FontWeight.bold)),
+                    ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
@@ -365,7 +392,8 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                               fontSize: 20,
                               fontWeight: FontWeight.bold)),
                       Text("Livraison rapide à domicile",
-                          style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 13)),
                     ],
                   ),
                 ),
@@ -432,9 +460,8 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, i) {
-                    final catProducts = _products
-                        .where((p) => p["category"] == cat)
-                        .toList();
+                    final catProducts =
+                        _products.where((p) => p["category"] == cat).toList();
                     if (i >= catProducts.length) return null;
                     final p = catProducts[i];
                     final qty = _cart[p["id"]] ?? 0;
@@ -462,8 +489,8 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                               color: color, size: 24),
                         ),
                         title: Text(p["name"],
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600)),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(
                           "${p['price']} FCFA",
                           style: TextStyle(
@@ -472,15 +499,13 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                         ),
                         trailing: qty == 0
                             ? GestureDetector(
-                                onTap: () => setState(
-                                    () => _cart[p["id"]] = 1),
+                                onTap: () => setState(() => _cart[p["id"]] = 1),
                                 child: Container(
                                   width: 36,
                                   height: 36,
                                   decoration: BoxDecoration(
                                     color: Colors.teal.shade700,
-                                    borderRadius:
-                                        BorderRadius.circular(10),
+                                    borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: const Icon(Icons.add,
                                       color: Colors.white, size: 22),
@@ -502,11 +527,9 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                                       height: 30,
                                       decoration: BoxDecoration(
                                         color: Colors.grey.shade200,
-                                        borderRadius:
-                                            BorderRadius.circular(8),
+                                        borderRadius: BorderRadius.circular(8),
                                       ),
-                                      child: const Icon(Icons.remove,
-                                          size: 18),
+                                      child: const Icon(Icons.remove, size: 18),
                                     ),
                                   ),
                                   Padding(
@@ -525,8 +548,7 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                                       height: 30,
                                       decoration: BoxDecoration(
                                         color: Colors.teal.shade700,
-                                        borderRadius:
-                                            BorderRadius.circular(8),
+                                        borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: const Icon(Icons.add,
                                           color: Colors.white, size: 18),
@@ -537,9 +559,8 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                       ),
                     );
                   },
-                  childCount: _products
-                      .where((p) => p["category"] == cat)
-                      .length,
+                  childCount:
+                      _products.where((p) => p["category"] == cat).length,
                 ),
               ),
             ),
@@ -553,8 +574,7 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
       bottomNavigationBar: _totalItems == 0
           ? null
           : Container(
-              padding:
-                  const EdgeInsets.fromLTRB(16, 12, 16, 20),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 boxShadow: [
@@ -610,4 +630,3 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
     );
   }
 }
-

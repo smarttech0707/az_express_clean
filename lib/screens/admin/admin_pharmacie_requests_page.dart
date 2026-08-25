@@ -1,7 +1,8 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../utils/partner_location_validator.dart';
 
 class AdminPharmacieRequestsPage extends StatefulWidget {
   const AdminPharmacieRequestsPage({super.key});
@@ -11,8 +12,7 @@ class AdminPharmacieRequestsPage extends StatefulWidget {
       _AdminPharmacieRequestsPageState();
 }
 
-class _AdminPharmacieRequestsPageState
-    extends State<AdminPharmacieRequestsPage>
+class _AdminPharmacieRequestsPageState extends State<AdminPharmacieRequestsPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabCtrl;
 
@@ -29,27 +29,39 @@ class _AdminPharmacieRequestsPageState
   }
 
   Future<void> _approve(String docId, Map<String, dynamic> data) async {
+    final latitude = (data['lat'] as num?)?.toDouble();
+    final longitude = (data['lng'] as num?)?.toDouble();
+    final locationError =
+        PartnerLocationValidator.validate(latitude, longitude);
+    if (locationError != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(locationError), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
     final db = FirebaseFirestore.instance;
     final batch = db.batch();
 
     // Create pharmacie doc (auto-id)
     final pharmRef = db.collection('pharmacies').doc();
     batch.set(pharmRef, {
-      'name':     data['pharmacieName'] ?? '',
+      'name': data['pharmacieName'] ?? '',
       'ownerName': data['ownerName'] ?? '',
-      'phone':    data['phone'] ?? '',
-      'address':  data['address'] ?? '',
-      'lat':      data['lat'] ?? 0.0,
-      'lng':      data['lng'] ?? 0.0,
+      'phone': data['phone'] ?? '',
+      'address': data['address'] ?? '',
+      'lat': latitude,
+      'lng': longitude,
       'password': data['password'] ?? '',
       'isActive': true,
-      'isOpen':   false,
+      'isOpen': false,
       'mustChangePassword': false,
       'createdAt': FieldValue.serverTimestamp(),
     });
 
     batch.update(db.collection('pharmacie_requests').doc(docId), {
-      'status':     'approved',
+      'status': 'approved',
       'approvedAt': FieldValue.serverTimestamp(),
       'pharmacieId': pharmRef.id,
     });
@@ -88,7 +100,8 @@ class _AdminPharmacieRequestsPageState
     await FirebaseFirestore.instance
         .collection('pharmacie_requests')
         .doc(docId)
-        .update({'status': 'rejected', 'rejectedAt': FieldValue.serverTimestamp()});
+        .update(
+            {'status': 'rejected', 'rejectedAt': FieldValue.serverTimestamp()});
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -140,7 +153,8 @@ class _AdminPharmacieRequestsPageState
 
 class _PharmacieRequestsList extends StatelessWidget {
   final String? statusFilter;
-  final Future<void> Function(String docId, Map<String, dynamic> data) onApprove;
+  final Future<void> Function(String docId, Map<String, dynamic> data)
+      onApprove;
   final Future<void> Function(String docId, String name) onReject;
 
   const _PharmacieRequestsList({
@@ -161,8 +175,9 @@ class _PharmacieRequestsList extends StatelessWidget {
     } else {
       query = FirebaseFirestore.instance
           .collection('pharmacie_requests')
-          .where('status', whereIn: ['approved', 'rejected'])
-          .orderBy('createdAt', descending: true);
+          .where('status', whereIn: ['approved', 'rejected']).orderBy(
+              'createdAt',
+              descending: true);
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -177,7 +192,8 @@ class _PharmacieRequestsList extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.inbox_rounded, size: 64, color: Colors.grey.shade300),
+                Icon(Icons.inbox_rounded,
+                    size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text('Aucune demande',
                     style: GoogleFonts.urbanist(color: Colors.grey)),
@@ -189,14 +205,14 @@ class _PharmacieRequestsList extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           itemCount: docs.length,
           itemBuilder: (context, i) {
-            final doc  = docs[i];
+            final doc = docs[i];
             final data = doc.data() as Map<String, dynamic>;
             return _PharmacieRequestCard(
               docId: doc.id,
               data: data,
               onApprove: () => onApprove(doc.id, data),
-              onReject:  () => onReject(doc.id,
-                  data['pharmacieName'] ?? 'cette pharmacie'),
+              onReject: () =>
+                  onReject(doc.id, data['pharmacieName'] ?? 'cette pharmacie'),
             );
           },
         );
@@ -220,17 +236,23 @@ class _PharmacieRequestCard extends StatelessWidget {
 
   Color get _statusColor {
     switch (data['status']) {
-      case 'approved': return const Color(0xFF2E7D32);
-      case 'rejected': return const Color(0xFFC62828);
-      default:         return const Color(0xFFFF8F00);
+      case 'approved':
+        return const Color(0xFF2E7D32);
+      case 'rejected':
+        return const Color(0xFFC62828);
+      default:
+        return const Color(0xFFFF8F00);
     }
   }
 
   String get _statusLabel {
     switch (data['status']) {
-      case 'approved': return 'Approuvée';
-      case 'rejected': return 'Refusée';
-      default:         return 'En attente';
+      case 'approved':
+        return 'Approuvée';
+      case 'rejected':
+        return 'Refusée';
+      default:
+        return 'En attente';
     }
   }
 
@@ -249,7 +271,8 @@ class _PharmacieRequestCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: isPending
             ? Border.all(
-                color: const Color(0xFFFF8F00).withValues(alpha: 0.5), width: 1.5)
+                color: const Color(0xFFFF8F00).withValues(alpha: 0.5),
+                width: 1.5)
             : null,
         boxShadow: [
           BoxShadow(
@@ -294,7 +317,8 @@ class _PharmacieRequestCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: _statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -306,11 +330,9 @@ class _PharmacieRequestCard extends StatelessWidget {
                         fontWeight: FontWeight.w700)),
               ),
             ]),
-
             const SizedBox(height: 14),
             const Divider(height: 1),
             const SizedBox(height: 12),
-
             _infoRow(Icons.person_outline, data['ownerName'] ?? '—'),
             const SizedBox(height: 6),
             _infoRow(Icons.phone_outlined, data['phone'] ?? '—'),
@@ -320,7 +342,6 @@ class _PharmacieRequestCard extends StatelessWidget {
               const SizedBox(height: 6),
               _infoRow(Icons.calendar_today_outlined, date),
             ],
-
             if (isPending) ...[
               const SizedBox(height: 16),
               Row(children: [
@@ -366,8 +387,8 @@ class _PharmacieRequestCard extends StatelessWidget {
       const SizedBox(width: 8),
       Expanded(
         child: Text(text,
-            style: GoogleFonts.urbanist(
-                fontSize: 13, color: Colors.grey.shade700),
+            style:
+                GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade700),
             maxLines: 1,
             overflow: TextOverflow.ellipsis),
       ),

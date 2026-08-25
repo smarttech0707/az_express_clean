@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/firestore_service.dart';
@@ -37,8 +37,8 @@ class AdminCodPage extends StatelessWidget {
                     'Les livreurs signalent automatiquement les non-paiements '
                     'à la livraison. Après 3 signalements, le paiement cash '
                     'est bloqué pour le client.',
-                    style: TextStyle(
-                        color: Colors.orange.shade800, fontSize: 12),
+                    style:
+                        TextStyle(color: Colors.orange.shade800, fontSize: 12),
                   ),
                 ),
               ],
@@ -67,8 +67,7 @@ class AdminCodPage extends StatelessWidget {
                             size: 72, color: Colors.green.shade300),
                         const SizedBox(height: 16),
                         const Text('Aucun client bloqué',
-                            style:
-                                TextStyle(color: Colors.grey, fontSize: 16)),
+                            style: TextStyle(color: Colors.grey, fontSize: 16)),
                         const SizedBox(height: 8),
                         Text(
                           'Les clients avec 3 signalements de non-paiement\napparaîtront ici.',
@@ -135,8 +134,7 @@ class AdminCodPage extends StatelessWidget {
                               border: Border.all(color: Colors.red.shade100),
                               boxShadow: [
                                 BoxShadow(
-                                    color:
-                                        Colors.black.withValues(alpha: 0.05),
+                                    color: Colors.black.withValues(alpha: 0.05),
                                     blurRadius: 8),
                               ],
                             ),
@@ -222,8 +220,7 @@ class AdminCodPage extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Débloquer le client'),
         content: Text(
           'Réactiver le paiement cash pour $name ?\n\n'

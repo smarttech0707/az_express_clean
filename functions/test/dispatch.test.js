@@ -2,10 +2,36 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { dispatchOrder, calculateCommission, haversineMeters } = require('../dispatch');
+const {
+  dispatchOrder: rawDispatchOrder,
+  calculateCommission,
+  haversineMeters,
+  DispatchError,
+  DRIVER_QUERY_LIMIT,
+  resolveDispatchGeography,
+} = require('../dispatch');
 
 // Point de référence Abengourou (utilisé par TarifService côté Dart).
 const CENTER = { lat: 6.7273, lng: -3.4961 };
+const ABENGOUROU = {
+  id: 'city-abengourou',
+  cityId: 'abengourou',
+  type: 'ville',
+  isActive: true,
+  isServiceable: true,
+  coordinateSource: 'own',
+  lat: CENTER.lat,
+  lng: CENTER.lng,
+  radiusKm: 25,
+};
+
+function dispatchOrder(db, admin, args) {
+  return rawDispatchOrder(db, admin, {
+    pickupCityId: 'abengourou',
+    cityResolutionStatus: 'resolved',
+    ...args,
+  });
+}
 
 function nearby(offsetDeg) {
   // ~0.001° ≈ 111 m — largement dans le rayon par défaut de 2 km.
@@ -26,12 +52,22 @@ const fakeAdmin = {
 // Les commandes vivent dans un store en mémoire (statut initial 'pending' par
 // défaut) pour que la transaction de dispatchOrder() puisse lire/écrire un
 // état réaliste — nécessaire depuis l'ajout du verrouillage transactionnel.
-function makeFakeDb({ commissionConfig = null, drivers = [], orders = {} } = {}) {
+function makeFakeDb({
+  commissionConfig = null,
+  drivers = [],
+  cities = [ABENGOUROU],
+  orders = {},
+} = {}) {
   const orderStore = new Map(
     Object.entries(Object.keys(orders).length ? orders : { o1: { status: 'pending' } })
   );
   const orderUpdates = [];
   const driverBatchUpdates = [];
+  const cityScopedDrivers = drivers.map((driver) => ({
+    currentCityId: 'abengourou',
+    registeredCityId: 'abengourou',
+    ...driver,
+  }));
 
   const db = {
     collection(name) {
@@ -46,15 +82,41 @@ function makeFakeDb({ commissionConfig = null, drivers = [], orders = {} } = {})
         };
       }
       if (name === 'livreurs') {
+        const query = (filters = [], queryLimit = null) => ({
+          where: (field, op, value) =>
+            query([...filters, { field, op, value }], queryLimit),
+          limit: (value) => query(filters, value),
+          get: async () => {
+            let selected = cityScopedDrivers.filter((driver) => filters.every((filter) => {
+              if (filter.op === '==') return driver[filter.field] === filter.value;
+              if (filter.op === 'in') return filter.value.includes(driver[filter.field]);
+              throw new Error(`Opérateur inattendu: ${filter.op}`);
+            }));
+            if (queryLimit != null) selected = selected.slice(0, queryLimit);
+            const docs = selected.map((d) => ({ id: d.id, data: () => d }));
+            return { docs, size: docs.length };
+          },
+        });
         return {
-          where: (field, _op, value) => ({
-            get: async () => ({
-              docs: drivers
-                .filter((d) => (field === 'isOnline' ? d.isOnline === value : true))
-                .map((d) => ({ id: d.id, data: () => d })),
-            }),
-          }),
+          where: (field, op, value) => query().where(field, op, value),
           doc: (id) => ({ __ref: `livreurs/${id}`, id }),
+        };
+      }
+      if (name === 'zones_livraison') {
+        const query = (filters = [], queryLimit = null) => ({
+          where: (field, op, value) =>
+            query([...filters, { field, op, value }], queryLimit),
+          limit: (value) => query(filters, value),
+          get: async () => {
+            let selected = cities.filter((city) => filters.every((filter) =>
+              filter.op === '==' && city[filter.field] === filter.value));
+            if (queryLimit != null) selected = selected.slice(0, queryLimit);
+            const docs = selected.map((city) => ({ id: city.id, data: () => city }));
+            return { docs, size: docs.length };
+          },
+        });
+        return {
+          where: (field, op, value) => query().where(field, op, value),
         };
       }
       if (name === 'orders') {
@@ -107,6 +169,48 @@ test('haversineMeters returns a sane distance for two known nearby points', () =
   // ~0.01° de latitude ≈ 1.1 km à cette latitude.
   const d = haversineMeters(CENTER.lat, CENTER.lng, CENTER.lat + 0.01, CENTER.lng);
   assert.ok(d > 900 && d < 1300, `distance inattendue: ${d}`);
+});
+
+test('resolveDispatchGeography returns both cities, zones and sources', async () => {
+  const quartier = {
+    id: 'zone-centre', cityId: 'abengourou', type: 'quartier',
+    isActive: true, isServiceable: true, coordinateSource: 'own',
+    lat: CENTER.lat, lng: CENTER.lng, radiusKm: 2,
+  };
+  const { db } = makeFakeDb({ cities: [ABENGOUROU, quartier] });
+  const result = await resolveDispatchGeography(db, {
+    pickupLat: CENTER.lat,
+    pickupLng: CENTER.lng,
+    deliveryLat: CENTER.lat + 0.001,
+    deliveryLng: CENTER.lng + 0.001,
+    pickupCoordinateSource: 'local_place',
+    deliveryCoordinateSource: 'gps',
+  });
+  assert.deepEqual(result, {
+    pickupCityId: 'abengourou',
+    pickupZoneId: 'zone-centre',
+    deliveryCityId: 'abengourou',
+    deliveryZoneId: 'zone-centre',
+    pickupCoordinateSource: 'local_place',
+    deliveryCoordinateSource: 'gps',
+    cityResolutionStatus: 'resolved',
+  });
+});
+
+test('resolveDispatchGeography refuses 0/0 before querying Firestore', async () => {
+  const { db } = makeFakeDb();
+  await assert.rejects(
+    () => resolveDispatchGeography(db, {
+      pickupLat: 0,
+      pickupLng: 0,
+      deliveryLat: CENTER.lat,
+      deliveryLng: CENTER.lng,
+      pickupCoordinateSource: 'local_place',
+      deliveryCoordinateSource: 'gps',
+    }),
+    (error) => error instanceof DispatchError &&
+      error.code === 'invalid-coordinates' && error.message.includes('collecte'),
+  );
 });
 
 test('calculateCommission uses default tiers when config/commission is absent', async () => {
@@ -261,4 +365,159 @@ test('dispatchOrder reports none (not already_assigned) when the order does not 
 
   const result = await dispatchOrder(db, fakeAdmin, { orderId: 'ghost', lat: CENTER.lat, lng: CENTER.lng, budget: 500 });
   assert.deepEqual(result, { dispatched: false, mode: 'none' });
+});
+
+test('un livreur d’une autre ville éloignée est exclu par la requête de ville', async () => {
+  const { db } = makeFakeDb({
+    drivers: [{
+      id: 'far-city',
+      isOnline: true,
+      wallet: 500,
+      lat: CENTER.lat,
+      lng: CENTER.lng,
+      currentCityId: 'agnibilekrou',
+    }],
+  });
+
+  const result = await dispatchOrder(db, fakeAdmin, {
+    orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500,
+  });
+
+  assert.deepEqual(result, { dispatched: false, mode: 'none' });
+});
+
+test('registered Abengourou mais current Agnibilékrou reste éligible', async () => {
+  const borderCity = {
+    ...ABENGOUROU,
+    id: 'city-agnibilekrou',
+    cityId: 'agnibilekrou',
+    lat: CENTER.lat + 0.01,
+    radiusKm: 2,
+  };
+  const { db, orderStore } = makeFakeDb({
+    cities: [ABENGOUROU, borderCity],
+    drivers: [{
+      id: 'mobile-driver',
+      isOnline: true,
+      wallet: 500,
+      lat: borderCity.lat,
+      lng: borderCity.lng,
+      currentCityId: 'agnibilekrou',
+      registeredCityId: 'abengourou',
+    }],
+  });
+
+  const result = await dispatchOrder(db, fakeAdmin, {
+    orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500,
+  });
+
+  assert.deepEqual(result, { dispatched: true, mode: 'assigned' });
+  assert.equal(orderStore.get('o1').driverId, 'mobile-driver');
+});
+
+test('une ville inactive refuse explicitement le dispatch', async () => {
+  const inactive = { ...ABENGOUROU, isActive: false };
+  const { db } = makeFakeDb({ cities: [inactive] });
+
+  await assert.rejects(
+    () => dispatchOrder(db, fakeAdmin, {
+      orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500,
+    }),
+    (error) => error instanceof DispatchError && error.code === 'inactive-city',
+  );
+});
+
+test('outside_service et unknown ne lancent aucune requête livreur', async () => {
+  for (const status of ['outside_service', 'unknown']) {
+    const { db } = makeFakeDb();
+    await assert.rejects(
+      () => rawDispatchOrder(db, fakeAdmin, {
+        orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng,
+        pickupCityId: 'abengourou', cityResolutionStatus: status,
+      }),
+      (error) => error instanceof DispatchError && error.code === 'unresolved-city',
+    );
+  }
+});
+
+test('la frontière inclut une ville dont le disque touche le rayon existant', async () => {
+  const borderCity = {
+    ...ABENGOUROU,
+    id: 'city-border',
+    cityId: 'border-city',
+    lat: CENTER.lat + 0.015,
+    radiusKm: 1,
+  };
+  const { db, orderStore } = makeFakeDb({
+    cities: [ABENGOUROU, borderCity],
+    drivers: [{
+      id: 'border-driver',
+      isOnline: true,
+      wallet: 500,
+      lat: borderCity.lat,
+      lng: borderCity.lng,
+      currentCityId: 'border-city',
+      registeredCityId: 'abengourou',
+    }],
+  });
+
+  await dispatchOrder(db, fakeAdmin, {
+    orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500,
+  });
+
+  assert.equal(orderStore.get('o1').driverId, 'border-driver');
+});
+
+test('la limite de 50 livreurs est appliquée et journalisée', async () => {
+  const drivers = Array.from({ length: DRIVER_QUERY_LIMIT + 1 }, (_, index) => ({
+    id: `driver-${index}`,
+    isOnline: true,
+    wallet: 500,
+    ...nearby(0.001 + index * 0.000001),
+  }));
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  try {
+    const { db } = makeFakeDb({ drivers });
+    const result = await dispatchOrder(db, fakeAdmin, {
+      orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500,
+    });
+    assert.equal(result.dispatched, true);
+    assert.ok(warnings.some((message) => message.includes('driverLimit=50')));
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('à distance égale currentCity puis registeredCity départagent', async () => {
+  const borderCity = {
+    ...ABENGOUROU,
+    id: 'city-border-tie',
+    cityId: 'border-city',
+    radiusKm: 25,
+  };
+  const point = nearby(0.001);
+  const { db, orderUpdates } = makeFakeDb({
+    cities: [ABENGOUROU, borderCity],
+    drivers: [
+      {
+        id: 'registered-only', isOnline: true, wallet: 500,
+        ...point, currentCityId: 'border-city', registeredCityId: 'abengourou',
+      },
+      {
+        id: 'current-match', isOnline: true, wallet: 500,
+        ...point, currentCityId: 'abengourou', registeredCityId: 'border-city',
+      },
+    ],
+  });
+
+  await dispatchOrder(db, fakeAdmin, {
+    orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500,
+  });
+
+  assert.deepEqual(
+    orderUpdates[0].data.notifiedDriverIds.__arrayUnion,
+    ['current-match', 'registered-only'],
+  );
 });

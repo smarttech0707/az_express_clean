@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../utils/partner_location_validator.dart';
+import '../../widgets/partner_location_input.dart';
 
 class RestaurantRegister extends StatefulWidget {
   const RestaurantRegister({super.key});
@@ -13,66 +14,67 @@ class RestaurantRegister extends StatefulWidget {
 }
 
 class _RestaurantRegisterState extends State<RestaurantRegister> {
-  final _ownerCtrl    = TextEditingController();
-  final _restoCtrl    = TextEditingController();
-  final _phoneCtrl    = TextEditingController();
-  final _addressCtrl  = TextEditingController();
+  final _ownerCtrl = TextEditingController();
+  final _restoCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
   final _categoryCtrl = TextEditingController();
-  final _passCtrl     = TextEditingController();
-  final _latCtrl      = TextEditingController();
-  final _lngCtrl      = TextEditingController();
+  final _passCtrl = TextEditingController();
+  final _latCtrl = TextEditingController();
+  final _lngCtrl = TextEditingController();
 
-  bool _loading    = false;
-  bool _obscure    = true;
-  bool _gpsLoading = false;
+  bool _loading = false;
+  bool _obscure = true;
 
   static const _categories = [
-    'Ivoirien', 'Fast food', 'Grillades', 'Pizzeria',
-    'Sandwichs', 'Chinois', 'Libanais', 'Autre',
+    'Ivoirien',
+    'Fast food',
+    'Grillades',
+    'Pizzeria',
+    'Sandwichs',
+    'Chinois',
+    'Libanais',
+    'Autre',
   ];
 
   @override
   void dispose() {
-    _ownerCtrl.dispose(); _restoCtrl.dispose(); _phoneCtrl.dispose();
-    _addressCtrl.dispose(); _categoryCtrl.dispose(); _passCtrl.dispose();
-    _latCtrl.dispose(); _lngCtrl.dispose();
+    _ownerCtrl.dispose();
+    _restoCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    _categoryCtrl.dispose();
+    _passCtrl.dispose();
+    _latCtrl.dispose();
+    _lngCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _captureGPS() async {
-    setState(() => _gpsLoading = true);
-    try {
-      await Geolocator.requestPermission();
-      final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
-      if (mounted) {
-        setState(() {
-          _latCtrl.text = pos.latitude.toStringAsFixed(6);
-          _lngCtrl.text = pos.longitude.toStringAsFixed(6);
-        });
-      }
-    } catch (_) {
-      if (mounted) _snack('Impossible de récupérer la position GPS', Colors.red);
-    } finally {
-      if (mounted) setState(() => _gpsLoading = false);
-    }
-  }
-
   Future<void> _submit() async {
-    final owner    = _ownerCtrl.text.trim();
-    final resto    = _restoCtrl.text.trim();
-    final phone    = _phoneCtrl.text.trim().replaceAll(' ', '');
-    final address  = _addressCtrl.text.trim();
+    final owner = _ownerCtrl.text.trim();
+    final resto = _restoCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim().replaceAll(' ', '');
+    final address = _addressCtrl.text.trim();
     final category = _categoryCtrl.text.trim();
-    final pass     = _passCtrl.text;
+    final pass = _passCtrl.text;
 
-    if (owner.isEmpty || resto.isEmpty || phone.isEmpty ||
-        address.isEmpty || category.isEmpty || pass.isEmpty) {
+    if (owner.isEmpty ||
+        resto.isEmpty ||
+        phone.isEmpty ||
+        address.isEmpty ||
+        category.isEmpty ||
+        pass.isEmpty) {
       _snack('Veuillez remplir tous les champs obligatoires', Colors.orange);
       return;
     }
     if (pass.length < 6) {
       _snack('Mot de passe minimum 6 caractères', Colors.orange);
+      return;
+    }
+    final locationError =
+        PartnerLocationValidator.validateText(_latCtrl.text, _lngCtrl.text);
+    if (locationError != null) {
+      _snack(locationError, Colors.orange);
       return;
     }
 
@@ -96,24 +98,27 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
           .collection('restaurant_requests')
           .doc(uid)
           .set({
-        'uid':          uid,
-        'ownerName':    owner,
+        'uid': uid,
+        'ownerName': owner,
         'restaurantName': resto,
-        'phone':        phone,
-        'address':      address,
-        'category':     category,
-        'lat':          double.tryParse(_latCtrl.text) ?? 0.0,
-        'lng':          double.tryParse(_lngCtrl.text) ?? 0.0,
-        'status':       'pending',
-        'createdAt':    FieldValue.serverTimestamp(),
+        'phone': phone,
+        'address': address,
+        'category': category,
+        'lat': double.parse(_latCtrl.text.trim()),
+        'lng': double.parse(_lngCtrl.text.trim()),
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
       });
 
       // Déconnecter et repasser en anonyme
       await FirebaseAuth.instance.signOut();
-      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (_) {}
 
       if (!mounted) return;
-      _snack('Demande envoyée ! L\'admin va valider votre restaurant.', Colors.green);
+      _snack('Demande envoyée ! L\'admin va valider votre restaurant.',
+          Colors.green);
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
@@ -208,8 +213,8 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
                 labelText: 'Catégorie *',
                 prefixIcon: const Icon(Icons.category_outlined,
                     color: Color(0xFF1565C0)),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide:
@@ -229,41 +234,9 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
 
             const SizedBox(height: 12),
 
-            // GPS row
-            Row(
-              children: [
-                Expanded(
-                  child: _field(_latCtrl, 'Latitude', Icons.gps_fixed,
-                      type: const TextInputType.numberWithOptions(
-                          decimal: true, signed: true)),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _field(_lngCtrl, 'Longitude', Icons.gps_not_fixed,
-                      type: const TextInputType.numberWithOptions(
-                          decimal: true, signed: true)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _gpsLoading ? null : _captureGPS,
-              icon: _gpsLoading
-                  ? const SizedBox(
-                      width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.my_location_rounded,
-                      color: Color(0xFF1565C0)),
-              label: Text(
-                _gpsLoading ? 'Localisation...' : 'Utiliser ma position GPS',
-                style: const TextStyle(color: Color(0xFF1565C0)),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFF1565C0)),
-                minimumSize: const Size(double.infinity, 44),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
+            PartnerLocationInput(
+              latitudeController: _latCtrl,
+              longitudeController: _lngCtrl,
             ),
 
             const SizedBox(height: 20),
@@ -274,8 +247,8 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
               obscureText: _obscure,
               decoration: InputDecoration(
                 labelText: 'Mot de passe (min. 6 caractères) *',
-                prefixIcon: const Icon(Icons.lock_outline,
-                    color: Color(0xFF1565C0)),
+                prefixIcon:
+                    const Icon(Icons.lock_outline, color: Color(0xFF1565C0)),
                 suffixIcon: IconButton(
                   icon: Icon(
                     _obscure
@@ -285,8 +258,8 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
                   ),
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide:
@@ -336,8 +309,8 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
                   Expanded(
                     child: Text(
                       'Votre demande sera examinée par l\'admin sous 24h. Notez votre numéro de téléphone et mot de passe pour vous connecter après approbation.',
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.blue.shade800),
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.blue.shade800),
                     ),
                   ),
                 ],
@@ -366,12 +339,10 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, color: const Color(0xFF1565C0)),
-        border:
-            OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide:
-              const BorderSide(color: Color(0xFF1565C0), width: 2),
+          borderSide: const BorderSide(color: Color(0xFF1565C0), width: 2),
         ),
         filled: true,
         fillColor: Colors.white,
@@ -379,4 +350,3 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
     );
   }
 }
-

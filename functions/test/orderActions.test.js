@@ -16,7 +16,23 @@ const {
 // Fake Firestore : un Map en mémoire + de quoi satisfaire get/set/update/add
 // hors et dans une transaction — même style que test/pendingActions.test.js.
 function makeFakeDb(seed = {}) {
-  const store = new Map(Object.entries(seed));
+  const geographicSeed = {
+    'zones_livraison/abengourou': {
+      type: 'ville', cityId: 'abengourou', isActive: true,
+      isServiceable: true, coordinateSource: 'own',
+      lat: 6.7, lng: -3.5, radiusKm: 100,
+    },
+    'zones_livraison/centre': {
+      type: 'quartier', cityId: 'abengourou', isActive: true,
+      isServiceable: true, coordinateSource: 'own',
+      lat: 6.7, lng: -3.5, radiusKm: 100,
+    },
+  };
+  const normalizedSeed = Object.fromEntries(Object.entries(seed).map(([path, data]) => [
+    path,
+    path.startsWith('sellers/') ? { lat: 6.7, lng: -3.5, ...data } : data,
+  ]));
+  const store = new Map(Object.entries({ ...geographicSeed, ...normalizedSeed }));
   const added = [];
   let autoId = 0;
 
@@ -63,6 +79,23 @@ function makeFakeDb(seed = {}) {
   }
 
   function makeCollection(name) {
+    const makeQuery = (filters = []) => ({
+      where: (field, op, value) => makeQuery([...filters, { field, op, value }]),
+      limit: (n) => ({
+        get: async () => {
+          const docs = [];
+          for (const [path, data] of store.entries()) {
+            if (!path.startsWith(`${name}/`)) continue;
+            if (path.slice(name.length + 1).includes('/')) continue;
+            const matches = filters.every(({ field, op, value }) =>
+              op === '==' && data?.[field] === value);
+            if (matches) docs.push({ id: path.split('/').pop(), data: () => data });
+            if (docs.length >= n) break;
+          }
+          return { empty: docs.length === 0, docs, size: docs.length };
+        },
+      }),
+    });
     return {
       doc: (id) => makeRef(`${name}/${id ?? `auto${autoId++}`}`),
       add: async (data) => {
@@ -71,22 +104,7 @@ function makeFakeDb(seed = {}) {
         added.push({ collection: name, data });
         return { id: path.split('/').pop() };
       },
-      where: (field, _op, value) => ({
-        limit: (n) => ({
-          get: async () => {
-            const docs = [];
-            for (const [path, data] of store.entries()) {
-              if (!path.startsWith(`${name}/`)) continue;
-              if (path.slice(name.length + 1).includes('/')) continue; // pas de sous-collection
-              if (data && data[field] === value) {
-                docs.push({ id: path.split('/').pop(), data: () => data });
-              }
-              if (docs.length >= n) break;
-            }
-            return { empty: docs.length === 0, docs };
-          },
-        }),
-      }),
+      where: (field, op, value) => makeQuery([{ field, op, value }]),
     };
   }
 
@@ -632,7 +650,7 @@ test('payBoutiqueOrderCF: happy path debits client, credits seller, decrements s
   fakeDispatchOrder.calls = [];
   const { db, store, added } = makeFakeDb({
     'sellers/s1':            { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1':  { name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
+    'boutique_products/p1':  { sellerId: 's1', name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
     'clients/c1':            { wallet: 10000 },
   });
   const logAudit = makeLogAudit();
@@ -658,6 +676,17 @@ test('payBoutiqueOrderCF: happy path debits client, credits seller, decrements s
   assert.equal(orderEntry[1].qty, 2);
   assert.equal(orderEntry[1].totalPrice, 6000);
 
+  const deliveryEntry = [...store.entries()].find(([k]) => k.startsWith('orders/'));
+  assert.ok(deliveryEntry, 'delivery order should exist');
+  assert.equal(deliveryEntry[1].latitude, 6.7);
+  assert.equal(deliveryEntry[1].longitude, -3.5);
+  assert.equal(deliveryEntry[1].destLat, 6.7);
+  assert.equal(deliveryEntry[1].destLng, -3.5);
+  assert.equal(deliveryEntry[1].pickupCityId, 'abengourou');
+  assert.equal(deliveryEntry[1].deliveryCityId, 'abengourou');
+  assert.equal(deliveryEntry[1].pickupZoneId, 'centre');
+  assert.equal(deliveryEntry[1].deliveryZoneId, 'centre');
+
   assert.equal(added.filter(a => a.collection.includes('wallet_transactions')).length, 2);
   assert.equal(fakeDispatchOrder.calls.length, 1);
   assert.equal(logAudit.calls.length, 1);
@@ -667,7 +696,7 @@ test('payBoutiqueOrderCF: happy path debits client, credits seller, decrements s
 test('payBoutiqueOrderCF: rejects when stock is insufficient', async () => {
   const { db } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 1 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 1 },
     'clients/c1':           { wallet: 100000 },
   });
   const fn = buildPayBoutiqueOrder({
@@ -676,7 +705,9 @@ test('payBoutiqueOrderCF: rejects when stock is insufficient', async () => {
   });
 
   await assert.rejects(
-    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 5 } }),
+    () => fn.run({ auth: { uid: 'c1' }, data: {
+      productId: 'p1', qty: 5, deliveryLat: 6.7, deliveryLng: -3.5,
+    } }),
     (err) => err.code === 'failed-precondition' && err.message.includes('STOCK_EPUISE'),
   );
 });
@@ -684,7 +715,7 @@ test('payBoutiqueOrderCF: rejects when stock is insufficient', async () => {
 test('payBoutiqueOrderCF: rejects with SOLDE_INSUFFISANT when balance is too low', async () => {
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 10 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 10 },
     'clients/c1':           { wallet: 100 },
   });
   const fn = buildPayBoutiqueOrder({
@@ -693,7 +724,9 @@ test('payBoutiqueOrderCF: rejects with SOLDE_INSUFFISANT when balance is too low
   });
 
   await assert.rejects(
-    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } }),
+    () => fn.run({ auth: { uid: 'c1' }, data: {
+      productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5,
+    } }),
     (err) => err.code === 'failed-precondition' && err.message.includes('SOLDE_INSUFFISANT'),
   );
   // Stock/wallet must be untouched on rejection.
@@ -703,7 +736,7 @@ test('payBoutiqueOrderCF: rejects with SOLDE_INSUFFISANT when balance is too low
 
 test('payBoutiqueOrderCF: rejects when no boutique seller is configured', async () => {
   const { db } = makeFakeDb({
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 10 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 10 },
     'clients/c1':           { wallet: 100000 },
   });
   const fn = buildPayBoutiqueOrder({
@@ -736,7 +769,7 @@ test('payBoutiqueOrderCF: rejects an unknown product', async () => {
 test('payBoutiqueOrderCF: still succeeds (purchase honored) even if dispatch throws', async () => {
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 10 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 10 },
     'clients/c1':           { wallet: 10000 },
   });
   const throwingDispatch = async () => { throw new Error('dispatch is down'); };
@@ -745,7 +778,9 @@ test('payBoutiqueOrderCF: still succeeds (purchase honored) even if dispatch thr
     checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: throwingDispatch,
   });
 
-  const result = await fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } });
+  const result = await fn.run({ auth: { uid: 'c1' }, data: {
+    productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5,
+  } });
 
   assert.equal(result.dispatched, false);
   assert.equal(store.get('clients/c1').wallet, 7000);
@@ -764,6 +799,27 @@ test('payBoutiqueOrderCF: rejects unauthenticated calls', async () => {
   );
 });
 
+test('payBoutiqueOrderCF: refuses a seller whose pickup is 0/0', async () => {
+  const { db, store } = makeFakeDb({
+    'sellers/s1': { type: 'boutique', name: 'Boutique AZ', wallet: 0, lat: 0, lng: 0 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz', price: 1000, stock: 2 },
+    'clients/c1': { wallet: 5000 },
+  });
+  const fn = buildPayBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: {
+      productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5,
+    } }),
+    (err) => err.code === 'failed-precondition' &&
+      err.message.includes('collecte'),
+  );
+  assert.equal(store.get('clients/c1').wallet, 5000);
+});
+
 // ── payBoutiqueOrderCashCF ───────────────────────────────────────────────────
 // Master Prompt 54 : l'ancien chemin cash (boutique_page.dart) décrémentait le
 // stock via une écriture directe PUIS tentait de créer boutique_orders avec un
@@ -774,7 +830,7 @@ test('payBoutiqueOrderCashCF: happy path decrements stock and creates the order 
   fakeDispatchOrder.calls = [];
   const { db, store } = makeFakeDb({
     'sellers/s1':            { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1':  { name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
+    'boutique_products/p1':  { sellerId: 's1', name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
   });
   const logAudit = makeLogAudit();
   const fn = buildPayBoutiqueOrderCash({
@@ -805,7 +861,7 @@ test('payBoutiqueOrderCashCF: happy path decrements stock and creates the order 
 test('payBoutiqueOrderCashCF: rejects when stock is insufficient — no stock decrement, no order created', async () => {
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 1 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 1 },
   });
   const fn = buildPayBoutiqueOrderCash({
     db, admin: fakeAdmin, onCall, HttpsError,
@@ -832,7 +888,7 @@ test('payBoutiqueOrderCashCF: two purchases against the last unit — only one s
   // survente. La 2ᵉ tentative doit voir le stock déjà à 0 et échouer proprement.
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 1 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 1 },
   });
   const fn = buildPayBoutiqueOrderCash({
     db, admin: fakeAdmin, onCall, HttpsError,
@@ -852,10 +908,10 @@ test('payBoutiqueOrderCashCF: two purchases against the last unit — only one s
   assert.equal(orders.length, 1); // une seule commande créée, pas deux
 });
 
-test('payBoutiqueOrderCashCF: still succeeds (order honored) even if dispatch throws', async () => {
+test('payBoutiqueOrderCashCF: restores stock exactly once when dispatch throws', async () => {
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 5 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 5 },
   });
   const throwingDispatch = async () => { throw new Error('dispatch is down'); };
   const fn = buildPayBoutiqueOrderCash({
@@ -863,13 +919,17 @@ test('payBoutiqueOrderCashCF: still succeeds (order honored) even if dispatch th
     checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: throwingDispatch,
   });
 
-  const result = await fn.run({
-    auth: { uid: 'c1' },
-    data: { productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5 },
-  });
+  await assert.rejects(
+    () => fn.run({
+      auth: { uid: 'c1' },
+      data: { productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5 },
+    }),
+    (err) => err.code === 'unavailable',
+  );
 
-  assert.equal(result.dispatched, false);
-  assert.equal(store.get('boutique_products/p1').stock, 4); // l'achat reste honoré
+  assert.equal(store.get('boutique_products/p1').stock, 5);
+  const order = [...store.entries()].find(([k]) => k.startsWith('boutique_orders/'))?.[1];
+  assert.equal(order.status, 'dispatch_failed');
 });
 
 test('payBoutiqueOrderCashCF: rejects an unknown product', async () => {
@@ -889,7 +949,7 @@ test('payBoutiqueOrderCashCF: rejects an unknown product', async () => {
 
 test('payBoutiqueOrderCashCF: rejects when no boutique seller is configured', async () => {
   const { db } = makeFakeDb({
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 5 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 5 },
   });
   const fn = buildPayBoutiqueOrderCash({
     db, admin: fakeAdmin, onCall, HttpsError,
@@ -1023,5 +1083,101 @@ test('refundExpiredBoutiqueOrderCF: rejects unauthenticated calls', async () => 
   await assert.rejects(
     () => fn.run({ data: { orderId: 'bo1' } }),
     (err) => err.code === 'unauthenticated',
+  );
+});
+
+test('deliverOrderCF: synchronizes the linked boutique order atomically', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': {
+      driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 500,
+      sellerId: 's1', sellerType: 'boutique', linkedBoutiqueOrderId: 'bo1',
+    },
+    'boutique_orders/bo1': { status: 'paid', deliveryOrderId: 'o1' },
+    'livreurs/d1': { wallet: 0 },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('orders/o1').status, 'delivered');
+  assert.equal(store.get('boutique_orders/bo1').status, 'delivered');
+});
+
+test('refundExpiredBoutiqueOrderCF: rejects a paid order when its linked delivery is delivered', async () => {
+  const { db, store } = makeFakeDb({
+    'boutique_orders/bo1': {
+      clientId: 'c1', sellerId: 's1', status: 'paid', totalPrice: 5000,
+      deliveryOrderId: 'o1',
+      deliveryDeadline: fakeAdmin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+    },
+    'orders/o1': { status: 'delivered', linkedBoutiqueOrderId: 'bo1' },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 5000 },
+  });
+  const fn = buildRefundExpiredBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { orderId: 'bo1' } }),
+    (err) => err.code === 'failed-precondition',
+  );
+  assert.equal(store.get('clients/c1').wallet, 0);
+  assert.equal(store.get('boutique_orders/bo1').status, 'paid');
+});
+
+test('payBoutiqueOrderCF: credits only the seller declared by the product', async () => {
+  const { db, store } = makeFakeDb({
+    'sellers/s1': { type: 'boutique', wallet: 0 },
+    'sellers/s2': { type: 'boutique', wallet: 0 },
+    'boutique_products/p1': { sellerId: 's2', name: 'Riz', price: 1000, stock: 2 },
+    'clients/c1': { wallet: 5000 },
+  });
+  const fn = buildPayBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: {
+    productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5,
+  } });
+
+  assert.equal(store.get('sellers/s1').wallet, 0);
+  assert.equal(store.get('sellers/s2').wallet, 1000);
+});
+
+test('payBoutiqueOrderCF: rejects a product without a sellerId', async () => {
+  const { db } = makeFakeDb({
+    'boutique_products/p1': { name: 'Riz', price: 1000, stock: 2 },
+    'clients/c1': { wallet: 5000 },
+  });
+  const fn = buildPayBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } }),
+    (err) => err.code === 'failed-precondition',
+  );
+});
+
+test('payBoutiqueOrderCashCF: rejects a suspended product seller', async () => {
+  const { db } = makeFakeDb({
+    'sellers/s1': { type: 'boutique', isSuspended: true, wallet: 0 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz', price: 1000, stock: 2 },
+  });
+  const fn = buildPayBoutiqueOrderCash({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } }),
+    (err) => err.code === 'failed-precondition',
   );
 });

@@ -39,6 +39,53 @@ class _FakeAzIaService extends AzIaService {
 Future<void> _settle() => Future<void>.delayed(Duration.zero);
 
 void main() {
+  test('attend l’initialisation sécurisée avant de souscrire à Auth', () async {
+    SharedPreferences.setMockInitialValues({});
+    final ready = Completer<void>();
+    final auth = StreamController<String?>.broadcast();
+    final service = _FakeAzIaService();
+    final provider = AzIaProvider(
+      service: service,
+      authUidChanges: auth.stream,
+      initializationReady: ready.future,
+    );
+
+    auth.add('avant-app-check');
+    await _settle();
+    expect(service.subscribedUids, isEmpty);
+
+    ready.complete();
+    await _settle();
+    auth.add('apres-app-check');
+    await _settle();
+    expect(service.subscribedUids, ['apres-app-check']);
+
+    provider.dispose();
+    await auth.close();
+    await service.close();
+  });
+
+  test('expose une vue stable et non modifiable sans recopier l’historique',
+      () async {
+    final auth = StreamController<String?>.broadcast();
+    final provider = AzIaProvider(
+      service: _FakeAzIaService(),
+      authUidChanges: auth.stream,
+    );
+
+    final firstView = provider.messages;
+    expect(identical(firstView, provider.messages), isTrue);
+    expect(
+        () => firstView.add(AzIaMessage(
+              sender: AzIaSender.user,
+              text: 'interdit',
+            )),
+        throwsUnsupportedError);
+
+    provider.dispose();
+    await auth.close();
+  });
+
   test('réabonne les actions en attente pour chaque UID et oublie l’ancien',
       () async {
     SharedPreferences.setMockInitialValues({});

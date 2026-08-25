@@ -26,7 +26,7 @@ class AmountHelper {
 
   static String formatCompact(int amount) {
     if (amount >= 1000000) return '${(amount / 1000000).toStringAsFixed(1)}M F';
-    if (amount >= 1000)    return '${(amount / 1000).toStringAsFixed(0)}K F';
+    if (amount >= 1000) return '${(amount / 1000).toStringAsFixed(0)}K F';
     return '$amount F';
   }
 }
@@ -43,16 +43,15 @@ class DateHelper {
   static String formatDate(DateTime d) =>
       DateFormat('dd/MM/yyyy', 'fr').format(d);
 
-  static String formatTime(DateTime d) =>
-      DateFormat('HH:mm', 'fr').format(d);
+  static String formatTime(DateTime d) => DateFormat('HH:mm', 'fr').format(d);
 
   static String formatRelative(DateTime d) {
-    final now  = DateTime.now();
+    final now = DateTime.now();
     final diff = now.difference(d);
-    if (diff.inMinutes < 1)  return 'À l\'instant';
+    if (diff.inMinutes < 1) return 'À l\'instant';
     if (diff.inMinutes < 60) return 'Il y a ${diff.inMinutes} min';
-    if (diff.inHours   < 24) return 'Il y a ${diff.inHours}h';
-    if (diff.inDays    < 7)  return 'Il y a ${diff.inDays}j';
+    if (diff.inHours < 24) return 'Il y a ${diff.inHours}h';
+    if (diff.inDays < 7) return 'Il y a ${diff.inDays}j';
     return formatDate(d);
   }
 }
@@ -63,14 +62,12 @@ class DateHelper {
 class GeoHelper {
   GeoHelper._();
 
-  static double distanceKm(
-      double lat1, double lng1, double lat2, double lng2) {
+  static double distanceKm(double lat1, double lng1, double lat2, double lng2) {
     const r = 6371.0;
     final dLat = _rad(lat2 - lat1);
     final dLng = _rad(lng2 - lng1);
     final a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(_rad(lat1)) * cos(_rad(lat2)) *
-            sin(dLng / 2) * sin(dLng / 2);
+        cos(_rad(lat1)) * cos(_rad(lat2)) * sin(dLng / 2) * sin(dLng / 2);
     return r * 2 * atan2(sqrt(a), sqrt(1 - a));
   }
 
@@ -116,7 +113,7 @@ class Validators {
     if (val == null || val.isEmpty) return 'Montant requis';
     final n = int.tryParse(val.replaceAll(' ', ''));
     if (n == null) return 'Montant invalide';
-    if (n < min)   return 'Minimum ${AmountHelper.formatWithCurrency(min)}';
+    if (n < min) return 'Minimum ${AmountHelper.formatWithCurrency(min)}';
     return null;
   }
 }
@@ -135,8 +132,8 @@ class UiHelper {
   }) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg,
-          style: const TextStyle(color: Colors.white, fontSize: 14)),
+      content:
+          Text(msg, style: const TextStyle(color: Colors.white, fontSize: 14)),
       backgroundColor: color,
       behavior: SnackBarBehavior.floating,
       duration: duration,
@@ -158,22 +155,21 @@ class UiHelper {
     BuildContext context, {
     required String title,
     required String message,
-    String confirmLabel  = 'Confirmer',
-    String cancelLabel   = 'Annuler',
-    Color  confirmColor  = AppColors.primary,
+    String confirmLabel = 'Confirmer',
+    String cancelLabel = 'Annuler',
+    Color confirmColor = AppColors.primary,
   }) {
     return showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(title,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(cancelLabel,
-                style: const TextStyle(color: Colors.grey)),
+            child:
+                Text(cancelLabel, style: const TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -182,8 +178,8 @@ class UiHelper {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
-            child: Text(confirmLabel,
-                style: const TextStyle(color: Colors.white)),
+            child:
+                Text(confirmLabel, style: const TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -214,13 +210,20 @@ class CollectionHelper {
 
   static String forRole(String role) {
     switch (role) {
-      case UserRole.driver:      return Collections.livreurs;
-      case UserRole.seller:      return Collections.sellers;
-      case UserRole.restaurant:  return Collections.restaurants;
-      case UserRole.boulangerie: return Collections.boulangeries;
-      case UserRole.pharmacie:   return Collections.pharmacies;
-      case UserRole.fleet:       return Collections.fleetOwners;
-      default:                   return Collections.clients;
+      case UserRole.driver:
+        return Collections.livreurs;
+      case UserRole.seller:
+        return Collections.sellers;
+      case UserRole.restaurant:
+        return Collections.restaurants;
+      case UserRole.boulangerie:
+        return Collections.boulangeries;
+      case UserRole.pharmacie:
+        return Collections.pharmacies;
+      case UserRole.fleet:
+        return Collections.fleetOwners;
+      default:
+        return Collections.clients;
     }
   }
 }

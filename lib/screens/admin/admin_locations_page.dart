@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../utils/storage_cleanup.dart';
 
 class AdminLocationsPage extends StatelessWidget {
   const AdminLocationsPage({super.key});
@@ -58,7 +60,7 @@ class AdminLocationsPage extends StatelessWidget {
           }
           return ListView.builder(
             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             itemCount: docs.length,
             itemBuilder: (context, i) {
               final doc = docs[i];
@@ -84,7 +86,8 @@ class _LocationAdminCard extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Supprimer cette annonce ?"),
-        content: Text("\"${data['title'] ?? ''}\" sera supprimée définitivement."),
+        content:
+            Text("\"${data['title'] ?? ''}\" sera supprimée définitivement."),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -98,10 +101,12 @@ class _LocationAdminCard extends StatelessWidget {
       ),
     );
     if (ok != true) return;
+    final photos = (data['photos'] as List?)?.cast<String>() ?? const [];
     await FirebaseFirestore.instance
         .collection("locations")
         .doc(docId)
         .delete();
+    await deleteStorageUrls([data['photoUrl'] as String?, ...photos]);
   }
 
   Future<void> _toggleAvailability() async {
@@ -137,13 +142,13 @@ class _LocationAdminCard extends StatelessWidget {
         children: [
           // Photo
           ClipRRect(
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(18)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
             child: SizedBox(
               height: 160,
               width: double.infinity,
               child: photoUrl != null && photoUrl.isNotEmpty
-                  ? Image.network(photoUrl, fit: BoxFit.cover,
+                  ? Image.network(photoUrl,
+                      fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => _photoPlaceholder())
                   : _photoPlaceholder(),
             ),
@@ -230,19 +235,16 @@ class _LocationAdminCard extends StatelessWidget {
                           isAvailable ? "Marquer indispo" : "Marquer dispo",
                           style: TextStyle(
                               fontSize: 12,
-                              color: isAvailable
-                                  ? Colors.orange
-                                  : Colors.green),
+                              color:
+                                  isAvailable ? Colors.orange : Colors.green),
                         ),
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(
-                              color: isAvailable
-                                  ? Colors.orange
-                                  : Colors.green),
+                              color:
+                                  isAvailable ? Colors.orange : Colors.green),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10)),
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 10),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                         ),
                       ),
                     ),
@@ -325,6 +327,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
   // `photos` (nouveau champ, tableau d'URLs) porte les photos supplémentaires.
   final List<XFile> _pickedGalleryFiles = [];
   final List<String> _existingGalleryUrls = [];
+  final List<String> _removedGalleryUrls = [];
   String? _galleryUploadStatus;
 
   bool get _isEditing => widget.docId != null;
@@ -343,8 +346,8 @@ class _LocationFormPageState extends State<_LocationFormPage> {
       _isAvailable = d["isAvailable"] ?? true;
       _existingPhotoUrl = d["photoUrl"];
       _existingIdPhotoUrl = d["idPhotoUrl"];
-      _existingGalleryUrls.addAll(
-          (d["photos"] as List?)?.map((e) => e.toString()) ?? const []);
+      _existingGalleryUrls
+          .addAll((d["photos"] as List?)?.map((e) => e.toString()) ?? const []);
       _idNumberCtrl.text = d["idNumber"] ?? "";
       final lat = (d["lat"] as num?)?.toDouble() ?? 0.0;
       final lng = (d["lng"] as num?)?.toDouble() ?? 0.0;
@@ -372,7 +375,8 @@ class _LocationFormPageState extends State<_LocationFormPage> {
     try {
       await Geolocator.requestPermission();
       final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.high));
       setState(() {
         _latCtrl.text = pos.latitude.toStringAsFixed(7);
         _lngCtrl.text = pos.longitude.toStringAsFixed(7);
@@ -385,8 +389,8 @@ class _LocationFormPageState extends State<_LocationFormPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Erreur GPS : $e"), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("Erreur GPS : $e"), backgroundColor: Colors.red));
       }
     }
     setState(() => _gpsLoading = false);
@@ -407,19 +411,22 @@ class _LocationFormPageState extends State<_LocationFormPage> {
               title: const Text("Prendre une photo"),
               onTap: () async {
                 Navigator.pop(context);
-                final picked = await ImagePicker().pickImage(
-                    source: ImageSource.camera, imageQuality: 75);
-                if (picked != null) setState(() => _pickedImage = File(picked.path));
+                final picked = await ImagePicker()
+                    .pickImage(source: ImageSource.camera, imageQuality: 75);
+                if (picked != null)
+                  setState(() => _pickedImage = File(picked.path));
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF00695C)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF00695C)),
               title: const Text("Choisir depuis la galerie"),
               onTap: () async {
                 Navigator.pop(context);
-                final picked = await ImagePicker().pickImage(
-                    source: ImageSource.gallery, imageQuality: 75);
-                if (picked != null) setState(() => _pickedImage = File(picked.path));
+                final picked = await ImagePicker()
+                    .pickImage(source: ImageSource.gallery, imageQuality: 75);
+                if (picked != null)
+                  setState(() => _pickedImage = File(picked.path));
               },
             ),
             const SizedBox(height: 8),
@@ -431,22 +438,27 @@ class _LocationFormPageState extends State<_LocationFormPage> {
 
   Future<void> _pickGalleryPhotos() async {
     try {
-      final files = await ImagePicker().pickMultiImage(imageQuality: 70, maxWidth: 1600);
+      final files =
+          await ImagePicker().pickMultiImage(imageQuality: 70, maxWidth: 1600);
       if (files.isEmpty) return;
-      final remaining = 10 - _existingGalleryUrls.length - _pickedGalleryFiles.length;
+      final remaining =
+          10 - _existingGalleryUrls.length - _pickedGalleryFiles.length;
       if (remaining <= 0) return;
       setState(() => _pickedGalleryFiles.addAll(files.take(remaining)));
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Impossible d'accéder à la galerie."), backgroundColor: Colors.red),
+          const SnackBar(
+              content: Text("Impossible d'accéder à la galerie."),
+              backgroundColor: Colors.red),
         );
       }
     }
   }
 
   Future<void> _pickIdPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
+    final picked =
+        await ImagePicker().pickImage(source: source, imageQuality: 80);
     if (picked != null) setState(() => _idPhotoFile = File(picked.path));
   }
 
@@ -463,12 +475,19 @@ class _LocationFormPageState extends State<_LocationFormPage> {
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFF00695C)),
               title: const Text("Photographier la pièce d'identité"),
-              onTap: () { Navigator.pop(context); _pickIdPhoto(ImageSource.camera); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickIdPhoto(ImageSource.camera);
+              },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF00695C)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF00695C)),
               title: const Text("Importer depuis la galerie"),
-              onTap: () { Navigator.pop(context); _pickIdPhoto(ImageSource.gallery); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickIdPhoto(ImageSource.gallery);
+              },
             ),
             const SizedBox(height: 8),
           ],
@@ -515,7 +534,8 @@ class _LocationFormPageState extends State<_LocationFormPage> {
     setState(() => _saving = true);
 
     final db = FirebaseFirestore.instance;
-    final docId = _isEditing ? widget.docId! : db.collection("locations").doc().id;
+    final docId =
+        _isEditing ? widget.docId! : db.collection("locations").doc().id;
 
     final photoUrl = await _uploadPhoto(docId);
     final idPhotoUrl = await _uploadIdPhoto(docId);
@@ -523,8 +543,8 @@ class _LocationFormPageState extends State<_LocationFormPage> {
     final galleryUrls = [..._existingGalleryUrls];
     for (var i = 0; i < _pickedGalleryFiles.length; i++) {
       if (mounted) {
-        setState(() =>
-            _galleryUploadStatus = "Envoi de la galerie ${i + 1}/${_pickedGalleryFiles.length}…");
+        setState(() => _galleryUploadStatus =
+            "Envoi de la galerie ${i + 1}/${_pickedGalleryFiles.length}…");
       }
       try {
         final ref = FirebaseStorage.instance.ref(
@@ -558,12 +578,19 @@ class _LocationFormPageState extends State<_LocationFormPage> {
 
     await db.collection("locations").doc(docId).set(data);
 
+    // Nettoyage Storage des photos de galerie retirées pendant l'édition —
+    // fait seulement maintenant que la sauvegarde a réellement réussi,
+    // jamais au moment du retrait dans la liste locale (voir onTap ci-dessus).
+    if (_removedGalleryUrls.isNotEmpty) {
+      unawaited(deleteStorageUrls(_removedGalleryUrls));
+    }
+
     if (mounted) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              _isEditing ? "Annonce modifiée ✓" : "Annonce ajoutée ✓"),
+          content:
+              Text(_isEditing ? "Annonce modifiée ✓" : "Annonce ajoutée ✓"),
           backgroundColor: const Color(0xFF00695C),
         ),
       );
@@ -583,7 +610,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
       ),
       body: ListView(
         physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(20),
         children: [
           // ── PHOTO ────────────────────────────────────────
           GestureDetector(
@@ -605,8 +632,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
                             _existingPhotoUrl!.isNotEmpty)
                         ? Image.network(_existingPhotoUrl!,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
-                                _photoHint())
+                            errorBuilder: (_, __, ___) => _photoHint())
                         : _photoHint(),
               ),
             ),
@@ -626,14 +652,13 @@ class _LocationFormPageState extends State<_LocationFormPage> {
           Row(
             children: [
               Expanded(
-                child: _field(_priceCtrl, "Prix FCFA/mois",
-                    Icons.payments_rounded,
+                child: _field(
+                    _priceCtrl, "Prix FCFA/mois", Icons.payments_rounded,
                     type: TextInputType.number, hint: "ex: 50000"),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _field(
-                    _roomsCtrl, "Nbre de pièces", Icons.bed_rounded,
+                child: _field(_roomsCtrl, "Nbre de pièces", Icons.bed_rounded,
                     type: TextInputType.number, hint: "ex: 3"),
               ),
             ],
@@ -645,8 +670,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
               borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 8)
+                    color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
               ],
             ),
             child: TextField(
@@ -655,14 +679,12 @@ class _LocationFormPageState extends State<_LocationFormPage> {
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
                 labelText: "Description",
-                hintText:
-                    "Décrivez la maison : état, équipements, conditions…",
-                hintStyle:
-                    TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                hintText: "Décrivez la maison : état, équipements, conditions…",
+                hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
                 prefixIcon: const Padding(
                   padding: EdgeInsets.only(bottom: 60),
-                  child: Icon(Icons.description_rounded,
-                      color: Color(0xFF00695C)),
+                  child:
+                      Icon(Icons.description_rounded, color: Color(0xFF00695C)),
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -682,7 +704,8 @@ class _LocationFormPageState extends State<_LocationFormPage> {
               onPressed: _gpsLoading ? null : _getGps,
               icon: _gpsLoading
                   ? const SizedBox(
-                      width: 18, height: 18,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.my_location, color: Colors.white),
@@ -760,8 +783,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
                           : (_existingIdPhotoUrl?.isNotEmpty ?? false)
                               ? Image.network(_existingIdPhotoUrl!,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) =>
-                                      _idPhotoHint())
+                                  errorBuilder: (_, __, ___) => _idPhotoHint())
                               : _idPhotoHint(),
                     ),
                   ),
@@ -812,8 +834,17 @@ class _LocationFormPageState extends State<_LocationFormPage> {
                               top: 2,
                               right: 2,
                               child: GestureDetector(
-                                onTap: () => setState(
-                                    () => _existingGalleryUrls.removeAt(i)),
+                                onTap: () => setState(() {
+                                  // Le fichier Storage n'est nettoyé qu'à la
+                                  // sauvegarde réelle (_save()), jamais ici —
+                                  // sinon annuler l'édition sans enregistrer
+                                  // supprimerait quand même le fichier alors
+                                  // que le document Firestore le référence
+                                  // toujours (image cassée sans raison).
+                                  _removedGalleryUrls
+                                      .add(_existingGalleryUrls[i]);
+                                  _existingGalleryUrls.removeAt(i);
+                                }),
                                 child: Container(
                                   padding: const EdgeInsets.all(2),
                                   decoration: const BoxDecoration(
@@ -834,7 +865,9 @@ class _LocationFormPageState extends State<_LocationFormPage> {
                               borderRadius: BorderRadius.circular(10),
                               child: Image.file(
                                   File(_pickedGalleryFiles[i].path),
-                                  width: 84, height: 84, fit: BoxFit.cover),
+                                  width: 84,
+                                  height: 84,
+                                  fit: BoxFit.cover),
                             ),
                             Positioned(
                               top: 2,
@@ -863,10 +896,12 @@ class _LocationFormPageState extends State<_LocationFormPage> {
                             width: 84,
                             height: 84,
                             decoration: BoxDecoration(
-                              color: const Color(0xFF00695C).withValues(alpha: 0.08),
+                              color: const Color(0xFF00695C)
+                                  .withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                  color: const Color(0xFF00695C).withValues(alpha: 0.3)),
+                                  color: const Color(0xFF00695C)
+                                      .withValues(alpha: 0.3)),
                             ),
                             child: const Icon(Icons.add_a_photo_rounded,
                                 color: Color(0xFF00695C)),
@@ -879,10 +914,12 @@ class _LocationFormPageState extends State<_LocationFormPage> {
                   const SizedBox(height: 10),
                   Row(children: [
                     const SizedBox(
-                        width: 16, height: 16,
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2)),
                     const SizedBox(width: 10),
-                    Text(_galleryUploadStatus!, style: const TextStyle(fontSize: 12)),
+                    Text(_galleryUploadStatus!,
+                        style: const TextStyle(fontSize: 12)),
                   ]),
                 ],
               ],
@@ -893,15 +930,13 @@ class _LocationFormPageState extends State<_LocationFormPage> {
 
           // Disponibilité
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 8)
+                    color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
               ],
             ),
             child: Row(
@@ -998,8 +1033,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
         ],
       ),
       child: TextField(
@@ -1009,8 +1043,7 @@ class _LocationFormPageState extends State<_LocationFormPage> {
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          hintStyle:
-              TextStyle(color: Colors.grey.shade400, fontSize: 13),
+          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
           prefixIcon: Icon(icon, color: const Color(0xFF00695C)),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),

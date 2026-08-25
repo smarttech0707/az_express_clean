@@ -21,15 +21,15 @@ class ClientAuthPage extends StatefulWidget {
 
 class _ClientAuthPageState extends State<ClientAuthPage>
     with SingleTickerProviderStateMixin {
-  bool _isLogin  = true;
-  bool _loading  = false;
-  bool _obscurePass    = true;
+  bool _isLogin = true;
+  bool _loading = false;
+  bool _obscurePass = true;
   bool _obscureConfirm = true;
 
-  final _phoneCtrl   = TextEditingController();
-  final _nameCtrl    = TextEditingController();
-  final _emailCtrl   = TextEditingController();
-  final _passCtrl    = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
 
   // Champ unique pour le login (phone OU email)
@@ -87,9 +87,9 @@ class _ClientAuthPageState extends State<ClientAuthPage>
       }
       if (mounted) setState(() => _loading = false);
     } else {
-      final name    = _nameCtrl.text.trim();
-      final phone   = _phoneCtrl.text.trim();
-      final email   = _emailCtrl.text.trim();
+      final name = _nameCtrl.text.trim();
+      final phone = _phoneCtrl.text.trim();
+      final email = _emailCtrl.text.trim();
       final confirm = _confirmCtrl.text.trim();
 
       if (name.isEmpty || phone.isEmpty || email.isEmpty || password.isEmpty) {
@@ -160,8 +160,8 @@ class _ClientAuthPageState extends State<ClientAuthPage>
         // Essayer compte vendeur
         final phone = input.replaceAll(' ', '');
         final sellerEmail = input.contains('@') ? input : '$phone@az-seller.ci';
-        credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: sellerEmail, password: password);
+        credential = await FirebaseAuth.instance
+            .signInWithEmailAndPassword(email: sellerEmail, password: password);
         isSeller = true;
       } else {
         rethrow;
@@ -172,20 +172,23 @@ class _ClientAuthPageState extends State<ClientAuthPage>
 
     if (isSeller) {
       final uid = credential.user!.uid;
-      final sellerDoc = await FirebaseFirestore.instance
-          .collection('sellers').doc(uid).get();
+      final sellerDoc =
+          await FirebaseFirestore.instance.collection('sellers').doc(uid).get();
       if (!mounted) return;
       if (!sellerDoc.exists || !(sellerDoc.data()?['isActive'] ?? false)) {
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
         _snack("Compte inactif. Contactez l'administrateur.", Colors.red);
         setState(() => _loading = false);
         return;
       }
       AuthService().logAuthEvent('login', 'seller');
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => SellerDashboard(
-          sellerId: uid, sellerData: sellerDoc.data()!)),
+        MaterialPageRoute(
+            builder: (_) =>
+                SellerDashboard(sellerId: uid, sellerData: sellerDoc.data()!)),
         (route) => false,
       );
     } else {
@@ -206,9 +209,10 @@ class _ClientAuthPageState extends State<ClientAuthPage>
     // toujours avec permission-denied, la règle n'autorisant que la lecture de
     // son propre document (isOwner(clientId)), jamais une requête cross-document
     // par téléphone, quel que soit l'état d'authentification de l'appelant.
-    final checkResult = await FirebaseFunctions.instanceFor(region: 'europe-west1')
-        .httpsCallable('checkClientPhone')
-        .call({'phone': phone});
+    final checkResult =
+        await FirebaseFunctions.instanceFor(region: 'europe-west1')
+            .httpsCallable('checkClientPhone')
+            .call({'phone': phone});
     if (checkResult.data['exists'] == true) {
       throw FirebaseAuthException(
           code: 'phone-already-in-use',
@@ -222,13 +226,13 @@ class _ClientAuthPageState extends State<ClientAuthPage>
     if (uid == null) throw Exception('Échec création compte');
 
     await FirebaseFirestore.instance.collection('clients').doc(uid).set({
-      'name':                  name,
-      'phone':                 phone,
-      'email':                 email,
-      'wallet':                0,
+      'name': name,
+      'phone': phone,
+      'email': email,
+      'wallet': 0,
       'cashOnDeliveryEnabled': true,
-      'fakeOrderCount':        0,
-      'createdAt':             FieldValue.serverTimestamp(),
+      'fakeOrderCount': 0,
+      'createdAt': FieldValue.serverTimestamp(),
     });
 
     if (!mounted) return;
@@ -288,7 +292,8 @@ class _ClientAuthPageState extends State<ClientAuthPage>
             children: [
               // Header
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
                 child: Row(
                   children: [
                     GestureDetector(
@@ -305,8 +310,11 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                     ),
                     const SizedBox(width: 14),
                     const Text('AZ EXPRESS',
-                        style: TextStyle(color: Colors.white, fontSize: 20,
-                            fontWeight: FontWeight.w900, letterSpacing: 2)),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2)),
                   ],
                 ),
               ),
@@ -316,11 +324,14 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Column(
                   children: [
-                    const Icon(Icons.account_circle, size: 72, color: Colors.white),
+                    const Icon(Icons.account_circle,
+                        size: 72, color: Colors.white),
                     const SizedBox(height: 8),
                     Text(context.tr('client_space'),
-                        style: const TextStyle(color: Colors.white,
-                            fontSize: 22, fontWeight: FontWeight.bold)),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
                     Text(context.tr('client_tagline'),
                         style: const TextStyle(
@@ -345,31 +356,41 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _isLogin ? context.tr('login') : context.tr('create_account'),
-                            style: const TextStyle(fontSize: 24,
-                                fontWeight: FontWeight.bold, color: Colors.black87),
+                            _isLogin
+                                ? context.tr('login')
+                                : context.tr('create_account'),
+                            style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87),
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            _isLogin ? context.tr('login_desc') : context.tr('register_desc'),
-                            style: const TextStyle(color: Colors.grey, fontSize: 13),
+                            _isLogin
+                                ? context.tr('login_desc')
+                                : context.tr('register_desc'),
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 13),
                           ),
                           const SizedBox(height: 28),
 
                           // ── INSCRIPTION ──────────────────────────────────
                           if (!_isLogin) ...[
-                            _Field(controller: _nameCtrl,
+                            _Field(
+                                controller: _nameCtrl,
                                 label: context.tr('full_name'),
                                 icon: Icons.person_outline,
                                 type: TextInputType.name),
                             const SizedBox(height: 14),
-                            _Field(controller: _phoneCtrl,
+                            _Field(
+                                controller: _phoneCtrl,
                                 label: context.tr('phone_number'),
                                 icon: Icons.phone_outlined,
                                 type: TextInputType.phone,
                                 hint: '07XXXXXXXX'),
                             const SizedBox(height: 14),
-                            _Field(controller: _emailCtrl,
+                            _Field(
+                                controller: _emailCtrl,
                                 label: 'Adresse email',
                                 icon: Icons.email_outlined,
                                 type: TextInputType.emailAddress,
@@ -380,19 +401,22 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                                 label: context.tr('password'),
                                 hint: '8 car. min, 1 maj, 1 chiffre',
                                 show: !_obscurePass,
-                                onToggle: () => setState(() => _obscurePass = !_obscurePass)),
+                                onToggle: () => setState(
+                                    () => _obscurePass = !_obscurePass)),
                             const SizedBox(height: 14),
                             _PasswordField(
                                 controller: _confirmCtrl,
                                 label: 'Confirmer le mot de passe',
                                 hint: 'Retapez le mot de passe',
                                 show: !_obscureConfirm,
-                                onToggle: () => setState(() => _obscureConfirm = !_obscureConfirm)),
+                                onToggle: () => setState(
+                                    () => _obscureConfirm = !_obscureConfirm)),
                           ],
 
                           // ── CONNEXION ────────────────────────────────────
                           if (_isLogin) ...[
-                            _Field(controller: _loginCtrl,
+                            _Field(
+                                controller: _loginCtrl,
                                 label: 'Téléphone ou email',
                                 icon: Icons.account_circle_outlined,
                                 type: TextInputType.emailAddress,
@@ -403,21 +427,26 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                                 label: context.tr('password'),
                                 hint: context.tr('password_hint'),
                                 show: !_obscurePass,
-                                onToggle: () => setState(() => _obscurePass = !_obscurePass)),
+                                onToggle: () => setState(
+                                    () => _obscurePass = !_obscurePass)),
                             const SizedBox(height: 4),
                             Align(
                               alignment: Alignment.centerRight,
                               child: GestureDetector(
-                                onTap: () => Navigator.push(context,
-                                    MaterialPageRoute(builder: (_) =>
-                                        ForgotPasswordPage(
-                                          prefillPhone: _loginCtrl.text.contains('@')
-                                              ? null
-                                              : _loginCtrl.text.trim(),
-                                        ))),
+                                onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => ForgotPasswordPage(
+                                              prefillPhone:
+                                                  _loginCtrl.text.contains('@')
+                                                      ? null
+                                                      : _loginCtrl.text.trim(),
+                                            ))),
                                 child: const Text('Mot de passe oublié ?',
-                                    style: TextStyle(color: AppColors.primary,
-                                        fontSize: 13, fontWeight: FontWeight.w600)),
+                                    style: TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600)),
                               ),
                             ),
                           ],
@@ -437,13 +466,20 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                                 elevation: 4,
                               ),
                               child: _loading
-                                  ? const SizedBox(width: 24, height: 24,
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
                                       child: CircularProgressIndicator(
-                                          color: Colors.white, strokeWidth: 2.5))
+                                          color: Colors.white,
+                                          strokeWidth: 2.5))
                                   : Text(
-                                      _isLogin ? context.tr('btn_login') : context.tr('btn_register'),
-                                      style: const TextStyle(color: Colors.white,
-                                          fontSize: 16, fontWeight: FontWeight.bold)),
+                                      _isLogin
+                                          ? context.tr('btn_login')
+                                          : context.tr('btn_register'),
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold)),
                             ),
                           ),
 
@@ -454,11 +490,13 @@ class _ClientAuthPageState extends State<ClientAuthPage>
                               onTap: _toggleMode,
                               child: RichText(
                                 text: TextSpan(
-                                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                                  style: const TextStyle(
+                                      fontSize: 14, color: Colors.black87),
                                   children: [
-                                    TextSpan(text: _isLogin
-                                        ? context.tr('no_account')
-                                        : context.tr('have_account')),
+                                    TextSpan(
+                                        text: _isLogin
+                                            ? context.tr('no_account')
+                                            : context.tr('have_account')),
                                     TextSpan(
                                       text: _isLogin
                                           ? context.tr('sign_up')
@@ -517,8 +555,12 @@ class _Field extends StatelessWidget {
   final IconData icon;
   final TextInputType type;
   final String? hint;
-  const _Field({required this.controller, required this.label,
-      required this.icon, required this.type, this.hint});
+  const _Field(
+      {required this.controller,
+      required this.label,
+      required this.icon,
+      required this.type,
+      this.hint});
 
   @override
   Widget build(BuildContext context) {
@@ -534,7 +576,8 @@ class _Field extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     );
   }
@@ -546,8 +589,12 @@ class _PasswordField extends StatelessWidget {
   final String? hint;
   final bool show;
   final VoidCallback onToggle;
-  const _PasswordField({required this.controller, required this.label,
-      this.hint, required this.show, required this.onToggle});
+  const _PasswordField(
+      {required this.controller,
+      required this.label,
+      this.hint,
+      required this.show,
+      required this.onToggle});
 
   @override
   Widget build(BuildContext context) {
@@ -560,7 +607,8 @@ class _PasswordField extends StatelessWidget {
         hintText: hint,
         prefixIcon: const Icon(Icons.lock_outline, color: AppColors.primary),
         suffixIcon: IconButton(
-          icon: Icon(show ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+          icon: Icon(
+              show ? Icons.visibility_off_outlined : Icons.visibility_outlined,
               color: Colors.grey),
           onPressed: onToggle,
         ),
@@ -569,7 +617,8 @@ class _PasswordField extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     );
   }

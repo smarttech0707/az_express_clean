@@ -67,14 +67,16 @@ class AdminCashSettlementPage extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.info_outline, color: Colors.orange.shade700, size: 20),
+                Icon(Icons.info_outline,
+                    color: Colors.orange.shade700, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Commandes cash restaurant/pharmacie où le livreur a collecté '
                     'la part du marchand mais ne l\'a pas encore remise. '
                     'À vérifier chaque jour avant clôture.',
-                    style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+                    style:
+                        TextStyle(fontSize: 12, color: Colors.orange.shade800),
                   ),
                 ),
               ],
@@ -123,7 +125,8 @@ class AdminCashSettlementPage extends StatelessWidget {
                         'Marchand';
                     final amount = (data['budget'] as num?)?.toInt() ?? 0;
                     final driverId = (data['driverId'] as String?) ?? '—';
-                    final deliveredAt = (data['deliveredAt'] as Timestamp?)?.toDate();
+                    final deliveredAt =
+                        (data['deliveredAt'] as Timestamp?)?.toDate();
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -160,7 +163,8 @@ class AdminCashSettlementPage extends StatelessWidget {
                           Text(
                             'Livreur : ${driverId.length > 8 ? driverId.substring(0, 8) : driverId}…'
                             '${deliveredAt != null ? ' · ${deliveredAt.day}/${deliveredAt.month} ${deliveredAt.hour}:${deliveredAt.minute.toString().padLeft(2, '0')}' : ''}',
-                            style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                            style: TextStyle(
+                                color: Colors.grey.shade600, fontSize: 12),
                           ),
                           const SizedBox(height: 10),
                           SizedBox(

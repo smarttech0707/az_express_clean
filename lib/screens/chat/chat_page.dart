@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,7 +12,8 @@ import '../../theme/app_theme.dart';
 class ChatPage extends StatefulWidget {
   final String orderId;
   final String senderRole; // 'client' ou 'driver'
-  const ChatPage({super.key, required this.orderId, this.senderRole = 'client'});
+  const ChatPage(
+      {super.key, required this.orderId, this.senderRole = 'client'});
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -138,11 +139,11 @@ class _ChatPageState extends State<ChatPage> {
 
       // Étape 3 : uploader
       final name = "voice_${DateTime.now().millisecondsSinceEpoch}.m4a";
-      final ref = FirebaseStorage.instance
-          .ref("chat_audio/${widget.orderId}/$name");
+      final ref =
+          FirebaseStorage.instance.ref("chat_audio/${widget.orderId}/$name");
 
-      final task = ref.putData(
-          bytes, SettableMetadata(contentType: 'audio/mp4'));
+      final task =
+          ref.putData(bytes, SettableMetadata(contentType: 'audio/mp4'));
       final snapshot = await task;
 
       if (snapshot.state != TaskState.success) {
@@ -226,8 +227,8 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 4)));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 4)));
   }
 
   // ── BUILD ─────────────────────────────────────────
@@ -246,8 +247,7 @@ class _ChatPageState extends State<ChatPage> {
             CircleAvatar(
               radius: 16,
               backgroundColor: Colors.white24,
-              child: Icon(Icons.delivery_dining,
-                  color: Colors.white, size: 18),
+              child: Icon(Icons.delivery_dining, color: Colors.white, size: 18),
             ),
             SizedBox(width: 8),
             Text("Livreur", style: TextStyle(fontSize: 16)),
@@ -325,9 +325,8 @@ class _ChatPageState extends State<ChatPage> {
                         isClient: isClient,
                         isPlaying: _playingMsgId == doc.id &&
                             _playerState == PlayerState.playing,
-                        position: _playingMsgId == doc.id
-                            ? _playPos
-                            : Duration.zero,
+                        position:
+                            _playingMsgId == doc.id ? _playPos : Duration.zero,
                         onToggle: () =>
                             _togglePlay(doc.id, data["audioUrl"] ?? ""),
                       );
@@ -384,8 +383,8 @@ class _TextBubble extends StatelessWidget {
       alignment: isClient ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 3),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.72),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
         decoration: BoxDecoration(
           color: isClient ? AppColors.primary : Colors.white,
@@ -397,9 +396,7 @@ class _TextBubble extends StatelessWidget {
           ),
           boxShadow: const [
             BoxShadow(
-                color: Colors.black12,
-                blurRadius: 3,
-                offset: Offset(0, 1))
+                color: Colors.black12, blurRadius: 3, offset: Offset(0, 1))
           ],
         ),
         child: Column(
@@ -458,15 +455,14 @@ class _AudioBubble extends StatelessWidget {
         ? "${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}"
         : "";
 
-    final displaySecs =
-        position.inSeconds > 0 ? position.inSeconds : duration;
+    final displaySecs = position.inSeconds > 0 ? position.inSeconds : duration;
 
     return Align(
       alignment: isClient ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 3),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.72),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
         padding: const EdgeInsets.fromLTRB(10, 10, 12, 8),
         decoration: BoxDecoration(
           color: isClient ? AppColors.primary : Colors.white,
@@ -478,9 +474,7 @@ class _AudioBubble extends StatelessWidget {
           ),
           boxShadow: const [
             BoxShadow(
-                color: Colors.black12,
-                blurRadius: 3,
-                offset: Offset(0, 1))
+                color: Colors.black12, blurRadius: 3, offset: Offset(0, 1))
           ],
         ),
         child: Column(
@@ -502,9 +496,7 @@ class _AudioBubble extends StatelessWidget {
                     ),
                     child: Icon(
                       isPlaying ? Icons.pause : Icons.play_arrow,
-                      color: isClient
-                          ? Colors.white
-                          : AppColors.primary,
+                      color: isClient ? Colors.white : AppColors.primary,
                       size: 22,
                     ),
                   ),
@@ -514,8 +506,7 @@ class _AudioBubble extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _WaveformBars(
-                          isClient: isClient, isPlaying: isPlaying),
+                      _WaveformBars(isClient: isClient, isPlaying: isPlaying),
                       const SizedBox(height: 4),
                       Text(
                         _fmt(displaySecs),
@@ -557,8 +548,21 @@ class _WaveformBarsState extends State<_WaveformBars>
   late AnimationController _anim;
 
   static const _heights = [
-    8.0, 14.0, 10.0, 18.0, 8.0, 14.0, 6.0, 16.0, 10.0, 14.0,
-    7.0, 12.0, 16.0, 9.0, 13.0,
+    8.0,
+    14.0,
+    10.0,
+    18.0,
+    8.0,
+    14.0,
+    6.0,
+    16.0,
+    10.0,
+    14.0,
+    7.0,
+    12.0,
+    16.0,
+    9.0,
+    13.0,
   ];
 
   @override
@@ -578,8 +582,7 @@ class _WaveformBarsState extends State<_WaveformBars>
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        widget.isClient ? Colors.white70 : Colors.grey.shade400;
+    final color = widget.isClient ? Colors.white70 : Colors.grey.shade400;
 
     return AnimatedBuilder(
       animation: _anim,
@@ -638,10 +641,7 @@ class _RecordingBar extends StatelessWidget {
         color: Colors.white,
         border: Border(top: BorderSide(color: Colors.grey.shade200)),
         boxShadow: const [
-          BoxShadow(
-              color: Colors.black12,
-              blurRadius: 4,
-              offset: Offset(0, -2))
+          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, -2))
         ],
       ),
       child: Row(
@@ -675,8 +675,7 @@ class _RecordingBar extends StatelessWidget {
                 color: AppColors.primary,
                 shape: BoxShape.circle,
               ),
-              child:
-                  const Icon(Icons.send, color: Colors.white, size: 22),
+              child: const Icon(Icons.send, color: Colors.white, size: 22),
             ),
           ),
         ],
@@ -771,10 +770,7 @@ class _InputBarState extends State<_InputBar> {
         color: Colors.white,
         border: Border(top: BorderSide(color: Colors.grey.shade200)),
         boxShadow: const [
-          BoxShadow(
-              color: Colors.black12,
-              blurRadius: 4,
-              offset: Offset(0, -2))
+          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, -2))
         ],
       ),
       child: Row(
@@ -794,8 +790,8 @@ class _InputBarState extends State<_InputBar> {
                   hintText: "Message...",
                   hintStyle: TextStyle(color: Colors.grey),
                   border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
             ),
@@ -810,15 +806,13 @@ class _InputBarState extends State<_InputBar> {
                     key: const ValueKey("send"),
                     onTap: widget.onSend,
                     child: const _CircleBtn(
-                        icon: Icons.send,
-                        color: AppColors.primary),
+                        icon: Icons.send, color: AppColors.primary),
                   )
                 : GestureDetector(
                     key: const ValueKey("mic"),
                     onTap: widget.onMicTap,
                     child: const _CircleBtn(
-                        icon: Icons.mic,
-                        color: AppColors.primary),
+                        icon: Icons.mic, color: AppColors.primary),
                   ),
           ),
         ],
@@ -842,4 +836,3 @@ class _CircleBtn extends StatelessWidget {
     );
   }
 }
-

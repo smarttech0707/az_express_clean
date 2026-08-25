@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,6 +9,7 @@ import 'dart:typed_data';
 import '../mp_constants.dart';
 import '../models/mp_product.dart';
 import '../services/mp_service.dart';
+import '../../utils/storage_cleanup.dart';
 
 class MpAddProductScreen extends StatefulWidget {
   final MpProduct? editProduct; // null = new product
@@ -21,23 +23,28 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
   final _formKey = GlobalKey<FormState>();
 
   // Controllers
-  final _titleCtrl   = TextEditingController();
-  final _descCtrl    = TextEditingController();
-  final _priceCtrl   = TextEditingController();
+  final _titleCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  final _priceCtrl = TextEditingController();
   final _batteryCtrl = TextEditingController();
 
   // Selections
-  String _category  = 'phones';
+  String _category = 'phones';
   String _condition = 'used';
-  String _brand     = '';
+  String _brand = '';
   String? _storage;
   String? _ram;
   String? _color;
-  String _city      = 'Abengourou';
+  String _city = 'Abengourou';
 
   // Images
-  final List<XFile>  _newImages   = [];
+  final List<XFile> _newImages = [];
   final List<String> _existingUrls = [];
+  // Snapshot des URLs présentes à l'ouverture de l'écran — sert uniquement à
+  // détecter, à l'enregistrement, quelles photos ont été retirées pendant
+  // l'édition pour nettoyer leur fichier Storage (sinon fichier orphelin :
+  // retiré du tableau Firestore mais jamais supprimé du Storage).
+  final List<String> _originalUrls = [];
   final _picker = ImagePicker();
   bool _uploading = false;
 
@@ -48,18 +55,19 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
     super.initState();
     final p = widget.editProduct;
     if (p != null) {
-      _titleCtrl.text   = p.title;
-      _descCtrl.text    = p.description;
-      _priceCtrl.text   = p.price.toString();
+      _titleCtrl.text = p.title;
+      _descCtrl.text = p.description;
+      _priceCtrl.text = p.price.toString();
       _batteryCtrl.text = p.battery ?? '';
-      _category  = p.category;
+      _category = p.category;
       _condition = p.condition;
-      _brand     = p.brand;
-      _storage   = p.storage;
-      _ram       = p.ram;
-      _color     = p.color;
-      _city      = p.city;
+      _brand = p.brand;
+      _storage = p.storage;
+      _ram = p.ram;
+      _color = p.color;
+      _city = p.city;
       _existingUrls.addAll(p.images);
+      _originalUrls.addAll(p.images);
     }
   }
 
@@ -100,13 +108,15 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser!;
       // Get seller info
-      String sellerName  = user.displayName ?? 'Vendeur';
+      String sellerName = user.displayName ?? 'Vendeur';
       String sellerPhone = '';
       try {
         final doc = await FirebaseFirestore.instance
-            .collection('clients').doc(user.uid).get();
+            .collection('clients')
+            .doc(user.uid)
+            .get();
         if (doc.exists) {
-          sellerName  = doc.data()?['name'] ?? sellerName;
+          sellerName = doc.data()?['name'] ?? sellerName;
           sellerPhone = doc.data()?['phone'] ?? '';
         }
       } catch (_) {}
@@ -116,7 +126,9 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
       // Upload new images
       List<String> uploadedUrls = [];
       if (_newImages.isNotEmpty) {
-        final id = _isEdit ? productId : 'tmp_${DateTime.now().millisecondsSinceEpoch}';
+        final id = _isEdit
+            ? productId
+            : 'tmp_${DateTime.now().millisecondsSinceEpoch}';
         uploadedUrls = await MpService.uploadImages(_newImages, id);
       }
 
@@ -124,26 +136,25 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
 
       final data = MpProduct(
         id: productId,
-        sellerId:      user.uid,
-        sellerName:    sellerName,
-        sellerPhone:   sellerPhone,
-        sellerCity:    _city,
+        sellerId: user.uid,
+        sellerName: sellerName,
+        sellerPhone: sellerPhone,
+        sellerCity: _city,
         sellerVerified: false,
-        title:       _titleCtrl.text.trim(),
+        title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
-        price:       int.parse(_priceCtrl.text.trim().replaceAll(' ', '')),
-        category:    _category,
-        brand:       _brand,
-        condition:   _condition,
-        storage:     _storage,
-        ram:         _ram,
-        color:       _color,
-        battery:     _batteryCtrl.text.trim().isEmpty
-            ? null
-            : _batteryCtrl.text.trim(),
-        images:      allImages,
-        city:        _city,
-        status:      'active',
+        price: int.parse(_priceCtrl.text.trim().replaceAll(' ', '')),
+        category: _category,
+        brand: _brand,
+        condition: _condition,
+        storage: _storage,
+        ram: _ram,
+        color: _color,
+        battery:
+            _batteryCtrl.text.trim().isEmpty ? null : _batteryCtrl.text.trim(),
+        images: allImages,
+        city: _city,
+        status: 'active',
       ).toMap();
 
       if (_isEdit) {
@@ -152,15 +163,22 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
           ..remove('createdAt')
           ..remove('views')
           ..remove('favoritesCount')
+          ..remove('expiresAt')
+          ..remove('sellerVerified')
+          ..remove('sellerVipStatus')
+          ..remove('priorityLevel')
           ..['images'] = allImages;
         await MpService.updateProduct(productId, updateData);
+        // Nettoyage Storage des photos retirées pendant cette édition —
+        // seulement maintenant que l'écriture Firestore a réellement réussi.
+        final removed = _originalUrls.where((u) => !allImages.contains(u));
+        if (removed.isNotEmpty) unawaited(deleteStorageUrls(removed));
       } else {
         await MpService.addProduct(data);
       }
 
       if (!mounted) return;
-      _snack(
-          _isEdit ? 'Annonce mise à jour !' : 'Annonce publiée ! 🎉',
+      _snack(_isEdit ? 'Annonce mise à jour !' : 'Annonce publiée ! 🎉',
           Colors.green);
       Navigator.pop(context, true);
     } catch (e) {
@@ -204,16 +222,22 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                         child: ListView(
                           scrollDirection: Axis.horizontal,
                           children: [
-                            ..._existingUrls.asMap().entries.map((e) => _ImgThumb(
-                              networkUrl: e.value,
-                              onRemove: () =>
-                                  setState(() => _existingUrls.removeAt(e.key)),
-                            )),
-                            ..._newImages.asMap().entries.map((e) => _ImgThumbLocal(
-                              xfile: e.value,
-                              onRemove: () =>
-                                  setState(() => _newImages.removeAt(e.key)),
-                            )),
+                            ..._existingUrls
+                                .asMap()
+                                .entries
+                                .map((e) => _ImgThumb(
+                                      networkUrl: e.value,
+                                      onRemove: () => setState(
+                                          () => _existingUrls.removeAt(e.key)),
+                                    )),
+                            ..._newImages
+                                .asMap()
+                                .entries
+                                .map((e) => _ImgThumbLocal(
+                                      xfile: e.value,
+                                      onRemove: () => setState(
+                                          () => _newImages.removeAt(e.key)),
+                                    )),
                           ],
                         ),
                       ),
@@ -224,8 +248,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                         height: 52,
                         decoration: BoxDecoration(
                           border: Border.all(
-                              color: kMpOrange,
-                              style: BorderStyle.solid),
+                              color: kMpOrange, style: BorderStyle.solid),
                           borderRadius: BorderRadius.circular(12),
                           color: kMpOrange.withValues(alpha: 0.05),
                         ),
@@ -246,8 +269,8 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                     const SizedBox(height: 4),
                     Text(
                       '${_existingUrls.length + _newImages.length}/6 photos  •  Première photo = couverture',
-                      style: GoogleFonts.urbanist(
-                          fontSize: 11, color: kMpMuted),
+                      style:
+                          GoogleFonts.urbanist(fontSize: 11, color: kMpMuted),
                     ),
                   ],
                 ),
@@ -295,12 +318,13 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                   children: mpConditions
                       .map((c) => Expanded(
                             child: GestureDetector(
-                              onTap: () => setState(() => _condition = c['id'] as String),
+                              onTap: () => setState(
+                                  () => _condition = c['id'] as String),
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 150),
                                 margin: const EdgeInsets.only(right: 8),
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 12),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
                                 decoration: BoxDecoration(
                                   color: _condition == c['id']
                                       ? Color(c['color']! as int)
@@ -348,8 +372,8 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                   controller: _titleCtrl,
                   validator: (v) =>
                       (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
-                  decoration: _deco('Ex: iPhone 13 Pro Max 256Go Blanc',
-                      Icons.title_rounded),
+                  decoration: _deco(
+                      'Ex: iPhone 13 Pro Max 256Go Blanc', Icons.title_rounded),
                   style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
                 ),
               ),
@@ -501,8 +525,8 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
       items: options
           .map((o) => DropdownMenuItem(
                 value: o,
-                child:
-                    Text(o, style: GoogleFonts.urbanist(fontSize: 14, color: kMpText)),
+                child: Text(o,
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText)),
               ))
           .toList(),
       onChanged: onChanged,
@@ -559,9 +583,7 @@ class _Section extends StatelessWidget {
           children: [
             Text(title,
                 style: GoogleFonts.urbanist(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: kMpText)),
+                    fontSize: 13, fontWeight: FontWeight.w700, color: kMpText)),
             const SizedBox(height: 12),
             child,
           ],
@@ -588,8 +610,7 @@ class _SelChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? kMpOrange : kMpBg,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: selected ? kMpOrange : kMpDivider),
+          border: Border.all(color: selected ? kMpOrange : kMpDivider),
         ),
         child: Text(label,
             style: GoogleFonts.urbanist(
@@ -643,15 +664,30 @@ class _ImgThumb extends StatelessWidget {
   }
 }
 
-class _ImgThumbLocal extends StatelessWidget {
+class _ImgThumbLocal extends StatefulWidget {
   final XFile xfile;
   final VoidCallback onRemove;
   const _ImgThumbLocal({required this.xfile, required this.onRemove});
 
   @override
+  State<_ImgThumbLocal> createState() => _ImgThumbLocalState();
+}
+
+class _ImgThumbLocalState extends State<_ImgThumbLocal> {
+  late Future<Uint8List> _bytes = widget.xfile.readAsBytes();
+
+  @override
+  void didUpdateWidget(covariant _ImgThumbLocal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.xfile.path != widget.xfile.path) {
+      _bytes = widget.xfile.readAsBytes();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<Uint8List>(
-      future: xfile.readAsBytes(),
+      future: _bytes,
       builder: (_, snap) {
         return Stack(
           children: [
@@ -664,7 +700,11 @@ class _ImgThumbLocal extends StatelessWidget {
                 color: kMpBg,
                 image: snap.hasData
                     ? DecorationImage(
-                        image: MemoryImage(snap.data!),
+                        image: ResizeImage(
+                          MemoryImage(snap.data!),
+                          width: 160,
+                          height: 160,
+                        ),
                         fit: BoxFit.cover,
                       )
                     : null,
@@ -682,7 +722,7 @@ class _ImgThumbLocal extends StatelessWidget {
               top: 2,
               right: 10,
               child: GestureDetector(
-                onTap: onRemove,
+                onTap: widget.onRemove,
                 child: Container(
                   width: 20,
                   height: 20,
@@ -699,4 +739,3 @@ class _ImgThumbLocal extends StatelessWidget {
     );
   }
 }
-

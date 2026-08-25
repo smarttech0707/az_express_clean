@@ -43,10 +43,10 @@ const _categories = [
     gradient: [Color(0xFF004D40), Color(0xFF00897B)],
     color: Color(0xFF00695C),
     subs: [
-      _SubCat('location',          'sub_location', Icons.home_rounded),
-      _SubCat('vente_maison',      'sub_vente',    Icons.sell_rounded),
-      _SubCat('local_commercial',  'sub_local',    Icons.store_rounded),
-      _SubCat('terrain',           'sub_terrain',  Icons.landscape_rounded),
+      _SubCat('location', 'sub_location', Icons.home_rounded),
+      _SubCat('vente_maison', 'sub_vente', Icons.sell_rounded),
+      _SubCat('local_commercial', 'sub_local', Icons.store_rounded),
+      _SubCat('terrain', 'sub_terrain', Icons.landscape_rounded),
     ],
   ),
   _Category(
@@ -56,22 +56,26 @@ const _categories = [
     gradient: [Color(0xFF1565C0), Color(0xFF1E88E5)],
     color: Color(0xFF1565C0),
     subs: [
-      _SubCat('macon',               'sub_macon',          Icons.domain_rounded),
-      _SubCat('plombier',            'sub_plombier',        Icons.plumbing_rounded),
-      _SubCat('electricien',         'sub_electricien',     Icons.electrical_services_rounded),
-      _SubCat('ferronnier',          'sub_ferronnier',      Icons.hardware_rounded),
-      _SubCat('menuisier',           'sub_menuisier',       Icons.carpenter_rounded),
-      _SubCat('carreleur',           'sub_carreleur',       Icons.grid_on_rounded),
-      _SubCat('peintre',             'sub_peintre',         Icons.format_paint_rounded),
-      _SubCat('vitrier',             'sub_vitrier',         Icons.window_rounded),
-      _SubCat('reparateur_tv',       'sub_reparateur_tv',   Icons.tv_rounded),
-      _SubCat('installation_camera', 'sub_camera',          Icons.videocam_rounded),
-      _SubCat('decoration',          'sub_decoration',      Icons.home_rounded),
-      _SubCat('reparateur_portable',    'sub_reparateur',          Icons.phone_android_rounded),
-      _SubCat('salon_coiffure_homme',   'sub_salon_homme',         Icons.content_cut_rounded),
-      _SubCat('barber_shop',            'sub_barber_shop',         Icons.face_rounded),
-      _SubCat('salon_coiffure_femme',   'sub_salon_femme',         Icons.face_retouching_natural_rounded),
-      _SubCat('onglerie',               'sub_onglerie',            Icons.spa_rounded),
+      _SubCat('macon', 'sub_macon', Icons.domain_rounded),
+      _SubCat('plombier', 'sub_plombier', Icons.plumbing_rounded),
+      _SubCat(
+          'electricien', 'sub_electricien', Icons.electrical_services_rounded),
+      _SubCat('ferronnier', 'sub_ferronnier', Icons.hardware_rounded),
+      _SubCat('menuisier', 'sub_menuisier', Icons.carpenter_rounded),
+      _SubCat('carreleur', 'sub_carreleur', Icons.grid_on_rounded),
+      _SubCat('peintre', 'sub_peintre', Icons.format_paint_rounded),
+      _SubCat('vitrier', 'sub_vitrier', Icons.window_rounded),
+      _SubCat('reparateur_tv', 'sub_reparateur_tv', Icons.tv_rounded),
+      _SubCat('installation_camera', 'sub_camera', Icons.videocam_rounded),
+      _SubCat('decoration', 'sub_decoration', Icons.home_rounded),
+      _SubCat(
+          'reparateur_portable', 'sub_reparateur', Icons.phone_android_rounded),
+      _SubCat(
+          'salon_coiffure_homme', 'sub_salon_homme', Icons.content_cut_rounded),
+      _SubCat('barber_shop', 'sub_barber_shop', Icons.face_rounded),
+      _SubCat('salon_coiffure_femme', 'sub_salon_femme',
+          Icons.face_retouching_natural_rounded),
+      _SubCat('onglerie', 'sub_onglerie', Icons.spa_rounded),
     ],
   ),
   _Category(
@@ -81,10 +85,12 @@ const _categories = [
     gradient: [Color(0xFFBF360C), Color(0xFFE64A19)],
     color: Color(0xFFBF360C),
     subs: [
-      _SubCat('mecanicien_voiture', 'sub_meca_voiture', Icons.directions_car_rounded),
-      _SubCat('mecanicien_moto',    'sub_meca_moto',    Icons.two_wheeler_rounded),
-      _SubCat('electrique_auto',    'sub_elec_auto',    Icons.electrical_services_rounded),
-      _SubCat('carrosserie',        'sub_carrosserie',  Icons.car_repair_rounded),
+      _SubCat('mecanicien_voiture', 'sub_meca_voiture',
+          Icons.directions_car_rounded),
+      _SubCat('mecanicien_moto', 'sub_meca_moto', Icons.two_wheeler_rounded),
+      _SubCat('electrique_auto', 'sub_elec_auto',
+          Icons.electrical_services_rounded),
+      _SubCat('carrosserie', 'sub_carrosserie', Icons.car_repair_rounded),
     ],
   ),
   _Category(
@@ -94,7 +100,7 @@ const _categories = [
     gradient: [Color(0xFF0277BD), Color(0xFF29B6F6)],
     color: Color(0xFF0277BD),
     subs: [
-      _SubCat('eau_pack',       'sub_eau',    Icons.water_drop_rounded),
+      _SubCat('eau_pack', 'sub_eau', Icons.water_drop_rounded),
       _SubCat('ciment_briques', 'sub_ciment', Icons.foundation_rounded),
     ],
   ),
@@ -105,8 +111,8 @@ const _categories = [
     gradient: [Color(0xFF6A1B9A), Color(0xFFAB47BC)],
     color: Color(0xFF6A1B9A),
     subs: [
-      _SubCat('telephone',    'sub_telephone',    Icons.smartphone_rounded),
-      _SubCat('accessoires',  'sub_accessoires',  Icons.headphones_rounded),
+      _SubCat('telephone', 'sub_telephone', Icons.smartphone_rounded),
+      _SubCat('accessoires', 'sub_accessoires', Icons.headphones_rounded),
     ],
   ),
   _Category(
@@ -116,9 +122,10 @@ const _categories = [
     gradient: [Color(0xFF880E4F), Color(0xFFE91E63)],
     color: Color(0xFF880E4F),
     subs: [
-      _SubCat('cave_vins',       'sub_cave_vins',       Icons.wine_bar_rounded),
-      _SubCat('cave_bieres',     'sub_cave_bieres',     Icons.sports_bar_rounded),
-      _SubCat('cave_sans_alcool','sub_cave_sans_alcool', Icons.local_drink_rounded),
+      _SubCat('cave_vins', 'sub_cave_vins', Icons.wine_bar_rounded),
+      _SubCat('cave_bieres', 'sub_cave_bieres', Icons.sports_bar_rounded),
+      _SubCat('cave_sans_alcool', 'sub_cave_sans_alcool',
+          Icons.local_drink_rounded),
     ],
   ),
 ];
@@ -136,31 +143,33 @@ class ServicesHubPage extends StatefulWidget {
 
 class _ServicesHubPageState extends State<ServicesHubPage>
     with TickerProviderStateMixin {
-
   final _searchCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
-  String  _query        = '';
-  bool    _searchActive = false;
+  String _query = '';
+  bool _searchActive = false;
 
   // Animation d'entrée staggerée par catégorie
   late final List<AnimationController> _catCtrl;
-  late final List<Animation<double>>   _catFade;
-  late final List<Animation<Offset>>   _catSlide;
+  late final List<Animation<double>> _catFade;
+  late final List<Animation<Offset>> _catSlide;
 
   @override
   void initState() {
     super.initState();
-    _catCtrl = List.generate(_categories.length, (i) =>
-      AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 450),
-      )
-    );
-    _catFade  = _catCtrl.map((c) =>
-      CurvedAnimation(parent: c, curve: Curves.easeOut)).toList();
-    _catSlide = _catCtrl.map((c) =>
-      Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
-        .animate(CurvedAnimation(parent: c, curve: Curves.easeOutCubic))).toList();
+    _catCtrl = List.generate(
+        _categories.length,
+        (i) => AnimationController(
+              vsync: this,
+              duration: const Duration(milliseconds: 450),
+            ));
+    _catFade = _catCtrl
+        .map((c) => CurvedAnimation(parent: c, curve: Curves.easeOut))
+        .toList();
+    _catSlide = _catCtrl
+        .map((c) => Tween<Offset>(
+                begin: const Offset(0, 0.15), end: Offset.zero)
+            .animate(CurvedAnimation(parent: c, curve: Curves.easeOutCubic)))
+        .toList();
 
     // Déclencher les animations en cascade
     for (var i = 0; i < _categories.length; i++) {
@@ -198,15 +207,17 @@ class _ServicesHubPageState extends State<ServicesHubPage>
 
   void _navigate(BuildContext context, _SubCat sub, _Category cat) {
     final label = context.tr(sub.labelKey);
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => ServiceProvidersPage(
-        subcategory: sub.id,
-        title:       label,
-        color:       cat.color,
-        gradient:    cat.gradient,
-        icon:        sub.icon,
-      ),
-    ));
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ServiceProvidersPage(
+            subcategory: sub.id,
+            title: label,
+            color: cat.color,
+            gradient: cat.gradient,
+            icon: sub.icon,
+          ),
+        ));
   }
 
   @override
@@ -229,9 +240,13 @@ class _ServicesHubPageState extends State<ServicesHubPage>
               background: Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xFF0D47A1), Color(0xFF1565C0), Color(0xFF1976D2)],
+                    colors: [
+                      Color(0xFF0D47A1),
+                      Color(0xFF1565C0),
+                      Color(0xFF1976D2)
+                    ],
                     begin: Alignment.topLeft,
-                    end:   Alignment.bottomRight,
+                    end: Alignment.bottomRight,
                   ),
                 ),
                 child: SafeArea(
@@ -283,12 +298,12 @@ class _ServicesHubPageState extends State<ServicesHubPage>
               child: _SearchBar(
                 controller: _searchCtrl,
                 onChanged: (v) => setState(() {
-                  _query        = v.toLowerCase();
+                  _query = v.toLowerCase();
                   _searchActive = v.isNotEmpty;
                 }),
                 onClear: () => setState(() {
                   _searchCtrl.clear();
-                  _query        = '';
+                  _query = '';
                   _searchActive = false;
                 }),
               ),
@@ -319,11 +334,11 @@ class _ServicesHubPageState extends State<ServicesHubPage>
                     (ctx, i) {
                       final r = _searchResults[i];
                       return _SearchResultTile(
-                        sub:    r.sub,
-                        cat:    r.cat,
-                        label:  ctx.tr(r.sub.labelKey),
+                        sub: r.sub,
+                        cat: r.cat,
+                        label: ctx.tr(r.sub.labelKey),
                         catLabel: ctx.tr(r.cat.labelKey),
-                        onTap:  () => _navigate(ctx, r.sub, r.cat),
+                        onTap: () => _navigate(ctx, r.sub, r.cat),
                       );
                     },
                     childCount: _searchResults.length,
@@ -358,9 +373,8 @@ class _ServicesHubPageState extends State<ServicesHubPage>
                     child: SlideTransition(
                       position: _catSlide[i],
                       child: _CategorySection(
-                        cat:      _categories[i],
-                        onSubTap: (sub) =>
-                            _navigate(ctx, sub, _categories[i]),
+                        cat: _categories[i],
+                        onSubTap: (sub) => _navigate(ctx, sub, _categories[i]),
                       ),
                     ),
                   ),
@@ -393,22 +407,22 @@ class _SearchBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color:        Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color:      Colors.black.withValues(alpha: 0.07),
+            color: Colors.black.withValues(alpha: 0.07),
             blurRadius: 10,
-            offset:     const Offset(0, 3),
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       child: TextField(
         controller: controller,
-        onChanged:  onChanged,
-        style:      GoogleFonts.urbanist(fontSize: 14),
+        onChanged: onChanged,
+        style: GoogleFonts.urbanist(fontSize: 14),
         decoration: InputDecoration(
-          hintText:  'Rechercher un service...',
+          hintText: 'Rechercher un service...',
           hintStyle: GoogleFonts.urbanist(fontSize: 14, color: Colors.grey),
           prefixIcon: const Icon(Icons.search_rounded,
               color: Color(0xFF1565C0), size: 22),
@@ -419,7 +433,7 @@ class _SearchBar extends StatelessWidget {
                   onPressed: onClear,
                 )
               : null,
-          border:         InputBorder.none,
+          border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 14),
         ),
       ),
@@ -453,22 +467,23 @@ class _SearchResultTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
         decoration: BoxDecoration(
-          color:        Colors.white,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color:      Colors.black.withValues(alpha: 0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 6,
-              offset:     const Offset(0, 2),
+              offset: const Offset(0, 2),
             ),
           ],
         ),
         child: Row(
           children: [
             Container(
-              width: 44, height: 44,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                color:        cat.color.withValues(alpha: 0.12),
+                color: cat.color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(sub.icon, color: cat.color, size: 22),
@@ -519,19 +534,18 @@ class _EmptySearch extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.search_off_rounded,
-              size: 64, color: Colors.grey.shade300),
+          Icon(Icons.search_off_rounded, size: 64, color: Colors.grey.shade300),
           const SizedBox(height: 16),
           Text(
             'Aucun résultat pour "$query"',
-            style: GoogleFonts.urbanist(
-                fontSize: 15, color: Colors.grey.shade600),
+            style:
+                GoogleFonts.urbanist(fontSize: 15, color: Colors.grey.shade600),
           ),
           const SizedBox(height: 8),
           Text(
             'Essayez : maçon, plombier, location...',
-            style: GoogleFonts.urbanist(
-                fontSize: 12, color: Colors.grey.shade400),
+            style:
+                GoogleFonts.urbanist(fontSize: 12, color: Colors.grey.shade400),
           ),
         ],
       ),
@@ -558,13 +572,13 @@ class _CategorySection extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
           decoration: BoxDecoration(
-            gradient:     LinearGradient(colors: cat.gradient),
+            gradient: LinearGradient(colors: cat.gradient),
             borderRadius: BorderRadius.circular(18),
             boxShadow: [
               BoxShadow(
-                color:      cat.color.withValues(alpha: 0.28),
+                color: cat.color.withValues(alpha: 0.28),
                 blurRadius: 12,
-                offset:     const Offset(0, 5),
+                offset: const Offset(0, 5),
               ),
             ],
           ),
@@ -573,7 +587,7 @@ class _CategorySection extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color:        Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(cat.icon, color: Colors.white, size: 22),
@@ -586,8 +600,8 @@ class _CategorySection extends StatelessWidget {
                     Text(
                       context.tr(cat.labelKey),
                       style: GoogleFonts.urbanist(
-                        color:      Colors.white,
-                        fontSize:   16,
+                        color: Colors.white,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -611,14 +625,14 @@ class _CategorySection extends StatelessWidget {
           physics: const NeverScrollableScrollPhysics(),
           padding: EdgeInsets.zero,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount:  2,
-            mainAxisSpacing:  8,
+            crossAxisCount: 2,
+            mainAxisSpacing: 8,
             crossAxisSpacing: 8,
             childAspectRatio: 2.6,
           ),
           itemCount: cat.subs.length,
           itemBuilder: (ctx, i) => _SubCatTile(
-            sub:   cat.subs[i],
+            sub: cat.subs[i],
             label: ctx.tr(cat.subs[i].labelKey),
             color: cat.color,
             onTap: () => onSubTap(cat.subs[i]),
@@ -657,29 +671,33 @@ class _SubCatTileState extends State<_SubCatTile> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown:   (_) => setState(() => _pressed = true),
-      onTapUp:     (_) { setState(() => _pressed = false); widget.onTap(); },
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
       onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedScale(
-        scale:    _pressed ? 0.96 : 1.0,
+        scale: _pressed ? 0.96 : 1.0,
         duration: const Duration(milliseconds: 100),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 100),
           decoration: BoxDecoration(
-            color:        _pressed
-                ? widget.color.withValues(alpha: 0.12)
-                : Colors.white,
+            color:
+                _pressed ? widget.color.withValues(alpha: 0.12) : Colors.white,
             borderRadius: BorderRadius.circular(14),
-            border:       Border.all(
+            border: Border.all(
                 color: widget.color.withValues(alpha: _pressed ? 0.3 : 0.15),
                 width: 1.5),
-            boxShadow: _pressed ? [] : [
-              BoxShadow(
-                color:      Colors.black.withValues(alpha: 0.05),
-                blurRadius: 6,
-                offset:     const Offset(0, 2),
-              ),
-            ],
+            boxShadow: _pressed
+                ? []
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
@@ -687,7 +705,7 @@ class _SubCatTileState extends State<_SubCatTile> {
               Container(
                 padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
-                  color:        widget.color.withValues(alpha: 0.12),
+                  color: widget.color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(9),
                 ),
                 child: Icon(widget.sub.icon, color: widget.color, size: 17),
@@ -699,16 +717,15 @@ class _SubCatTileState extends State<_SubCatTile> {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.urbanist(
-                    fontSize:   11.5,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w600,
-                    color:      Colors.black87,
-                    height:     1.25,
+                    color: Colors.black87,
+                    height: 1.25,
                   ),
                 ),
               ),
               Icon(Icons.chevron_right_rounded,
-                  size: 14,
-                  color: widget.color.withValues(alpha: 0.5)),
+                  size: 14, color: widget.color.withValues(alpha: 0.5)),
             ],
           ),
         ),
@@ -732,31 +749,32 @@ class _BecomeProviderBannerState extends State<_BecomeProviderBanner> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown:   (_) => setState(() => _pressed = true),
-      onTapUp:     (_) {
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
         setState(() => _pressed = false);
-        Navigator.push(context,
+        Navigator.push(
+            context,
             MaterialPageRoute(
                 builder: (_) => const ServiceProviderRegisterPage()));
       },
       onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedScale(
-        scale:    _pressed ? 0.97 : 1.0,
+        scale: _pressed ? 0.97 : 1.0,
         duration: const Duration(milliseconds: 100),
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [Color(0xFF5C1F6B), Color(0xFF9C27B0)],
-              begin:  Alignment.centerLeft,
-              end:    Alignment.centerRight,
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
             ),
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color:      const Color(0xFF7B1FA2).withValues(alpha: 0.3),
+                color: const Color(0xFF7B1FA2).withValues(alpha: 0.3),
                 blurRadius: 12,
-                offset:     const Offset(0, 5),
+                offset: const Offset(0, 5),
               ),
             ],
           ),
@@ -765,7 +783,7 @@ class _BecomeProviderBannerState extends State<_BecomeProviderBanner> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color:        Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(Icons.storefront_rounded,
@@ -779,8 +797,8 @@ class _BecomeProviderBannerState extends State<_BecomeProviderBanner> {
                     Text(
                       'Devenir prestataire',
                       style: GoogleFonts.urbanist(
-                        color:      Colors.white,
-                        fontSize:   15,
+                        color: Colors.white,
+                        fontSize: 15,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -794,20 +812,20 @@ class _BecomeProviderBannerState extends State<_BecomeProviderBanner> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 7),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                 decoration: BoxDecoration(
-                  color:        Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20),
-                  border:       Border.all(
-                      color: Colors.white.withValues(alpha: 0.3)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.3)),
                 ),
                 child: Text(
                   "S'inscrire",
                   style: GoogleFonts.urbanist(
-                    color:      Colors.white,
+                    color: Colors.white,
                     fontWeight: FontWeight.bold,
-                    fontSize:   12,
+                    fontSize: 12,
                   ),
                 ),
               ),
@@ -834,30 +852,30 @@ class _EkbineBannerState extends State<_EkbineBanner> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown:   (_) => setState(() => _pressed = true),
-      onTapUp:     (_) {
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
         setState(() => _pressed = false);
-        Navigator.push(context,
-            MaterialPageRoute(builder: (_) => const EkHomeScreen()));
+        Navigator.push(
+            context, MaterialPageRoute(builder: (_) => const EkHomeScreen()));
       },
       onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedScale(
-        scale:    _pressed ? 0.97 : 1.0,
+        scale: _pressed ? 0.97 : 1.0,
         duration: const Duration(milliseconds: 100),
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [Color(0xFF00695C), Color(0xFF00BFA5)],
-              begin:  Alignment.centerLeft,
-              end:    Alignment.centerRight,
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
             ),
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color:      const Color(0xFF00695C).withValues(alpha: 0.35),
+                color: const Color(0xFF00695C).withValues(alpha: 0.35),
                 blurRadius: 14,
-                offset:     const Offset(0, 6),
+                offset: const Offset(0, 6),
               ),
             ],
           ),
@@ -866,7 +884,7 @@ class _EkbineBannerState extends State<_EkbineBanner> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color:        Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Icon(Icons.sim_card_rounded,
@@ -880,8 +898,8 @@ class _EkbineBannerState extends State<_EkbineBanner> {
                     Text(
                       'E-Kbine Services',
                       style: GoogleFonts.urbanist(
-                        color:      Colors.white,
-                        fontSize:   16,
+                        color: Colors.white,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -895,20 +913,20 @@ class _EkbineBannerState extends State<_EkbineBanner> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color:        Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20),
-                  border:       Border.all(
-                      color: Colors.white.withValues(alpha: 0.3)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.3)),
                 ),
                 child: Text(
                   'Ouvrir',
                   style: GoogleFonts.urbanist(
-                    color:      Colors.white,
+                    color: Colors.white,
                     fontWeight: FontWeight.bold,
-                    fontSize:   12.5,
+                    fontSize: 12.5,
                   ),
                 ),
               ),

@@ -4,28 +4,77 @@ const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https')
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
+const { defineSecret } = require('firebase-functions/params');
 const admin  = require('firebase-admin');
 const axios  = require('axios');
+const crypto = require('crypto');
+const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
+const { buildResetAccountPassword } = require('./passwordReset');
+const { buildManageProfessionalSubscription } = require('./professionalSubscriptions');
+const {
+  buildPublishMarketplaceProduct,
+  buildRepublishMarketplaceProduct,
+  buildExpireMarketplaceProducts,
+} = require('./marketplacePublishing');
+const {
+  DisabledExternalPharmacyGuardProvider,
+  syncProvider: syncPharmacyGuardProvider,
+} = require('./pharmacyGuards');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'europe-west1' });
 
 const db = admin.firestore();
 
+exports.publishMarketplaceProduct = onCall(
+  { maxInstances: 5 },
+  buildPublishMarketplaceProduct({ db, admin }),
+);
+exports.republishMarketplaceProduct = onCall(
+  { maxInstances: 5 },
+  buildRepublishMarketplaceProduct({ db, admin }),
+);
+exports.expireMarketplaceProducts = onSchedule(
+  { schedule: 'every day 02:15', timeZone: 'Africa/Abidjan', maxInstances: 1 },
+  buildExpireMarketplaceProducts({ db, admin }),
+);
+
+// Architecture prête pour une API officielle future. Tant qu'aucune source
+// autorisée n'est configurée, cette tâche ne modifie aucune donnée et conserve
+// intégralement les gardes manuelles/déjà synchronisées dans Firestore.
+exports.syncPharmacyGuards = onSchedule(
+  { schedule: '0 5,17 * * *', timeZone: 'Africa/Abidjan', maxInstances: 1 },
+  async () => {
+    const now = new Date();
+    const to = new Date(now.getTime() + 32 * 24 * 60 * 60 * 1000);
+    return syncPharmacyGuardProvider({
+      db,
+      admin,
+      provider: new DisabledExternalPharmacyGuardProvider(),
+      city: 'Abengourou',
+      from: now,
+      to,
+      logger: console,
+    });
+  },
+);
+
 // ── Environnement ───────────────────────────────────────────────────────────
-// Créez functions/.env avec :
-//   FEEXPAY_TOKEN=votre_token_feexpay
-//   FEEXPAY_WEBHOOK_SECRET=votre_secret_webhook
-const FEEXPAY_TOKEN          = process.env.FEEXPAY_TOKEN;
-const FEEXPAY_WEBHOOK_SECRET = process.env.FEEXPAY_WEBHOOK_SECRET;
+// Configurer FEEXPAY_TOKEN et FEEXPAY_WEBHOOK_SECRET dans Secret Manager.
+const FEEXPAY_TOKEN_SECRET = defineSecret('FEEXPAY_TOKEN');
+const FEEXPAY_WEBHOOK_SECRET = defineSecret('FEEXPAY_WEBHOOK_SECRET');
+const ANTHROPIC_API_KEY_SECRET = defineSecret('ANTHROPIC_API_KEY');
 const FEEXPAY_API_URL        = 'https://api.feexpay.me';
 const PROJECT_ID             = 'az-express-b0469';
 
 // Le secret est inclus dans l'URL du webhook → FeexPay le renvoie
 // sans avoir à vérifier une signature HMAC (que FeexPay ne supporte pas)
-const WEBHOOK_URL = FEEXPAY_WEBHOOK_SECRET
-  ? `https://europe-west1-${PROJECT_ID}.cloudfunctions.net/feexPayWebhook?wh_secret=${FEEXPAY_WEBHOOK_SECRET}`
-  : `https://europe-west1-${PROJECT_ID}.cloudfunctions.net/feexPayWebhook`;
+function feexpayWebhookUrl() {
+  const webhookSecret = FEEXPAY_WEBHOOK_SECRET.value();
+  return webhookSecret
+    ? `https://europe-west1-${PROJECT_ID}.cloudfunctions.net/feexPayWebhook?wh_secret=${webhookSecret}`
+    : `https://europe-west1-${PROJECT_ID}.cloudfunctions.net/feexPayWebhook`;
+}
 
 // ── Rate Limiting ────────────────────────────────────────────────────────────
 async function checkRateLimit(uid, action, maxRequests, windowSeconds) {
@@ -127,7 +176,9 @@ function feexpayOperatorCode(operator) {
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. INITIER UN PAIEMENT FEEXPAY (Callable Flutter)
 // ═══════════════════════════════════════════════════════════════════════════
-exports.initiateFeexPayPayment = onCall(async (request) => {
+exports.initiateFeexPayPayment = onCall({
+  secrets: [FEEXPAY_TOKEN_SECRET, FEEXPAY_WEBHOOK_SECRET],
+}, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
   }
@@ -190,7 +241,7 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
       {
         amount:       amount,
         id:           txId,
-        callback:     WEBHOOK_URL,
+        callback:     feexpayWebhookUrl(),
         description:  'Recharge wallet AZ Express',
         currency:     'XOF',
         pay_in_phone: String(phone).trim(),
@@ -198,7 +249,7 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
       },
       {
         headers: {
-          Authorization:  `Bearer ${FEEXPAY_TOKEN}`,
+          Authorization:  `Bearer ${FEEXPAY_TOKEN_SECRET.value()}`,
           'Content-Type': 'application/json',
         },
         timeout: 20000,
@@ -230,19 +281,22 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
 //    URL à configurer dans le dashboard FeexPay :
 //    https://europe-west1-az-express-b0469.cloudfunctions.net/feexPayWebhook
 // ═══════════════════════════════════════════════════════════════════════════
-exports.feexPayWebhook = onRequest(async (req, res) => {
+exports.feexPayWebhook = onRequest({
+  secrets: [FEEXPAY_WEBHOOK_SECRET],
+}, async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   // ── Vérification du token secret dans l'URL ──────────────────────────────
   // FeexPay renvoie l'URL telle quelle → le secret est dans ?wh_secret=
-  if (!FEEXPAY_WEBHOOK_SECRET) {
+  const webhookSecret = FEEXPAY_WEBHOOK_SECRET.value();
+  if (!webhookSecret) {
     console.error('FEEXPAY_WEBHOOK_SECRET manquant — webhook désactivé par sécurité');
     return res.status(503).json({ error: 'Service temporairement indisponible' });
   }
   const receivedSecret = req.query.wh_secret;
-  if (!receivedSecret || receivedSecret !== FEEXPAY_WEBHOOK_SECRET) {
+  if (!receivedSecret || receivedSecret !== webhookSecret) {
     console.error('Webhook : token secret invalide ou manquant');
     await logSecurityEvent('system', 'webhook_invalid_secret', 'high',
       `Tentative webhook avec secret invalide depuis ${req.ip}`);
@@ -292,20 +346,29 @@ exports.feexPayWebhook = onRequest(async (req, res) => {
   // ── Paiement réussi → crédit atomique du wallet ───────────────────────────
   if (['SUCCESSFUL', 'SUCCESS', 'COMPLETED', 'PAID'].includes(status)) {
     try {
-      await db.runTransaction(async (firestoreTx) => {
-        const colName    = collectionFor(tx.userType);
-        const clientRef  = db.collection(colName).doc(tx.userId);
+      const creditedNow = await db.runTransaction(async (firestoreTx) => {
+        // Re-read the payment record in this transaction. Concurrent webhooks
+        // must retry after the first credit and then observe it as completed.
+        const currentTxSnap = await firestoreTx.get(txRef);
+        if (!currentTxSnap.exists) throw new Error(`Transaction ${txId} introuvable`);
+        const currentTx = currentTxSnap.data();
+        if (currentTx.credited === true || currentTx.status === 'completed') {
+          return false;
+        }
+
+        const colName    = collectionFor(currentTx.userType);
+        const clientRef  = db.collection(colName).doc(currentTx.userId);
         const clientSnap = await firestoreTx.get(clientRef);
 
         if (!clientSnap.exists) {
-          throw new Error(`Utilisateur ${tx.userId} introuvable`);
+          throw new Error(`Utilisateur ${currentTx.userId} introuvable`);
         }
 
         const currentWallet = clientSnap.data().wallet || 0;
 
         // Crédit wallet
         firestoreTx.update(clientRef, {
-          wallet:         currentWallet + tx.amount,
+          wallet:         currentWallet + currentTx.amount,
           lastRechargeAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -320,17 +383,22 @@ exports.feexPayWebhook = onRequest(async (req, res) => {
         });
 
         // Historique wallet (sous-collection existante)
-        const histRef = db.collection(colName).doc(tx.userId)
+        const histRef = db.collection(colName).doc(currentTx.userId)
           .collection('wallet_transactions').doc();
         firestoreTx.set(histRef, {
           type:        'recharge',
-          amount:      tx.amount,
+          amount:      currentTx.amount,
           description: `Recharge FeexPay ${(tx.paymentMethod || '').toUpperCase()} — ${tx.amount} FCFA`,
           provider:    'FeexPay',
           txId:        txId,
           createdAt:   admin.firestore.FieldValue.serverTimestamp(),
         });
+        return true;
       });
+
+      if (!creditedNow) {
+        return res.status(200).json({ message: 'Déjà traité' });
+      }
 
       console.log(`✅ Wallet crédité : user=${tx.userId} +${tx.amount} FCFA`);
       await logAudit({ userId: tx.userId, userType: tx.userType, action: 'wallet_credited', targetId: txId, amount: tx.amount, status: 'success' });
@@ -343,11 +411,17 @@ exports.feexPayWebhook = onRequest(async (req, res) => {
   // ── Paiement échoué ou annulé ─────────────────────────────────────────────
   } else if (['FAILED', 'CANCELLED', 'CANCELED', 'REJECTED'].includes(status)) {
     const finalStatus = ['CANCELLED', 'CANCELED'].includes(status) ? 'cancelled' : 'failed';
-    await txRef.update({
-      status:        finalStatus,
-      validatedAt:   admin.firestore.FieldValue.serverTimestamp(),
-      failureReason: body.reason     || null,
-      feexpayPhone:  body.phoneNumber || null,
+    await db.runTransaction(async (firestoreTx) => {
+      const currentTxSnap = await firestoreTx.get(txRef);
+      if (!currentTxSnap.exists) return;
+      const currentTx = currentTxSnap.data();
+      if (currentTx.credited === true || currentTx.status === 'completed') return;
+      firestoreTx.update(txRef, {
+        status:        finalStatus,
+        validatedAt:   admin.firestore.FieldValue.serverTimestamp(),
+        failureReason: body.reason     || null,
+        feexpayPhone:  body.phoneNumber || null,
+      });
     });
     console.log(`Transaction ${txId} → ${finalStatus} (reason: ${body.reason})`);
   }
@@ -359,7 +433,9 @@ exports.feexPayWebhook = onRequest(async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 3. INITIER UN RETRAIT FEEXPAY (Callable Flutter)
 // ═══════════════════════════════════════════════════════════════════════════
-exports.initiateWithdrawal = onCall(async (request) => {
+exports.initiateWithdrawal = onCall({
+  secrets: [FEEXPAY_TOKEN_SECRET],
+}, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
   }
@@ -453,7 +529,7 @@ exports.initiateWithdrawal = onCall(async (request) => {
       },
       {
         headers: {
-          Authorization:  `Bearer ${FEEXPAY_TOKEN}`,
+          Authorization:  `Bearer ${FEEXPAY_TOKEN_SECRET.value()}`,
           'Content-Type': 'application/json',
         },
         timeout: 20000,
@@ -511,31 +587,35 @@ async function sendToToken(token, title, body, data = {}) {
 
 async function sendToMultipleTokens(tokens, title, body, data = {}, collectionHint = null) {
   if (!tokens?.length) return;
+  const uniqueTokens = [...new Set(tokens.filter(Boolean))];
   const dataStr = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
-  try {
-    const result = await admin.messaging().sendEachForMulticast({
-      tokens,
-      notification: { title, body },
-      android: { priority: 'high', notification: { sound: 'default' } },
-      apns:    { payload: { aps: { sound: 'default', badge: 1 } } },
-      data:    dataStr,
-    });
-    // Nettoyer les tokens invalides
-    result.responses.forEach((resp, i) => {
-      if (!resp.success) {
-        const code = resp.error?.code;
-        if (code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-registration-token') {
-          console.log(`Token invalide détecté — marqué pour nettoyage: ${tokens[i]?.slice(0, 20)}`);
-          // Nettoyage asynchrone non-bloquant
-          db.collection('invalid_fcm_tokens').add({
-            token: tokens[i], detectedAt: admin.firestore.FieldValue.serverTimestamp(),
-          }).catch(() => {});
+  for (let start = 0; start < uniqueTokens.length; start += 500) {
+    const tokenBatch = uniqueTokens.slice(start, start + 500);
+    try {
+      const result = await admin.messaging().sendEachForMulticast({
+        tokens: tokenBatch,
+        notification: { title, body },
+        android: { priority: 'high', notification: { sound: 'default' } },
+        apns:    { payload: { aps: { sound: 'default', badge: 1 } } },
+        data:    dataStr,
+      });
+      // Nettoyer les tokens invalides
+      result.responses.forEach((resp, i) => {
+        if (!resp.success) {
+          const code = resp.error?.code;
+          if (code === 'messaging/registration-token-not-registered' ||
+              code === 'messaging/invalid-registration-token') {
+            console.log(`Token invalide détecté — marqué pour nettoyage: ${tokenBatch[i]?.slice(0, 20)}`);
+            // Nettoyage asynchrone non-bloquant
+            db.collection('invalid_fcm_tokens').add({
+              token: tokenBatch[i], detectedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }).catch(() => {});
+          }
         }
-      }
-    });
-  } catch (err) {
-    console.warn('Multicast FCM error:', err.message);
+      });
+    } catch (err) {
+      console.warn('Multicast FCM error:', err.message);
+    }
   }
 }
 
@@ -547,7 +627,7 @@ function getServiceType(order) {
   if (st === 'boulangerie') return 'boulangerie';
   if (st === 'seller')      return 'marketplace';
   if (t  === 'pharmacie')   return 'pharmacie';
-  if (t  === 'courses')     return 'courses';
+  if (t  === 'courses' || t === 'shopping') return 'courses';
   return 'livraison';
 }
 
@@ -908,6 +988,30 @@ exports.notifyBoulangerieOnNewOrder = onDocumentCreated({ document: 'orders/{ord
   );
 });
 
+// Client — suivi de préparation des commandes boulangerie. Ces transitions
+// utilisent sellerStatus sans modifier le statut logistique de la commande.
+exports.notifyClientOnBoulangeriePreparation = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!before || !after || after.sellerType !== 'boulangerie') return;
+  if (before.sellerStatus === after.sellerStatus) return;
+
+  const notifications = {
+    preparing: { title: '🥐 Préparation en cours', body: 'La boulangerie prépare votre commande.' },
+    ready: { title: '✅ Commande prête', body: 'Votre commande est prête pour la livraison.' },
+  };
+  const notif = notifications[after.sellerStatus];
+  if (!notif || !after.clientId) return;
+
+  const clientDoc = await db.collection('clients').doc(after.clientId).get();
+  const token = clientDoc.data()?.fcmToken;
+  if (!token) return;
+
+  await sendToToken(token, notif.title, notif.body, {
+    type: 'order_update', orderId: event.params.orderId, status: after.sellerStatus,
+  });
+});
+
 exports.notifySellerOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'seller' || !order.sellerId) return;
@@ -968,6 +1072,9 @@ exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId
 const EK_CLIENT_MESSAGES = {
   assigned:         { title: '👤 Agent trouvé !',          body: 'Un agent a pris en charge votre demande.' },
   awaiting_deposit: { title: '💰 Dépôt requis',            body: 'Votre agent attend votre dépôt pour démarrer.' },
+  deposit_proof_sent: { title: '📨 Preuve envoyée',        body: 'Votre preuve est en attente de validation par l’agent.' },
+  deposit_confirmed: { title: '✅ Dépôt confirmé',         body: 'Votre agent peut maintenant commencer l’opération.' },
+  deposit_rejected: { title: '⚠️ Preuve rejetée',          body: 'Votre agent a rejeté la preuve. Vous pouvez en envoyer une nouvelle.' },
   in_progress:      { title: '⏳ Traitement en cours',     body: 'Votre agent traite votre dossier.' },
   proof_sent:       { title: '📄 Justificatif envoyé',     body: 'Votre agent a envoyé le justificatif. Vérifiez.' },
   completed:        { title: '✅ Transaction terminée',    body: 'Votre demande E-Kbine a été complétée avec succès.' },
@@ -1018,9 +1125,17 @@ exports.notifyEkAgentsOnNewOrder = onDocumentCreated({ document: 'ekbine_orders/
   const order = event.data.data();
   if (!order || order.status !== 'pending') return;
 
-  // Chercher les agents actifs (subscriptionActive ou trialActive)
+  // Chercher les agents en ligne — `isActive` n'a jamais existé dans le
+  // schéma réel de ekbine_agents (seuls isOnline/isVerified/isSuspended/
+  // subscriptionStatus existent), donc cette requête ne renvoyait jamais
+  // aucun document depuis l'origine : aucun agent n'a jamais reçu cette
+  // notification. `isOnline` est le champ réel déjà utilisé partout
+  // ailleurs (toggleAgentOnline, streamPendingForAgent). L'éligibilité
+  // complète (isVerified/isSuspended/subscriptionStatus) reste de toute
+  // façon revérifiée par isEligibleAgent() au moment de l'acceptation
+  // (ekbineAcceptOrder) — être notifié n'accorde aucun droit en soi.
   const agentsSnap = await db.collection('ekbine_agents')
-    .where('isActive', '==', true)
+    .where('isOnline', '==', true)
     .get();
 
   const tokens = agentsSnap.docs
@@ -1090,7 +1205,23 @@ exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/
 // Master Prompt 122 — quota CPU Cloud Run régional : fonction utilisateur
 // secondaire (Groupe B), réduction légère de maxInstances uniquement (cpu
 // inchangé, l'utilisateur attend une réponse en direct sur cet écran).
-exports.resetAccountPassword = onCall({ maxInstances: 2 }, async (request) => {
+exports.resetAccountPassword = onCall({ maxInstances: 2 }, buildResetAccountPassword({
+  db,
+  auth: admin.auth(),
+  fieldValue: admin.firestore.FieldValue,
+  hashSecret,
+  checkRateLimit,
+}));
+exports.manageProfessionalSubscription = onCall({ maxInstances: 5 },
+  buildManageProfessionalSubscription({
+    db,
+    auth: admin.auth(),
+    timestamp: admin.firestore.Timestamp,
+    fieldValue: admin.firestore.FieldValue,
+  }));
+/* Ancienne implementation desactivee: elle ne garantissait pas une resolution
+ * unique du numero verifie vers l'UID Firebase Auth cible.
+const resetAccountPasswordLegacy = async (request) => {
   // Le caller doit être authentifié via vérification téléphonique (OTP)
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Authentification requise');
@@ -1178,6 +1309,7 @@ exports.resetAccountPassword = onCall({ maxInstances: 2 }, async (request) => {
   await admin.auth().updateUser(uid, { password: String(newValue) });
   return { success: true };
 });
+*/
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1559,6 +1691,166 @@ exports.ekClientConfirmOrder = onCall(async (request) => {
   return { success: true };
 });
 
+exports.notifyEkAgentOnDepositProof = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!before || !after || before.status === 'deposit_proof_sent' || after.status !== 'deposit_proof_sent') return;
+  if (!after.agentId) return;
+  const agent = await db.collection('ekbine_agents').doc(after.agentId).get();
+  const token = agent.data()?.fcmToken;
+  if (!token) return;
+  await sendToToken(token, '📨 Preuve de dépôt reçue', 'Vérifiez la preuve avant de confirmer la réception.', {
+    type: 'ek_deposit_proof', orderId: event.params.orderId,
+  });
+});
+
+// E-Kbine deposit gate. These callables own every transition before service
+// execution so a client cannot self-confirm and an agent cannot start early.
+exports.ekbineAcceptOrder = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
+  const orderId = request.data?.orderId;
+  if (typeof orderId !== 'string') throw new HttpsError('invalid-argument', 'orderId manquant');
+  const agentId = request.auth.uid;
+  const orderRef = db.collection('ekbine_orders').doc(orderId);
+  const agentRef = db.collection('ekbine_agents').doc(agentId);
+  await db.runTransaction(async (tx) => {
+    const [orderSnap, agentSnap] = await Promise.all([tx.get(orderRef), tx.get(agentRef)]);
+    if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
+    if (!agentSnap.exists) throw new HttpsError('permission-denied', 'Agent introuvable');
+    const order = orderSnap.data();
+    const agent = agentSnap.data();
+    if (order.status !== 'pending') throw new HttpsError('failed-precondition', 'Commande non disponible');
+    if (!isEligibleAgent(agent)) throw new HttpsError('permission-denied', 'Agent non éligible');
+    const depositAccount = selectDepositAccount(agent, order.operator);
+    if (!depositAccount) throw new HttpsError('failed-precondition', 'Aucun numéro valide pour cet opérateur');
+    tx.update(orderRef, {
+      agentId,
+      agentName: String(agent.name || 'Agent E-Kbine'),
+      agentPhone: String(agent.phone || ''),
+      // Immutable snapshots: instructions cannot change when an agent edits profile.
+      agentDepositAccountId: depositAccount.id,
+      agentDepositNumber: depositAccount.phoneNumber,
+      agentDepositOperator: order.operator,
+      status: 'awaiting_deposit',
+      assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+  return { success: true };
+});
+
+// Only the authenticated agent can change deposit accounts. Historical
+// operatorNumbers are retained; this callable migrates them on first save.
+exports.ekbineUpdateDepositAccounts = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
+  const incoming = request.data?.depositAccounts;
+  if (!Array.isArray(incoming) || incoming.length > 20) {
+    throw new HttpsError('invalid-argument', 'Liste de numéros invalide');
+  }
+  const validOperators = new Set(['orange', 'mtn', 'moov', 'wave']);
+  const agentRef = db.collection('ekbine_agents').doc(request.auth.uid);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(agentRef);
+    if (!snap.exists) throw new HttpsError('not-found', 'Agent introuvable');
+    const seen = new Set();
+    const primaryByOperator = new Set();
+    const normalized = incoming.map((raw) => {
+      const operator = String(raw?.operator || '').toLowerCase();
+      const phoneNumber = String(raw?.phoneNumber || '').replace(/[^0-9]/g, '').replace(/^225/, '');
+      if (!validOperators.has(operator) || phoneNumber.length < 8 || phoneNumber.length > 12) {
+        throw new HttpsError('invalid-argument', 'Numéro ou opérateur invalide');
+      }
+      const key = `${operator}:${phoneNumber}`;
+      if (seen.has(key)) throw new HttpsError('already-exists', 'Numéro de dépôt en double');
+      seen.add(key);
+      const isActive = raw?.isActive !== false;
+      const isPrimary = raw?.isPrimary === true && isActive;
+      if (isPrimary && primaryByOperator.has(operator)) {
+        throw new HttpsError('failed-precondition', 'Un seul numéro principal actif par opérateur');
+      }
+      if (isPrimary) primaryByOperator.add(operator);
+      return {
+        id: typeof raw?.id === 'string' && raw.id.length <= 80 ? raw.id : crypto.randomUUID(),
+        operator, phoneNumber, label: typeof raw?.label === 'string' ? raw.label.trim().slice(0, 60) : null,
+        isPrimary, isActive, updatedAt: admin.firestore.Timestamp.now(),
+      };
+    });
+    if (!normalized.some((account) => account.isActive)) {
+      throw new HttpsError('failed-precondition', 'Au moins un numéro actif est requis');
+    }
+    const legacy = snap.data().operatorNumbers || {};
+    for (const [operator, number] of Object.entries(legacy)) {
+      if (!normalized.some((account) => account.operator === operator && account.phoneNumber === String(number).replace(/[^0-9]/g, '').replace(/^225/, ''))) {
+        normalized.push({ id: `legacy_${operator}`, operator, phoneNumber: String(number).replace(/[^0-9]/g, '').replace(/^225/, ''), label: 'Historique', isPrimary: false, isActive: true, updatedAt: admin.firestore.Timestamp.now() });
+      }
+    }
+    tx.update(agentRef, { depositAccounts: normalized, depositAccountsUpdatedAt: admin.firestore.FieldValue.serverTimestamp() });
+  });
+  return { success: true };
+});
+
+exports.ekbineSubmitDepositProof = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
+  const { orderId, depositProofUrl, transactionReference } = request.data || {};
+  if (typeof orderId !== 'string' || typeof depositProofUrl !== 'string' || depositProofUrl.length > 2048) {
+    throw new HttpsError('invalid-argument', 'Preuve de dépôt invalide');
+  }
+  const ref = db.collection('ekbine_orders').doc(orderId);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('not-found', 'Commande introuvable');
+    const order = snap.data();
+    if (order.clientId !== request.auth.uid) throw new HttpsError('permission-denied', 'Non autorisé');
+    if (!['awaiting_deposit', 'deposit_rejected'].includes(order.status)) {
+      throw new HttpsError('failed-precondition', 'La preuve ne peut pas être envoyée maintenant');
+    }
+    tx.update(ref, {
+      depositProofUrl,
+      transactionReference: typeof transactionReference === 'string' ? transactionReference.trim().slice(0, 100) : null,
+      depositRejectionReason: admin.firestore.FieldValue.delete(),
+      status: 'deposit_proof_sent',
+      depositProofSentAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+  return { success: true };
+});
+
+exports.ekbineAgentDepositAction = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
+  const { orderId, action, rejectionReason } = request.data || {};
+  if (typeof orderId !== 'string' || !['confirm', 'reject', 'start'].includes(action)) {
+    throw new HttpsError('invalid-argument', 'Action de dépôt invalide');
+  }
+  const ref = db.collection('ekbine_orders').doc(orderId);
+  const agentRef = db.collection('ekbine_agents').doc(request.auth.uid);
+  let alreadyConfirmed = false;
+  await db.runTransaction(async (tx) => {
+    const [snap, agentSnap] = await Promise.all([tx.get(ref), tx.get(agentRef)]);
+    if (!snap.exists || !agentSnap.exists) throw new HttpsError('not-found', 'Commande ou agent introuvable');
+    const order = snap.data();
+    if (order.agentId !== request.auth.uid || !isEligibleAgent(agentSnap.data())) {
+      throw new HttpsError('permission-denied', 'Agent non autorisé');
+    }
+    if (action === 'confirm') {
+      if (order.status === 'deposit_confirmed') { alreadyConfirmed = true; return; }
+      if (order.status !== 'deposit_proof_sent' || !order.depositProofUrl) {
+        throw new HttpsError('failed-precondition', 'Aucune preuve à confirmer');
+      }
+      tx.update(ref, { status: 'deposit_confirmed', depositConfirmedAt: admin.firestore.FieldValue.serverTimestamp() });
+    } else if (action === 'reject') {
+      if (order.status !== 'deposit_proof_sent') throw new HttpsError('failed-precondition', 'Preuve non rejetable');
+      tx.update(ref, {
+        status: 'deposit_rejected',
+        depositRejectionReason: typeof rejectionReason === 'string' ? rejectionReason.trim().slice(0, 300) : 'Preuve non validée',
+        depositRejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } else {
+      if (order.status !== 'deposit_confirmed') throw new HttpsError('failed-precondition', 'Dépôt non confirmé');
+      tx.update(ref, { status: 'in_progress', startedAt: admin.firestore.FieldValue.serverTimestamp() });
+    }
+  });
+  return { success: true, alreadyConfirmed };
+});
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SCHEDULER — Annulation automatique des commandes sans livreur
@@ -1812,7 +2104,12 @@ exports.enforceOrderRateLimit = onDocumentCreated('orders/{orderId}', async (eve
 // dispatch tourne désormais uniquement côté serveur (Admin SDK, ignore les
 // règles). Réutilise la même logique que les outils AZ IA (functions/dispatch.js).
 // ═══════════════════════════════════════════════════════════════════════════
-const { dispatchOrder, calculateCommission } = require('./dispatch');
+const {
+  dispatchOrder,
+  calculateCommission,
+  DispatchError,
+  assertValidDispatchPoint,
+} = require('./dispatch');
 
 exports.dispatchOrderToDriver = onCall(async (request) => {
   if (!request.auth) {
@@ -1847,13 +2144,33 @@ exports.dispatchOrderToDriver = onCall(async (request) => {
 
   const lat    = Number(order.latitude ?? order.deliveryLatitude ?? 0);
   const lng    = Number(order.longitude ?? order.deliveryLongitude ?? 0);
+  const destLat = Number(order.destLat ?? 0);
+  const destLng = Number(order.destLng ?? 0);
   const budget = Number(order.budget || 0);
+  const pickupCityId = order.pickupCityId;
+  const cityResolutionStatus = order.cityResolutionStatus;
 
-  const result = await dispatchOrder(db, admin, {
-    orderId:  String(orderId),
-    lat, lng, budget,
-    ...(typeof radiusKm === 'number' ? { radiusKm } : {}),
-  });
+  let result;
+  try {
+    assertValidDispatchPoint(lat, lng, 'collecte');
+    assertValidDispatchPoint(destLat, destLng, 'livraison');
+    result = await dispatchOrder(db, admin, {
+      orderId: String(orderId),
+      lat,
+      lng,
+      pickupCityId,
+      cityResolutionStatus,
+      budget,
+      ...(typeof radiusKm === 'number' ? { radiusKm } : {}),
+    });
+  } catch (error) {
+    if (error instanceof DispatchError) {
+      throw new HttpsError('failed-precondition', error.message, {
+        dispatchCode: error.code,
+      });
+    }
+    throw error;
+  }
 
   return result; // { dispatched: boolean, mode: 'assigned'|'broadcast'|'none' }
 });
@@ -1964,13 +2281,21 @@ exports.staleDriverCleanupCheck = buildStaleDriverCleanup({ db, admin, onSchedul
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AZ IA — Assistant conversationnel (Claude)
-// Créez functions/.env avec :
-//   ANTHROPIC_API_KEY=votre_clé_anthropic
+// Configurer ANTHROPIC_API_KEY dans Secret Manager.
 // ═══════════════════════════════════════════════════════════════════════════
 const createAzIa = require('./azia');
 const azIa       = createAzIa({
   db, admin, onCall, onSchedule, checkRateLimit, logAudit, HttpsError,
-  axios, feexpayOperatorCode, FEEXPAY_TOKEN, FEEXPAY_API_URL, WEBHOOK_URL,
+  axios, feexpayOperatorCode,
+  FEEXPAY_TOKEN: FEEXPAY_TOKEN_SECRET,
+  FEEXPAY_API_URL,
+  WEBHOOK_URL: feexpayWebhookUrl,
+  azIaChatSecrets: [
+    ANTHROPIC_API_KEY_SECRET,
+    FEEXPAY_TOKEN_SECRET,
+    FEEXPAY_WEBHOOK_SECRET,
+  ],
+  aiConfirmActionSecrets: [FEEXPAY_TOKEN_SECRET, FEEXPAY_WEBHOOK_SECRET],
   sendToToken,
 });
 exports.azIaChat                       = azIa.azIaChat;
@@ -1994,6 +2319,30 @@ exports.requestPropertyVisit          = realEstate.requestPropertyVisit;
 exports.respondToVisitRequest         = realEstate.respondToVisitRequest;
 exports.notifyAgentOnVisitRequest     = realEstate.notifyAgentOnVisitRequest;
 exports.notifyClientOnVisitUpdate     = realEstate.notifyClientOnVisitUpdate;
+
+// ÉVÉNEMENTIEL — réservations et messagerie
+const { createEventNotificationFunctions } = require('./eventNotifications');
+const eventNotifications = createEventNotificationFunctions({
+  db, onDocumentCreated, onDocumentUpdated, sendToToken,
+});
+exports.notifyAdminsOnEventProviderApplication =
+  eventNotifications.notifyAdminsOnEventProviderApplication;
+exports.notifyProvidersOnEventReservation =
+  eventNotifications.notifyProvidersOnEventReservation;
+exports.notifyClientOnEventReservationUpdate =
+  eventNotifications.notifyClientOnEventReservationUpdate;
+exports.notifyEventChatRecipient =
+  eventNotifications.notifyEventChatRecipient;
+exports.updateEventProviderRating =
+  eventNotifications.updateEventProviderRating;
+
+// GPS privé/confidentialité réelle V2 — real_estate_private_locations,
+// real_estate_location_access (voir functions/realEstateLocation.js).
+const { createRealEstateLocationFunctions } = require('./realEstateLocation');
+const realEstateLocation = createRealEstateLocationFunctions({
+  db, admin, onCall, HttpsError, logAudit, checkRateLimit,
+});
+exports.upsertRealEstateLocation = realEstateLocation.upsertRealEstateLocation;
 
 
 // ═══════════════════════════════════════════════════════════════════════════

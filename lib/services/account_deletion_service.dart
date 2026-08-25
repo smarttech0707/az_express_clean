@@ -26,28 +26,28 @@ class AccountDeletionService {
 
   /// Rôle applicatif -> nom de la collection Firestore correspondante.
   static const Map<String, String> roleCollections = {
-    'client':             'clients',
-    'livreur':            'livreurs',
-    'seller':             'sellers',
-    'restaurant':         'restaurants',
-    'pharmacie':          'pharmacies',
-    'boulangerie':        'boulangeries',
-    'ekbine_agent':       'ekbine_agents',
-    'real_estate_agent':  'real_estate_agents',
-    'fleet_owner':        'fleet_owners',
+    'client': 'clients',
+    'livreur': 'livreurs',
+    'seller': 'sellers',
+    'restaurant': 'restaurants',
+    'pharmacie': 'pharmacies',
+    'boulangerie': 'boulangeries',
+    'ekbine_agent': 'ekbine_agents',
+    'real_estate_agent': 'real_estate_agents',
+    'fleet_owner': 'fleet_owners',
   };
 
   /// Libellés français affichés dans les sélecteurs de rôle (app + web).
   static const Map<String, String> roleLabels = {
-    'client':             'Client',
-    'livreur':            'Livreur',
-    'seller':             'Vendeur Marketplace',
-    'restaurant':         'Restaurant',
-    'pharmacie':          'Pharmacie',
-    'boulangerie':        'Boulangerie',
-    'ekbine_agent':       'Agent Ekbine',
-    'real_estate_agent':  'Agent immobilier',
-    'fleet_owner':        'Patron de flotte',
+    'client': 'Client',
+    'livreur': 'Livreur',
+    'seller': 'Vendeur Marketplace',
+    'restaurant': 'Restaurant',
+    'pharmacie': 'Pharmacie',
+    'boulangerie': 'Boulangerie',
+    'ekbine_agent': 'Agent Ekbine',
+    'real_estate_agent': 'Agent immobilier',
+    'fleet_owner': 'Patron de flotte',
   };
 
   /// Enregistre une demande de suppression de compte — étape 1 (« demande
@@ -67,10 +67,13 @@ class AccountDeletionService {
     }
     final phone = contactPhone.trim();
     if (phone.isEmpty) {
-      throw ArgumentError('Un numéro de téléphone est requis pour identifier la demande.');
+      throw ArgumentError(
+          'Un numéro de téléphone est requis pour identifier la demande.');
     }
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    await FirebaseFirestore.instance.collection('account_deletion_requests').add({
+    await FirebaseFirestore.instance
+        .collection('account_deletion_requests')
+        .add({
       'role': role,
       'docId': uid,
       'uid': uid,
@@ -103,7 +106,10 @@ class AccountDeletionService {
     final cred = EmailAuthProvider.credential(email: email, password: password);
     await user.reauthenticateWithCredential(cred);
 
-    await FirebaseFirestore.instance.collection('clients').doc(user.uid).delete();
+    await FirebaseFirestore.instance
+        .collection('clients')
+        .doc(user.uid)
+        .delete();
     await user.delete();
   }
 }

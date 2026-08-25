@@ -22,15 +22,15 @@ class FeexPayService {
     if (operator.trim().isEmpty) throw ArgumentError('Opérateur requis');
 
     final callable = _fn.httpsCallable('initiateFeexPayPayment');
-    final result   = await callable.call({
-      'amount':   amount,
-      'phone':    phone.trim(),
+    final result = await callable.call({
+      'amount': amount,
+      'phone': phone.trim(),
       'operator': operator.trim(),
       'userType': userType,
     });
 
-    final data       = Map<String, dynamic>.from(result.data as Map);
-    final txId       = data['txId']?.toString();
+    final data = Map<String, dynamic>.from(result.data as Map);
+    final txId = data['txId']?.toString();
     if (txId == null || txId.isEmpty) {
       throw Exception('Réponse invalide du serveur de paiement');
     }
@@ -58,9 +58,9 @@ class FeexPayService {
     String userName = '',
   }) async {
     final callable = _fn.httpsCallable('initiateWithdrawal');
-    final result   = await callable.call({
-      'amount':   amount,
-      'phone':    phone,
+    final result = await callable.call({
+      'amount': amount,
+      'phone': phone,
       'operator': operator,
       'userType': userType,
       'userName': userName,

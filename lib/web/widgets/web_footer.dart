@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -22,15 +22,15 @@ class WebFooter extends StatelessWidget {
 
   static const _pages = [
     ('Comment ça marche', '/comment-ca-marche'),
-    ('Commerçants',       '/commercants'),
-    ('Livreurs',          '/livreurs'),
-    ('À propos',          '/a-propos'),
-    ('Contact',           '/contact'),
+    ('Commerçants', '/commercants'),
+    ('Livreurs', '/livreurs'),
+    ('À propos', '/a-propos'),
+    ('Contact', '/contact'),
   ];
 
   static const _legal = [
     ('Politique de confidentialité', '/confidentialite'),
-    ('Conditions d\'utilisation',    '/conditions'),
+    ('Conditions d\'utilisation', '/conditions'),
   ];
 
   @override
@@ -52,7 +52,8 @@ class WebFooter extends StatelessWidget {
           ),
           // Bottom bar
           Container(
-            height: 1, color: kDivider,
+            height: 1,
+            color: kDivider,
           ),
           Container(
             padding: EdgeInsets.symmetric(
@@ -93,7 +94,11 @@ class WebFooter extends StatelessWidget {
       children: [
         Expanded(flex: 3, child: _brand(context)),
         const SizedBox(width: 60),
-        Expanded(flex: 2, child: _col('Services', _services.map((s) => (s, '')).toList(), context, isLink: false)),
+        Expanded(
+            flex: 2,
+            child: _col(
+                'Services', _services.map((s) => (s, '')).toList(), context,
+                isLink: false)),
         const SizedBox(width: 40),
         Expanded(flex: 2, child: _col('Plateforme', _pages.toList(), context)),
         const SizedBox(width: 40),
@@ -131,7 +136,8 @@ class WebFooter extends StatelessWidget {
             const SizedBox(width: 10),
             Text(
               'AZ Express',
-              style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: kWhite),
+              style: GoogleFonts.inter(
+                  fontSize: 22, fontWeight: FontWeight.w800, color: kWhite),
             ),
           ],
         ),
@@ -153,7 +159,8 @@ class WebFooter extends StatelessWidget {
             children: [
               const Icon(Icons.location_on_rounded, color: kOrange, size: 16),
               const SizedBox(width: 6),
-              Text('Abengourou, Côte d\'Ivoire', style: kBodyStyle(color: kTextMuted, size: 13)),
+              Text('Abengourou, Côte d\'Ivoire',
+                  style: kBodyStyle(color: kTextMuted, size: 13)),
             ],
           ),
         ),
@@ -161,24 +168,29 @@ class WebFooter extends StatelessWidget {
     );
   }
 
-  Widget _col(String title, List<(String, String)> items, BuildContext context, {bool isLink = true}) {
+  Widget _col(String title, List<(String, String)> items, BuildContext context,
+      {bool isLink = true}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: kWhite)),
+        Text(title,
+            style: GoogleFonts.inter(
+                fontSize: 14, fontWeight: FontWeight.w700, color: kWhite)),
         const SizedBox(height: 16),
         ...items.map((item) => Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: isLink && item.$2.isNotEmpty
-              ? MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    onTap: () => context.go(item.$2),
-                    child: Text(item.$1, style: kBodyStyle(color: kTextMuted, size: 13)),
-                  ),
-                )
-              : Text(item.$1, style: kBodyStyle(color: kTextMuted, size: 13)),
-        )),
+              padding: const EdgeInsets.only(bottom: 10),
+              child: isLink && item.$2.isNotEmpty
+                  ? MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => context.go(item.$2),
+                        child: Text(item.$1,
+                            style: kBodyStyle(color: kTextMuted, size: 13)),
+                      ),
+                    )
+                  : Text(item.$1,
+                      style: kBodyStyle(color: kTextMuted, size: 13)),
+            )),
       ],
     );
   }
@@ -201,7 +213,8 @@ class WebFooter extends StatelessWidget {
         onTap: () => launchUrl(Uri.parse(url)),
         child: Container(
           margin: const EdgeInsets.only(left: 8),
-          width: 36, height: 36,
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(
             color: kNavyCard,
             borderRadius: BorderRadius.circular(8),
@@ -213,4 +226,3 @@ class WebFooter extends StatelessWidget {
     );
   }
 }
-
