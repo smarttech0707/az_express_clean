@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'admin_partner_account_service.dart';
 import '../../services/subscription_service.dart';
 import '../../utils/partner_location_validator.dart';
 import '../../widgets/partner_location_input.dart';
@@ -360,12 +361,11 @@ class _SellerFormPageState extends State<_SellerFormPage> {
         uid = widget.docId!;
       } else {
         // Créer compte Firebase Auth
-        final credential =
-            await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        uid = await AdminPartnerAccountService.create(
+          kind: 'seller',
           email: "$phone@az-seller.ci",
           password: pass,
         );
-        uid = credential.user!.uid;
       }
 
       await FirebaseFirestore.instance.collection('sellers').doc(uid).set({

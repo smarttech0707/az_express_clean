@@ -41,9 +41,16 @@ void main() {
   });
 
   test('le flag accepte uniquement super ou sub explicitement actif', () {
-    expect(adminDevelopmentRoleAllowed({'role': 'super'}), isTrue);
     expect(
-      adminDevelopmentRoleAllowed({'role': 'sub', 'isActive': true}),
+      adminDevelopmentRoleAllowed({'role': 'super', 'isActive': true}),
+      isTrue,
+    );
+    expect(
+      adminDevelopmentRoleAllowed({
+        'role': 'sub',
+        'isActive': true,
+        'permissions': <String>[],
+      }),
       isTrue,
     );
     expect(
@@ -59,19 +66,9 @@ void main() {
       (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: AdminDashboard(
-          adminData: {
-            'uid': 'admin-test',
-            'role': 'sub',
-            'isActive': true,
-            'permissions': <String>[],
-          },
-          twoFactorBypassed: true,
-        ),
+        home: Scaffold(body: AdminTwoFactorBypassBanner()),
       ),
     );
-    await tester.pump();
-
     expect(find.byKey(const Key('admin-2fa-debug-bypass-banner')), findsOne);
     expect(find.text('2FA DÉSACTIVÉE — MODE DEV'), findsOne);
   });

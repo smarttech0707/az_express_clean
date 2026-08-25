@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
 const { buildResetAccountPassword } = require('./passwordReset');
 const { buildManageProfessionalSubscription } = require('./professionalSubscriptions');
+const { buildManageAdminPartnerAccount } = require('./adminPartnerAccounts');
 const {
   buildPublishMarketplaceProduct,
   buildRepublishMarketplaceProduct,
@@ -25,6 +26,15 @@ admin.initializeApp();
 setGlobalOptions({ region: 'europe-west1' });
 
 const db = admin.firestore();
+
+exports.manageAdminPartnerAccount = onCall(
+  { maxInstances: 2 },
+  buildManageAdminPartnerAccount({
+    db,
+    auth: admin.auth(),
+    fieldValue: admin.firestore.FieldValue,
+  }),
+);
 
 exports.publishMarketplaceProduct = onCall(
   { maxInstances: 5 },

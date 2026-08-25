@@ -90,6 +90,28 @@ test('zones_livraison: un utilisateur ne peut pas écrire', async () => {
   }));
 });
 
+test('admin deny-by-default: rôle absent, inconnu ou inactif refusé', async () => {
+  await seed(async (db) => {
+    await db.doc('sellers/s1').set({ name: 'S' });
+    await db.doc('admins/missing-role').set({ isActive: true, permissions: [] });
+    await db.doc('admins/unknown-role').set({ role: 'client', isActive: true, permissions: [] });
+    await db.doc('admins/inactive').set({ role: 'super', isActive: false });
+  });
+  await assertFails(asAdmin('missing-role').doc('sellers/s1').get());
+  await assertFails(asAdmin('unknown-role').doc('sellers/s1').get());
+  await assertFails(asAdmin('inactive').doc('sellers/s1').get());
+});
+
+test('permissions: sous-admin sans permission vendeurs refusé, super autorisé', async () => {
+  await seed(async (db) => {
+    await db.doc('sellers/s1').set({ name: 'S' });
+    await db.doc('admins/sub1').set({ role: 'sub', isActive: true, permissions: [] });
+    await db.doc('admins/super1').set({ role: 'super', isActive: true });
+  });
+  await assertFails(asAdmin('sub1').doc('sellers/s1').get());
+  await assertSucceeds(asAdmin('super1').doc('sellers/s1').get());
+});
+
 function asClient(uid) {
   return testEnv.authenticatedContext(uid, { firebase: { sign_in_provider: 'password' } }).firestore();
 }
@@ -483,7 +505,7 @@ test('admins: un super-admin PEUT modifier le rôle d\'un autre admin', async ()
 });
 
 test('admins: un admin peut mettre à jour son propre champ OTP', async () => {
-  await seed((db) => db.doc('admins/admin1').set({ role: 'sub', isActive: true }));
+  await seed((db) => db.doc('admins/admin1').set({ role: 'sub', isActive: true, permissions: [] }));
   await assertSucceeds(asAdmin('admin1').doc('admins/admin1').update({ otpCode: '123456' }));
 });
 
@@ -1132,7 +1154,7 @@ test('event: le client ne peut pas activer ni tarifer son plan', async () => {
 
 test('event: un administrateur peut gérer le plan et les dates protégées', async () => {
   await seed(async (db) => {
-    await db.doc('admins/admin1').set({ isActive: true, role: 'admin' });
+    await db.doc('admins/admin1').set({ isActive: true, role: 'super' });
     await db.doc('event_providers/event-owner').set({
       ownerId: 'event-owner',
       status: 'approved',

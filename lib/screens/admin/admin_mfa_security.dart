@@ -8,16 +8,67 @@ class AdminAccessDecision {
   const AdminAccessDecision.rejected(String code) : this._(false, code);
 }
 
+const adminPermissionKeys = <String>{
+  'livreurs',
+  'commandes',
+  'gains',
+  'classement',
+  'carte',
+  'zones',
+  'demandes',
+  'restaurants',
+  'demandes_resto',
+  'demandes_vendeurs',
+  'demandes_boulangeries',
+  'demandes_pharmacies',
+  'pharmacies',
+  'boutique',
+  'recharges',
+  'flottes',
+  'locations',
+  'residences',
+  'services',
+  'eventiel',
+  'tricycle',
+  'sos',
+  'anti_fraude',
+  'cash_marchand',
+  'support',
+  'ai_dashboard',
+  'boulangeries',
+  'ekbine',
+  'purger',
+};
+
+bool isAdminSessionValid({
+  required String? currentUid,
+  required bool isAnonymous,
+  required String expectedUid,
+  required Map<String, dynamic>? adminData,
+}) =>
+    currentUid == expectedUid &&
+    !isAnonymous &&
+    validateAdminRecord(adminData).allowed;
+
 AdminAccessDecision validateAdminRecord(Map<String, dynamic>? data) {
   if (data == null) {
     return const AdminAccessDecision.rejected('admin-role-rejected');
   }
-  final role = data['role'] as String? ?? 'super';
+  if (data['isActive'] != true) {
+    return const AdminAccessDecision.rejected('admin-role-rejected');
+  }
+  final role = data['role'] as String?;
   if (role != 'super' && role != 'sub') {
     return const AdminAccessDecision.rejected('admin-role-rejected');
   }
-  if (role == 'sub' && data['isActive'] == false) {
-    return const AdminAccessDecision.rejected('admin-role-rejected');
+  if (role == 'sub') {
+    final permissions = data['permissions'];
+    if (permissions is! List ||
+        permissions.any((permission) =>
+            permission is! String ||
+            !adminPermissionKeys.contains(permission))) {
+      return const AdminAccessDecision.rejected('admin-role-rejected');
+    }
   }
   return const AdminAccessDecision.allowed();
 }

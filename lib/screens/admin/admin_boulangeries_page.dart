@@ -5,7 +5,7 @@ import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'admin_partner_account_service.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/subscription_service.dart';
@@ -208,19 +208,13 @@ class AdminBoulangeriesPage extends StatelessWidget {
                         if (existing == null) {
                           // Créer compte Firebase Auth
                           final email = '$phone@az-boulangerie.ci';
-                          final cred = await FirebaseAuth.instance
-                              .createUserWithEmailAndPassword(
-                                  email: email, password: pass);
-                          // Restaurer la session anonyme
-                          await FirebaseAuth.instance.signOut();
-                          try {
-                            await FirebaseAuth.instance.signInAnonymously();
-                          } catch (_) {}
+                          final uid = await AdminPartnerAccountService.create(
+                            kind: 'boulangerie',
+                            email: email,
+                            password: pass,
+                          );
 
-                          await db
-                              .collection('boulangeries')
-                              .doc(cred.user!.uid)
-                              .set({
+                          await db.collection('boulangeries').doc(uid).set({
                             'name': name,
                             'address': address,
                             'phone': phone,
@@ -244,18 +238,11 @@ class AdminBoulangeriesPage extends StatelessWidget {
                             'lng': double.parse(lngCtrl.text.trim()),
                           };
                           if (pass.isNotEmpty) {
-                            await FirebaseAuth.instance
-                                .signInWithEmailAndPassword(
-                                    email: '$phone@az-boulangerie.ci',
-                                    password: pass)
-                                .then((_) async {
-                              await FirebaseAuth.instance.currentUser
-                                  ?.updatePassword(pass);
-                              await FirebaseAuth.instance.signOut();
-                              try {
-                                await FirebaseAuth.instance.signInAnonymously();
-                              } catch (_) {}
-                            }).catchError((_) {});
+                            await AdminPartnerAccountService.updatePassword(
+                              kind: 'boulangerie',
+                              uid: existing.id,
+                              password: pass,
+                            );
                           }
                           await db
                               .collection('boulangeries')

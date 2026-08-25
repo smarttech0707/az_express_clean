@@ -31,9 +31,25 @@ service firebase.storage {
       return request.auth.uid == uid;
     }
 
+    function isActiveAdmin() {
+      let doc = firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data;
+      return isRealUser()
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid))
+        && doc.isActive == true
+        && doc.role in ['super', 'sub']
+        && (doc.role == 'super' || doc.permissions is list);
+    }
+
+    // Toute règle Storage non encore associée à une permission explicite est
+    // réservée au super-admin (refus par défaut pour les sous-admins).
     function isAdmin() {
-      return isAuth()
-        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+      let doc = firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data;
+      return isActiveAdmin() && doc.role == 'super';
+    }
+
+    function hasAdminPermission(permission) {
+      let doc = firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data;
+      return isActiveAdmin() && (doc.role == 'super' || permission in doc.permissions);
     }
 
     // Vérifie que l'utilisateur est client ou livreur d'une commande orders/

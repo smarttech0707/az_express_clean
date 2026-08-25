@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -44,6 +46,8 @@ import 'admin_commissions_page.dart';
 import 'admin_live_tracking_page.dart';
 import 'admin_security_dashboard.dart';
 import 'admin_ai_dashboard.dart';
+import 'admin_login.dart';
+import 'admin_mfa_security.dart';
 import '../../event/screens/admin_event_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
@@ -60,16 +64,51 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  bool get _isSuper => (widget.adminData['role'] as String?) != 'sub';
-  List<String> get _perms =>
-      List<String>.from(widget.adminData['permissions'] ?? []);
+  late Map<String, dynamic> _adminData = Map.of(widget.adminData);
+  StreamSubscription<User?>? _authSubscription;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+      _adminSubscription;
+  bool _closingForInvalidSession = false;
+
+  bool get _isSuper => _adminData['role'] == 'super';
+  List<String> get _perms => List<String>.from(_adminData['permissions'] ?? []);
   bool _has(String key) => _isSuper || _perms.contains(key);
-  late String? _photoUrl = widget.adminData['photoUrl'] as String?;
+  late String? _photoUrl = _adminData['photoUrl'] as String?;
   OverlayEntry? _twoFactorWarningOverlay;
 
   @override
   void initState() {
     super.initState();
+    final expectedUid = widget.adminData['uid'] as String?;
+    if (expectedUid == null || !validateAdminRecord(_adminData).allowed) {
+      _closeInvalidSession();
+    } else {
+      _authSubscription =
+          FirebaseAuth.instance.authStateChanges().listen((user) {
+        if (!isAdminSessionValid(
+          currentUid: user?.uid,
+          isAnonymous: user?.isAnonymous ?? true,
+          expectedUid: expectedUid,
+          adminData: _adminData,
+        )) {
+          _closeInvalidSession();
+        }
+      });
+      _adminSubscription = FirebaseFirestore.instance
+          .collection('admins')
+          .doc(expectedUid)
+          .snapshots()
+          .listen((snapshot) {
+        final data = snapshot.data();
+        if (!snapshot.exists || !validateAdminRecord(data).allowed) {
+          _closeInvalidSession();
+          return;
+        }
+        if (mounted) {
+          setState(() => _adminData = {'uid': expectedUid, ...data!});
+        }
+      }, onError: (_) => _closeInvalidSession());
+    }
     if (widget.twoFactorBypassed) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _twoFactorWarningOverlay != null) return;
@@ -86,7 +125,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       });
     }
     NotificationService.registerTapHandler((type, orderId, status) {
-      if (!mounted) return;
+      if (!mounted || _closingForInvalidSession) return;
       if (type == 'admin_new_driver') {
         Navigator.push(context,
             MaterialPageRoute(builder: (_) => const DriverRequestsPage()));
@@ -101,10 +140,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
+    _adminSubscription?.cancel();
     _twoFactorWarningOverlay?.remove();
     _twoFactorWarningOverlay = null;
     NotificationService.unregisterTapHandler();
     super.dispose();
+  }
+
+  void _closeInvalidSession() {
+    if (_closingForInvalidSession) return;
+    _closingForInvalidSession = true;
+    NotificationService.unregisterTapHandler();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AdminLogin()),
+        (_) => false,
+      );
+    });
   }
 
   // Master Prompt 135 — bouton Déconnexion manquant sur ce tableau de bord
@@ -131,7 +185,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final adminName = (widget.adminData['name'] as String?) ?? '';
+    if (_closingForInvalidSession) return const SizedBox.shrink();
+    final adminName = (_adminData['name'] as String?) ?? '';
     final isSuper = _isSuper;
 
     return Scaffold(
@@ -175,7 +230,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             SinglePhotoEditor(
                               photoUrl: _photoUrl,
                               storagePath:
-                                  'admin_photos/${widget.adminData['uid']}/profile.jpg',
+                                  'admin_photos/${_adminData['uid']}/profile.jpg',
                               size: 48,
                               placeholderIcon: isSuper
                                   ? Icons.admin_panel_settings_rounded
@@ -183,14 +238,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               onUploaded: (url) async {
                                 await FirebaseFirestore.instance
                                     .collection('admins')
-                                    .doc(widget.adminData['uid'])
+                                    .doc(_adminData['uid'])
                                     .update({'photoUrl': url});
                                 if (mounted) setState(() => _photoUrl = url);
                               },
                               onDeleted: () async {
                                 await FirebaseFirestore.instance
                                     .collection('admins')
-                                    .doc(widget.adminData['uid'])
+                                    .doc(_adminData['uid'])
                                     .update({'photoUrl': FieldValue.delete()});
                                 if (mounted) setState(() => _photoUrl = null);
                               },

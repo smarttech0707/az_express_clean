@@ -8,17 +8,30 @@ service cloud.firestore {
     function uid() {
       return request.auth.uid;
     }
-    function isAdmin() {
-      return isAuth()
+    function adminDoc() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+    function isActiveAdmin() {
+      return isRealUser()
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('isActive', true) != false;
+        && adminDoc().isActive == true
+        && adminDoc().role in ['super', 'sub']
+        && (adminDoc().role == 'super' || adminDoc().permissions is list);
+    }
+    // Les anciens appels génériques restent réservés au super-admin.
+    // Un sous-admin doit toujours passer par hasAdminPermission().
+    function isAdmin() {
+      return isActiveAdmin() && adminDoc().role == 'super';
+    }
+    function hasAdminPermission(permission) {
+      return isActiveAdmin()
+        && (adminDoc().role == 'super' || permission in adminDoc().permissions);
     }
     function isOwner(userId) {
       return isAuth() && uid() == userId;
     }
     function isSuperAdmin() {
-      return isAdmin()
-        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('role', 'super') != 'sub';
+      return isAdmin();
     }
     function isRealUser() {
       return isAuth() && request.auth.token.firebase.sign_in_provider != 'anonymous';
@@ -68,7 +81,7 @@ service cloud.firestore {
       // Tout admin peut mettre à jour uniquement ses propres champs OTP (2FA
       // login) et sa propre photo de profil (Master Prompt "photos manquantes").
       allow write: if isSuperAdmin()
-        || (isOwner(adminId) && isAdmin()
+        || (isOwner(adminId) && isActiveAdmin()
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['otpHash', 'otpCode', 'otpExpiry', 'otpAttempts', 'fcmToken', 'photoUrl']));
     }
@@ -145,9 +158,9 @@ service cloud.firestore {
     }
 
     match /sellers/{sellerId} {
-      allow read:   if isOwner(sellerId) || isAdmin();
-      allow create: if isAdmin();
-      allow update: if isAdmin() || (isOwner(sellerId)
+      allow read:   if isOwner(sellerId) || hasAdminPermission('demandes_vendeurs');
+      allow create: if hasAdminPermission('demandes_vendeurs');
+      allow update: if hasAdminPermission('demandes_vendeurs') || (isOwner(sellerId)
         && unchanged('wallet')
         && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
         && unchanged('vipStatus') && unchanged('vipExpiresAt')
@@ -305,7 +318,7 @@ service cloud.firestore {
         && request.resource.data.sourceType in ['manual', 'external', 'partner']
         && request.resource.data.isVerified is bool
         && request.resource.data.isActive is bool;
-      allow delete: if isAdmin();
+      allow delete: if hasAdminPermission('demandes_vendeurs');
     }
 
     // Contrairement à driver_requests/seller_requests/restaurant_requests

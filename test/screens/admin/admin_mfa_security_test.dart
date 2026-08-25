@@ -4,12 +4,19 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('contrôle du rôle après MFA', () {
     test('accepte un super Admin valide', () {
-      expect(validateAdminRecord({'role': 'super'}).allowed, isTrue);
+      expect(
+        validateAdminRecord({'role': 'super', 'isActive': true}).allowed,
+        isTrue,
+      );
     });
 
     test('accepte un sous-Admin actif', () {
       expect(
-        validateAdminRecord({'role': 'sub', 'isActive': true}).allowed,
+        validateAdminRecord({
+          'role': 'sub',
+          'isActive': true,
+          'permissions': <String>[],
+        }).allowed,
         isTrue,
       );
     });
@@ -26,7 +33,28 @@ void main() {
     });
 
     test('rejette un rôle inconnu', () {
-      expect(validateAdminRecord({'role': 'client'}).allowed, isFalse);
+      expect(
+        validateAdminRecord({'role': 'client', 'isActive': true}).allowed,
+        isFalse,
+      );
+    });
+
+    test('rejette un rôle absent', () {
+      expect(validateAdminRecord({'isActive': true}).allowed, isFalse);
+    });
+
+    test('rejette un sous-Admin sans isActive explicite', () {
+      expect(
+        validateAdminRecord({'role': 'sub', 'permissions': []}).allowed,
+        isFalse,
+      );
+    });
+
+    test('rejette un sous-Admin sans permissions valides', () {
+      expect(
+        validateAdminRecord({'role': 'sub', 'isActive': true}).allowed,
+        isFalse,
+      );
     });
   });
 
@@ -46,6 +74,47 @@ void main() {
 
     test('configuration Android non autorisée', () {
       expect(adminMfaErrorMessage('app-not-authorized'), contains('Android'));
+    });
+  });
+
+  group('garde réactive du dashboard', () {
+    const valid = {'role': 'super', 'isActive': true};
+
+    test('ferme après signOut', () {
+      expect(
+          isAdminSessionValid(
+              currentUid: null,
+              isAnonymous: false,
+              expectedUid: 'a1',
+              adminData: valid),
+          isFalse);
+    });
+    test('ferme si la session devient anonyme', () {
+      expect(
+          isAdminSessionValid(
+              currentUid: 'a1',
+              isAnonymous: true,
+              expectedUid: 'a1',
+              adminData: valid),
+          isFalse);
+    });
+    test('ferme si isActive devient false', () {
+      expect(
+          isAdminSessionValid(
+              currentUid: 'a1',
+              isAnonymous: false,
+              expectedUid: 'a1',
+              adminData: {...valid, 'isActive': false}),
+          isFalse);
+    });
+    test('ferme si le document Admin est supprimé', () {
+      expect(
+          isAdminSessionValid(
+              currentUid: 'a1',
+              isAnonymous: false,
+              expectedUid: 'a1',
+              adminData: null),
+          isFalse);
     });
   });
 

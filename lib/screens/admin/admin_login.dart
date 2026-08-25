@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../auth/generic_forgot_password_page.dart';
 import 'admin_otp_page.dart';
 import 'admin_dashboard.dart';
+import 'admin_mfa_security.dart';
 import '../../theme/app_theme.dart';
 import '../../services/email_verification_resend_guard.dart';
 import '../../widgets/admin_email_verification_prompt.dart';
@@ -34,7 +35,8 @@ bool adminDevelopmentBypassAllowed({
 @visibleForTesting
 bool adminDevelopmentRoleAllowed(Map<String, dynamic> adminData) {
   final role = adminData['role'] as String?;
-  return role == 'super' || (role == 'sub' && adminData['isActive'] == true);
+  return adminData['isActive'] == true &&
+      (role == 'super' || (role == 'sub' && adminData['permissions'] is List));
 }
 
 class AdminLogin extends StatefulWidget {
@@ -127,10 +129,8 @@ class _AdminLoginState extends State<AdminLogin> {
         'uid': cred.user!.uid,
         ...adminDoc.data()!,
       };
-      adminData['role'] ??= 'super';
-
-      // Compte sous-admin désactivé
-      if (adminData['role'] == 'sub' && adminData['isActive'] == false) {
+      final access = validateAdminRecord(adminData);
+      if (!access.allowed) {
         await FirebaseAuth.instance.signOut();
         try {
           await FirebaseAuth.instance.signInAnonymously();
