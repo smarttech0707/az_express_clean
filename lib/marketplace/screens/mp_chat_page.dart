@@ -75,11 +75,12 @@ class _MpChatPageState extends State<MpChatPage> {
       if (mounted) setState(() => _playPos = p);
     });
     _player.onPlayerComplete.listen((_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _playingMsgId = null;
           _playPos = Duration.zero;
         });
+      }
     });
   }
 
@@ -259,6 +260,11 @@ class _MpChatPageState extends State<MpChatPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFEDE7DC),
       appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Retour',
+          onPressed: () => Navigator.of(context).maybePop(),
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
         backgroundColor: kMpOrange,
         foregroundColor: Colors.white,
         elevation: 0,

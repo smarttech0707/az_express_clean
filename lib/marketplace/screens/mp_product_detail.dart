@@ -41,6 +41,11 @@ class _MpProductDetailState extends State<MpProductDetail> {
         slivers: [
           // ── Gallery ─────────────────────────────────────────────────────────
           SliverAppBar(
+            leading: IconButton(
+              tooltip: 'Retour',
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
             expandedHeight: 320,
             pinned: true,
             backgroundColor: Colors.white,

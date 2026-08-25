@@ -47,6 +47,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
   final List<String> _originalUrls = [];
   final _picker = ImagePicker();
   bool _uploading = false;
+  bool _discardConfirmed = false;
 
   bool get _isEdit => widget.editProduct != null;
 
@@ -69,6 +70,83 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
       _existingUrls.addAll(p.images);
       _originalUrls.addAll(p.images);
     }
+    for (final controller in [
+      _titleCtrl,
+      _descCtrl,
+      _priceCtrl,
+      _batteryCtrl,
+    ]) {
+      controller.addListener(_onFormChanged);
+    }
+  }
+
+  void _onFormChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool get _hasUnsavedChanges {
+    final p = widget.editProduct;
+    if (p == null) {
+      return _titleCtrl.text.trim().isNotEmpty ||
+          _descCtrl.text.trim().isNotEmpty ||
+          _priceCtrl.text.trim().isNotEmpty ||
+          _batteryCtrl.text.trim().isNotEmpty ||
+          _brand.isNotEmpty ||
+          _storage != null ||
+          _ram != null ||
+          _color != null ||
+          _newImages.isNotEmpty;
+    }
+    return _titleCtrl.text != p.title ||
+        _descCtrl.text != p.description ||
+        _priceCtrl.text != p.price.toString() ||
+        _batteryCtrl.text != (p.battery ?? '') ||
+        _category != p.category ||
+        _condition != p.condition ||
+        _brand != p.brand ||
+        _storage != p.storage ||
+        _ram != p.ram ||
+        _color != p.color ||
+        _city != p.city ||
+        _newImages.isNotEmpty ||
+        !_sameUrls(_existingUrls, _originalUrls);
+  }
+
+  bool _sameUrls(List<String> first, List<String> second) {
+    if (first.length != second.length) return false;
+    for (var i = 0; i < first.length; i++) {
+      if (first[i] != second[i]) return false;
+    }
+    return true;
+  }
+
+  Future<bool> _confirmDiscard() async {
+    if (!_hasUnsavedChanges) return true;
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Abandonner cette annonce ?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Continuer la saisie'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Abandonner'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _requestPop() async {
+    if (!await _confirmDiscard() || !mounted) return;
+    setState(() => _discardConfirmed = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    Navigator.of(context).maybePop();
   }
 
   @override
@@ -191,303 +269,316 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kMpBg,
-      appBar: AppBar(
-        title: Text(
-          _isEdit ? 'Modifier l\'annonce' : 'Nouvelle annonce',
-          style: GoogleFonts.urbanist(
-              fontSize: 16, fontWeight: FontWeight.w700, color: kMpText),
+    return PopScope(
+      canPop: !_hasUnsavedChanges || _discardConfirmed,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (!didPop) await _requestPop();
+      },
+      child: Scaffold(
+        backgroundColor: kMpBg,
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: 'Retour',
+            onPressed: _requestPop,
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+          title: Text(
+            _isEdit ? 'Modifier l\'annonce' : 'Nouvelle annonce',
+            style: GoogleFonts.urbanist(
+                fontSize: 16, fontWeight: FontWeight.w700, color: kMpText),
+          ),
+          backgroundColor: Colors.white,
+          foregroundColor: kMpText,
+          elevation: 0,
+          centerTitle: true,
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: kMpText,
-        elevation: 0,
-        centerTitle: true,
-      ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Photos
-              _Section(
-                title: 'Photos',
-                child: Column(
-                  children: [
-                    if (_existingUrls.isNotEmpty || _newImages.isNotEmpty)
-                      SizedBox(
-                        height: 90,
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          children: [
-                            ..._existingUrls
-                                .asMap()
-                                .entries
-                                .map((e) => _ImgThumb(
-                                      networkUrl: e.value,
-                                      onRemove: () => setState(
-                                          () => _existingUrls.removeAt(e.key)),
-                                    )),
-                            ..._newImages
-                                .asMap()
-                                .entries
-                                .map((e) => _ImgThumbLocal(
-                                      xfile: e.value,
-                                      onRemove: () => setState(
-                                          () => _newImages.removeAt(e.key)),
-                                    )),
-                          ],
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-                    GestureDetector(
-                      onTap: _pickImages,
-                      child: Container(
-                        height: 52,
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                              color: kMpOrange, style: BorderStyle.solid),
-                          borderRadius: BorderRadius.circular(12),
-                          color: kMpOrange.withValues(alpha: 0.05),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.add_photo_alternate_rounded,
-                                color: kMpOrange),
-                            const SizedBox(width: 8),
-                            Text('Ajouter des photos',
-                                style: GoogleFonts.urbanist(
-                                    color: kMpOrange,
-                                    fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_existingUrls.length + _newImages.length}/6 photos  •  Première photo = couverture',
-                      style:
-                          GoogleFonts.urbanist(fontSize: 11, color: kMpMuted),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Category
-              _Section(
-                title: 'Catégorie',
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: mpCategories
-                      .map((c) => _SelChip(
-                            label: '${c['emoji']} ${c['label']}',
-                            selected: _category == c['id'],
-                            onTap: () => setState(() {
-                              _category = c['id']!;
-                              _brand = '';
-                            }),
-                          ))
-                      .toList(),
-                ),
-              ),
-
-              // Brand
-              _Section(
-                title: 'Marque',
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: brandsForCategory(_category)
-                      .map((b) => _SelChip(
-                            label: b,
-                            selected: _brand == b,
-                            onTap: () => setState(() => _brand = b),
-                          ))
-                      .toList(),
-                ),
-              ),
-
-              // Condition
-              _Section(
-                title: 'État du produit',
-                child: Row(
-                  children: mpConditions
-                      .map((c) => Expanded(
-                            child: GestureDetector(
-                              onTap: () => setState(
-                                  () => _condition = c['id'] as String),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 150),
-                                margin: const EdgeInsets.only(right: 8),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                                decoration: BoxDecoration(
-                                  color: _condition == c['id']
-                                      ? Color(c['color']! as int)
-                                      : Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: _condition == c['id']
-                                        ? Color(c['color']! as int)
-                                        : kMpDivider,
-                                  ),
-                                ),
-                                child: Column(children: [
-                                  Text(
-                                    c['id'] == 'new'
-                                        ? '🌟'
-                                        : c['id'] == 'like_new'
-                                            ? '✨'
-                                            : '💡',
-                                    style: const TextStyle(fontSize: 20),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    c['label']! as String,
-                                    style: GoogleFonts.urbanist(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: _condition == c['id']
-                                          ? Colors.white
-                                          : kMpText,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ]),
-                              ),
-                            ),
-                          ))
-                      .toList(),
-                ),
-              ),
-
-              // Title
-              _Section(
-                title: 'Titre de l\'annonce',
-                child: TextFormField(
-                  controller: _titleCtrl,
-                  validator: (v) =>
-                      (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
-                  decoration: _deco(
-                      'Ex: iPhone 13 Pro Max 256Go Blanc', Icons.title_rounded),
-                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                ),
-              ),
-
-              // Price
-              _Section(
-                title: 'Prix (FCFA)',
-                child: TextFormField(
-                  controller: _priceCtrl,
-                  keyboardType: TextInputType.number,
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Obligatoire';
-                    final n = int.tryParse(v.trim().replaceAll(' ', ''));
-                    if (n == null || n <= 0) return 'Prix invalide';
-                    return null;
-                  },
-                  decoration: _deco('Ex: 150000', Icons.payments_rounded),
-                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                ),
-              ),
-
-              // Description
-              _Section(
-                title: 'Description',
-                child: TextFormField(
-                  controller: _descCtrl,
-                  maxLines: 4,
-                  validator: (v) =>
-                      (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
-                  decoration: _deco(
-                      'Décrivez l\'état, les accessoires inclus...',
-                      Icons.description_rounded),
-                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                ),
-              ),
-
-              // Specs (optional)
-              _Section(
-                title: 'Spécifications (optionnel)',
-                child: Column(
-                  children: [
-                    _dropRow('Stockage', storageOptions, _storage,
-                        (v) => setState(() => _storage = v)),
-                    const SizedBox(height: 10),
-                    _dropRow('RAM', ramOptions, _ram,
-                        (v) => setState(() => _ram = v)),
-                    const SizedBox(height: 10),
-                    _dropRow('Couleur', deviceColors, _color,
-                        (v) => setState(() => _color = v)),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _batteryCtrl,
-                      decoration: _deco('Batterie (ex: 4500 mAh)',
-                          Icons.battery_full_rounded),
-                      style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                    ),
-                  ],
-                ),
-              ),
-
-              // City
-              _Section(
-                title: 'Ville',
-                child: DropdownButtonFormField<String>(
-                  initialValue: _city,
-                  items: mpCities
-                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                      .toList(),
-                  onChanged: (v) => setState(() => _city = v ?? _city),
-                  decoration: _deco('Votre ville', Icons.location_city_rounded),
-                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Submit
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ScaleButton(
-                  onPressed: _uploading ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kMpOrange,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    elevation: 4,
-                  ),
-                  child: _uploading
-                      ? const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2),
-                            ),
-                            SizedBox(width: 10),
-                            Text('Publication en cours...'),
-                          ],
-                        )
-                      : Text(
-                          _isEdit ? 'Mettre à jour' : 'Publier l\'annonce',
-                          style: GoogleFonts.urbanist(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+        body: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Photos
+                _Section(
+                  title: 'Photos',
+                  child: Column(
+                    children: [
+                      if (_existingUrls.isNotEmpty || _newImages.isNotEmpty)
+                        SizedBox(
+                          height: 90,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: [
+                              ..._existingUrls
+                                  .asMap()
+                                  .entries
+                                  .map((e) => _ImgThumb(
+                                        networkUrl: e.value,
+                                        onRemove: () => setState(() =>
+                                            _existingUrls.removeAt(e.key)),
+                                      )),
+                              ..._newImages
+                                  .asMap()
+                                  .entries
+                                  .map((e) => _ImgThumbLocal(
+                                        xfile: e.value,
+                                        onRemove: () => setState(
+                                            () => _newImages.removeAt(e.key)),
+                                      )),
+                            ],
                           ),
                         ),
+                      const SizedBox(height: 10),
+                      GestureDetector(
+                        onTap: _pickImages,
+                        child: Container(
+                          height: 52,
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: kMpOrange, style: BorderStyle.solid),
+                            borderRadius: BorderRadius.circular(12),
+                            color: kMpOrange.withValues(alpha: 0.05),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.add_photo_alternate_rounded,
+                                  color: kMpOrange),
+                              const SizedBox(width: 8),
+                              Text('Ajouter des photos',
+                                  style: GoogleFonts.urbanist(
+                                      color: kMpOrange,
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_existingUrls.length + _newImages.length}/6 photos  •  Première photo = couverture',
+                        style:
+                            GoogleFonts.urbanist(fontSize: 11, color: kMpMuted),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 40),
-            ],
+
+                // Category
+                _Section(
+                  title: 'Catégorie',
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: mpCategories
+                        .map((c) => _SelChip(
+                              label: '${c['emoji']} ${c['label']}',
+                              selected: _category == c['id'],
+                              onTap: () => setState(() {
+                                _category = c['id']!;
+                                _brand = '';
+                              }),
+                            ))
+                        .toList(),
+                  ),
+                ),
+
+                // Brand
+                _Section(
+                  title: 'Marque',
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: brandsForCategory(_category)
+                        .map((b) => _SelChip(
+                              label: b,
+                              selected: _brand == b,
+                              onTap: () => setState(() => _brand = b),
+                            ))
+                        .toList(),
+                  ),
+                ),
+
+                // Condition
+                _Section(
+                  title: 'État du produit',
+                  child: Row(
+                    children: mpConditions
+                        .map((c) => Expanded(
+                              child: GestureDetector(
+                                onTap: () => setState(
+                                    () => _condition = c['id'] as String),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  margin: const EdgeInsets.only(right: 8),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: _condition == c['id']
+                                        ? Color(c['color']! as int)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: _condition == c['id']
+                                          ? Color(c['color']! as int)
+                                          : kMpDivider,
+                                    ),
+                                  ),
+                                  child: Column(children: [
+                                    Text(
+                                      c['id'] == 'new'
+                                          ? '🌟'
+                                          : c['id'] == 'like_new'
+                                              ? '✨'
+                                              : '💡',
+                                      style: const TextStyle(fontSize: 20),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      c['label']! as String,
+                                      style: GoogleFonts.urbanist(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: _condition == c['id']
+                                            ? Colors.white
+                                            : kMpText,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ]),
+                                ),
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
+
+                // Title
+                _Section(
+                  title: 'Titre de l\'annonce',
+                  child: TextFormField(
+                    controller: _titleCtrl,
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
+                    decoration: _deco('Ex: iPhone 13 Pro Max 256Go Blanc',
+                        Icons.title_rounded),
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                  ),
+                ),
+
+                // Price
+                _Section(
+                  title: 'Prix (FCFA)',
+                  child: TextFormField(
+                    controller: _priceCtrl,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Obligatoire';
+                      final n = int.tryParse(v.trim().replaceAll(' ', ''));
+                      if (n == null || n <= 0) return 'Prix invalide';
+                      return null;
+                    },
+                    decoration: _deco('Ex: 150000', Icons.payments_rounded),
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                  ),
+                ),
+
+                // Description
+                _Section(
+                  title: 'Description',
+                  child: TextFormField(
+                    controller: _descCtrl,
+                    maxLines: 4,
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
+                    decoration: _deco(
+                        'Décrivez l\'état, les accessoires inclus...',
+                        Icons.description_rounded),
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                  ),
+                ),
+
+                // Specs (optional)
+                _Section(
+                  title: 'Spécifications (optionnel)',
+                  child: Column(
+                    children: [
+                      _dropRow('Stockage', storageOptions, _storage,
+                          (v) => setState(() => _storage = v)),
+                      const SizedBox(height: 10),
+                      _dropRow('RAM', ramOptions, _ram,
+                          (v) => setState(() => _ram = v)),
+                      const SizedBox(height: 10),
+                      _dropRow('Couleur', deviceColors, _color,
+                          (v) => setState(() => _color = v)),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _batteryCtrl,
+                        decoration: _deco('Batterie (ex: 4500 mAh)',
+                            Icons.battery_full_rounded),
+                        style:
+                            GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // City
+                _Section(
+                  title: 'Ville',
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _city,
+                    items: mpCities
+                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                        .toList(),
+                    onChanged: (v) => setState(() => _city = v ?? _city),
+                    decoration:
+                        _deco('Votre ville', Icons.location_city_rounded),
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Submit
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ScaleButton(
+                    onPressed: _uploading ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kMpOrange,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 4,
+                    ),
+                    child: _uploading
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2),
+                              ),
+                              SizedBox(width: 10),
+                              Text('Publication en cours...'),
+                            ],
+                          )
+                        : Text(
+                            _isEdit ? 'Mettre à jour' : 'Publier l\'annonce',
+                            style: GoogleFonts.urbanist(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 40),
+              ],
+            ),
           ),
         ),
       ),
