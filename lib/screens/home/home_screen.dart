@@ -224,7 +224,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     } catch (_) {}
     if (!mounted) return;
-    NotificationService().saveToken(user.uid, 'clients');
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null || currentUser.isAnonymous) {
+      Navigator.push(context, AppTransitions.fadeSlide(const ClientAuthPage()));
+      return;
+    }
+    NotificationService().saveToken(currentUser.uid, 'clients');
     Navigator.push(context, AppTransitions.fadeSlide(const MainDashboard()));
   }
 

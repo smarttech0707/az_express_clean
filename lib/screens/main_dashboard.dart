@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../l10n/app_text.dart';
@@ -10,6 +11,7 @@ import 'client/client_map.dart';
 import 'client/livraison_screen.dart';
 import 'client/suivi_commande.dart';
 import 'client/profil_client.dart';
+import 'auth/client_auth_page.dart';
 
 class MainDashboard extends StatefulWidget {
   const MainDashboard({super.key});
@@ -17,6 +19,13 @@ class MainDashboard extends StatefulWidget {
   @override
   State<MainDashboard> createState() => _MainDashboardState();
 }
+
+@visibleForTesting
+bool isAuthenticatedClientSession({
+  required bool hasUser,
+  required bool isAnonymous,
+}) =>
+    hasUser && !isAnonymous;
 
 class _MainDashboardState extends State<MainDashboard>
     with TickerProviderStateMixin {
@@ -59,31 +68,45 @@ class _MainDashboardState extends State<MainDashboard>
   Widget build(BuildContext context) {
     final text = AppText(AppLanguage.of(context).locale);
 
-    return PopScope(
-      canPop: _currentIndex == 0,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        setState(() => _currentIndex = 0);
-      },
-      child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.dark,
-        child: Scaffold(
-          extendBody: true,
-          body: IndexedStack(
-            index: _currentIndex,
-            children: List.generate(
-              4,
-              (i) => _pages[i] ?? const SizedBox.shrink(),
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      initialData: FirebaseAuth.instance.currentUser,
+      builder: (context, snapshot) {
+        final user = snapshot.data;
+        if (!isAuthenticatedClientSession(
+          hasUser: user != null,
+          isAnonymous: user?.isAnonymous ?? true,
+        )) {
+          return const ClientAuthPage();
+        }
+
+        return PopScope(
+          canPop: _currentIndex == 0,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            setState(() => _currentIndex = 0);
+          },
+          child: AnnotatedRegion<SystemUiOverlayStyle>(
+            value: SystemUiOverlayStyle.dark,
+            child: Scaffold(
+              extendBody: true,
+              body: IndexedStack(
+                index: _currentIndex,
+                children: List.generate(
+                  4,
+                  (i) => _pages[i] ?? const SizedBox.shrink(),
+                ),
+              ),
+              bottomNavigationBar: _FloatingNav(
+                currentIndex: _currentIndex,
+                text: text,
+                onTap: _navigate,
+                onCommander: _openCommander,
+              ),
             ),
           ),
-          bottomNavigationBar: _FloatingNav(
-            currentIndex: _currentIndex,
-            text: text,
-            onTap: _navigate,
-            onCommander: _openCommander,
-          ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

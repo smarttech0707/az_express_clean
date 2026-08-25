@@ -7,7 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../l10n/app_text.dart';
 import '../../services/account_deletion_service.dart';
 import '../../services/auth_service.dart';
-import '../home/home_screen.dart';
+import '../auth/client_auth_page.dart';
 import '../support/support_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/fade_slide_in.dart';
@@ -886,7 +886,7 @@ class _ProfilClientState extends State<ProfilClient> {
               } catch (_) {}
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const HomeScreen()),
+                  MaterialPageRoute(builder: (_) => const ClientAuthPage()),
                   (route) => false,
                 );
               }
@@ -970,12 +970,10 @@ class _ProfilClientState extends State<ProfilClient> {
       await FirebaseAuth.instance.signInAnonymously();
 
       if (!context.mounted) return;
-      // Retour à l'accueil
-      Navigator.of(context).popUntil((route) => route.isFirst);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Compte supprimé avec succès'),
-        backgroundColor: Colors.red,
-      ));
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const ClientAuthPage()),
+        (route) => false,
+      );
     } on FirebaseAuthException catch (e) {
       if (!context.mounted) return;
       String msg = 'Erreur lors de la suppression';

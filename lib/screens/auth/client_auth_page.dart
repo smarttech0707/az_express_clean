@@ -241,8 +241,9 @@ class _ClientAuthPageState extends State<ClientAuthPage>
   }
 
   void _goToDashboard() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) NotificationService().saveToken(uid, 'clients');
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return;
+    NotificationService().saveToken(user.uid, 'clients');
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const MainDashboard()),
       (route) => false,
