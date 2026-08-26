@@ -113,7 +113,12 @@ const _catItems = <(String, String, Color)>[
 ];
 
 class LivraisonScreen extends StatefulWidget {
-  const LivraisonScreen({super.key});
+  final bool startStartupServices;
+
+  const LivraisonScreen({
+    super.key,
+    this.startStartupServices = true,
+  });
   @override
   State<LivraisonScreen> createState() => _LivraisonScreenState();
 }
@@ -121,14 +126,8 @@ class LivraisonScreen extends StatefulWidget {
 class _LivraisonScreenState extends State<LivraisonScreen>
     with TickerProviderStateMixin {
   // ── Animations ─────────────────────────────────────────────────────────────
-  late final AnimationController _routeAnim = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 500),
-  );
-  late final AnimationController _pulseCtrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1200),
-  );
+  late final AnimationController _routeAnim;
+  late final AnimationController _pulseCtrl;
 
   // ── Carte ──────────────────────────────────────────────────────────────────
   GoogleMapController? _mapCtrl;
@@ -232,9 +231,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   @override
   void initState() {
     super.initState();
+    _routeAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
     _loadIcons();
-    _getGPS(_ActiveField.departure, false);
-    _listenWallet();
+    if (widget.startStartupServices) {
+      _getGPS(_ActiveField.departure, false);
+      _listenWallet();
+    }
     _depFocus.addListener(_onDepFocusChange);
     _destFocus.addListener(_onDestFocusChange);
   }
