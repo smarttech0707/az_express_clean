@@ -864,9 +864,15 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                 zoomControlsEnabled: false,
                 mapToolbarEnabled: false,
                 compassEnabled: false,
-                onMapCreated: (c) => _mapCtrl = c,
+                onMapCreated: (c) {
+                  _mapCtrl = c;
+                  debugPrint('[MAP_DIAG] onMapCreated OK');
+                },
                 onCameraMove: (position) => _mapCenter = position.target,
-                onCameraIdle: _resolveMapCenter,
+                onCameraIdle: () {
+                  debugPrint('[MAP_DIAG] onCameraIdle center=$_mapCenter');
+                  _resolveMapCenter();
+                },
                 onTap: (_) => _dismissKeyboard(),
               ),
             ),
