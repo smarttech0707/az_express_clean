@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
@@ -191,9 +192,7 @@ class GoogleRoutesService {
   // ── Fallback sans API (ligne droite + estimation locale) ──────────────────
 
   static RouteModel _fallback(LatLng origin, LatLng dest) {
-    final distKm = RouteModel.estimateEta(_haversineKm(origin, dest)) > 0
-        ? _haversineKm(origin, dest)
-        : 1.0;
+    final distKm = _haversineKm(origin, dest);
     final eta = RouteModel.estimateEta(distKm);
     return RouteModel(
       points: _straightLine(origin, dest),
@@ -221,23 +220,17 @@ class GoogleRoutesService {
     const r = 6371.0;
     final dLat = _rad(b.latitude - a.latitude);
     final dLon = _rad(b.longitude - a.longitude);
-    final sinDLat = _sin(dLat / 2);
-    final sinDLon = _sin(dLon / 2);
-    final c = sinDLat * sinDLat +
-        _cos(_rad(a.latitude)) * _cos(_rad(b.latitude)) * sinDLon * sinDLon;
-    return r * 2 * _atan2(_sqrt(c), _sqrt(1 - c));
+    final sinDLat = math.sin(dLat / 2);
+    final sinDLon = math.sin(dLon / 2);
+    final h = sinDLat * sinDLat +
+        math.cos(_rad(a.latitude)) *
+            math.cos(_rad(b.latitude)) *
+            sinDLon *
+            sinDLon;
+    return r * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
   }
 
   static double _rad(double deg) => deg * 3.14159265358979 / 180;
-  static double _sin(double x) => x - x * x * x / 6;
-  static double _cos(double x) => 1 - x * x / 2;
-  static double _sqrt(double x) => x <= 0
-      ? 0
-      : x < 1
-          ? x * (1 + x / 2)
-          : x;
-  static double _atan2(double y, double x) =>
-      x == 0 ? (y > 0 ? 1.5708 : -1.5708) : (x > 0 ? y / x : y / x + 3.14159);
 }
 
 // ── Entrée de cache interne ────────────────────────────────────────────────

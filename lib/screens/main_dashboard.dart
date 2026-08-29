@@ -61,7 +61,10 @@ class _MainDashboardState extends State<MainDashboard>
 
   void _openCommander() {
     HapticFeedback.mediumImpact();
-    Navigator.push(context, AppTransitions.fadeSlide(buildClientOrderScreen()));
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => buildClientOrderScreen()),
+    );
   }
 
   @override

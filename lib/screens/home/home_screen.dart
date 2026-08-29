@@ -230,7 +230,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return;
     }
     NotificationService().saveToken(currentUser.uid, 'clients');
-    Navigator.push(context, AppTransitions.fadeSlide(const MainDashboard()));
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const MainDashboard()),
+    );
   }
 
   @override

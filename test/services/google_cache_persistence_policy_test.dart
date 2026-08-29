@@ -113,4 +113,17 @@ void main() {
     expect(persistedText, isNot(contains('distance')));
     expect(persistedText, isNot(contains('eta')));
   });
+
+  test('le fallback local conserve une distance positive entre deux points',
+      () async {
+    GoogleRoutesService.debugDirectionsGet = (_) async => http.Response('', 500);
+
+    final route = await GoogleRoutesService.getRouteModel(
+      origin: const LatLng(6.7273, -3.4961),
+      destination: const LatLng(6.7373, -3.4861),
+    );
+
+    expect(route.distanceKm, greaterThan(0));
+    expect(route.distanceText, isNot('0 m'));
+  });
 }

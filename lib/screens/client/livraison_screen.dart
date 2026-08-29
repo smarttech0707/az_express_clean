@@ -58,6 +58,28 @@ bool shouldShowLivraisonSearchExpansion({
     query.trim().length >= 5 &&
     searchState == PlacesSearchState.awaitingExpansion;
 
+/// `_premiumField` fixe déjà une couleur de texte claire, mais laisse le fond
+/// hériter de [InputDecorationTheme]. En mode sombre iOS, ce fond hérité est
+/// sombre alors que le texte local reste sombre. On verrouille donc seulement
+/// ce fond pour la combinaison qui présente ce contraste incohérent.
+@visibleForTesting
+bool shouldUseLightLivraisonPremiumFieldFill({
+  required TargetPlatform platform,
+  required Brightness brightness,
+}) =>
+    platform == TargetPlatform.iOS && brightness == Brightness.dark;
+
+/// L'overlay des suggestions reste blanc. En thème sombre iOS, le titre d'un
+/// [ListTile] sans couleur explicite hérite au contraire de `textDark`.
+@visibleForTesting
+Color? livraisonPopularPlaceTitleColor({
+  required TargetPlatform platform,
+  required Brightness brightness,
+}) =>
+    platform == TargetPlatform.iOS && brightness == Brightness.dark
+        ? AppColors.text
+        : null;
+
 typedef LivraisonReverseGeocoder = Future<String?> Function(
   double latitude,
   double longitude,
@@ -843,7 +865,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
 
     return PopScope(
-      canPop: false,
+      // À la première étape, l'écran est une vraie route empilée : laisser
+      // Flutter la dépiler préserve le bouton Retour Android et le geste
+      // interactif iOS. Les étapes suivantes restent dans le même parcours
+      // et sont donc gérées par _goBack ci-dessous.
+      canPop: _phase == 1,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _goBack();
       },
@@ -1969,6 +1995,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   Widget _buildQuickPlaces() {
     final cityProvider = context.watch<ActiveCityProvider>();
     final cityName = activeLivraisonCityName(cityProvider);
+    final titleColor = livraisonPopularPlaceTitleColor(
+      platform: Theme.of(context).platform,
+      brightness: Theme.of(context).brightness,
+    );
     if (cityName.isEmpty ||
         _popularPlacesCityId != cityProvider.activeCityId ||
         _popularPlaces.isEmpty) {
@@ -2002,7 +2032,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
               ),
               title: Text(place.name,
                   style: GoogleFonts.urbanist(
-                      fontSize: 14, fontWeight: FontWeight.w600)),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: titleColor)),
               subtitle: Text(place.address,
                   style: GoogleFonts.urbanist(
                       fontSize: 12, color: AppColors.textMuted)),
@@ -2343,6 +2375,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     FocusNode? focusNode,
     FocusNode? nextFocusNode,
   }) {
+    final shouldUseLightFill = shouldUseLightLivraisonPremiumFieldFill(
+      platform: Theme.of(context).platform,
+      brightness: Theme.of(context).brightness,
+    );
+
     return Container(
       decoration: BoxDecoration(
         color: AppColors.bg,
@@ -2367,6 +2404,12 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
         textCapitalization: TextCapitalization.words,
         decoration: InputDecoration(
+          // Android conserve intégralement le rendu déjà validé. Sur
+          // iOS/iPadOS en mode sombre, empêcher InputDecorationTheme.dark de
+          // recouvrir ce champ clair avec `cardDark`, incompatible avec le
+          // texte explicitement défini ci-dessus.
+          filled: shouldUseLightFill ? true : null,
+          fillColor: shouldUseLightFill ? AppColors.bg : null,
           hintText: hint,
           hintStyle:
               GoogleFonts.urbanist(fontSize: 13, color: AppColors.textLight),
