@@ -276,6 +276,66 @@ test('real estate edit: un client (non-agent) ne peut pas éditer une annonce', 
 
 // ── clients — protection du wallet ──────────────────────────────────────────
 
+const normalMobileClient = {
+  name: 'Client mobile',
+  phone: '0700000001',
+  email: 'client@example.com',
+  wallet: 0,
+  cashOnDeliveryEnabled: true,
+  fakeOrderCount: 0,
+  createdAt: new Date(),
+};
+
+const normalWebClient = {
+  name: 'Client web',
+  phone: '0700000002',
+  wallet: 0,
+  cashOnDeliveryEnabled: true,
+  fakeOrderCount: 0,
+  createdAt: new Date(),
+};
+
+test('clients: création mobile normale avec email et wallet initial à zéro autorisée', async () => {
+  await assertSucceeds(
+    asClient('client-mobile').doc('clients/client-mobile').set(normalMobileClient),
+  );
+});
+
+test('clients: création web normale sans email et wallet initial à zéro autorisée', async () => {
+  await assertSucceeds(
+    asClient('client-web').doc('clients/client-web').set(normalWebClient),
+  );
+});
+
+test('clients: création refusée pour un wallet initial non nul ou de mauvais type', async () => {
+  for (const [id, wallet] of [
+    ['wallet-one', 1],
+    ['wallet-large', 1000000],
+    ['wallet-negative', -1],
+    ['wallet-string', '0'],
+  ]) {
+    await assertFails(
+      asClient(id).doc(`clients/${id}`).set({ ...normalMobileClient, wallet }),
+    );
+  }
+});
+
+test('clients: création refusée si un champ financier ou de privilège est ajouté', async () => {
+  for (const [id, extra] of [
+    ['balance', { balance: 0 }],
+    ['wallet-balance', { walletBalance: 0 }],
+    ['credit', { credit: 0 }],
+    ['commission', { commission: 0 }],
+    ['role', { role: 'admin' }],
+    ['is-admin', { isAdmin: true }],
+    ['is-active', { isActive: true }],
+  ]) {
+    await assertFails(
+      asClient(id).doc(`clients/${id}`).set({ ...normalMobileClient, ...extra }),
+    );
+  }
+});
+
 test('clients: le propriétaire peut lire son propre profil', async () => {
   await seed((db) => db.doc('clients/u1').set({ wallet: 1000 }));
   await assertSucceeds(asClient('u1').doc('clients/u1').get());

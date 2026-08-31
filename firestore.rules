@@ -88,7 +88,21 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       allow read:   if isOwner(clientId) || isAdmin();
-      allow create: if isOwner(clientId);
+      // Le profil client est créé directement après Firebase Auth. Le wallet
+      // doit impérativement démarrer à zéro : une création sans ce contrôle
+      // permettrait à un client de s'attribuer un solde arbitraire avant que
+      // les protections d'update ne s'appliquent.
+      allow create: if isOwner(clientId)
+        && request.resource.data.keys().hasOnly([
+          'name', 'phone', 'email', 'wallet', 'cashOnDeliveryEnabled',
+          'fakeOrderCount', 'createdAt'
+        ])
+        && request.resource.data.wallet is int
+        && request.resource.data.wallet == 0
+        && request.resource.data.cashOnDeliveryEnabled is bool
+        && request.resource.data.cashOnDeliveryEnabled == true
+        && request.resource.data.fakeOrderCount is int
+        && request.resource.data.fakeOrderCount == 0;
       allow update: if isAdmin() ||
         (isOwner(clientId) && unchanged('wallet') && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled')) ||
         // Débit wallet autorisé (paiement Ekbine côté client) — solde ne peut que diminuer
