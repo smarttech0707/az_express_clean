@@ -367,6 +367,21 @@ service firebase.storage {
           || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid)).data.get('restaurantId', '') == restaurantId);
     }
 
+    // ── COUVERTURE RESTAURANT ──────────────────────────────────────────────
+    // Même preuve de propriété que le logo, mais fichier distinct : la
+    // couverture ne peut jamais remplacer l'identité `logoUrl` existante.
+    match /restaurant_covers/{restaurantId}/cover.jpg {
+      allow read: if isAuth();
+      allow create, update: if isRealUser() && isImage() && maxSize(5)
+        && (isAdmin()
+          || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid))
+              .data.get('restaurantId', '') == restaurantId);
+      allow delete: if isRealUser()
+        && (isAdmin()
+          || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid))
+              .data.get('restaurantId', '') == restaurantId);
+    }
+
     // Corrigé (Master Prompt "photos manquantes") : le doc boulangeries/{id}
     // n'a jamais eu de champ `ownerId` — son ID EST déjà l'UID Firebase Auth
     // du propriétaire (mêmes conventions que firestore.rules:isOwner(),

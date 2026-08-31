@@ -214,7 +214,7 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
             .data.get('restaurantId', '') == restaurantId
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['logoUrl', 'isOpen']);
+            .hasOnly(['logoUrl', 'coverImageUrl', 'isOpen']);
 
       // Sous-collection utilisée par restaurant_owner_dashboard.dart
       match /menu/{menuId} {

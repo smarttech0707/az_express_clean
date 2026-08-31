@@ -13,6 +13,7 @@ import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
 import '../../widgets/partner_account_sheet.dart';
+import '../../widgets/single_photo_editor.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import '../../utils/storage_cleanup.dart';
 
@@ -39,6 +40,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
   bool _isOpen = false;
   int _wallet = 0;
   String? _photoUrl;
+  String? _coverUrl;
   StreamSubscription? _walletSub;
   StreamSubscription<QuerySnapshot>? _orderSub;
   int _prevPendingCount = -1;
@@ -46,8 +48,9 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
   String get _name => widget.restaurantData['name'] ?? 'Mon restaurant';
 
   String _fmtWallet(int v) {
-    if (v >= 1000)
+    if (v >= 1000) {
       return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    }
     return v.toString();
   }
 
@@ -57,17 +60,21 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
     _tabCtrl = TabController(length: 2, vsync: this);
     _isOpen = widget.restaurantData['isOpen'] == true;
     _photoUrl = widget.restaurantData['logoUrl'] as String?;
+    _coverUrl = widget.restaurantData['coverImageUrl'] as String?;
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
-      if (type == 'new_seller_order') _tabCtrl.animateTo(1);
+      if (type == 'new_seller_order') {
+        _tabCtrl.animateTo(1);
+      }
     });
     _walletSub = FirebaseFirestore.instance
         .collection('restaurants')
         .doc(widget.restaurantId)
         .snapshots()
         .listen((s) {
-      if (mounted)
+      if (mounted) {
         setState(() => _wallet = (s.data()?['wallet'] as num? ?? 0).toInt());
+      }
     });
 
     _orderSub = FirebaseFirestore.instance
@@ -280,6 +287,8 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
             ),
           ),
 
+          _buildCoverSection(),
+
           Expanded(
             child: TabBarView(
               controller: _tabCtrl,
@@ -291,6 +300,66 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCoverSection() {
+    final hasCover = _coverUrl?.trim().isNotEmpty == true;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(children: [
+        SinglePhotoEditor(
+          photoUrl: _coverUrl,
+          storagePath: 'restaurant_covers/${widget.restaurantId}/cover.jpg',
+          size: 64,
+          placeholderIcon: Icons.add_photo_alternate_outlined,
+          onUploaded: (url) async {
+            await FirebaseFirestore.instance
+                .collection('restaurants')
+                .doc(widget.restaurantId)
+                .update({'coverImageUrl': url});
+            if (mounted) setState(() => _coverUrl = url);
+          },
+          onDeleted: () async {
+            await FirebaseFirestore.instance
+                .collection('restaurants')
+                .doc(widget.restaurantId)
+                .update({'coverImageUrl': FieldValue.delete()});
+            if (mounted) setState(() => _coverUrl = null);
+          },
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Photo de couverture',
+                  style: GoogleFonts.urbanist(
+                      fontSize: 14, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 3),
+              Text('Ajoutez une photo de votre établissement ou de vos plats.',
+                  style: GoogleFonts.urbanist(
+                      fontSize: 11, color: Colors.grey.shade600)),
+              const SizedBox(height: 5),
+              Text(
+                  hasCover
+                      ? 'Modifier ou supprimer la couverture'
+                      : 'Ajouter une couverture',
+                  style: GoogleFonts.urbanist(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF1565C0))),
+            ],
+          ),
+        ),
+      ]),
     );
   }
 }
@@ -884,8 +953,9 @@ class _WalletSheet extends StatelessWidget {
   });
 
   String _fmt(int v) {
-    if (v >= 1000)
+    if (v >= 1000) {
       return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    }
     return v.toString();
   }
 
