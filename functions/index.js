@@ -12,6 +12,7 @@ const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
 const { buildResetAccountPassword } = require('./passwordReset');
 const { buildManageProfessionalSubscription } = require('./professionalSubscriptions');
 const { buildManageAdminPartnerAccount } = require('./adminPartnerAccounts');
+const { requireAdminPermission, requireSuperAdmin } = require('./adminGuards');
 const {
   buildPublishMarketplaceProduct,
   buildRepublishMarketplaceProduct,
@@ -140,7 +141,7 @@ async function logSecurityEvent(userId, eventType, severity, description) {
     });
     // Si critique : notifier les admins
     if (severity === 'critical' || severity === 'high') {
-      const adminsSnap = await db.collection('admins').where('isActive', '!=', false).get();
+      const adminsSnap = await db.collection('admins').where('isActive', '==', true).get();
       const tokens = adminsSnap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
       if (tokens.length) {
         await sendToMultipleTokens(tokens,
@@ -1506,12 +1507,18 @@ exports.setPharmaciePassword = onCall({ maxInstances: 2 }, async (request) => {
     throw new HttpsError('not-found', 'Pharmacie introuvable');
   }
 
-  const adminSnap      = await db.collection('admins').doc(uid).get();
-  const isCallerAdmin  = adminSnap.exists && adminSnap.data().isActive !== false;
   const isCallerOwner  = pharmacieSnap.data().currentUid === uid;
-
-  if (!isCallerAdmin && !isCallerOwner) {
-    throw new HttpsError('permission-denied', 'Non autorisé');
+  let isCallerAdmin = false;
+  if (!isCallerOwner) {
+    await requireAdminPermission({ request, db, permission: 'pharmacies' });
+    isCallerAdmin = true;
+  } else {
+    try {
+      await requireAdminPermission({ request, db, permission: 'pharmacies' });
+      isCallerAdmin = true;
+    } catch (_) {
+      // The linked pharmacy owner retains the established self-service flow.
+    }
   }
   if (!isCallerAdmin) {
     await checkRateLimit(uid, 'set_pharmacie_password', 5, 3600);
@@ -1548,12 +1555,7 @@ exports.setPharmaciePassword = onCall({ maxInstances: 2 }, async (request) => {
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe C, réduction
 // modérée de maxInstances, cpu inchangé.
 exports.createSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Non authentifié');
-
-  const callerDoc = await db.collection('admins').doc(request.auth.uid).get();
-  if (!callerDoc.exists || callerDoc.data().role !== 'super') {
-    throw new HttpsError('permission-denied', 'Réservé à l\'admin principal');
-  }
+  await requireSuperAdmin({ request, db });
 
   const { name, email, password, phone, permissions } = request.data;
   if (!name || !email || !password) {
@@ -1580,12 +1582,7 @@ exports.createSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
 });
 
 exports.deleteSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Non authentifié');
-
-  const callerDoc = await db.collection('admins').doc(request.auth.uid).get();
-  if (!callerDoc.exists || callerDoc.data().role !== 'super') {
-    throw new HttpsError('permission-denied', 'Réservé à l\'admin principal');
-  }
+  await requireSuperAdmin({ request, db });
 
   const { uid } = request.data;
   if (!uid) throw new HttpsError('invalid-argument', 'uid manquant');
@@ -1604,7 +1601,7 @@ exports.deleteSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
 exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{driverId}', maxInstances: 2 }, async (event) => {
   const driver = event.data.data();
   if (!driver) return;
-  const snap = await db.collection('admins').where('isActive', '!=', false).get();
+  const snap = await db.collection('admins').where('isActive', '==', true).get();
   const tokens = snap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
   if (!tokens.length) return;
   await sendToMultipleTokens(tokens,
@@ -1618,7 +1615,7 @@ exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{drive
 exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'service_providers/{id}', maxInstances: 2 }, async (event) => {
   const provider = event.data.data();
   if (!provider || provider.status !== 'pending') return;
-  const snap = await db.collection('admins').where('isActive', '!=', false).get();
+  const snap = await db.collection('admins').where('isActive', '==', true).get();
   const tokens = snap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
   if (!tokens.length) return;
   await sendToMultipleTokens(tokens,
@@ -2145,8 +2142,8 @@ exports.dispatchOrderToDriver = onCall(async (request) => {
   const isOwner = order.clientId === uid;
   let isCallerAdmin = false;
   if (!isOwner) {
-    const adminSnap = await db.collection('admins').doc(uid).get();
-    isCallerAdmin = adminSnap.exists && adminSnap.data().isActive !== false;
+    await requireAdminPermission({ request, db, permission: 'commandes' });
+    isCallerAdmin = true;
   }
   if (!isOwner && !isCallerAdmin) {
     throw new HttpsError('permission-denied', 'Non autorisé');

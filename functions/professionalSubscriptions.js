@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
+const { requireAdminPermission } = require('./adminGuards');
 
 const COLLECTIONS = new Set([
   'sellers', 'restaurants', 'boulangeries', 'ekbine_agents', 'fleet_owners',
@@ -20,6 +21,13 @@ const TRIAL_MS = 60 * 24 * 60 * 60 * 1000;
 const ADMIN_ACTIONS = new Set([
   'activateStandard', 'activateVip', 'deactivateVip', 'suspend', 'activateTrial',
 ]);
+const ADMIN_PERMISSIONS = Object.freeze({
+  sellers: 'demandes_vendeurs',
+  restaurants: 'restaurants',
+  boulangeries: 'boulangeries',
+  ekbine_agents: 'ekbine',
+  fleet_owners: 'flottes',
+});
 
 function operationId(parts) {
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
@@ -46,10 +54,16 @@ function buildManageProfessionalSubscription({ db, auth, timestamp, fieldValue }
       throw new HttpsError('invalid-argument', 'Action ou compte invalide');
     }
 
-    const adminSnap = await db.collection('admins').doc(request.auth.uid).get();
-    const isAdmin = adminSnap.exists && adminSnap.data()?.isActive !== false;
-    if (ADMIN_ACTIONS.has(action) && !isAdmin) {
-      throw new HttpsError('permission-denied', 'Administrateur requis');
+    let isAdmin = false;
+    if (ADMIN_ACTIONS.has(action)) {
+      await requireAdminPermission({ request, db, permission: ADMIN_PERMISSIONS[collection] });
+      isAdmin = true;
+    }
+    if (action === 'renew') {
+      const adminSnap = await db.collection('admins').doc(request.auth.uid).get();
+      const adminData = adminSnap.data();
+      isAdmin = adminSnap.exists && adminData?.isActive === true &&
+        ['super', 'sub'].includes(adminData?.role);
     }
     if (action === 'renew' && !isAdmin) {
       if (collection === 'restaurants') {
@@ -202,4 +216,5 @@ module.exports = {
   buildManageProfessionalSubscription,
   STANDARD_PRICES,
   VIP_PRICE,
+  ADMIN_PERMISSIONS,
 };

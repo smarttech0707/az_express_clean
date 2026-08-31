@@ -1,26 +1,12 @@
 'use strict';
 
 const { HttpsError } = require('firebase-functions/v2/https');
+const { requireAdminPermission } = require('./adminGuards');
 
 const PERMISSIONS = {
   seller: 'demandes_vendeurs',
   boulangerie: 'boulangeries',
 };
-
-async function requireAdminPermission({ request, db, permission }) {
-  if (!request.auth || request.auth.token?.firebase?.sign_in_provider === 'anonymous') {
-    throw new HttpsError('unauthenticated', 'Authentification Admin requise.');
-  }
-  const snapshot = await db.collection('admins').doc(request.auth.uid).get();
-  const data = snapshot.data();
-  if (!snapshot.exists || data?.isActive !== true || !['super', 'sub'].includes(data?.role)) {
-    throw new HttpsError('permission-denied', 'Compte Admin invalide ou désactivé.');
-  }
-  if (data.role === 'sub' &&
-      (!Array.isArray(data.permissions) || !data.permissions.includes(permission))) {
-    throw new HttpsError('permission-denied', 'Permission Admin insuffisante.');
-  }
-}
 
 function requiredString(data, key) {
   const value = data?.[key];

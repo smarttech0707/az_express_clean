@@ -12,7 +12,7 @@ function createEventNotificationFunctions({
       const provider = event.data?.data();
       if (!provider || provider.status !== 'pending') return;
       const admins = await db.collection('admins')
-        .where('isActive', '!=', false).get();
+        .where('isActive', '==', true).get();
       const tokens = [...new Set(admins.docs
         .map((doc) => doc.data()?.fcmToken)
         .filter((token) => typeof token === 'string' && token.length > 10))];

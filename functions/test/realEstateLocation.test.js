@@ -84,13 +84,29 @@ test('upsertRealEstateLocation: autorise l\'agent propriétaire de l\'annonce', 
   assert.ok(store.get('real_estate_private_locations/l1'));
 });
 
-test('upsertRealEstateLocation: autorise un admin même sans être l\'agent de l\'annonce', async () => {
-  const { fns } = buildFns({ ...LISTING, 'admins/admin1': { isActive: true } });
+test('upsertRealEstateLocation: autorise seulement un super-admin actif hors flux agent', async () => {
+  const { fns } = buildFns({ ...LISTING, 'admins/admin1': { role: 'super', isActive: true } });
   const result = await fns.upsertRealEstateLocation.run({
     auth: { uid: 'admin1' },
     data: { listingId: 'l1', latitude: 6.7273, longitude: -3.4961, locationPrivacy: 'hidden' },
   });
   assert.equal(result.success, true);
+});
+
+test('upsertRealEstateLocation: refuse un sous-admin et un super-admin désactivé hors flux agent', async () => {
+  for (const admin of [
+    { role: 'sub', isActive: true, permissions: ['commandes'] },
+    { role: 'super', isActive: false },
+  ]) {
+    const { fns } = buildFns({ ...LISTING, 'admins/admin1': admin });
+    await assert.rejects(
+      () => fns.upsertRealEstateLocation.run({
+        auth: { uid: 'admin1' },
+        data: { listingId: 'l1', latitude: 6.7273, longitude: -3.4961, locationPrivacy: 'hidden' },
+      }),
+      (err) => err.code === 'permission-denied',
+    );
+  }
 });
 
 test('upsertRealEstateLocation: refuse un agent non vérifié/inactif', async () => {

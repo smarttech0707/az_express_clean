@@ -12,6 +12,7 @@
 // plutôt que d'inventer une distinction qui n'existe nulle part dans le code.
 
 const { encodeGeohash, approximateCoordinates, EXACT_PRECISION } = require('./geohash');
+const { requireSuperAdmin } = require('./adminGuards');
 
 const VALID_PRIVACY = ['exact', 'approximate', 'hidden'];
 
@@ -27,9 +28,14 @@ function isValidLatLng(lat, lng) {
 }
 
 function createRealEstateLocationFunctions({ db, admin, onCall, HttpsError, logAudit, checkRateLimit }) {
-  async function assertCallerAuthorized(uid, listing) {
-    const adminSnap = await db.collection('admins').doc(uid).get();
-    if (adminSnap.exists && adminSnap.data().isActive !== false) return;
+  async function assertCallerAuthorized(request, listing) {
+    const uid = request.auth.uid;
+    try {
+      await requireSuperAdmin({ request, db });
+      return;
+    } catch (error) {
+      if (listing.agentId !== uid) throw error;
+    }
 
     // Jamais un rôle envoyé par le client : toujours re-dérivé de l'annonce
     // déjà en base et du document agent déjà en base.
@@ -66,7 +72,7 @@ function createRealEstateLocationFunctions({ db, admin, onCall, HttpsError, logA
     if (!listingSnap.exists) throw new HttpsError('not-found', 'Annonce introuvable.');
     const listing = listingSnap.data();
 
-    await assertCallerAuthorized(uid, listing);
+    await assertCallerAuthorized(request, listing);
 
     // ownerId/agentId proviennent EXCLUSIVEMENT de l'annonce déjà en base —
     // jamais du payload client — pour empêcher tout changement de propriété.

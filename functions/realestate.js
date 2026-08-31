@@ -12,6 +12,7 @@ const VISIT_TRANSITIONS = {
   decline: { by: 'agent',  from: ['pending', 'proposed'], to: 'declined',  requiresDate: false },
   cancel:  { by: 'client', from: ['pending', 'proposed'], to: 'cancelled', requiresDate: false },
 };
+const { requireSuperAdmin } = require('./adminGuards');
 
 // `tx` optionnel : fourni par le confirmHandler de l'outil AZ IA
 // `request_property_visit` (déjà à l'intérieur de la transaction qui bascule
@@ -74,10 +75,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
   const approveRealEstateAgentRequest = onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
     const uid = request.auth.uid;
-    const adminSnap = await db.collection('admins').doc(uid).get();
-    if (!adminSnap.exists || adminSnap.data().isActive === false) {
-      throw new HttpsError('permission-denied', 'Réservé aux administrateurs');
-    }
+    await requireSuperAdmin({ request, db });
 
     const { requestId, decision } = request.data || {};
     if (!requestId || !['approve', 'reject'].includes(decision)) {

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildManageProfessionalSubscription } = require('../professionalSubscriptions');
+const { buildManageProfessionalSubscription, ADMIN_PERMISSIONS } = require('../professionalSubscriptions');
 
 function makeDb(seed = {}) {
   const store = new Map(Object.entries(seed));
@@ -56,6 +56,16 @@ function ownerRequest(data = {}, uid = 'seller-1') {
     data: { action: 'renew', collection: 'sellers', docId: 'seller-1', ...data },
   };
 }
+
+test('mapping des permissions admin couvre exactement chaque collection professionnelle', () => {
+  assert.deepEqual(ADMIN_PERMISSIONS, {
+    sellers: 'demandes_vendeurs',
+    restaurants: 'restaurants',
+    boulangeries: 'boulangeries',
+    ekbine_agents: 'ekbine',
+    fleet_owners: 'flottes',
+  });
+});
 
 test('renouvellement: debite et modifie abonnement uniquement dans la transaction serveur', async (t) => {
   const h = harness({
@@ -169,7 +179,7 @@ test('action admin refusee a un non-admin', async (t) => {
 
 test('action admin idempotente: le meme requestId ne facture qu une fois', async (t) => {
   const h = harness({
-    'admins/admin-1': { isActive: true },
+    'admins/admin-1': { role: 'super', isActive: true },
     'sellers/seller-1': { wallet: 5000 },
   });
   t.after(h.restore);
@@ -180,6 +190,29 @@ test('action admin idempotente: le meme requestId ne facture qu une fois', async
   const second = await h.handler(request);
   assert.equal(h.db.store.get('sellers/seller-1').wallet, 3000);
   assert.equal(second.idempotent, true);
+});
+
+test('action admin requires the permission mapped to its collection', async (t) => {
+  const h = harness({
+    'admins/sub-1': { role: 'sub', isActive: true, permissions: ['restaurants'] },
+    'sellers/seller-1': { wallet: 5000 },
+  });
+  t.after(h.restore);
+  await assert.rejects(h.handler(ownerRequest({
+    action: 'activateStandard', requestId: '1234567890abcdef', chargeWallet: false,
+  }, 'sub-1')), (error) => error.code === 'permission-denied');
+});
+
+test('action admin accepts the matching active sub-admin permission', async (t) => {
+  const h = harness({
+    'admins/sub-1': { role: 'sub', isActive: true, permissions: ['demandes_vendeurs'] },
+    'sellers/seller-1': { wallet: 5000 },
+  });
+  t.after(h.restore);
+  const result = await h.handler(ownerRequest({
+    action: 'activateStandard', requestId: '1234567890abcdef', chargeWallet: false,
+  }, 'sub-1'));
+  assert.equal(result.outcome, 'activated');
 });
 
 test('session anonyme refusee avant toute lecture ou ecriture sensible', async (t) => {
