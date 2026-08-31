@@ -70,3 +70,8 @@ functions/.env.*
 
 # Debug symbols from obfuscated builds
 /build/app/outputs/symbols/
+
+# Local Firebase configuration snapshots and security-cleanup reports.
+.scratch_shots/
+*.pre-mfa-backup
+functions/scripts/reports/cleanup_production_test_data_*.json
