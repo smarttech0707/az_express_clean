@@ -344,8 +344,12 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                           final selected = s == _serviceType;
                           return RadioListTile<String>(
                             value: s,
+                            selected: selected,
                             title: Text(s,
                                 style: TextStyle(
+                                    color: selected
+                                        ? Colors.blue.shade800
+                                        : Colors.black87,
                                     fontWeight: selected
                                         ? FontWeight.bold
                                         : FontWeight.normal)),

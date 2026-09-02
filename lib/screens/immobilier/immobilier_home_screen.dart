@@ -34,6 +34,17 @@ class _ImmobilierHomeScreenState extends State<ImmobilierHomeScreen> {
   List<RealEstateListing>? _searchResults;
   bool _searching = false;
 
+  String get _pageTitle {
+    if (widget.initialPriceType == 'rent' &&
+        widget.initialPropertyType == 'Maison') {
+      return 'Maisons à louer';
+    }
+    if (widget.initialFurnished == true) {
+      return 'Résidences meublées';
+    }
+    return 'Immobilier';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -101,7 +112,7 @@ class _ImmobilierHomeScreenState extends State<ImmobilierHomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: const Text('Immobilier'),
+        title: Text(_pageTitle),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -220,8 +231,9 @@ class _ImmobilierHomeScreenState extends State<ImmobilierHomeScreen> {
                         return const StreamErrorState(
                             message: "Impossible de charger les annonces.");
                       }
-                      if (!snap.hasData)
+                      if (!snap.hasData) {
                         return const Center(child: CircularProgressIndicator());
+                      }
                       return _ListingGrid(listings: snap.data!);
                     },
                   ),
@@ -245,7 +257,13 @@ class _FilterChip extends StatelessWidget {
       label: Text(label),
       selected: selected,
       onSelected: (_) => onTap(),
+      backgroundColor: Colors.white,
       selectedColor: AppColors.primary.withValues(alpha: 0.15),
+      side: BorderSide(
+        color: selected
+            ? AppColors.primary.withValues(alpha: 0.45)
+            : Colors.grey.shade400,
+      ),
       labelStyle: TextStyle(
           color: selected ? AppColors.primary : Colors.black87,
           fontWeight: FontWeight.w600),
