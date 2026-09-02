@@ -58,10 +58,10 @@ bool shouldShowLivraisonSearchExpansion({
     query.trim().length >= 5 &&
     searchState == PlacesSearchState.awaitingExpansion;
 
-/// `_premiumField` fixe déjà une couleur de texte claire, mais laisse le fond
-/// hériter de [InputDecorationTheme]. En mode sombre iOS, ce fond hérité est
-/// sombre alors que le texte local reste sombre. On verrouille donc seulement
-/// ce fond pour la combinaison qui présente ce contraste incohérent.
+/// Les champs Livraison à texte sombre peuvent laisser leur fond hériter de
+/// [InputDecorationTheme]. En mode sombre iOS, ce fond hérité est sombre et
+/// rend le texte local presque invisible. On verrouille donc seulement ce fond
+/// pour la combinaison qui présente ce contraste incohérent.
 @visibleForTesting
 bool shouldUseLightLivraisonPremiumFieldFill({
   required TargetPlatform platform,
@@ -1300,6 +1300,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Phase 5 : détails du colis ───────────────────────────────────────────
 
   Widget _buildColisDetailsPanel(double bottomPad) {
+    final shouldUseLightFill = shouldUseLightLivraisonPremiumFieldFill(
+      platform: Theme.of(context).platform,
+      brightness: Theme.of(context).brightness,
+    );
+
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(20, 14, 20, bottomPad + 16),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1381,6 +1386,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
             decoration: InputDecoration(
+              filled: shouldUseLightFill ? true : null,
+              fillColor: shouldUseLightFill ? AppColors.bg : null,
               hintText: 'Poids en kg (optionnel)',
               hintStyle: GoogleFonts.urbanist(
                   fontSize: 13, color: AppColors.textLight),
@@ -1415,15 +1422,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             onChanged: (_) => setState(() {}),
             style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
+              filled: shouldUseLightFill ? true : null,
+              fillColor: shouldUseLightFill ? AppColors.bg : null,
               hintText: 'Budget d’achat (optionnel)',
+              hintStyle: GoogleFonts.urbanist(
+                  fontSize: 13, color: AppColors.textLight),
               helperText: 'Montant des achats, hors frais de livraison',
-              prefixIcon: Icon(Icons.shopping_basket_outlined,
+              prefixIcon: const Icon(Icons.shopping_basket_outlined,
                   color: AppColors.textMuted, size: 18),
               suffixText: 'FCFA',
               border: InputBorder.none,
               contentPadding:
-                  EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             ),
           ),
         ),
@@ -2303,6 +2314,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     bool autoFocus = false,
   }) {
     final isActive = _activeField == field;
+    final shouldUseLightFill = shouldUseLightLivraisonPremiumFieldFill(
+      platform: Theme.of(context).platform,
+      brightness: Theme.of(context).brightness,
+    );
     return GestureDetector(
       onTap: () {
         setState(() {
@@ -2333,6 +2348,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             autofocus: autoFocus,
             style: GoogleFonts.urbanist(fontSize: 13, color: AppColors.text),
             decoration: InputDecoration(
+              filled: shouldUseLightFill ? true : null,
+              fillColor: shouldUseLightFill ? Colors.white : null,
               hintText: hint,
               hintStyle: GoogleFonts.urbanist(
                   fontSize: 13, color: AppColors.textLight),

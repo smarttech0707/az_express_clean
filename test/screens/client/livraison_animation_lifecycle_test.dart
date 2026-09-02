@@ -28,6 +28,14 @@ void main() {
         ),
       );
 
+  Widget darkIosApp() => ChangeNotifierProvider<ActiveCityProvider>.value(
+        value: cityProvider,
+        child: MaterialApp(
+          theme: ThemeData.dark().copyWith(platform: TargetPlatform.iOS),
+          home: const LivraisonScreen(startStartupServices: false),
+        ),
+      );
+
   Widget navigationApp() => ChangeNotifierProvider<ActiveCityProvider>.value(
         value: cityProvider,
         child: MaterialApp(
@@ -111,6 +119,17 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  testWidgets('le champ de recherche réel garde un fond clair sur iOS sombre',
+      (tester) async {
+    await tester.pumpWidget(darkIosApp());
+
+    final searchField = tester.widget<TextField>(find.byType(TextField));
+    expect(searchField.style?.color, AppColors.text);
+    expect(searchField.decoration?.filled, isTrue);
+    expect(searchField.decoration?.fillColor, Colors.white);
+    expect(searchField.decoration?.hintStyle?.color, AppColors.textLight);
   });
 
   test('le titre des lieux populaires reste opaque sur iOS sombre', () {
