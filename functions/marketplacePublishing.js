@@ -64,10 +64,13 @@ function buildPublishMarketplaceProduct({ db, admin }) {
     const productRef = db.collection('marketplace_products').doc();
     const sellerRef = db.collection('sellers').doc(uid);
     const now = admin.firestore.Timestamp.now();
+    console.log(`[marketplace-publish] start uid=${uid} productId=${productRef.id}`);
 
+    console.log(`[marketplace-publish] transaction-start uid=${uid} productId=${productRef.id}`);
     await db.runTransaction(async (tx) => {
       const sellerSnap = await tx.get(sellerRef);
       const seller = sellerSnap.exists ? sellerSnap.data() : null;
+      console.log(`[marketplace-publish] seller-loaded uid=${uid} productId=${productRef.id}`);
       const professional = isActiveProfessionalSeller(seller, now.toMillis());
       if (!professional) {
         const activeQuery = db.collection('marketplace_products')
@@ -76,6 +79,7 @@ function buildPublishMarketplaceProduct({ db, admin }) {
           .limit(PRIVATE_ACTIVE_LIMIT + 1);
         const activeSnap = await tx.get(activeQuery);
         assertPrivatePublicationAllowed({ isProfessional: false, activeCount: activeSnap.size });
+        console.log(`[marketplace-publish] active-count-complete uid=${uid} productId=${productRef.id}`);
       }
       tx.set(productRef, {
         ...product,
@@ -83,7 +87,10 @@ function buildPublishMarketplaceProduct({ db, admin }) {
         ...publicationSystemFields({ seller, isProfessional: professional, now, timestamp: admin.firestore.Timestamp }),
         createdAt: now,
       });
+      console.log(`[marketplace-publish] product-write-prepared uid=${uid} productId=${productRef.id}`);
     });
+    console.log(`[marketplace-publish] transaction-complete uid=${uid} productId=${productRef.id}`);
+    console.log(`[marketplace-publish] response-sent uid=${uid} productId=${productRef.id}`);
     return { productId: productRef.id };
   };
 }

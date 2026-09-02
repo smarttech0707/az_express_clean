@@ -28,8 +28,8 @@ void main() {
       (tester) async {
     await openAddProduct(tester);
 
-    expect(find.byTooltip('Retour'), findsOneWidget);
-    await tester.tap(find.byTooltip('Retour'));
+    expect(find.byType(BackButton), findsOneWidget);
+    await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
 
     expect(find.text('Ouvrir'), findsOneWidget);
@@ -41,7 +41,7 @@ void main() {
     await openAddProduct(tester);
     await tester.enterText(find.byType(TextFormField).first, 'Téléphone');
 
-    await tester.tap(find.byTooltip('Retour'));
+    await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
 
     expect(find.text('Abandonner cette annonce ?'), findsOneWidget);
@@ -66,5 +66,34 @@ void main() {
     await tester.tap(find.text('Abandonner'));
     await tester.pumpAndSettle();
     expect(find.text('Ouvrir'), findsOneWidget);
+  });
+
+  testWidgets('les menus gardent un contraste lisible en thème sombre',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      themeMode: ThemeMode.dark,
+      darkTheme: ThemeData.dark(),
+      home: Scaffold(body: MpAddProductScreen()),
+    ));
+
+    final menus = find.byType(DropdownButtonFormField<String>);
+    const firstOptions = ['16 Go', '2 Go', 'Noir', 'Abidjan'];
+
+    expect(menus, findsNWidgets(4));
+    for (var index = 0; index < firstOptions.length; index++) {
+      final menu = menus.at(index);
+      await tester.ensureVisible(menu);
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+
+      final option = find.text(firstOptions[index]).last;
+      expect(option, findsOneWidget);
+      final text = tester.widget<Text>(option);
+      expect(text.style?.color, isNotNull);
+      expect(text.style?.color, isNot(equals(Colors.white)));
+
+      await tester.tap(option);
+      await tester.pumpAndSettle();
+    }
   });
 }

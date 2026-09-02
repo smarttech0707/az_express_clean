@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
@@ -67,10 +69,12 @@ class MpService {
               p.description.toLowerCase().contains(q2))
           .toList();
     }
-    if (minPrice != null)
+    if (minPrice != null) {
       results = results.where((p) => p.price >= minPrice).toList();
-    if (maxPrice != null)
+    }
+    if (maxPrice != null) {
       results = results.where((p) => p.price <= maxPrice).toList();
+    }
     return results;
   }
 
@@ -87,8 +91,12 @@ class MpService {
         ..remove('status');
       final result = await _functions
           .httpsCallable('publishMarketplaceProduct')
-          .call(<String, dynamic>{'product': payload});
+          .call(<String, dynamic>{'product': payload}).timeout(
+              const Duration(seconds: 45));
       return (result.data as Map)['productId'] as String;
+    } on TimeoutException {
+      throw Exception(
+          'La publication prend trop de temps. Vérifiez votre connexion puis réessayez.');
     } on FirebaseFunctionsException catch (e) {
       throw Exception(e.message ?? 'Publication impossible.');
     }
@@ -122,8 +130,19 @@ class MpService {
       XFile file, String productId, int index) async {
     final ref = _storage.ref('marketplace/$productId/img_$index.jpg');
     final bytes = await file.readAsBytes();
-    await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
-    return ref.getDownloadURL();
+    try {
+      await ref
+          .putData(bytes, SettableMetadata(contentType: 'image/jpeg'))
+          .timeout(const Duration(seconds: 60));
+    } on TimeoutException {
+      throw Exception('Le téléchargement de la photo prend trop de temps.');
+    }
+
+    try {
+      return await ref.getDownloadURL().timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      throw Exception('Impossible de récupérer la photo téléchargée.');
+    }
   }
 
   static Future<List<String>> uploadImages(

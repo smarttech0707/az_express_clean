@@ -277,11 +277,13 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
       child: Scaffold(
         backgroundColor: kMpBg,
         appBar: AppBar(
-          leading: IconButton(
-            tooltip: 'Retour',
-            onPressed: _requestPop,
-            icon: const Icon(Icons.arrow_back_rounded),
-          ),
+          automaticallyImplyLeading: false,
+          leading: Navigator.of(context).canPop()
+              ? BackButton(
+                  color: kMpText,
+                  onPressed: _requestPop,
+                )
+              : null,
           title: Text(
             _isEdit ? 'Modifier l\'annonce' : 'Nouvelle annonce',
             style: GoogleFonts.urbanist(
@@ -528,13 +530,13 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
                   title: 'Ville',
                   child: DropdownButtonFormField<String>(
                     initialValue: _city,
-                    items: mpCities
-                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                        .toList(),
+                    items: mpCities.map(_dropdownMenuItem).toList(),
                     onChanged: (v) => setState(() => _city = v ?? _city),
-                    decoration:
-                        _deco('Votre ville', Icons.location_city_rounded),
-                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                    dropdownColor: Colors.white,
+                    iconEnabledColor: kMpOrange,
+                    decoration: _dropdownDecoration(
+                        'Votre ville', Icons.location_city_rounded),
+                    style: _dropdownTextStyle,
                   ),
                 ),
 
@@ -607,22 +609,23 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
             const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       );
 
-  Widget _dropRow(String label, List<String> options, String? selectedValue,
-      ValueChanged<String?> onChanged) {
-    return DropdownButtonFormField<String>(
-      initialValue: selectedValue,
-      hint: Text('$label (optionnel)',
-          style: GoogleFonts.urbanist(color: kMpMuted, fontSize: 13)),
-      items: options
-          .map((o) => DropdownMenuItem(
-                value: o,
-                child: Text(o,
-                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText)),
-              ))
-          .toList(),
-      onChanged: onChanged,
-      decoration: InputDecoration(
+  TextStyle get _dropdownTextStyle =>
+      GoogleFonts.urbanist(fontSize: 14, color: kMpText);
+
+  DropdownMenuItem<String> _dropdownMenuItem(String value) => DropdownMenuItem(
+        value: value,
+        child: Text(value, style: _dropdownTextStyle),
+      );
+
+  InputDecoration _dropdownDecoration(String hint, [IconData? icon]) =>
+      InputDecoration(
+        hintText: hint,
+        hintStyle: GoogleFonts.urbanist(color: kMpMuted, fontSize: 13),
+        prefixIcon:
+            icon == null ? null : Icon(icon, color: kMpOrange, size: 20),
         filled: true,
+        // The form itself is white. Keep the popup white too so the explicit
+        // dark text remains readable when iOS uses a dark system theme.
         fillColor: Colors.white,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -638,7 +641,20 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
         ),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      ),
+      );
+
+  Widget _dropRow(String label, List<String> options, String? selectedValue,
+      ValueChanged<String?> onChanged) {
+    return DropdownButtonFormField<String>(
+      initialValue: selectedValue,
+      hint: Text('$label (optionnel)',
+          style: GoogleFonts.urbanist(color: kMpMuted, fontSize: 13)),
+      items: options.map(_dropdownMenuItem).toList(),
+      onChanged: onChanged,
+      dropdownColor: Colors.white,
+      iconEnabledColor: kMpOrange,
+      style: _dropdownTextStyle,
+      decoration: _dropdownDecoration('$label (optionnel)'),
     );
   }
 
