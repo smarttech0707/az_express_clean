@@ -64,6 +64,12 @@ void main() {
     );
   });
 
+  test('le téléphone Admin local est normalisé en E.164 avant le challenge',
+      () {
+    expect(normalizeAdminMfaPhone('07 01 02 03 04'), '+2250701020304');
+    expect(normalizeAdminMfaPhone('+225 07 01 02 03 04'), '+2250701020304');
+  });
+
   test('le mot de passe temporaire n’est jamais écrit sur disque', () async {
     const password = 'secret-qui-ne-doit-pas-etre-persiste';
     final secret = AdminEnrollmentSecret(password);

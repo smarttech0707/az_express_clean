@@ -1,5 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../auto_moto/screens/vehicle_chat_screen.dart';
+import '../../auto_moto/vehicle_conversation_repository.dart';
 import '../../services/notification_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/glass_kit.dart';
@@ -48,10 +51,24 @@ class _ClientDashboardState extends State<ClientDashboard>
         'driver_found',
         'order_confirmed',
         'order_cancelled',
+        'no_driver_found',
         'mission_end'
       ].contains(type)) {
         setState(() => _currentIndex = 2);
+      } else if (type == 'recharge') {
+        setState(() => _currentIndex = 1);
+      } else if (type == 'vehicle_chat_message' && orderId != null) {
+        _openVehicleConversationFromNotification(orderId);
       }
+    }, acceptedTypes: const {
+      'order_update',
+      'driver_found',
+      'order_confirmed',
+      'order_cancelled',
+      'no_driver_found',
+      'mission_end',
+      'recharge',
+      'vehicle_chat_message',
     });
   }
 
@@ -72,6 +89,34 @@ class _ClientDashboardState extends State<ClientDashboard>
   void _openNotificationCenter() {
     Navigator.push(context,
         MaterialPageRoute(builder: (_) => const NotificationCenterScreen()));
+  }
+
+  Future<void> _openVehicleConversationFromNotification(
+    String conversationId,
+  ) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return;
+    try {
+      final repository = VehicleConversationRepository();
+      final conversation = await repository.getConversation(conversationId);
+      if (!mounted ||
+          conversation == null ||
+          !conversation.participantIds.contains(user.uid)) {
+        return;
+      }
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VehicleChatScreen(
+            conversation: conversation,
+            currentUserId: user.uid,
+            repository: repository,
+          ),
+        ),
+      );
+    } catch (_) {
+      // Le contrôle Firestore reste la barrière finale pour un payload falsifié.
+    }
   }
 
   @override

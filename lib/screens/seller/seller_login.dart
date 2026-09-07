@@ -243,7 +243,7 @@ class _SellerLoginState extends State<SellerLogin> {
                           prefixIcon: const Icon(Icons.phone_rounded,
                               color: Color(0xFF1565C0)),
                           filled: true,
-                          fillColor: Colors.white,
+                          fillColor: Theme.of(context).colorScheme.surface,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none,
@@ -271,7 +271,7 @@ class _SellerLoginState extends State<SellerLogin> {
                                 setState(() => _showPass = !_showPass),
                           ),
                           filled: true,
-                          fillColor: Colors.white,
+                          fillColor: Theme.of(context).colorScheme.surface,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none,

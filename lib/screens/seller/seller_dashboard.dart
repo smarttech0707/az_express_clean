@@ -50,7 +50,7 @@ class _SellerDashboardState extends State<SellerDashboard>
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
       if (type == 'new_seller_order') _tabCtrl.animateTo(0);
-    });
+    }, acceptedTypes: const {'new_seller_order'});
     _walletSub = FirestoreService().sellerWallet(widget.sellerId).listen((v) {
       if (mounted) setState(() => _wallet = v);
     });
@@ -109,8 +109,9 @@ class _SellerDashboardState extends State<SellerDashboard>
   }
 
   String _fmtWallet(int v) {
-    if (v >= 1000)
+    if (v >= 1000) {
       return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    }
     return v.toString();
   }
 
@@ -939,8 +940,9 @@ class _AnalyticsSheetState extends State<_AnalyticsSheet> {
   }
 
   String _fmt(int v) {
-    if (v >= 1000)
+    if (v >= 1000) {
       return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    }
     return v.toString();
   }
 

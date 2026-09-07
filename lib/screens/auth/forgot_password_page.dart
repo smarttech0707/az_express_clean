@@ -217,7 +217,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         const BorderSide(color: AppColors.primary, width: 2),
                   ),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: Theme.of(context).colorScheme.surface,
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 ),
@@ -244,7 +244,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         const BorderSide(color: Color(0xFF1E88E5), width: 2),
                   ),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: Theme.of(context).colorScheme.surface,
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 ),

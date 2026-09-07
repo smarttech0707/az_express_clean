@@ -75,6 +75,13 @@ void main() {
     test('configuration Android non autorisée', () {
       expect(adminMfaErrorMessage('app-not-authorized'), contains('Android'));
     });
+
+    test('numéro Admin invalide', () {
+      expect(
+        adminMfaErrorMessage('invalid-phone-number'),
+        contains('numéro Admin est invalide'),
+      );
+    });
   });
 
   group('garde réactive du dashboard', () {

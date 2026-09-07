@@ -706,7 +706,7 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
           hintStyle: GoogleFonts.urbanist(fontSize: 13),
           prefixIcon: Icon(icon, size: 18, color: Colors.grey),
           filled: true,
-          fillColor: Colors.white,
+          fillColor: Theme.of(context).colorScheme.surface,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           border: OutlineInputBorder(

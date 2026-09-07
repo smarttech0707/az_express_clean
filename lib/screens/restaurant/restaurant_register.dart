@@ -221,7 +221,7 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
                       const BorderSide(color: Color(0xFF1565C0), width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
               hint: const Text('Choisir une catégorie'),
               items: _categories
@@ -266,7 +266,7 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
                       const BorderSide(color: Color(0xFF1565C0), width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
 
@@ -345,7 +345,7 @@ class _RestaurantRegisterState extends State<RestaurantRegister> {
           borderSide: const BorderSide(color: Color(0xFF1565C0), width: 2),
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }

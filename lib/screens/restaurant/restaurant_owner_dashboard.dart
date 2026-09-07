@@ -66,7 +66,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
       if (type == 'new_seller_order') {
         _tabCtrl.animateTo(1);
       }
-    });
+    }, acceptedTypes: const {'new_seller_order'});
     _walletSub = FirebaseFirestore.instance
         .collection('restaurants')
         .doc(widget.restaurantId)

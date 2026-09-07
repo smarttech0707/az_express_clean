@@ -1168,7 +1168,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide.none),
           filled: true,
-          fillColor: Colors.white,
+          fillColor: Theme.of(context).colorScheme.surface,
         ),
       ),
     );
@@ -1358,7 +1358,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         prefixIcon: Icon(icon),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }

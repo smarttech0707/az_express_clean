@@ -72,6 +72,21 @@ class _RestaurantListState extends State<RestaurantList> {
             bottom: -54,
             child: _orb(126, AppColors.primary.withValues(alpha: .20))),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (Navigator.of(context).canPop())
+            Semantics(
+              label: 'Retour',
+              button: true,
+              child: Material(
+                color: Colors.white.withValues(alpha: .16),
+                shape: const CircleBorder(),
+                child: IconButton(
+                  tooltip: 'Retour',
+                  icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                  color: Colors.white,
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+              ),
+            ),
           const Spacer(),
           Text('Restaurants',
               style: GoogleFonts.urbanist(

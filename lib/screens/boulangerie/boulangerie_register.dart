@@ -210,7 +210,7 @@ class _BoulangerieRegisterState extends State<BoulangerieRegister> {
                   borderSide: const BorderSide(color: _brown, width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 28),
@@ -285,7 +285,7 @@ class _BoulangerieRegisterState extends State<BoulangerieRegister> {
           borderSide: const BorderSide(color: _brown, width: 2),
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }

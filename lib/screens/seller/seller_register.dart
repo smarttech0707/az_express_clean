@@ -207,7 +207,7 @@ class _SellerRegisterState extends State<SellerRegister> {
                   borderSide: const BorderSide(color: _blue, width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
               hint: const Text('Choisir une catégorie'),
               items: _categories
@@ -247,7 +247,7 @@ class _SellerRegisterState extends State<SellerRegister> {
                   borderSide: const BorderSide(color: _blue, width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 28),
@@ -320,7 +320,7 @@ class _SellerRegisterState extends State<SellerRegister> {
           borderSide: const BorderSide(color: _blue, width: 2),
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }

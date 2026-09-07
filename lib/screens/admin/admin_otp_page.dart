@@ -54,6 +54,9 @@ String adminOtpErrorMessage(String code) => switch (code) {
       _ => adminMfaErrorMessage(code),
     };
 
+@visibleForTesting
+String normalizeAdminMfaPhone(String phone) => AuthService.toE164(phone.trim());
+
 /// Résout exclusivement un vrai challenge Firebase MFA. En mode enrollment,
 /// le compte Admin existant est enrôlé avant tout accès au tableau de bord.
 class AdminOtpPage extends StatefulWidget {
@@ -150,7 +153,10 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
           getSession: user.multiFactor.getSession,
         );
         session = _enrollmentSession!;
-        phoneNumber = widget.adminPhone;
+        // Les documents Admin conservent historiquement le numéro tel qu'il a
+        // été saisi (par exemple 07 01 02 03 04). Firebase Phone Auth exige
+        // cependant le format international E.164 pour créer le challenge MFA.
+        phoneNumber = normalizeAdminMfaPhone(widget.adminPhone!);
       }
 
       _sendTimeout?.cancel();

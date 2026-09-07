@@ -63,14 +63,13 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
         return;
       }
       final data = doc.data()!;
-      NotificationService().saveToken(lastId, 'pharmacies');
       final fbUser = FirebaseAuth.instance.currentUser;
-      if (fbUser != null) {
-        FirebaseFirestore.instance
-            .collection('pharmacies')
-            .doc(lastId)
-            .update({'currentUid': fbUser.uid}).catchError((_) {});
+      if (fbUser == null || data['currentUid'] != fbUser.uid) {
+        await prefs.remove(kPharmacieLastIdPrefKey);
+        if (mounted) setState(() => _autoResuming = false);
+        return;
       }
+      NotificationService().saveToken(lastId, 'pharmacies');
       if (data['mustChangePassword'] == true) {
         Navigator.pushReplacement(
           context,
@@ -157,14 +156,8 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
 
       NotificationService().saveToken(doc.id, 'pharmacies');
       AuthService().logAuthEvent('login', 'pharmacie');
-      // Lie l'UID Firebase anonyme au document pharmacie pour isPharmacieOwnerOfOrder()
-      final fbUser = FirebaseAuth.instance.currentUser;
-      if (fbUser != null) {
-        FirebaseFirestore.instance
-            .collection('pharmacies')
-            .doc(doc.id)
-            .update({'currentUid': fbUser.uid}).catchError((_) {});
-      }
+      // pharmacieLogin lie currentUid côté serveur uniquement après validation
+      // du mot de passe. Le client ne peut jamais s'attribuer ce document.
       // Master Prompt 128 — seul l'identifiant est conservé (jamais le mot
       // de passe), pour restaurer la session au prochain lancement.
       (await SharedPreferences.getInstance())
@@ -274,7 +267,7 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
                   borderSide: BorderSide(color: red, width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 16),
@@ -300,7 +293,7 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
                   borderSide: BorderSide(color: red, width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 8),

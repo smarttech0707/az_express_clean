@@ -500,6 +500,8 @@ class AppTheme {
     final textLight = isDark ? AppColors.textLightDark : AppColors.textLight;
     final divider = isDark ? AppColors.dividerDark : AppColors.divider;
     final border = isDark ? AppColors.borderDark : AppColors.border;
+    final inputBorder =
+        isDark ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
 
     final base = ThemeData(
       useMaterial3: true,
@@ -668,19 +670,30 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: surface,
+        labelStyle: _ts(size: 14, weight: FontWeight.w500, color: textMuted),
+        floatingLabelStyle:
+            _ts(size: 14, weight: FontWeight.w600, color: AppColors.primary),
         hintStyle: _ts(size: 14, weight: FontWeight.w400, color: textLight),
+        prefixIconColor: textMuted,
+        suffixIconColor: textMuted,
         border: OutlineInputBorder(
             borderRadius: AppRadius.inputR,
-            borderSide: BorderSide(color: border, width: 1)),
+            borderSide: BorderSide(color: inputBorder, width: 1)),
         enabledBorder: OutlineInputBorder(
             borderRadius: AppRadius.inputR,
-            borderSide: BorderSide(color: border, width: 1)),
+            borderSide: BorderSide(color: inputBorder, width: 1)),
+        disabledBorder: OutlineInputBorder(
+            borderRadius: AppRadius.inputR,
+            borderSide: BorderSide(color: divider, width: 1)),
         focusedBorder: const OutlineInputBorder(
             borderRadius: AppRadius.inputR,
             borderSide: BorderSide(color: AppColors.primary, width: 2)),
         errorBorder: const OutlineInputBorder(
             borderRadius: AppRadius.inputR,
             borderSide: BorderSide(color: AppColors.red, width: 1.5)),
+        focusedErrorBorder: const OutlineInputBorder(
+            borderRadius: AppRadius.inputR,
+            borderSide: BorderSide(color: AppColors.red, width: 2)),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),

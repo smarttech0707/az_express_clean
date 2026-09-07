@@ -72,6 +72,11 @@ class _DriverDashboardState extends State<DriverDashboard>
     NotificationService.registerTapHandler((type, orderId, status) {
       // Pour new_order : le dialog apparaît automatiquement via _listenPendingRequest
       // Pour les autres types, rien à faire depuis le dashboard livreur
+    }, acceptedTypes: const {
+      'new_order',
+      'order_cancelled',
+      'mission_end',
+      'low_balance',
     });
     _listenPendingRequest();
     _loadDeliveredCount();

@@ -402,7 +402,7 @@ class _GenericForgotPasswordPageState extends State<GenericForgotPasswordPage> {
               borderSide: BorderSide(color: color, width: 2),
             ),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: Theme.of(context).colorScheme.surface,
           ),
           onSubmitted: (_) => _sendOtp(),
         ),
@@ -635,7 +635,7 @@ class _OtpBox extends StatelessWidget {
             decoration: InputDecoration(
               counterText: '',
               filled: true,
-              fillColor: Colors.white,
+              fillColor: Theme.of(context).colorScheme.surface,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(color: Colors.grey.shade300),
@@ -699,7 +699,7 @@ class _SecretField extends StatelessWidget {
           borderSide: BorderSide(color: color, width: 2),
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
       onSubmitted: onSubmit != null ? (_) => onSubmit!() : null,
     );

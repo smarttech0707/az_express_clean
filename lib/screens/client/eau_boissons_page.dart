@@ -430,7 +430,7 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: Theme.of(context).colorScheme.surface,
                       ),
                     ),
                   ),

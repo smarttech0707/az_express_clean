@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
@@ -8,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../models/local_place.dart';
 import 'active_city_service.dart';
+import 'notification_service.dart';
 
 /// État du suivi GPS — utilisé par l'UI pour afficher le bon indicateur.
 enum GpsTrackingState {
@@ -126,7 +126,7 @@ class DriverLocationService {
 
     // ── Token FCM ────────────────────────────────────────────────────────────
     try {
-      _fcmToken = await FirebaseMessaging.instance.getToken() ?? '';
+      _fcmToken = await NotificationService().getTokenWhenReady() ?? '';
     } catch (_) {}
 
     // ── Position initiale immédiate ──────────────────────────────────────────

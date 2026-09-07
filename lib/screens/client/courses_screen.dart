@@ -825,7 +825,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                     borderSide: BorderSide.none,
                   ),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: Theme.of(context).colorScheme.surface,
                   contentPadding: const EdgeInsets.symmetric(vertical: 16),
                 ),
               ),
@@ -1028,7 +1028,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                     borderSide: BorderSide.none,
                   ),
                   filled: true,
-                  fillColor: Colors.white,
+                  fillColor: Theme.of(context).colorScheme.surface,
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                 ),

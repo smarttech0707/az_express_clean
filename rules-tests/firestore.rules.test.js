@@ -14,6 +14,7 @@ const {
   assertSucceeds,
   assertFails,
 } = require('@firebase/rules-unit-testing');
+const { deleteField, serverTimestamp } = require('firebase/firestore');
 
 let testEnv;
 
@@ -1332,4 +1333,838 @@ test('marketplace: les champs système restent immuables pour le vendeur', async
   await assertFails(ref.update({ sellerVerified: true }));
   await assertFails(ref.update({ sellerVipStatus: 'active' }));
   await assertFails(ref.update({ priorityLevel: 999 }));
+});
+
+test('notifications partenaires: le propriétaire restaurant ne modifie que son fcmToken', async () => {
+  await seed(async (db) => {
+    await db.doc('restaurant_owners/owner1').set({ restaurantId: 'restaurant1' });
+    await db.doc('restaurant_owners/owner2').set({ restaurantId: 'restaurant2' });
+    await db.doc('restaurants/restaurant1').set({
+      name: 'Restaurant 1',
+      fcmToken: 'ancien-token-restaurant',
+    });
+  });
+
+  const ownerRef = asClient('owner1').doc('restaurants/restaurant1');
+  await assertSucceeds(ownerRef.update({ fcmToken: 'nouveau-token-restaurant' }));
+  await assertFails(ownerRef.update({
+    fcmToken: 'autre-token-restaurant',
+    name: 'Nom modifié',
+  }));
+  await assertFails(
+    asClient('owner2')
+      .doc('restaurants/restaurant1')
+      .update({ fcmToken: 'token-cross-user-refuse' }),
+  );
+});
+
+test('notifications partenaires: seule la session pharmacie liée modifie fcmToken', async () => {
+  await seed((db) => db.doc('pharmacies/pharmacie1').set({
+    name: 'Pharmacie 1',
+    currentUid: 'session-pharmacie',
+    fcmToken: 'ancien-token-pharmacie',
+  }));
+
+  const ownerRef = asAnonymous('session-pharmacie').doc('pharmacies/pharmacie1');
+  await assertSucceeds(ownerRef.update({ fcmToken: 'nouveau-token-pharmacie' }));
+  await assertFails(ownerRef.update({
+    fcmToken: 'autre-token-pharmacie',
+    name: 'Nom modifié',
+  }));
+  await assertFails(
+    asAnonymous('autre-session')
+      .doc('pharmacies/pharmacie1')
+      .update({ fcmToken: 'token-cross-user-refuse' }),
+  );
+  await assertFails(
+    asAnonymous('autre-session')
+      .doc('pharmacies/pharmacie1')
+      .update({ currentUid: 'autre-session' }),
+  );
+});
+
+test('notifications partenaires: un agent E-Kbine ne modifie que son document', async () => {
+  await seed((db) => db.doc('ekbine_agents/agent1').set({
+    isVerified: true,
+    isSuspended: false,
+    walletBalance: 0,
+    totalCompleted: 0,
+    fcmToken: 'ancien-token-ekbine',
+  }));
+
+  await assertSucceeds(
+    asClient('agent1')
+      .doc('ekbine_agents/agent1')
+      .update({ fcmToken: 'nouveau-token-ekbine' }),
+  );
+  await assertFails(
+    asClient('agent2')
+      .doc('ekbine_agents/agent1')
+      .update({ fcmToken: 'token-cross-user-refuse' }),
+  );
+});
+
+function validVehicleListing(sellerId = 'seller1', overrides = {}) {
+  return {
+    sellerId,
+    sellerType: 'individual',
+    vehicleType: 'car',
+    offerType: 'sale',
+    title: 'Toyota Corolla',
+    description: 'Véhicule propre et régulièrement entretenu.',
+    brand: 'Toyota',
+    model: 'Corolla',
+    year: 2024,
+    condition: 'used',
+    color: 'Gris',
+    mileageKm: 25000,
+    transmission: 'automatic',
+    fuelType: 'petrol',
+    seats: 5,
+    salePrice: 2500000,
+    rentalWithDriver: false,
+    rentalWithoutDriver: false,
+    price: 2500000,
+    currency: 'XOF',
+    cityId: 'agnibilekrou',
+    cityName: 'Agnibilékrou',
+    status: 'draft',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
+test('vehicle_listings: le propriétaire réel crée et lit son annonce valide', async () => {
+  const ref = asClient('seller1').doc('vehicle_listings/v1');
+  await assertSucceeds(ref.set(validVehicleListing()));
+  await assertSucceeds(ref.get());
+});
+
+test('vehicle_listings: une annonce active est lisible par une session authentifiée', async () => {
+  await seed((db) => db.doc('vehicle_listings/v1').set(
+    validVehicleListing('seller1', {
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      status: 'active',
+    }),
+  ));
+  await assertSucceeds(asClient('reader1').doc('vehicle_listings/v1').get());
+  await assertFails(unauth().doc('vehicle_listings/v1').get());
+});
+
+test('vehicle_listings: création non authentifiée, anonyme ou cross-user refusée', async () => {
+  await assertFails(
+    unauth().doc('vehicle_listings/v1').set(validVehicleListing()),
+  );
+  await assertFails(
+    asAnonymous('seller1')
+      .doc('vehicle_listings/v2')
+      .set(validVehicleListing()),
+  );
+  await assertFails(
+    asClient('seller1')
+      .doc('vehicle_listings/v3')
+      .set(validVehicleListing('seller2')),
+  );
+});
+
+test('vehicle_listings: propriétaire modifie et archive, tiers et changement de propriétaire refusés', async () => {
+  await seed((db) => db.doc('vehicle_listings/v1').set(
+    validVehicleListing('seller1', {
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+      status: 'active',
+    }),
+  ));
+  const ownerRef = asClient('seller1').doc('vehicle_listings/v1');
+  await assertSucceeds(ownerRef.update({
+    title: 'Toyota Corolla révisée',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(asClient('seller2').doc('vehicle_listings/v1').update({
+    title: 'Annonce détournée',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(ownerRef.update({
+    sellerId: 'seller2',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(ownerRef.update({
+    status: 'archived',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(ownerRef.delete());
+});
+
+test('vehicle_listings: enum, prix et champs critiques invalides sont refusés', async () => {
+  const ref = asClient('seller1').doc('vehicle_listings/v1');
+  await assertFails(ref.set(validVehicleListing('seller1', {
+    vehicleType: 'boat',
+  })));
+  await assertFails(ref.set(validVehicleListing('seller1', { price: -1 })));
+  await assertFails(ref.set(validVehicleListing('seller1', {
+    cityId: 'Agnibilékrou',
+  })));
+  await assertFails(ref.set(validVehicleListing('seller1', {
+    verified: true,
+  })));
+  await assertFails(ref.set(validVehicleListing('seller1', {
+    status: 'sold',
+  })));
+  await assertFails(ref.set(validVehicleListing('seller1', {
+    salePrice: -1,
+    price: -1,
+  })));
+  await assertFails(ref.set(validVehicleListing('seller1', {
+    rentalPricePerDay: 15000,
+  })));
+});
+
+test('vehicle_listings: location cohérente autorisée et options invalides refusées', async () => {
+  const validRental = validVehicleListing('seller1', {
+    offerType: 'rental',
+    price: 15000,
+    salePrice: undefined,
+    rentalPricePerDay: 15000,
+    rentalWithDriver: false,
+    rentalWithoutDriver: true,
+  });
+  delete validRental.salePrice;
+  await assertSucceeds(
+    asClient('seller1').doc('vehicle_listings/rental-ok').set(validRental),
+  );
+
+  await assertFails(
+    asClient('seller1').doc('vehicle_listings/rental-no-option').set({
+      ...validRental,
+      rentalWithoutDriver: false,
+    }),
+  );
+});
+
+test('vehicle_listings: références médias bornées autorisées, liste excessive refusée', async () => {
+  const media = {
+    id: 'photo1',
+    type: 'image',
+    storagePath: 'vehicle_listings/seller1/media-ok/images/photo1.jpg',
+    downloadUrl: 'https://example.test/photo1',
+    position: 0,
+  };
+  await assertSucceeds(
+    asClient('seller1').doc('vehicle_listings/media-ok').set(
+      validVehicleListing('seller1', {
+        media: [media],
+        coverMediaId: 'photo1',
+      }),
+    ),
+  );
+  await assertFails(
+    asClient('seller1').doc('vehicle_listings/media-too-many').set(
+      validVehicleListing('seller1', {
+        media: Array.from({ length: 10 }, (_, index) => ({
+          ...media,
+          id: `photo${index}`,
+          position: index,
+        })),
+        coverMediaId: 'photo0',
+      }),
+    ),
+  );
+});
+
+test('vehicle_listings: createdAt et champs conditionnels restent protégés', async () => {
+  await seed((db) => db.doc('vehicle_listings/v-conditional').set(
+    validVehicleListing('seller1', {
+      status: 'active',
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+    }),
+  ));
+  const ref = asClient('seller1').doc('vehicle_listings/v-conditional');
+  await assertFails(ref.update({
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(ref.update({
+    mileageKm: deleteField(),
+    updatedAt: serverTimestamp(),
+  }));
+});
+
+test('vehicle_listings: le super-admin modifie et supprime sans changer sellerId', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('vehicle_listings/v1').set(validVehicleListing('seller1', {
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+      status: 'active',
+    }));
+  });
+  const ref = asAdmin('admin1').doc('vehicle_listings/v1');
+  await assertSucceeds(ref.update({
+    status: 'archived',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(ref.update({
+    sellerId: 'admin1',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(ref.delete());
+});
+
+function validVehicleSellerProfile(ownerId = 'seller1', overrides = {}) {
+  return {
+    ownerId,
+    sellerType: 'individual',
+    displayName: 'Aya Koné',
+    phone: '0700000000',
+    cityId: 'abengourou',
+    verificationStatus: 'unverified',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
+function validProfessionalProfile(ownerId = 'seller1', overrides = {}) {
+  return validVehicleSellerProfile(ownerId, {
+    sellerType: 'professional',
+    shopName: 'AZ Motors',
+    businessType: 'dealership',
+    professionalPhone: '0100000000',
+    address: 'Quartier Commerce',
+    locationVisibility: 'approximate',
+    ...overrides,
+  });
+}
+
+function validVehiclePrivateLocation(ownerId = 'seller1', overrides = {}) {
+  return {
+    ownerId,
+    latitude: 6.7297,
+    longitude: -3.4964,
+    cityId: 'abengourou',
+    addressLabel: 'Près du marché',
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
+function validVehicleConversation(buyerId = 'buyer1', overrides = {}) {
+  return {
+    listingId: 'v-chat',
+    buyerId,
+    sellerId: 'seller1',
+    participantIds: [buyerId, 'seller1'],
+    listingTitle: 'Toyota Corolla',
+    listingPrice: 6500000,
+    currency: 'XOF',
+    sellerDisplayName: 'Aya Koné',
+    sellerType: 'individual',
+    sellerVerificationStatus: 'unverified',
+    lastMessagePreview: '',
+    lastSenderId: null,
+    buyerUnreadCount: 0,
+    sellerUnreadCount: 0,
+    status: 'active',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    lastMessageAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
+async function seedVehicleChatBase() {
+  await seed(async (db) => {
+    await db.doc('vehicle_seller_profiles/seller1').set(
+      validVehicleSellerProfile('seller1', {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await db.doc('vehicle_listings/v-chat').set(
+      validVehicleListing('seller1', {
+        title: 'Toyota Corolla',
+        price: 6500000,
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+}
+
+test('vehicle_conversations: acheteur crée une conversation valide et déterministe', async () => {
+  await seedVehicleChatBase();
+  await assertSucceeds(
+    asClient('buyer1')
+      .doc('vehicle_conversations/vc_v-chat_buyer1')
+      .set(validVehicleConversation()),
+  );
+});
+
+test('vehicle_conversations: vendeur lui-même, faux buyer/seller et annonce archivée refusés', async () => {
+  await seedVehicleChatBase();
+  await assertFails(
+    asClient('seller1')
+      .doc('vehicle_conversations/vc_v-chat_seller1')
+      .set(validVehicleConversation('seller1', {
+        buyerId: 'seller1',
+        participantIds: ['seller1', 'seller1'],
+      })),
+  );
+  await assertFails(
+    asClient('buyer1')
+      .doc('vehicle_conversations/vc_v-chat_other')
+      .set(validVehicleConversation('other')),
+  );
+  await assertFails(
+    asClient('buyer1')
+      .doc('vehicle_conversations/vc_v-chat_buyer1')
+      .set(validVehicleConversation('buyer1', { sellerId: 'intruder' })),
+  );
+  await seed((db) => db.doc('vehicle_listings/v-chat').update({ status: 'archived' }));
+  await assertFails(
+    asClient('buyer1')
+      .doc('vehicle_conversations/vc_v-chat_buyer1')
+      .set(validVehicleConversation()),
+  );
+});
+
+test('vehicle_conversations: non authentifié refusé', async () => {
+  await seedVehicleChatBase();
+  const path = 'vehicle_conversations/vc_v-chat_buyer1';
+  await assertFails(unauth().doc(path).set(validVehicleConversation()));
+});
+
+test('vehicle_conversations: participants lisent, tiers refusé', async () => {
+  await seed((db) => db.doc('vehicle_conversations/vc_v-chat_buyer1').set(
+    validVehicleConversation('buyer1', {
+      createdAt: new Date(), updatedAt: new Date(), lastMessageAt: new Date(),
+    }),
+  ));
+  const path = 'vehicle_conversations/vc_v-chat_buyer1';
+  await assertSucceeds(asClient('buyer1').doc(path).get());
+  await assertSucceeds(asClient('seller1').doc(path).get());
+  await assertFails(asClient('other').doc(path).get());
+});
+
+test('vehicle_conversations: identités et participants sont immuables', async () => {
+  await seed((db) => db.doc('vehicle_conversations/vc_v-chat_buyer1').set(
+    validVehicleConversation('buyer1', {
+      createdAt: new Date(), updatedAt: new Date(), lastMessageAt: new Date(),
+    }),
+  ));
+  const ref = asClient('buyer1').doc('vehicle_conversations/vc_v-chat_buyer1');
+  await assertFails(ref.update({ listingId: 'other', updatedAt: serverTimestamp() }));
+  await assertFails(ref.update({ participantIds: ['buyer1', 'other'], updatedAt: serverTimestamp() }));
+});
+
+test('vehicle_conversations: incrément unread opposé et reset personnel autorisés', async () => {
+  await seed((db) => db.doc('vehicle_conversations/vc_v-chat_buyer1').set(
+    validVehicleConversation('buyer1', {
+      createdAt: new Date(), updatedAt: new Date(), lastMessageAt: new Date(),
+    }),
+  ));
+  const buyer = asClient('buyer1').doc('vehicle_conversations/vc_v-chat_buyer1');
+  await assertSucceeds(buyer.update({
+    lastMessagePreview: 'Bonjour', lastSenderId: 'buyer1',
+    sellerUnreadCount: 1, lastMessageAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(buyer.update({
+    buyerUnreadCount: 4, updatedAt: serverTimestamp(),
+  }));
+  const seller = asClient('seller1').doc('vehicle_conversations/vc_v-chat_buyer1');
+  await assertSucceeds(seller.update({
+    sellerUnreadCount: 0, updatedAt: serverTimestamp(),
+  }));
+});
+
+test('vehicle messages: participants envoient/lisent, tiers et sender falsifié refusés', async () => {
+  await seed((db) => db.doc('vehicle_conversations/vc_v-chat_buyer1').set(
+    validVehicleConversation('buyer1', {
+      createdAt: new Date(), updatedAt: new Date(), lastMessageAt: new Date(),
+    }),
+  ));
+  const path = 'vehicle_conversations/vc_v-chat_buyer1/messages/m1';
+  await assertSucceeds(asClient('buyer1').doc(path).set({
+    senderId: 'buyer1', text: 'Bonjour', type: 'text',
+    createdAt: serverTimestamp(),
+  }));
+  await assertSucceeds(asClient('seller1').doc(path).get());
+  await assertFails(asClient('other').doc(path).get());
+  await assertFails(asClient('buyer1').doc(
+    'vehicle_conversations/vc_v-chat_buyer1/messages/m2',
+  ).set({ senderId: 'seller1', text: 'Faux', type: 'text', createdAt: serverTimestamp() }));
+});
+
+test('vehicle messages: vide, espaces, trop long et mauvais type refusés', async () => {
+  await seed((db) => db.doc('vehicle_conversations/vc_v-chat_buyer1').set(
+    validVehicleConversation('buyer1', {
+      createdAt: new Date(), updatedAt: new Date(), lastMessageAt: new Date(),
+    }),
+  ));
+  const messages = asClient('buyer1')
+    .collection('vehicle_conversations/vc_v-chat_buyer1/messages');
+  for (const [text, type] of [['', 'text'], ['   ', 'text'], ['x'.repeat(1001), 'text'], ['ok', 'audio']]) {
+    await assertFails(messages.add({
+      senderId: 'buyer1', text, type, createdAt: serverTimestamp(),
+    }));
+  }
+});
+
+test('vehicle_favorites: ajout, lecture et suppression réservés au propriétaire', async () => {
+  await seed((db) => db.doc('vehicle_listings/v-favorite').set(
+    validVehicleListing('seller1', {
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }),
+  ));
+  const data = {
+    userId: 'buyer1',
+    listingId: 'v-favorite',
+    listingSnapshot: { title: 'Toyota Corolla', sellerId: 'seller1' },
+    createdAt: serverTimestamp(),
+  };
+  const path = 'vehicle_favorites/buyer1/items/v-favorite';
+  const owner = asClient('buyer1').doc(path);
+  await assertSucceeds(owner.set(data));
+  await assertSucceeds(owner.get());
+  await assertFails(asClient('other').doc(path).get());
+  await assertFails(asClient('other').doc(path).delete());
+  await assertSucceeds(owner.delete());
+});
+
+test('vehicle_favorites: non authentifié, UID usurpé et annonce inactive refusés', async () => {
+  await seed(async (db) => {
+    await db.doc('vehicle_listings/active').set(validVehicleListing('seller1', {
+      status: 'active', createdAt: new Date(), updatedAt: new Date(),
+    }));
+    await db.doc('vehicle_listings/archived').set(validVehicleListing('seller1', {
+      status: 'archived', createdAt: new Date(), updatedAt: new Date(),
+    }));
+  });
+  const favorite = (userId, listingId) => ({
+    userId,
+    listingId,
+    listingSnapshot: { title: 'Annonce' },
+    createdAt: serverTimestamp(),
+  });
+  await assertFails(unauth().doc('vehicle_favorites/buyer1/items/active')
+    .set(favorite('buyer1', 'active')));
+  await assertFails(asClient('other').doc('vehicle_favorites/buyer1/items/active')
+    .set(favorite('buyer1', 'active')));
+  await assertFails(asClient('buyer1').doc('vehicle_favorites/buyer1/items/active')
+    .set(favorite('other', 'active')));
+  await assertFails(asClient('buyer1').doc('vehicle_favorites/buyer1/items/archived')
+    .set(favorite('buyer1', 'archived')));
+});
+
+test('vehicle_reports: annonce/vendeur valides, doublon et usurpation refusés', async () => {
+  await seed(async (db) => {
+    await db.doc('vehicle_seller_profiles/seller1').set(
+      validVehicleSellerProfile('seller1'),
+    );
+    await db.doc('vehicle_listings/v-report').set(validVehicleListing('seller1', {
+      status: 'active', createdAt: new Date(), updatedAt: new Date(),
+    }));
+  });
+  const listing = asClient('buyer1').doc('vehicle_reports/listing_v-report_buyer1');
+  await assertSucceeds(listing.set({
+    targetType: 'listing', targetId: 'v-report', sellerId: 'seller1',
+    reporterUid: 'buyer1', reason: 'Prix trompeur', status: 'pending',
+    createdAt: serverTimestamp(),
+  }));
+  await assertFails(listing.set({
+    targetType: 'listing', targetId: 'v-report', sellerId: 'seller1',
+    reporterUid: 'buyer1', reason: 'Doublon', status: 'pending',
+    createdAt: serverTimestamp(),
+  }));
+  await assertSucceeds(asClient('buyer1')
+    .doc('vehicle_reports/seller_seller1_buyer1').set({
+      targetType: 'seller', targetId: 'seller1', sellerId: 'seller1',
+      reporterUid: 'buyer1', reason: 'Spam', status: 'pending',
+      createdAt: serverTimestamp(),
+    }));
+  await assertFails(asClient('buyer1')
+    .doc('vehicle_reports/listing_v-report_other').set({
+      targetType: 'listing', targetId: 'v-report', sellerId: 'seller1',
+      reporterUid: 'other', reason: 'Spam', status: 'pending',
+      createdAt: serverTimestamp(),
+    }));
+  await assertFails(unauth().doc('vehicle_reports/listing_v-report_u').set({}));
+});
+
+test('vehicle_user_blocks: propriétaire bloque/débloque, tiers et auto-blocage refusés', async () => {
+  const ref = asClient('buyer1')
+    .doc('vehicle_user_blocks/buyer1/blocked/seller1');
+  await assertSucceeds(ref.set({
+    ownerUid: 'buyer1', blockedUid: 'seller1', createdAt: serverTimestamp(),
+  }));
+  await assertSucceeds(ref.get());
+  await assertFails(asClient('other')
+    .doc('vehicle_user_blocks/buyer1/blocked/seller1').get());
+  await assertFails(asClient('buyer1')
+    .doc('vehicle_user_blocks/buyer1/blocked/buyer1').set({
+      ownerUid: 'buyer1', blockedUid: 'buyer1', createdAt: serverTimestamp(),
+    }));
+  await assertSucceeds(ref.delete());
+});
+
+test('vehicle_conversations: blocage bilatéral refuse création et nouveaux messages, historique reste lisible', async () => {
+  await seed(async (db) => {
+    await db.doc('vehicle_seller_profiles/seller1').set(
+      validVehicleSellerProfile('seller1'),
+    );
+    await db.doc('vehicle_listings/v-chat').set(validVehicleListing('seller1', {
+      status: 'active', createdAt: new Date(), updatedAt: new Date(),
+    }));
+    await db.doc('vehicle_conversations/vc_v-chat_buyer1').set(
+      validVehicleConversation(),
+    );
+    await db.doc('vehicle_conversations/vc_v-chat_buyer1/messages/old').set({
+      senderId: 'buyer1', text: 'Historique', type: 'text', createdAt: new Date(),
+    });
+    await db.doc('vehicle_user_blocks/seller1/blocked/buyer1').set({
+      ownerUid: 'seller1', blockedUid: 'buyer1', createdAt: new Date(),
+    });
+  });
+  await assertSucceeds(asClient('buyer1')
+    .doc('vehicle_conversations/vc_v-chat_buyer1/messages/old').get());
+  await assertFails(asClient('buyer1')
+    .doc('vehicle_conversations/vc_v-chat_buyer1/messages/new').set({
+      senderId: 'buyer1', text: 'Nouveau', type: 'text',
+      createdAt: serverTimestamp(),
+    }));
+});
+
+test('vehicle moderation: vendeur ne lève pas suspension et ne s’auto-vérifie pas', async () => {
+  await seed(async (db) => {
+    await db.doc('vehicle_seller_profiles/seller1').set(
+      validVehicleSellerProfile('seller1', {
+        suspended: true, suspensionReason: 'Fraude', suspendedAt: new Date(),
+      }),
+    );
+    await db.doc('vehicle_seller_suspensions/seller1').set({
+      sellerId: 'seller1', createdAt: new Date(),
+    });
+    await db.doc('vehicle_listings/v-suspended').set(validVehicleListing('seller1', {
+      status: 'suspended', suspensionReason: 'Fraude', suspendedAt: new Date(),
+      createdAt: new Date(), updatedAt: new Date(),
+    }));
+  });
+  await assertFails(asClient('seller1').doc('vehicle_listings/v-suspended')
+    .update({ status: 'active', updatedAt: serverTimestamp() }));
+  await assertFails(asClient('seller1').doc('vehicle_seller_profiles/seller1')
+    .update({ suspended: false, verificationStatus: 'verified', updatedAt: serverTimestamp() }));
+  await assertFails(asClient('seller1').doc('vehicle_listings/new')
+    .set(validVehicleListing('seller1')));
+});
+
+test('vehicle_seller_profiles: création individual et professional valide autorisée', async () => {
+  await assertSucceeds(
+    asClient('seller1')
+      .doc('vehicle_seller_profiles/seller1')
+      .set(validVehicleSellerProfile()),
+  );
+  await assertSucceeds(
+    asClient('seller2')
+      .doc('vehicle_seller_profiles/seller2')
+      .set(validProfessionalProfile('seller2')),
+  );
+});
+
+test('vehicle_seller_profiles: écriture non authentifiée, mauvais UID et ownerId falsifié refusés', async () => {
+  await assertFails(
+    unauth()
+      .doc('vehicle_seller_profiles/seller1')
+      .set(validVehicleSellerProfile()),
+  );
+  await assertFails(
+    asClient('seller1')
+      .doc('vehicle_seller_profiles/seller2')
+      .set(validVehicleSellerProfile('seller1')),
+  );
+  await assertFails(
+    asClient('seller1')
+      .doc('vehicle_seller_profiles/seller1')
+      .set(validVehicleSellerProfile('seller2')),
+  );
+});
+
+test('vehicle_seller_profiles: propriétaire modifie ses champs publics, tiers refusé', async () => {
+  await seed((db) => db.doc('vehicle_seller_profiles/seller1').set(
+    validVehicleSellerProfile('seller1', {
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+    }),
+  ));
+  await assertSucceeds(
+    asClient('seller1').doc('vehicle_seller_profiles/seller1').update({
+      displayName: 'Aya K. Koné',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(
+    asClient('seller2').doc('vehicle_seller_profiles/seller1').update({
+      displayName: 'Profil détourné',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('vehicle_seller_profiles: token FCM limité au propriétaire et à ce seul champ', async () => {
+  await seed((db) => db.doc('vehicle_seller_profiles/seller1').set(
+    validVehicleSellerProfile('seller1', {
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+    }),
+  ));
+  const owner = asClient('seller1')
+    .doc('vehicle_seller_profiles/seller1');
+  await assertSucceeds(owner.update({ fcmToken: 'seller-token-12345' }));
+  await assertFails(
+    asClient('seller2').doc('vehicle_seller_profiles/seller1')
+      .update({ fcmToken: 'stolen-token-12345' }),
+  );
+  await assertFails(owner.update({ fcmToken: 'court' }));
+  await assertFails(owner.update({
+    fcmToken: 'seller-token-67890',
+    displayName: 'Modification couplée interdite',
+  }));
+});
+
+test('vehicle_seller_profiles: auto-vérification et champs Admin interdits', async () => {
+  await assertFails(
+    asClient('seller1')
+      .doc('vehicle_seller_profiles/seller1')
+      .set(validProfessionalProfile('seller1', {
+        verificationStatus: 'verified',
+      })),
+  );
+  await seed((db) => db.doc('vehicle_seller_profiles/seller1').set(
+    validProfessionalProfile('seller1', {
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+    }),
+  ));
+  const ref = asClient('seller1').doc('vehicle_seller_profiles/seller1');
+  await assertFails(ref.update({
+    verificationStatus: 'verified',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(ref.update({
+    isSuspended: false,
+    updatedAt: serverTimestamp(),
+  }));
+});
+
+test('vehicle_seller_profiles: type vendeur immuable et chemin logo propriétaire uniquement', async () => {
+  await seed((db) => db.doc('vehicle_seller_profiles/seller1').set(
+    validVehicleSellerProfile('seller1', {
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      updatedAt: new Date('2026-09-01T00:00:00Z'),
+    }),
+  ));
+  const ref = asClient('seller1').doc('vehicle_seller_profiles/seller1');
+  await assertFails(ref.update({
+    sellerType: 'professional',
+    shopName: 'AZ Motors',
+    businessType: 'dealership',
+    professionalPhone: '0100000000',
+    address: 'Quartier Commerce',
+    locationVisibility: 'hidden',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(ref.update({
+    logoStoragePath: 'vehicle_seller_profiles/seller2/logo/logo.jpg',
+    updatedAt: serverTimestamp(),
+  }));
+});
+
+test('vehicle_seller_profiles: super-admin peut modérer sans changer ownerId', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('vehicle_seller_profiles/seller1').set(
+      validProfessionalProfile('seller1', {
+        createdAt: new Date('2026-09-01T00:00:00Z'),
+        updatedAt: new Date('2026-09-01T00:00:00Z'),
+      }),
+    );
+  });
+  const ref = asAdmin('admin1').doc('vehicle_seller_profiles/seller1');
+  await assertSucceeds(ref.update({
+    verificationStatus: 'verified',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(ref.update({
+    ownerId: 'admin1',
+    updatedAt: serverTimestamp(),
+  }));
+});
+
+test('vehicle_seller_private_locations: propriétaire professionnel écrit et lit', async () => {
+  await seed((db) => db.doc('vehicle_seller_profiles/seller1').set(
+    validProfessionalProfile('seller1', {
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }),
+  ));
+  const ref = asClient('seller1')
+    .doc('vehicle_seller_private_locations/seller1');
+  await assertSucceeds(ref.set(validVehiclePrivateLocation()));
+  await assertSucceeds(ref.get());
+});
+
+test('vehicle_seller_private_locations: lecture et écriture cross-user refusées', async () => {
+  await seed(async (db) => {
+    await db.doc('vehicle_seller_profiles/seller1').set(
+      validProfessionalProfile('seller1', {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await db.doc('vehicle_seller_profiles/seller2').set(
+      validProfessionalProfile('seller2', {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    );
+    await db.doc('vehicle_seller_private_locations/seller1').set(
+      validVehiclePrivateLocation('seller1', { updatedAt: new Date() }),
+    );
+  });
+  const otherRef = asClient('seller2')
+    .doc('vehicle_seller_private_locations/seller1');
+  await assertFails(otherRef.get());
+  await assertFails(otherRef.set(validVehiclePrivateLocation('seller2')));
+});
+
+test('vehicle_seller_private_locations: un particulier ne peut pas enregistrer de coordonnées', async () => {
+  await seed((db) => db.doc('vehicle_seller_profiles/seller1').set(
+    validVehicleSellerProfile('seller1', {
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }),
+  ));
+  await assertFails(
+    asClient('seller1')
+      .doc('vehicle_seller_private_locations/seller1')
+      .set(validVehiclePrivateLocation()),
+  );
+});
+
+test('vehicle_seller_private_locations: super-admin lit, utilisateur non authentifié refusé', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('vehicle_seller_private_locations/seller1').set(
+      validVehiclePrivateLocation('seller1', { updatedAt: new Date() }),
+    );
+  });
+  const path = 'vehicle_seller_private_locations/seller1';
+  await assertSucceeds(asAdmin('admin1').doc(path).get());
+  await assertFails(unauth().doc(path).get());
 });

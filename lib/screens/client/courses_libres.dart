@@ -136,7 +136,7 @@ class _CoursesLibresState extends State<CoursesLibres> {
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
                 prefixIcon: const Icon(Icons.shopping_basket),
               ),
             ),
@@ -150,7 +150,7 @@ class _CoursesLibresState extends State<CoursesLibres> {
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
                 prefixIcon: const Icon(Icons.account_balance_wallet),
                 suffixText: "FCFA",
               ),

@@ -214,7 +214,7 @@ class _PharmacieChangePasswordState extends State<PharmacieChangePassword> {
           borderSide: BorderSide(color: color, width: 2),
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }

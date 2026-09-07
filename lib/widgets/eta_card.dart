@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../models/route_model.dart';
 import '../screens/chat/chat_page.dart';
 import '../services/realtime_tracking_service.dart';
 import '../theme/app_theme.dart';
@@ -17,6 +16,14 @@ class EtaCard extends StatelessWidget {
   final double? driverRating;
   final String orderStatus;
   final String orderId;
+  final String? pickupLabel;
+  final String? deliveryLabel;
+  final double? orderDistanceKm;
+  final int? orderEtaMinutes;
+  final String? orderEtaText;
+  final int? deliveryPrice;
+  final String? deliveryMode;
+  final String? paymentMethod;
   final VoidCallback? onFollowToggle;
   final VoidCallback? onRecenter;
 
@@ -29,6 +36,14 @@ class EtaCard extends StatelessWidget {
     this.driverPhotoUrl,
     this.driverPhone,
     this.driverRating,
+    this.pickupLabel,
+    this.deliveryLabel,
+    this.orderDistanceKm,
+    this.orderEtaMinutes,
+    this.orderEtaText,
+    this.deliveryPrice,
+    this.deliveryMode,
+    this.paymentMethod,
     this.onFollowToggle,
     this.onRecenter,
   });
@@ -65,6 +80,14 @@ class EtaCard extends StatelessWidget {
     final hasDest = tracking.hasDest;
     final loading = tracking.routeLoading;
     final color = _statusColor;
+    final hasOrderSummary = pickupLabel != null ||
+        deliveryLabel != null ||
+        orderDistanceKm != null ||
+        orderEtaMinutes != null ||
+        orderEtaText != null ||
+        deliveryPrice != null ||
+        deliveryMode != null ||
+        paymentMethod != null;
 
     return Container(
       decoration: const BoxDecoration(
@@ -87,6 +110,21 @@ class EtaCard extends StatelessWidget {
           decoration: BoxDecoration(
               color: AppColors.divider, borderRadius: BorderRadius.circular(4)),
         )),
+
+        if (hasOrderSummary)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: _OrderSummary(
+              pickupLabel: pickupLabel,
+              deliveryLabel: deliveryLabel,
+              distanceKm: orderDistanceKm,
+              etaMinutes: orderEtaMinutes,
+              etaText: orderEtaText,
+              price: deliveryPrice,
+              deliveryMode: deliveryMode,
+              paymentMethod: paymentMethod,
+            ),
+          ),
 
         // ── Barre de progression livraison ────────────────────────────────────
         if (hasDriver)
@@ -260,31 +298,21 @@ class EtaCard extends StatelessWidget {
             _StatChip(
               icon: Icons.access_time_rounded,
               label: 'Arrivée',
-              value: hasDriver
-                  ? (hasDest
-                      ? RouteModel.formatEta(tracking.totalEta)
-                      : r2c.etaText)
-                  : '--',
+              value: hasDriver ? r2c.etaText : '--',
               color: AppColors.primary,
             ),
             const SizedBox(width: 10),
             _StatChip(
               icon: Icons.straighten_rounded,
               label: 'Distance',
-              value: hasDriver
-                  ? (hasDest
-                      ? RouteModel.formatDistance(tracking.totalDistKm)
-                      : r2c.distanceText)
-                  : '--',
+              value: hasDriver ? r2c.distanceText : '--',
               color: const Color(0xFF1565C0),
             ),
             const SizedBox(width: 10),
             _StatChip(
               icon: Icons.payments_rounded,
               label: 'Tarif',
-              value: hasDriver && r2c.estimatedPrice > 0
-                  ? '${r2c.estimatedPrice} F'
-                  : '--',
+              value: deliveryPrice == null ? '--' : '$deliveryPrice F',
               color: const Color(0xFF16A34A),
             ),
           ]),
@@ -348,6 +376,156 @@ class EtaCard extends StatelessWidget {
         color: AppColors.primary,
         child: const Icon(Icons.delivery_dining_rounded,
             color: Colors.white, size: 22),
+      );
+}
+
+class _OrderSummary extends StatelessWidget {
+  final String? pickupLabel;
+  final String? deliveryLabel;
+  final double? distanceKm;
+  final int? etaMinutes;
+  final String? etaText;
+  final int? price;
+  final String? deliveryMode;
+  final String? paymentMethod;
+
+  const _OrderSummary({
+    this.pickupLabel,
+    this.deliveryLabel,
+    this.distanceKm,
+    this.etaMinutes,
+    this.etaText,
+    this.price,
+    this.deliveryMode,
+    this.paymentMethod,
+  });
+
+  String get _distanceText => distanceKm == null
+      ? '—'
+      : '${distanceKm!.toStringAsFixed(1).replaceAll('.', ',')} km';
+
+  String get _etaDisplay {
+    if (etaText != null && etaText!.trim().isNotEmpty && etaText != '—') {
+      return etaText!;
+    }
+    return etaMinutes == null ? '—' : '$etaMinutes min';
+  }
+
+  String _displayValue(String? value) {
+    if (value == null || value.trim().isEmpty) return '—';
+    return '${value[0].toUpperCase()}${value.substring(1).toLowerCase()}';
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.bg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+            'Votre livraison',
+            style: GoogleFonts.urbanist(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: AppColors.text,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _OrderAddress(
+            icon: Icons.radio_button_checked_rounded,
+            iconColor: AppColors.primary,
+            label: 'Récupération',
+            value: pickupLabel ?? '—',
+          ),
+          const SizedBox(height: 6),
+          _OrderAddress(
+            icon: Icons.location_on_rounded,
+            iconColor: const Color(0xFF1565C0),
+            label: 'Livraison',
+            value: deliveryLabel ?? '—',
+          ),
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _SummaryValue(label: 'Distance', value: _distanceText),
+              _SummaryValue(label: 'Durée', value: _etaDisplay),
+              _SummaryValue(
+                label: 'Tarif',
+                value: price == null ? '—' : '$price FCFA',
+              ),
+              _SummaryValue(
+                label: 'Mode',
+                value: _displayValue(deliveryMode),
+              ),
+              _SummaryValue(
+                label: 'Paiement',
+                value: _displayValue(paymentMethod),
+              ),
+            ],
+          ),
+        ]),
+      );
+}
+
+class _OrderAddress extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String value;
+
+  const _OrderAddress({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) => Row(children: [
+        Icon(icon, size: 14, color: iconColor),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text.rich(
+            TextSpan(children: [
+              TextSpan(
+                text: '$label  ',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              TextSpan(text: value),
+            ]),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.urbanist(fontSize: 11.5, color: AppColors.text),
+          ),
+        ),
+      ]);
+}
+
+class _SummaryValue extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _SummaryValue({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Text.rich(
+        TextSpan(children: [
+          TextSpan(
+            text: '$label : ',
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
+          TextSpan(
+            text: value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ]),
+        style: GoogleFonts.urbanist(fontSize: 10.5, color: AppColors.textMuted),
       );
 }
 

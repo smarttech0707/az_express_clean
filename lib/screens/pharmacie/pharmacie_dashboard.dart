@@ -41,7 +41,7 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
       if (type == 'new_pharmacie_order') _tabCtrl.animateTo(0);
-    });
+    }, acceptedTypes: const {'new_pharmacie_order'});
   }
 
   @override

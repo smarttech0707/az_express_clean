@@ -228,7 +228,7 @@ class _PharmacieRegisterState extends State<PharmacieRegister> {
           borderSide: BorderSide(color: color, width: 2),
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }

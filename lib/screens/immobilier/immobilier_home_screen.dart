@@ -138,7 +138,7 @@ class _ImmobilierHomeScreenState extends State<ImmobilierHomeScreen> {
                     decoration: InputDecoration(
                       hintText: 'Rechercher une maison, un terrain...',
                       filled: true,
-                      fillColor: Colors.white,
+                      fillColor: Theme.of(context).colorScheme.surface,
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide.none),

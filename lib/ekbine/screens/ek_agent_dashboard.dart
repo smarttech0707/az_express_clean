@@ -13,6 +13,7 @@ import '../providers/ek_provider.dart';
 import 'ek_order_tracking.dart';
 import '../../services/subscription_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/notification_service.dart';
 import '../../screens/home/home_screen.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/stream_error_state.dart';
@@ -36,6 +37,7 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
     _tabCtrl = TabController(length: 3, vsync: this);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
+      NotificationService().saveToken(uid, 'ekbine_agents');
       SubscriptionService.checkAndRenew('ekbine_agents', uid);
     }
   }
@@ -158,7 +160,10 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
         IconButton(
           icon: const Icon(Icons.phone_android_rounded),
           tooltip: 'Mes numéros de dépôt',
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EkDepositAccountsScreen())),
+          onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const EkDepositAccountsScreen())),
         ),
         IconButton(
           icon: const Icon(Icons.account_circle_outlined),
@@ -703,9 +708,10 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
                   width: double.infinity,
                   height: 42,
                   child: ElevatedButton.icon(
-                    onPressed: order.status == 'deposit_proof_sent' && !_verifying
-                        ? _verifyDeposit
-                        : null,
+                    onPressed:
+                        order.status == 'deposit_proof_sent' && !_verifying
+                            ? _verifyDeposit
+                            : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF9C27B0),
                       foregroundColor: Colors.white,

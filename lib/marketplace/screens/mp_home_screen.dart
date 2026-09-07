@@ -11,6 +11,7 @@ import 'mp_search_screen.dart';
 import 'mp_seller_screen.dart';
 import 'mp_favorites_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../auto_moto/screens/vehicle_home_screen.dart';
 
 class MpHomeScreen extends StatefulWidget {
   const MpHomeScreen({super.key});
@@ -168,6 +169,17 @@ class _MpHomeScreenState extends State<MpHomeScreen> {
                 label: 'Tout',
                 selected: mp.selectedCategory == 'all',
                 onTap: () => mp.selectCategory('all'),
+              ),
+              _CatChip(
+                emoji: '🚗',
+                label: 'Auto & Moto',
+                selected: false,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const VehicleHomeScreen(),
+                  ),
+                ),
               ),
               ...mpCategories.map((c) => _CatChip(
                     emoji: c['emoji']!,

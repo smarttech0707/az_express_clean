@@ -48,6 +48,7 @@ import 'admin_security_dashboard.dart';
 import 'admin_ai_dashboard.dart';
 import 'admin_login.dart';
 import 'admin_mfa_security.dart';
+import 'admin_vehicle_moderation_page.dart';
 import '../../event/screens/admin_event_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
@@ -135,6 +136,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
             MaterialPageRoute(
                 builder: (_) => const AdminServiceRequestsPage()));
       }
+    }, acceptedTypes: const {
+      'admin_new_driver',
+      'admin_new_service_provider',
     });
   }
 
@@ -387,6 +391,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
         );
 
     return [
+      if (_isSuper)
+        go(
+          'Auto & Moto',
+          'Annonces, vendeurs et signalements',
+          Icons.directions_car_rounded,
+          const [Color(0xFFE65100), AppColors.primary],
+          const AdminVehicleModerationPage(),
+        ),
       if (_has('livreurs'))
         go('Livreurs', 'Gérer les comptes', Icons.delivery_dining_rounded,
             const [Color(0xFF1565C0), Color(0xFF1E88E5)], const DriversPage()),

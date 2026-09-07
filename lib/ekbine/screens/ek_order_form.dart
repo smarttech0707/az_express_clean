@@ -474,7 +474,7 @@ class _StepBeneficiary extends StatelessWidget {
             hintStyle: GoogleFonts.urbanist(color: kEkMuted),
             prefixIcon: const Icon(Icons.phone_rounded, color: kEkGreen),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: Theme.of(context).colorScheme.surface,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(18),
                 borderSide: const BorderSide(color: kEkDivider)),
@@ -504,7 +504,7 @@ class _StepBeneficiary extends StatelessWidget {
             hintStyle: GoogleFonts.urbanist(color: kEkMuted),
             prefixIcon: const Icon(Icons.payments_rounded, color: kEkGreen),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: Theme.of(context).colorScheme.surface,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(18),
                 borderSide: const BorderSide(color: kEkDivider)),

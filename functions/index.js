@@ -1204,7 +1204,7 @@ exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/
   await sendToToken(token,
     '✅ Mission accomplie !',
     `Transaction E-Kbine complétée.${earning ? ` Gain : +${earning} FCFA.` : ''}`,
-    { type: 'mission_end', orderId: event.params.orderId }
+    { type: 'ek_mission_end', orderId: event.params.orderId }
   );
 });
 
@@ -1442,6 +1442,9 @@ exports.artisanLogin = onCall({ maxInstances: 2 }, async (request) => {
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
 // légère de maxInstances uniquement.
 exports.pharmacieLogin = onCall({ maxInstances: 2 }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Authentification requise');
+  }
   const { pharmacieId, password } = request.data;
   if (!pharmacieId || !password) {
     throw new HttpsError('invalid-argument', 'Paramètres manquants');
@@ -1459,9 +1462,12 @@ exports.pharmacieLogin = onCall({ maxInstances: 2 }, async (request) => {
 
   if (credSnap.exists) {
     const ok = verifySecret(password, credSnap.data().hash);
-    return ok
-      ? { success: true, mustChangePassword: data.mustChangePassword === true }
-      : { success: false };
+    if (!ok) return { success: false };
+    // La liaison de session est créée uniquement après preuve du mot de passe.
+    // Les règles Firestore peuvent ensuite autoriser ce seul propriétaire à
+    // actualiser fcmToken sans permettre une auto-attribution cross-user.
+    await pharmacieRef.update({ currentUid: request.auth.uid });
+    return { success: true, mustChangePassword: data.mustChangePassword === true };
   }
 
   // Pas encore migrée — comparer avec l'ancien champ en clair, puis migrer.
@@ -1477,6 +1483,7 @@ exports.pharmacieLogin = onCall({ maxInstances: 2 }, async (request) => {
   await pharmacieRef.update({
     password:   admin.firestore.FieldValue.delete(),
     accessCode: admin.firestore.FieldValue.delete(),
+    currentUid: request.auth.uid,
   });
 
   return { success: true, mustChangePassword: data.mustChangePassword === true };
@@ -2342,6 +2349,19 @@ exports.notifyEventChatRecipient =
   eventNotifications.notifyEventChatRecipient;
 exports.updateEventProviderRating =
   eventNotifications.updateEventProviderRating;
+
+// AUTO & MOTO — notification du destinataire d'un nouveau message.
+const { createVehicleChatNotificationFunction } = require('./vehicleChatNotifications');
+exports.notifyVehicleChatRecipient = createVehicleChatNotificationFunction({
+  db, onDocumentCreated, sendToToken,
+});
+const { buildModerateVehicleEntity } = require('./vehicleModeration');
+exports.moderateVehicleEntity = onCall(
+  { maxInstances: 3 },
+  buildModerateVehicleEntity({
+    db, admin, requireAdminPermission, HttpsError,
+  }),
+);
 
 // GPS privé/confidentialité réelle V2 — real_estate_private_locations,
 // real_estate_location_access (voir functions/realEstateLocation.js).

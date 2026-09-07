@@ -41,7 +41,7 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
       if (type == 'new_boulangerie_order') _tabCtrl.animateTo(0);
-    });
+    }, acceptedTypes: const {'new_boulangerie_order'});
   }
 
   @override

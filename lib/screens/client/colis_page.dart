@@ -537,7 +537,7 @@ class _ColisPageState extends State<ColisPage> {
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: Theme.of(context).colorScheme.surface,
                       ),
                     ),
                   ),
@@ -629,7 +629,7 @@ class _ColisPageState extends State<ColisPage> {
               borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide.none),
           filled: true,
-          fillColor: Colors.white,
+          fillColor: Theme.of(context).colorScheme.surface,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         ),

@@ -3,12 +3,12 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import '../event_constants.dart';
 import '../models/event_models.dart';
 import '../../models/professional_subscription.dart';
+import '../../services/notification_service.dart';
 
 class EventService {
   EventService({
@@ -214,7 +214,7 @@ class EventService {
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      final token = await NotificationService().getTokenWhenReady();
       if (token != null) {
         await ref.set({'fcmToken': token}, SetOptions(merge: true));
       }

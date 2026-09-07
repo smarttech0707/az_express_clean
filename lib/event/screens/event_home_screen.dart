@@ -45,7 +45,9 @@ class _EventHomeScreenState extends State<EventHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<EventProvider>();
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Événementiel'),
@@ -92,6 +94,7 @@ class _EventHomeScreenState extends State<EventHomeScreen> {
         onRefresh: () => state.load(refresh: true),
         child: CustomScrollView(
           controller: _scroll,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           slivers: [
             SliverToBoxAdapter(child: _Header(state: state)),
             SliverPadding(
@@ -141,6 +144,8 @@ class _EventHomeScreenState extends State<EventHomeScreen> {
                           ),
                         ),
             ),
+            if (keyboardInset > 0)
+              SliverToBoxAdapter(child: SizedBox(height: keyboardInset)),
           ],
         ),
       ),

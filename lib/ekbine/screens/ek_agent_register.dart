@@ -192,7 +192,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
             DropdownButtonFormField<String>(
               decoration: InputDecoration(
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
                 prefixIcon:
                     const Icon(Icons.location_on_rounded, color: kEkGreen),
                 border: OutlineInputBorder(
@@ -386,7 +386,7 @@ class _EkAgentRegisterState extends State<EkAgentRegister> {
           hintStyle: GoogleFonts.urbanist(color: kEkMuted),
           prefixIcon: Icon(icon, color: kEkGreen),
           filled: true,
-          fillColor: Colors.white,
+          fillColor: Theme.of(context).colorScheme.surface,
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: const BorderSide(color: kEkDivider)),

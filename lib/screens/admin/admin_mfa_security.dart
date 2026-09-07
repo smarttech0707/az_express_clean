@@ -78,6 +78,8 @@ String adminMfaErrorMessage(String code) => switch (code) {
       'session-expired' => 'Code expiré. Renvoyez un nouveau code.',
       'too-many-requests' => 'Trop de tentatives. Réessayez plus tard.',
       'quota-exceeded' => 'Quota SMS temporairement atteint.',
+      'invalid-phone-number' =>
+        'Le numéro Admin est invalide. Utilisez un numéro ivoirien valide.',
       'admin-role-rejected' =>
         'Accès refusé : rôle Admin invalide ou désactivé.',
       'unsupported-second-factor' => 'Aucun facteur SMS Admin n’est enrôlé.',

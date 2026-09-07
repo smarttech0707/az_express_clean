@@ -19,7 +19,27 @@ import '../widgets/eta_card.dart';
 /// Écran de suivi professionnel côté client — style Google Maps / Yango.
 class CustomerTrackingScreen extends StatefulWidget {
   final OrderModel order;
-  const CustomerTrackingScreen({super.key, required this.order});
+  final String? pickupLabel;
+  final String? deliveryLabel;
+  final double? orderDistanceKm;
+  final int? orderEtaMinutes;
+  final String? orderEtaText;
+  final int? deliveryPrice;
+  final String? deliveryMode;
+  final String? paymentMethod;
+
+  const CustomerTrackingScreen({
+    super.key,
+    required this.order,
+    this.pickupLabel,
+    this.deliveryLabel,
+    this.orderDistanceKm,
+    this.orderEtaMinutes,
+    this.orderEtaText,
+    this.deliveryPrice,
+    this.deliveryMode,
+    this.paymentMethod,
+  });
 
   @override
   State<CustomerTrackingScreen> createState() => _CustomerTrackingScreenState();
@@ -322,8 +342,9 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
   void _fitAllVisible() {
     if (_mapCtrl == null) return;
     final pts = <LatLng>[_clientPos];
-    if (_tracking.animatedDriverPos != null)
+    if (_tracking.animatedDriverPos != null) {
       pts.add(_tracking.animatedDriverPos!);
+    }
     if (_destPos != null) pts.add(_destPos!);
     final bounds = RoutePolylineBuilder.boundsFor(pts);
     if (bounds != null) {
@@ -513,6 +534,14 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
                   driverRating: _driverRating,
                   orderStatus: _orderStatus,
                   orderId: widget.order.id,
+                  pickupLabel: widget.pickupLabel,
+                  deliveryLabel: widget.deliveryLabel,
+                  orderDistanceKm: widget.orderDistanceKm,
+                  orderEtaMinutes: widget.orderEtaMinutes,
+                  orderEtaText: widget.orderEtaText,
+                  deliveryPrice: widget.deliveryPrice,
+                  deliveryMode: widget.deliveryMode,
+                  paymentMethod: widget.paymentMethod,
                   onRecenter: _fitAllVisible,
                   onFollowToggle: () {
                     _tracking.setFollowDriver(!_tracking.followDriver);

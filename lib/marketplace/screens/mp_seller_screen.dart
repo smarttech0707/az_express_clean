@@ -17,10 +17,16 @@ class MpSellerScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: kMpBg,
       appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Retour',
-          onPressed: () => Navigator.of(context).maybePop(),
-          icon: const Icon(Icons.arrow_back_rounded),
+        automaticallyImplyLeading: false,
+        leadingWidth: 56,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: IconButton(
+            tooltip: 'Retour',
+            color: kMpText,
+            onPressed: () => Navigator.maybePop(context),
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          ),
         ),
         title: Text('Mes annonces',
             style: GoogleFonts.urbanist(

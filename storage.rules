@@ -517,6 +517,32 @@ service firebase.storage {
       allow delete: if isRealUser() && (isOwnerPath(uid) || isAdmin());
     }
 
+    // Auto & Moto — médias détenus par le vendeur authentifié. Le document
+    // Firestore est créé seulement après la réussite des uploads, donc la
+    // propriété est prouvée par le segment sellerUid du chemin déterministe.
+    match /vehicle_listings/{sellerUid}/{listingId}/images/{file} {
+      allow read: if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(sellerUid)
+        && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(sellerUid);
+    }
+
+    match /vehicle_listings/{sellerUid}/{listingId}/videos/{file} {
+      allow read: if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(sellerUid)
+        && isVideo() && maxSize(20);
+      allow delete: if isRealUser() && isOwnerPath(sellerUid);
+    }
+
+    match /vehicle_seller_profiles/{sellerUid}/logo/{file} {
+      allow read: if true;
+      allow create, update: if isRealUser()
+        && request.auth.uid == sellerUid
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png)');
+      allow delete: if isRealUser() && request.auth.uid == sellerUid;
+    }
+
     // ── TOUT LE RESTE : REFUSÉ ─────────────────────────────────────────────
   }
 }

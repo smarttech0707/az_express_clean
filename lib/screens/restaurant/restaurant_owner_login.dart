@@ -293,7 +293,7 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
                       const BorderSide(color: Color(0xFF1565C0), width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 16),
@@ -323,7 +323,7 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
                       const BorderSide(color: Color(0xFF1565C0), width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
 

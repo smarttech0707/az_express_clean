@@ -834,7 +834,17 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-              builder: (_) => CustomerTrackingScreen(order: order)));
+              builder: (_) => CustomerTrackingScreen(
+                    order: order,
+                    pickupLabel: _departure!.name,
+                    deliveryLabel: _destination!.name,
+                    orderDistanceKm: _route.distanceKm,
+                    orderEtaMinutes: _route.etaMinutes,
+                    orderEtaText: _etaRange,
+                    deliveryPrice: price,
+                    deliveryMode: _deliveryMode,
+                    paymentMethod: _payment,
+                  )));
     } catch (e) {
       if (!mounted) return;
       setState(() => _sending = false);

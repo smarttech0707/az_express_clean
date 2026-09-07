@@ -843,7 +843,7 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
               border:
                   OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: Theme.of(context).colorScheme.surface,
             ),
           ),
 
@@ -911,7 +911,7 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
         prefixIcon: Icon(icon),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }

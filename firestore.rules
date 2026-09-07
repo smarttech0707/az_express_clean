@@ -49,6 +49,10 @@ service cloud.firestore {
     function unchanged(field) {
       return request.resource.data.get(field, null) == resource.data.get(field, null);
     }
+    function vehicleUsersBlocked(firstUid, secondUid) {
+      return exists(/databases/$(database)/documents/vehicle_user_blocks/$(firstUid)/blocked/$(secondUid))
+        || exists(/databases/$(database)/documents/vehicle_user_blocks/$(secondUid)/blocked/$(firstUid));
+    }
     function notPresent(field) {
       return !(field in request.resource.data);
     }
@@ -67,7 +71,7 @@ service cloud.firestore {
     }
 
     // Vérifie que la session courante correspond à la pharmacie propriétaire de la commande.
-    // Nécessite que pharmacies/{id}.currentUid soit sauvegardé par l'app Flutter après connexion.
+    // currentUid est lié par pharmacieLogin après validation du mot de passe.
     function isPharmacieOwnerOfOrder() {
       return isAuth()
         && 'pharmacieId' in resource.data
@@ -215,6 +219,16 @@ service cloud.firestore {
             .data.get('restaurantId', '') == restaurantId
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['logoUrl', 'coverImageUrl', 'isOpen']);
+      // Le propriétaire Firebase Auth ne peut écrire que le token du
+      // restaurant auquel restaurant_owners/{uid} le rattache.
+      allow update: if isRealUser()
+        && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+            .data.get('restaurantId', '') == restaurantId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['fcmToken'])
+        && request.resource.data.fcmToken is string
+        && request.resource.data.fcmToken.size() > 10
+        && request.resource.data.fcmToken.size() <= 4096;
 
       // Sous-collection utilisée par restaurant_owner_dashboard.dart
       match /menu/{menuId} {
@@ -288,11 +302,17 @@ service cloud.firestore {
       // même par un admin — uniquement via setPharmaciePassword() (Admin SDK).
       allow write: if isAdmin()
         && !request.resource.data.keys().hasAny(['password', 'accessCode']);
-      // La pharmacie peut sauvegarder son UID de session pour l'accès aux commandes.
-      // Seul le champ currentUid est modifiable, et uniquement avec l'UID de la session active.
+      // currentUid est lié exclusivement par pharmacieLogin après validation
+      // du mot de passe côté serveur (Admin SDK). Une session ne peut donc pas
+      // s'attribuer elle-même une pharmacie depuis le client.
+      // Le détenteur de cette liaison peut uniquement actualiser son token FCM.
       allow update: if isAuth()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentUid'])
-        && request.resource.data.currentUid == uid();
+        && resource.data.currentUid == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['fcmToken'])
+        && request.resource.data.fcmToken is string
+        && request.resource.data.fcmToken.size() > 10
+        && request.resource.data.fcmToken.size() <= 4096;
 
       // Master Prompt "photos manquantes" : une fois la session déjà liée
       // (currentUid déjà écrit ci-dessus au login), la même session peut
@@ -1343,6 +1363,566 @@ service cloud.firestore {
         && request.resource.data.reporterId == uid()
         && request.resource.data.status == 'open';
       allow update, delete: if isAdmin();
+    }
+
+    // Auto & Moto — Lot 2 : identité publique du vendeur. Aucune coordonnée
+    // exacte n'est autorisée dans ce document.
+    match /vehicle_seller_profiles/{profileId} {
+      function validOptionalProfileString(data, field, maxLength) {
+        return !(field in data)
+          || (data[field] is string
+            && data[field].size() > 0
+            && data[field].size() <= maxLength);
+      }
+
+      function validVehicleSellerProfile(data) {
+        return data.keys().hasAll([
+            'ownerId', 'sellerType', 'displayName', 'phone', 'cityId',
+            'verificationStatus', 'createdAt', 'updatedAt'
+          ])
+          && data.keys().hasOnly([
+            'ownerId', 'sellerType', 'displayName', 'phone', 'cityId',
+            'zoneId', 'profilePhotoUrl', 'shopName', 'businessType',
+            'professionalPhone', 'address', 'locationVisibility', 'logoUrl',
+            'logoStoragePath',
+            'description', 'openingHours', 'verificationStatus', 'createdAt',
+            'updatedAt', 'fcmToken', 'suspended', 'suspensionReason',
+            'suspendedAt'
+          ])
+          && data.ownerId is string && data.ownerId.size() > 0
+          && data.sellerType in ['individual', 'professional']
+          && data.displayName is string
+          && data.displayName.size() >= 2 && data.displayName.size() <= 100
+          && data.phone is string
+          && data.phone.size() >= 8 && data.phone.size() <= 25
+          && data.cityId is string
+          && data.cityId.matches('^[a-z0-9]+(-[a-z0-9]+)*$')
+          && validOptionalProfileString(data, 'zoneId', 100)
+          && (!('zoneId' in data)
+            || data.zoneId.matches('^[a-z0-9]+(-[a-z0-9]+)*$'))
+          && validOptionalProfileString(data, 'profilePhotoUrl', 2000)
+          && validOptionalProfileString(data, 'logoUrl', 2000)
+          && validOptionalProfileString(data, 'logoStoragePath', 500)
+          && (!('logoStoragePath' in data)
+            || data.logoStoragePath.matches(
+              '^vehicle_seller_profiles/' + data.ownerId
+              + '/logo/[^/]+\\.(jpg|png)$'))
+          && validOptionalProfileString(data, 'description', 1000)
+          && validOptionalProfileString(data, 'openingHours', 500)
+          && validOptionalProfileString(data, 'fcmToken', 4096)
+          && (!('fcmToken' in data) || data.fcmToken.size() > 10)
+          && data.verificationStatus
+            in ['unverified', 'pending', 'verified', 'rejected']
+          && data.get('suspended', false) is bool
+          && data.createdAt is timestamp && data.updatedAt is timestamp
+          && (
+            (data.sellerType == 'individual'
+              && !('shopName' in data)
+              && !('businessType' in data)
+              && !('professionalPhone' in data)
+              && !('address' in data)
+              && !('locationVisibility' in data)
+              && !('logoUrl' in data)
+              && !('logoStoragePath' in data)
+              && !('description' in data)
+              && !('openingHours' in data))
+            || (data.sellerType == 'professional'
+              && data.keys().hasAll([
+                'shopName', 'businessType', 'professionalPhone', 'address',
+                'locationVisibility'
+              ])
+              && data.shopName is string
+              && data.shopName.size() >= 2 && data.shopName.size() <= 120
+              && data.businessType in [
+                'dealership', 'garage', 'motorcycle_shop', 'vehicle_rental',
+                'other'
+              ]
+              && data.professionalPhone is string
+              && data.professionalPhone.size() >= 8
+              && data.professionalPhone.size() <= 25
+              && data.address is string
+              && data.address.size() >= 2 && data.address.size() <= 300
+              && data.locationVisibility in ['exact', 'approximate', 'hidden'])
+          );
+      }
+
+      allow read: if isAuth();
+      allow create: if isRealUser()
+        && profileId == uid()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.verificationStatus == 'unverified'
+        && request.resource.data.get('suspended', false) == false
+        && !('suspensionReason' in request.resource.data)
+        && !('suspendedAt' in request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && validVehicleSellerProfile(request.resource.data);
+      allow update: if validVehicleSellerProfile(request.resource.data)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && (
+          isAdmin()
+          || (isRealUser()
+            && profileId == uid()
+            && resource.data.ownerId == uid()
+            && request.resource.data.sellerType == resource.data.sellerType
+            && (request.resource.data.verificationStatus
+                == resource.data.verificationStatus
+              || (resource.data.sellerType == 'professional'
+                && resource.data.verificationStatus in ['unverified', 'rejected']
+                && request.resource.data.verificationStatus == 'pending'))
+            && request.resource.data.get('suspended', false)
+              == resource.data.get('suspended', false)
+            && request.resource.data.get('suspensionReason', null)
+              == resource.data.get('suspensionReason', null)
+            && request.resource.data.get('suspendedAt', null)
+              == resource.data.get('suspendedAt', null))
+        );
+      // Token de notification Auto & Moto : le propriétaire ne peut modifier
+      // que son propre token. Le refresh réutilise NotificationService.
+      allow update: if isRealUser()
+        && profileId == uid()
+        && resource.data.ownerId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['fcmToken'])
+        && request.resource.data.fcmToken is string
+        && request.resource.data.fcmToken.size() > 10
+        && request.resource.data.fcmToken.size() <= 4096;
+      allow delete: if isAdmin();
+    }
+
+    // Coordonnées exactes du magasin : document séparé, jamais public.
+    match /vehicle_seller_private_locations/{locationId} {
+      function validVehicleSellerPrivateLocation(data) {
+        return data.keys().hasAll([
+            'ownerId', 'latitude', 'longitude', 'cityId', 'updatedAt'
+          ])
+          && data.keys().hasOnly([
+            'ownerId', 'latitude', 'longitude', 'addressLabel', 'cityId',
+            'zoneId', 'updatedAt'
+          ])
+          && data.ownerId is string && data.ownerId.size() > 0
+          && data.latitude is number
+          && data.latitude >= -90 && data.latitude <= 90
+          && data.longitude is number
+          && data.longitude >= -180 && data.longitude <= 180
+          && data.cityId is string
+          && data.cityId.matches('^[a-z0-9]+(-[a-z0-9]+)*$')
+          && validOptionalLocationString(data, 'zoneId', 100)
+          && (!('zoneId' in data)
+            || data.zoneId.matches('^[a-z0-9]+(-[a-z0-9]+)*$'))
+          && validOptionalLocationString(data, 'addressLabel', 300)
+          && data.updatedAt is timestamp;
+      }
+
+      function validOptionalLocationString(data, field, maxLength) {
+        return !(field in data)
+          || (data[field] is string
+            && data[field].size() > 0
+            && data[field].size() <= maxLength);
+      }
+
+      function isProfessionalLocationOwner() {
+        return isRealUser()
+          && locationId == uid()
+          && exists(/databases/$(database)/documents/vehicle_seller_profiles/$(uid()))
+          && get(/databases/$(database)/documents/vehicle_seller_profiles/$(uid())).data.ownerId == uid()
+          && get(/databases/$(database)/documents/vehicle_seller_profiles/$(uid())).data.sellerType == 'professional';
+      }
+
+      allow read: if isAdmin()
+        || (isRealUser()
+          && locationId == uid()
+          && resource.data.ownerId == uid());
+      allow create: if isProfessionalLocationOwner()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.updatedAt == request.time
+        && validVehicleSellerPrivateLocation(request.resource.data);
+      allow update: if isProfessionalLocationOwner()
+        && resource.data.ownerId == uid()
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.updatedAt == request.time
+        && validVehicleSellerPrivateLocation(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Auto & Moto — conversations privées liées à une annonce.
+    match /vehicle_conversations/{conversationId} {
+      function vehicleConversationParticipant(data) {
+        return isRealUser()
+          && data.participantIds is list
+          && uid() in data.participantIds
+          && (uid() == data.buyerId || uid() == data.sellerId);
+      }
+
+      function vehicleConversationIdentityUnchanged() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            'lastMessagePreview', 'lastSenderId', 'lastMessageAt', 'updatedAt',
+            'buyerUnreadCount', 'sellerUnreadCount'
+          ]);
+      }
+
+      function validVehicleConversationCreate(data) {
+        let listing = get(/databases/$(database)/documents/vehicle_listings/$(data.listingId)).data;
+        let profile = get(/databases/$(database)/documents/vehicle_seller_profiles/$(data.sellerId)).data;
+        return data.keys().hasOnly([
+            'listingId', 'buyerId', 'sellerId', 'participantIds',
+            'listingTitle', 'listingPrice', 'currency', 'listingImageUrl',
+            'sellerDisplayName', 'sellerType', 'sellerVerificationStatus',
+            'lastMessagePreview', 'lastSenderId', 'buyerUnreadCount',
+            'sellerUnreadCount', 'status', 'createdAt', 'updatedAt',
+            'lastMessageAt'
+          ])
+          && data.keys().hasAll([
+            'listingId', 'buyerId', 'sellerId', 'participantIds',
+            'listingTitle', 'listingPrice', 'currency', 'sellerDisplayName',
+            'sellerType', 'sellerVerificationStatus', 'lastMessagePreview',
+            'lastSenderId', 'buyerUnreadCount', 'sellerUnreadCount', 'status',
+            'createdAt', 'updatedAt', 'lastMessageAt'
+          ])
+          && conversationId == 'vc_' + data.listingId + '_' + data.buyerId
+          && data.buyerId == uid()
+          && data.buyerId != data.sellerId
+          && data.sellerId == listing.sellerId
+          && listing.status == 'active'
+          && profile.get('suspended', false) == false
+          && !vehicleUsersBlocked(data.buyerId, data.sellerId)
+          && data.participantIds is list
+          && data.participantIds.size() == 2
+          && data.buyerId in data.participantIds
+          && data.sellerId in data.participantIds
+          && data.listingTitle == listing.title
+          && data.listingPrice == listing.price
+          && data.currency == listing.currency
+          && data.sellerType == listing.sellerType
+          && data.sellerType == profile.sellerType
+          && data.sellerVerificationStatus == profile.verificationStatus
+          && data.sellerDisplayName == (
+            data.sellerType == 'professional'
+              ? profile.shopName
+              : profile.displayName)
+          && (!('listingImageUrl' in data)
+            || (data.listingImageUrl is string
+              && data.listingImageUrl.size() > 0
+              && data.listingImageUrl.size() <= 2000))
+          && data.lastMessagePreview == ''
+          && data.lastSenderId == null
+          && data.buyerUnreadCount == 0
+          && data.sellerUnreadCount == 0
+          && data.status == 'active'
+          && data.createdAt == request.time
+          && data.updatedAt == request.time
+          && data.lastMessageAt == request.time;
+      }
+
+      function validVehicleMessageMetadataUpdate() {
+        return vehicleConversationIdentityUnchanged()
+          && request.resource.data.lastSenderId == uid()
+          && request.resource.data.lastMessagePreview is string
+          && request.resource.data.lastMessagePreview.size() > 0
+          && request.resource.data.lastMessagePreview.size() <= 161
+          && request.resource.data.lastMessageAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && (
+            (uid() == resource.data.buyerId
+              && request.resource.data.buyerUnreadCount
+                == resource.data.buyerUnreadCount
+              && request.resource.data.sellerUnreadCount
+                == resource.data.sellerUnreadCount + 1)
+            || (uid() == resource.data.sellerId
+              && request.resource.data.sellerUnreadCount
+                == resource.data.sellerUnreadCount
+              && request.resource.data.buyerUnreadCount
+                == resource.data.buyerUnreadCount + 1)
+          );
+      }
+
+      function validVehicleReadReset() {
+        return request.resource.data.updatedAt == request.time
+          && (
+            (uid() == resource.data.buyerId
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['buyerUnreadCount', 'updatedAt'])
+              && request.resource.data.buyerUnreadCount == 0)
+            || (uid() == resource.data.sellerId
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['sellerUnreadCount', 'updatedAt'])
+              && request.resource.data.sellerUnreadCount == 0)
+          );
+      }
+
+      allow read: if vehicleConversationParticipant(resource.data);
+      allow create: if validVehicleConversationCreate(request.resource.data);
+      allow update: if vehicleConversationParticipant(resource.data)
+        && !vehicleUsersBlocked(resource.data.buyerId, resource.data.sellerId)
+        && (validVehicleMessageMetadataUpdate() || validVehicleReadReset());
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if vehicleConversationParticipant(
+          get(/databases/$(database)/documents/vehicle_conversations/$(conversationId)).data
+        );
+        allow create: if isRealUser()
+          && vehicleConversationParticipant(
+            get(/databases/$(database)/documents/vehicle_conversations/$(conversationId)).data
+          )
+          && !vehicleUsersBlocked(
+            get(/databases/$(database)/documents/vehicle_conversations/$(conversationId)).data.buyerId,
+            get(/databases/$(database)/documents/vehicle_conversations/$(conversationId)).data.sellerId)
+          && request.resource.data.keys()
+            .hasOnly(['senderId', 'text', 'type', 'createdAt'])
+          && request.resource.data.keys()
+            .hasAll(['senderId', 'text', 'type', 'createdAt'])
+          && request.resource.data.senderId == uid()
+          && request.resource.data.type == 'text'
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.text.matches('.*\\S.*')
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    // Auto & Moto — Lot 1 : annonces dédiées, sans médias,
+    // géolocalisation précise ni sous-collections.
+    match /vehicle_listings/{listingId} {
+      function validVehicleListing(data) {
+        return data.keys().hasAll([
+            'sellerId', 'sellerType', 'vehicleType', 'offerType', 'title',
+            'description', 'brand', 'model', 'price', 'currency', 'cityId',
+            'cityName', 'condition', 'color', 'rentalWithDriver',
+            'rentalWithoutDriver', 'status', 'createdAt', 'updatedAt'
+          ])
+          && data.keys().hasOnly([
+            'sellerId', 'sellerType', 'vehicleType', 'offerType', 'title',
+            'description', 'brand', 'model', 'year', 'price', 'currency',
+            'cityId', 'cityName', 'condition', 'color', 'mileageKm',
+            'transmission', 'fuelType', 'engineCapacityCc', 'seats',
+            'salePrice', 'rentalPricePerDay', 'rentalPricePerWeek',
+            'depositAmount', 'rentalWithDriver', 'rentalWithoutDriver',
+            'media', 'coverMediaId', 'searchKeywords', 'status', 'createdAt',
+            'updatedAt', 'suspensionReason', 'suspendedAt'
+          ])
+          && data.sellerId is string && data.sellerId.size() > 0
+          && data.sellerType in ['individual', 'professional']
+          && data.vehicleType in ['car', 'motorcycle', 'tricycle']
+          && data.offerType in ['sale', 'rental']
+          && data.title is string
+          && data.title.size() >= 3 && data.title.size() <= 120
+          && data.description is string
+          && data.description.size() >= 10 && data.description.size() <= 3000
+          && data.brand is string
+          && data.brand.size() > 0 && data.brand.size() <= 80
+          && data.model is string
+          && data.model.size() > 0 && data.model.size() <= 80
+          && (!('year' in data) || (data.year is int
+            && data.year >= 1886 && data.year <= 2100))
+          && data.condition in ['new', 'used']
+          && data.color is string
+          && data.color.size() > 0 && data.color.size() <= 60
+          && (!('mileageKm' in data)
+            || (data.mileageKm is int && data.mileageKm >= 0))
+          && (data.condition != 'used'
+            || ('mileageKm' in data && data.mileageKm is int
+              && data.mileageKm >= 0))
+          && (!('transmission' in data)
+            || data.transmission in ['manual', 'automatic'])
+          && (!('fuelType' in data)
+            || data.fuelType in ['petrol', 'diesel', 'electric', 'hybrid', 'other'])
+          && (!('engineCapacityCc' in data)
+            || (data.engineCapacityCc is int && data.engineCapacityCc > 0))
+          && (!('seats' in data) || (data.seats is int && data.seats > 0))
+          && data.rentalWithDriver is bool
+          && data.rentalWithoutDriver is bool
+          && (!('media' in data) || (data.media is list && data.media.size() <= 9))
+          && (!('coverMediaId' in data) || (data.coverMediaId is string
+            && data.coverMediaId.size() > 0 && 'media' in data
+            && data.media.size() > 0))
+          && (!('searchKeywords' in data)
+            || (data.searchKeywords is list
+              && data.searchKeywords.size() > 0
+              && data.searchKeywords.size() <= 100))
+          && data.price is int && data.price > 0
+          && ((data.offerType == 'sale'
+              && 'salePrice' in data && data.salePrice is int
+              && data.salePrice > 0 && data.price == data.salePrice
+              && !('rentalPricePerDay' in data)
+              && !('rentalPricePerWeek' in data)
+              && !('depositAmount' in data)
+              && data.rentalWithDriver == false
+              && data.rentalWithoutDriver == false)
+            || (data.offerType == 'rental'
+              && !('salePrice' in data)
+              && 'rentalPricePerDay' in data
+              && data.rentalPricePerDay is int
+              && data.rentalPricePerDay > 0
+              && data.price == data.rentalPricePerDay
+              && (!('rentalPricePerWeek' in data)
+                || (data.rentalPricePerWeek is int
+                  && data.rentalPricePerWeek > 0))
+              && (!('depositAmount' in data)
+                || (data.depositAmount is int && data.depositAmount >= 0))
+              && (data.rentalWithDriver == true
+                || data.rentalWithoutDriver == true)))
+          && ((data.vehicleType == 'car'
+              && 'transmission' in data && 'fuelType' in data
+              && 'seats' in data && !('engineCapacityCc' in data))
+            || (data.vehicleType == 'motorcycle'
+              && 'engineCapacityCc' in data
+              && !('transmission' in data) && !('fuelType' in data)
+              && !('seats' in data))
+            || (data.vehicleType == 'tricycle'
+              && 'engineCapacityCc' in data
+              && !('transmission' in data) && !('fuelType' in data)))
+          && data.currency == 'XOF'
+          && data.cityId is string
+          && data.cityId.matches('^[a-z0-9]+(-[a-z0-9]+)*$')
+          && data.cityName is string
+          && data.cityName.size() >= 2 && data.cityName.size() <= 100
+          && data.status
+            in ['draft', 'active', 'sold', 'rented', 'archived', 'suspended']
+          && (!('suspensionReason' in data)
+            || (data.suspensionReason is string
+              && data.suspensionReason.size() > 0
+              && data.suspensionReason.size() <= 300))
+          && (!('suspendedAt' in data) || data.suspendedAt is timestamp)
+          && (data.status != 'sold' || data.offerType == 'sale')
+          && (data.status != 'rented' || data.offerType == 'rental')
+          && data.createdAt is timestamp
+          && data.updatedAt is timestamp;
+      }
+
+      function ownerStatusTransitionAllowed() {
+        return request.resource.data.status == resource.data.status
+          || (resource.data.status == 'draft'
+            && request.resource.data.status in ['active', 'archived'])
+          || (resource.data.status == 'active'
+            && request.resource.data.status in ['sold', 'rented', 'archived']);
+      }
+
+      allow read: if isAuth() && (
+        resource.data.status == 'active'
+        || resource.data.sellerId == uid()
+        || isAdmin()
+      );
+      allow create: if validVehicleListing(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && (
+          (isRealUser()
+            && request.resource.data.sellerId == uid()
+            && request.resource.data.status in ['draft', 'active'])
+            && !exists(/databases/$(database)/documents/vehicle_seller_suspensions/$(uid()))
+          || isAdmin()
+        );
+      allow update: if validVehicleListing(request.resource.data)
+        && request.resource.data.sellerId == resource.data.sellerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && (
+          isAdmin()
+          || (isRealUser()
+            && resource.data.sellerId == uid()
+            && resource.data.status != 'suspended'
+            && !exists(/databases/$(database)/documents/vehicle_seller_suspensions/$(uid()))
+            && unchanged('suspensionReason')
+            && unchanged('suspendedAt')
+            && ownerStatusTransitionAllowed())
+        );
+      // La suppression client est volontairement remplacée par l'archivage.
+      allow delete: if isAdmin();
+    }
+
+    // Marqueur écrit uniquement par la Function de modération. Il évite une
+    // lecture/validation coûteuse du profil sur chaque écriture d'annonce.
+    match /vehicle_seller_suspensions/{sellerId} {
+      allow read, write: if false;
+    }
+
+    // Signalements Auto & Moto : identifiant déterministe pour dédupliquer
+    // cible + auteur. Seul l'admin peut les lire et les modérer.
+    match /vehicle_reports/{reportId} {
+      function validVehicleReport(data) {
+        let listingPath = /databases/$(database)/documents/vehicle_listings/$(data.targetId);
+        let sellerPath = /databases/$(database)/documents/vehicle_seller_profiles/$(data.targetId);
+        return data.keys().hasAll([
+            'targetType', 'targetId', 'sellerId', 'reporterUid', 'reason',
+            'status', 'createdAt'
+          ])
+          && data.keys().hasOnly([
+            'targetType', 'targetId', 'sellerId', 'reporterUid', 'reason',
+            'details', 'status', 'createdAt'
+          ])
+          && data.targetType in ['listing', 'seller']
+          && data.targetId is string && data.targetId.size() > 0
+          && data.sellerId is string && data.sellerId.size() > 0
+          && data.reporterUid == uid()
+          && data.reporterUid != data.sellerId
+          && data.reason is string
+          && data.reason.size() > 0 && data.reason.size() <= 80
+          && (!('details' in data)
+            || (data.details is string
+              && data.details.size() > 0 && data.details.size() <= 300))
+          && data.status == 'pending'
+          && data.createdAt == request.time
+          && reportId == data.targetType + '_' + data.targetId + '_' + uid()
+          && ((data.targetType == 'listing'
+              && exists(listingPath)
+              && get(listingPath).data.sellerId == data.sellerId)
+            || (data.targetType == 'seller'
+              && data.targetId == data.sellerId
+              && exists(sellerPath)
+              && get(sellerPath).data.ownerId == data.sellerId));
+      }
+
+      allow create: if isRealUser() && validVehicleReport(request.resource.data);
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // Blocages privés : aucun document parent lisible, un document par UID.
+    match /vehicle_user_blocks/{ownerUid} {
+      allow read, write: if false;
+      match /blocked/{blockedUid} {
+        allow read: if isRealUser() && ownerUid == uid();
+        allow create: if isRealUser()
+          && ownerUid == uid()
+          && blockedUid != uid()
+          && request.resource.data.keys()
+            .hasOnly(['ownerUid', 'blockedUid', 'createdAt'])
+          && request.resource.data.ownerUid == uid()
+          && request.resource.data.blockedUid == blockedUid
+          && request.resource.data.createdAt == request.time;
+        allow update: if false;
+        allow delete: if isRealUser() && ownerUid == uid();
+      }
+    }
+
+    // Favoris Auto & Moto privés et scalables : un document par annonce,
+    // sous le seul UID propriétaire. Le snapshot évite les lectures N+1.
+    match /vehicle_favorites/{userId} {
+      allow read, write: if false;
+
+      match /items/{listingId} {
+        allow read: if isRealUser() && userId == uid();
+        allow create: if isRealUser()
+          && userId == uid()
+          && listingId == request.resource.data.listingId
+          && request.resource.data.userId == uid()
+          && request.resource.data.keys().hasOnly([
+            'userId', 'listingId', 'listingSnapshot', 'createdAt'
+          ])
+          && request.resource.data.listingSnapshot is map
+          && request.resource.data.createdAt == request.time
+          && exists(/databases/$(database)/documents/vehicle_listings/$(listingId))
+          && get(/databases/$(database)/documents/vehicle_listings/$(listingId)).data.status
+            == 'active';
+        allow update: if false;
+        allow delete: if isRealUser() && userId == uid();
+      }
     }
 
     match /event_chats/{chatId} {

@@ -84,8 +84,10 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
   Future<void> _order() async {
     if (_cart.isEmpty) return;
 
+    final orderTotal = _totalPrice;
+
     // Minimum 500 FCFA (frais de livraison inclus)
-    if (_totalPrice < 500) {
+    if (orderTotal < 500) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Commande minimum 500 FCFA'),
         backgroundColor: Colors.orange,
@@ -93,10 +95,10 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
       return;
     }
 
-    if (_paymentMethod == 'wallet' && _walletBalance < _totalPrice) {
+    if (_paymentMethod == 'wallet' && _walletBalance < orderTotal) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
-            "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $_totalPrice FCFA"),
+            "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $orderTotal FCFA"),
         backgroundColor: Colors.red,
       ));
       return;
@@ -149,7 +151,7 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
       final order = OrderModel(
         id: id,
         description: "🍽️ ${widget.restaurantName} : $description",
-        budget: _totalPrice,
+        budget: orderTotal,
         status: "pending",
         latitude: pickupLat,
         longitude: pickupLng,
@@ -190,8 +192,8 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
         await FirebaseFirestore.instance.runTransaction((tx) async {
           final snap = await tx.get(clientRef);
           final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
-          if (wallet < _totalPrice) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': wallet - _totalPrice});
+          if (wallet < orderTotal) throw Exception('SOLDE_INSUFFISANT');
+          tx.update(clientRef, {'wallet': wallet - orderTotal});
           tx.set(orderRef, order.toMap());
         });
 
@@ -202,11 +204,16 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
             .collection('wallet_transactions')
             .add({
           'type': 'purchase',
-          'amount': _totalPrice,
+          'amount': orderTotal,
           'description': 'Commande ${widget.restaurantName} (wallet)',
           'orderId': id,
           'createdAt': Timestamp.now(),
         });
+
+        await FirestoreService().createOrder(
+          order,
+          alreadyCreated: true,
+        );
       } else {
         await FirestoreService().createOrder(order);
       }
@@ -229,7 +236,7 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
           ),
           content: Text(
             "Votre commande chez ${widget.restaurantName} a été envoyée.\n\n"
-            "Total : $_totalPrice FCFA\n\n"
+            "Total : $orderTotal FCFA\n\n"
             "Un livreur va bientôt prendre en charge votre commande.",
             style: const TextStyle(fontSize: 14),
           ),
@@ -249,7 +256,10 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
         ),
       );
 
-      setState(() => _cart.clear());
+      setState(() {
+        _cart.clear();
+        _cartData.clear();
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _ordering = false);

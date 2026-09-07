@@ -16,7 +16,7 @@ Future<RealEstateSearchFilters?> showPropertyFilterSheet(
   return showModalBottomSheet<RealEstateSearchFilters>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.white,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
     builder: (ctx) => _PropertyFilterSheetContent(initial: current),
@@ -140,14 +140,37 @@ class _PropertyFilterSheetContentState
   void _reset() => Navigator.pop(context, const RealEstateSearchFilters());
 
   Widget _toggleChip(String label, bool? value, ValueChanged<bool?> onTap) {
-    return FilterChip(
-      label: Text(label),
+    return _filterChip(
+      label: label,
       selected: value == true,
       onSelected: (v) => setState(() => onTap(v ? true : null)),
-      selectedColor: AppColors.primary15,
+    );
+  }
+
+  Widget _filterChip({
+    required String label,
+    required bool selected,
+    required ValueChanged<bool> onSelected,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: onSelected,
+      showCheckmark: true,
+      checkmarkColor: Colors.white,
+      backgroundColor:
+          isDark ? theme.colorScheme.surfaceContainerHighest : AppColors.bg,
+      selectedColor: AppColors.primary,
+      side: BorderSide(
+        color: selected ? AppColors.primary : theme.colorScheme.outline,
+      ),
       labelStyle: TextStyle(
-          color: value == true ? AppColors.primary : AppColors.text,
-          fontWeight: FontWeight.w600),
+        color: selected ? Colors.white : theme.colorScheme.onSurface,
+        fontWeight: FontWeight.w600,
+      ),
     );
   }
 
@@ -221,18 +244,18 @@ class _PropertyFilterSheetContentState
                 style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              FilterChip(
-                label: const Text('Terrain uniquement'),
+              _filterChip(
+                label: 'Terrain uniquement',
                 selected: _landOnly,
                 onSelected: (v) => setState(() => _landOnly = v),
               ),
-              FilterChip(
-                label: const Text('Local commercial uniquement'),
+              _filterChip(
+                label: 'Local commercial uniquement',
                 selected: _commercialOnly,
                 onSelected: (v) => setState(() => _commercialOnly = v),
               ),
-              FilterChip(
-                label: const Text('Résidence meublée uniquement'),
+              _filterChip(
+                label: 'Résidence meublée uniquement',
                 selected: _furnishedResidenceOnly,
                 onSelected: (v) => setState(() => _furnishedResidenceOnly = v),
               ),
