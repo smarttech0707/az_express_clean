@@ -203,18 +203,20 @@ class _ProfilClientState extends State<ProfilClient> {
                           final err =
                               AuthService.validatePassword(newCtrl.text);
                           if (err != null) {
-                            if (ctx.mounted)
+                            if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
                                   content: Text(err),
                                   backgroundColor: Colors.orange));
+                            }
                             return;
                           }
                           if (newCtrl.text != confCtrl.text) {
-                            if (ctx.mounted)
+                            if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
                                   content: Text(
                                       'Les mots de passe ne correspondent pas'),
                                   backgroundColor: Colors.red));
+                            }
                             return;
                           }
                           setS(() => loading = true);
@@ -223,17 +225,19 @@ class _ProfilClientState extends State<ProfilClient> {
                                 currentPassword: curCtrl.text,
                                 newPassword: newCtrl.text);
                             if (ctx.mounted) Navigator.pop(ctx);
-                            if (mounted)
+                            if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                       content: Text('Mot de passe mis à jour'),
                                       backgroundColor: Colors.green));
+                            }
                           } catch (e) {
                             setS(() => loading = false);
-                            if (ctx.mounted)
+                            if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
                                   content: Text('Erreur : $e'),
                                   backgroundColor: Colors.red));
+                            }
                           }
                         },
                   child: const Text('Enregistrer',
@@ -277,11 +281,12 @@ class _ProfilClientState extends State<ProfilClient> {
                       ? null
                       : () async {
                           if (!AuthService.isValidEmail(emailCtrl.text)) {
-                            if (ctx.mounted)
+                            if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(
                                   const SnackBar(
                                       content: Text('Email invalide'),
                                       backgroundColor: Colors.orange));
+                            }
                             return;
                           }
                           setS(() => loading = true);
@@ -291,19 +296,21 @@ class _ProfilClientState extends State<ProfilClient> {
                                 newEmail: emailCtrl.text,
                                 collection: 'clients');
                             if (ctx.mounted) Navigator.pop(ctx);
-                            if (mounted)
+                            if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                       content: Text(
                                           'Un lien de vérification a été envoyé à votre nouvel email'),
                                       backgroundColor: Colors.green,
-                                      duration: Duration(seconds: 4)));
+                                       duration: Duration(seconds: 4)));
+                            }
                           } catch (e) {
                             setS(() => loading = false);
-                            if (ctx.mounted)
+                            if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
                                   content: Text('Erreur : $e'),
                                   backgroundColor: Colors.red));
+                            }
                           }
                         },
                   child: const Text('Envoyer la vérification',
@@ -347,11 +354,12 @@ class _ProfilClientState extends State<ProfilClient> {
                       ? null
                       : () async {
                           if (!AuthService.isValidPhone(phoneCtrl.text)) {
-                            if (ctx.mounted)
+                            if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(
                                   const SnackBar(
                                       content: Text('Numéro invalide'),
                                       backgroundColor: Colors.orange));
+                            }
                             return;
                           }
                           setS(() => loading = true);
@@ -360,21 +368,24 @@ class _ProfilClientState extends State<ProfilClient> {
                                 currentPassword: passCtrl.text,
                                 newPhone: phoneCtrl.text,
                                 collection: 'clients');
-                            if (mounted)
+                            if (mounted) {
                               setState(() =>
                                   _phoneCtrl.text = phoneCtrl.text.trim());
+                            }
                             if (ctx.mounted) Navigator.pop(ctx);
-                            if (mounted)
+                            if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                       content: Text('Numéro mis à jour'),
                                       backgroundColor: Colors.green));
+                            }
                           } catch (e) {
                             setS(() => loading = false);
-                            if (ctx.mounted)
+                            if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
                                   content: Text('Erreur : $e'),
                                   backgroundColor: Colors.red));
+                            }
                           }
                         },
                   child: const Text('Enregistrer',
@@ -674,7 +685,10 @@ class _ProfilClientState extends State<ProfilClient> {
                 color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
           ],
         ),
-        child: Column(children: children),
+        child: Material(
+          type: MaterialType.transparency,
+          child: Column(children: children),
+        ),
       );
 
   Widget _infoField(
