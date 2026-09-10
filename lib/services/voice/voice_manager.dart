@@ -20,7 +20,15 @@ import 'voice_provider.dart';
 /// synthèse (sortie), en remplacement du `FlutterTts` utilisé jusqu'ici
 /// sans configuration (Prompt 116/M7).
 class VoiceManager {
-  VoiceProvider _provider;
+  /// Fabrique du fournisseur niveau 1 — n'est appelée qu'à la première
+  /// utilisation vocale réelle (voir [_ensureProvider]). Construire un
+  /// [AndroidTtsProvider] instancie un `FlutterTts`, ce qui ne doit PAS
+  /// arriver tant que l'utilisateur n'a rien demandé de vocal.
+  final VoiceProvider Function() _providerFactory;
+
+  /// `null` tant qu'aucune fonctionnalité vocale n'a été utilisée — aucun
+  /// moteur TTS n'est alors créé/connecté.
+  VoiceProvider? _provider;
   bool _initialized = false;
 
   /// Pause entre deux phrases (Master Prompt 119, "pauses naturelles") —
@@ -32,44 +40,65 @@ class VoiceManager {
 
   VoiceManager(
       {VoiceProvider? provider,
+      VoiceProvider Function()? providerFactory,
       this.sentencePause = const Duration(milliseconds: 180)})
-      : _provider = provider ?? AndroidTtsProvider();
+      : _provider = provider,
+        _providerFactory = providerFactory ?? (() => AndroidTtsProvider());
 
-  VoiceProvider get activeProvider => _provider;
+  /// `null` tant qu'aucune synthèse vocale n'a été demandée.
+  VoiceProvider? get activeProvider => _provider;
+
+  /// `true` une fois le fournisseur réellement initialisé (première
+  /// utilisation vocale). Exposé pour les tests.
+  @visibleForTesting
+  bool get isInitialized => _initialized;
+
+  VoiceProvider _ensureProvider() => _provider ??= _providerFactory();
 
   Future<void> initialize() async {
-    await _provider.initialize();
-    if (!_provider.isAvailable && _provider is! AndroidTtsProvider) {
+    final provider = _ensureProvider();
+    await provider.initialize();
+    if (!provider.isAvailable && provider is! AndroidTtsProvider) {
       // Tout fournisseur de niveau 2 non configuré retombe sur le niveau 1
       // gratuit — jamais un AZ IA muet parce qu'un fournisseur payant
       // n'est pas encore activé.
       debugPrint(
-          '[VoiceManager] "${_provider.name}" indisponible — repli sur AndroidTtsProvider.');
+          '[VoiceManager] "${provider.name}" indisponible — repli sur AndroidTtsProvider.');
       _provider = AndroidTtsProvider();
-      await _provider.initialize();
+      await _provider!.initialize();
     }
     _initialized = true;
     debugPrint(
-        '[VoiceManager] Fournisseur actif : ${_provider.name} (disponible: ${_provider.isAvailable})');
+        '[VoiceManager] Fournisseur actif : ${_provider!.name} (disponible: ${_provider!.isAvailable})');
   }
 
   /// Change de fournisseur à chaud (ex. activer une voix IA payante plus
   /// tard) — le reste de l'application n'a jamais besoin de le savoir.
   Future<void> setProvider(VoiceProvider provider) async {
-    await _provider.stop();
+    await _provider?.stop();
     _provider = provider;
-    await _provider.initialize();
+    await provider.initialize();
+    _initialized = true;
   }
 
-  Future<void> stop() => _provider.stop();
+  /// N'initialise jamais le moteur TTS : s'il n'a jamais été créé, il n'y a
+  /// rien à arrêter (utilisé aussi en anti-collision micro/haut-parleur).
+  Future<void> stop() async {
+    final provider = _provider;
+    if (provider == null) return;
+    await provider.stop();
+  }
 
   /// Lit `rawText` (la réponse brute d'AZ IA, potentiellement pleine de
   /// markdown/emoji) à voix haute, nettoyée et segmentée pour un débit
   /// naturel. Ne fait jamais planter l'appelant : toute erreur est avalée
   /// et journalisée (la voix est un agrément, jamais un chemin critique).
   Future<void> speak(String rawText) async {
+    // Première utilisation vocale réelle → c'est ICI (et pas avant) que le
+    // moteur TTS est créé et connecté.
     if (!_initialized) await initialize();
-    if (!_provider.isAvailable) {
+    final provider = _provider!;
+    if (!provider.isAvailable) {
       debugPrint(
           '[VoiceManager] Aucun fournisseur vocal disponible — lecture ignorée.');
       return;
@@ -81,7 +110,7 @@ class VoiceManager {
     try {
       final sentences = _splitIntoSentences(cleaned);
       for (var i = 0; i < sentences.length; i++) {
-        await _provider.speak(sentences[i]);
+        await provider.speak(sentences[i]);
         if (i < sentences.length - 1) {
           await Future.delayed(sentencePause);
         }

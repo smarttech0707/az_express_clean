@@ -19,6 +19,7 @@ import '../../theme/az_ia_theme.dart';
 import '../../widgets/az_ia/az_ia_logo.dart';
 import '../../widgets/az_ia/az_ia_splash_screen.dart';
 import '../../widgets/az_ia/az_ia_suggestion_chip.dart';
+import 'az_ia_chat_app_bar_title.dart';
 import 'az_ia_message_parser.dart';
 import 'az_ia_response_widgets.dart';
 import 'az_ia_rich_message.dart';
@@ -93,7 +94,10 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
   void initState() {
     super.initState();
     _initSpeech();
-    _voice.initialize();
+    // Le moteur TTS n'est plus initialisé ici : `VoiceManager` se prépare
+    // paresseusement au premier `speak()` réel (première réponse lue à voix
+    // haute), pas à l'ouverture du chat — ouvrir AZ IA pour taper une
+    // question ne doit rien démarrer de vocal.
     _loadVoicePreference();
     _scrollCtrl.addListener(() {
       if (!_scrollCtrl.hasClients) return;
@@ -521,24 +525,10 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
         backgroundColor: AzIaTheme.deepBlue,
         foregroundColor: Colors.white,
         centerTitle: false,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const AzIaLogo(size: 38, variant: AzIaLogoVariant.avatar),
-            const SizedBox(width: 10),
-            const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('AZ IA',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                Text('Assistant AZ Express',
-                    style: TextStyle(
-                        fontSize: 11, color: AzIaTheme.textSecondary)),
-              ],
-            ),
-          ],
-        ),
+        // Correctif responsive : la partie texte devient `Flexible` + ellipse
+        // pour ne plus déborder à droite sur écran étroit — voir
+        // `AzIaChatAppBarTitle`.
+        title: const AzIaChatAppBarTitle(),
         actions: [
           IconButton(
             tooltip: _voiceRepliesEnabled
