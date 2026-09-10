@@ -122,7 +122,7 @@ void main() {
       'pagination dédoublonne et recherche/ville repartent sans curseur',
       (tester) async {
     final cursor = FakeVehicleCursor();
-    final calls = <(String, bool)>[];
+    final calls = <(String?, bool)>[];
     var page = 0;
 
     Widget screen(String city) => VehicleListingsScreen(
@@ -141,7 +141,10 @@ void main() {
                       8,
                       (index) => listing.copyWith(id: 'v$index'),
                     )
-                  : [listing, listing2],
+              : [
+                  listing.copyWith(id: 'v-next-corolla'),
+                  listing2.copyWith(id: 'v-next-yaris'),
+                ],
               nextCursor: page == 1 ? cursor : null,
               hasMore: page == 1,
             );
@@ -150,9 +153,29 @@ void main() {
 
     await tester.pumpWidget(app(screen('abidjan')));
     await tester.pump();
-    await tester.drag(find.byType(ListView).last, const Offset(0, -900));
+    expect(find.byType(GridView), findsOneWidget);
+    final grid = tester.widget<GridView>(find.byType(GridView));
+    expect(
+      grid.gridDelegate,
+      isA<SliverGridDelegateWithFixedCrossAxisCount>(),
+    );
+    expect(
+      (grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount)
+          .crossAxisCount,
+      2,
+    );
+    final scrollable = find.descendant(
+      of: find.byType(GridView),
+      matching: find.byType(Scrollable),
+    );
+    expect(scrollable, findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Toyota Yaris'),
+      300,
+      scrollable: scrollable,
+    );
     await tester.pumpAndSettle();
-    expect(find.text('Toyota Corolla'), findsWidgets);
+    expect(find.text('Toyota Yaris'), findsOneWidget);
     expect(calls.any((call) => call.$2), isTrue);
 
     await tester.enterText(find.byKey(const Key('vehicle_search')), 'Yaris');
@@ -168,11 +191,17 @@ void main() {
   testWidgets('cœur et écran Mes favoris affichent l’état favori',
       (tester) async {
     var toggled = false;
-    await tester.pumpWidget(app(VehicleListingCard(
-      listing: listing,
-      onTap: () {},
-      isFavorite: true,
-      onFavoriteChanged: (value) => toggled = value,
+    await tester.pumpWidget(app(Scaffold(
+      body: ListView(
+        children: [
+          VehicleListingCard(
+            listing: listing,
+            onTap: () {},
+            isFavorite: true,
+            onFavoriteChanged: (value) => toggled = value,
+          ),
+        ],
+      ),
     )));
     expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
     await tester.tap(find.byIcon(Icons.favorite_rounded));
@@ -199,18 +228,42 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(app(
-      const Scaffold(
-        body: VehicleFilterSheet(
-          initial: VehicleListingFilters(),
-          offerType: VehicleOfferType.rental,
-          vehicleType: VehicleType.car,
+      Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: FilledButton(
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                useSafeArea: true,
+                builder: (_) => const VehicleFilterSheet(
+                  initial: VehicleListingFilters(),
+                  offerType: VehicleOfferType.rental,
+                  vehicleType: VehicleType.car,
+                ),
+              ),
+              child: const Text('Ouvrir les filtres'),
+            ),
+          ),
         ),
       ),
       mode: ThemeMode.dark,
     ));
-    await tester.tap(find.widgetWithText(TextField, 'Marque exacte'));
+    await tester.tap(find.text('Ouvrir les filtres'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('vehicle_filter_brand')),
+      160,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.byKey(const Key('vehicle_filter_brand')));
+    await tester.enterText(
+        find.byKey(const Key('vehicle_filter_brand')), 'Toyota');
     await tester.pump();
     expect(tester.takeException(), isNull);
-    expect(find.text('Afficher les résultats'), findsOneWidget);
+    final apply = find.byKey(const Key('vehicle_filter_apply'));
+    await tester.ensureVisible(apply);
+    expect(apply, findsOneWidget);
   });
 }

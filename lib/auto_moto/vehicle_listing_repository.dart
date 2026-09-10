@@ -149,14 +149,18 @@ class VehicleListingRepository {
     if (pageSize < 1 || pageSize > maxPageSize) {
       throw RangeError.range(pageSize, 1, maxPageSize, 'pageSize');
     }
-    if (!RegExp(r'^[a-z0-9]+(?:-[a-z0-9]+)*$').hasMatch(request.cityId)) {
-      throw ArgumentError.value(request.cityId, 'cityId', 'ville invalide');
+    final cityId = request.cityId;
+    if (cityId != null &&
+        !RegExp(r'^[a-z0-9]+(?:-[a-z0-9]+)*$').hasMatch(cityId)) {
+      throw ArgumentError.value(cityId, 'cityId', 'ville invalide');
     }
     Query<Map<String, dynamic>> query = _listings
         .where('status', isEqualTo: VehicleListingStatus.active.toFirestore())
-        .where('cityId', isEqualTo: request.cityId)
         .where('offerType', isEqualTo: request.offerType.toFirestore())
         .where('vehicleType', isEqualTo: request.vehicleType.toFirestore());
+    if (cityId != null) {
+      query = query.where('cityId', isEqualTo: cityId);
+    }
     if (request.normalizedSearch.isNotEmpty) {
       query = query.where(
         'searchKeywords',

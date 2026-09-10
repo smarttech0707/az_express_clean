@@ -104,18 +104,24 @@ void main() {
     )));
     await tester.tap(find.byKey(const Key('choose_professional')));
     await tester.pump();
+    final save = find.byKey(const Key('save_seller_profile'));
     await tester.scrollUntilVisible(
-      find.byKey(const Key('save_seller_profile')),
+      save,
       400,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.byKey(const Key('save_seller_profile')));
+    expect(save, findsOneWidget);
+    await tester.ensureVisible(save);
     await tester.pump();
+    await tester.tap(save);
+    await tester.pump();
+    final shop = find.byKey(const Key('seller_shop_name'));
     await tester.scrollUntilVisible(
-      find.byKey(const Key('seller_shop_name')),
+      shop,
       -400,
       scrollable: find.byType(Scrollable).first,
     );
+    expect(shop, findsOneWidget);
     expect(find.text('Magasin requis'), findsOneWidget);
     expect(find.text('Activité requise'), findsOneWidget);
   });

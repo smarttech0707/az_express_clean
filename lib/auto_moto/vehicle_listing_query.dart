@@ -4,7 +4,7 @@ enum VehicleListingSort { newest, priceAscending, priceDescending, yearNewest }
 
 class VehicleListingRequest {
   const VehicleListingRequest({
-    required this.cityId,
+    this.cityId,
     required this.offerType,
     required this.vehicleType,
     this.searchText = '',
@@ -12,7 +12,8 @@ class VehicleListingRequest {
     this.sort = VehicleListingSort.newest,
   });
 
-  final String cityId;
+  /// Null means all cities in Côte d’Ivoire; a listing itself always has one.
+  final String? cityId;
   final VehicleOfferType offerType;
   final VehicleType vehicleType;
   final String searchText;

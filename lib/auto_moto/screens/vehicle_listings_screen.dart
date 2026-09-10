@@ -15,7 +15,7 @@ import '../widgets/vehicle_filter_sheet.dart';
 import 'vehicle_listing_detail_screen.dart';
 
 typedef VehicleListingsPageLoader = Future<VehicleListingsPage> Function({
-  required String cityId,
+  required String? cityId,
   required VehicleOfferType offerType,
   required VehicleType vehicleType,
   required int pageSize,
@@ -42,7 +42,7 @@ class VehicleListingsScreen extends StatefulWidget {
 
   final VehicleOfferType offerType;
   final VehicleType vehicleType;
-  final String cityId;
+  final String? cityId;
   final VehicleListingsPageLoader? pageLoader;
   final VehicleSellerProfileLoader? detailProfileLoader;
   final VehicleSearchPageLoader? searchPageLoader;
@@ -237,7 +237,7 @@ class _VehicleListingsScreenState extends State<VehicleListingsScreen> {
   }
 
   Widget _results() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const _VehicleLoadingState();
     if (_error != null && _listings.isEmpty) {
       return _MessageState(
         icon: Icons.cloud_off_rounded,
@@ -250,18 +250,23 @@ class _VehicleListingsScreenState extends State<VehicleListingsScreen> {
       return _MessageState(
         icon: Icons.directions_car_outlined,
         message: 'Aucune annonce disponible pour le moment.',
-        actionLabel: _hasMore ? 'Chercher dans la suite' : null,
-        onAction: _hasMore ? _loadMore : null,
+        actionLabel: 'Modifier les filtres',
+        onAction: _openFilters,
       );
     }
     return RefreshIndicator(
       onRefresh: _loadFirstPage,
-      child: ListView.separated(
+      child: GridView.builder(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 12,
+          childAspectRatio: .54,
+        ),
         itemCount: _listings.length + (_loadingMore || !_hasMore ? 1 : 0),
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           if (index == _listings.length) {
             if (_loadingMore) {
@@ -313,8 +318,35 @@ class _VehicleListingsScreenState extends State<VehicleListingsScreen> {
     return Material(
       color: colors.surface,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
         child: Column(children: [
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: colors.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(Icons.directions_car_filled_rounded,
+                  color: colors.onPrimaryContainer),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Auto & Moto',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(widget.cityId ?? 'Toute la Côte d’Ivoire',
+                      key: const Key('vehicle_scope_label'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ]),
+          const SizedBox(height: 12),
           TextField(
             key: const Key('vehicle_search'),
             controller: _searchController,
@@ -357,7 +389,7 @@ class _VehicleListingsScreenState extends State<VehicleListingsScreen> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              'Ville : ${widget.cityId}',
+              'Ville : ${widget.cityId ?? 'Toute la Côte d’Ivoire'}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colors.onSurfaceVariant,
                   ),
@@ -378,6 +410,7 @@ class _VehicleListingsScreenState extends State<VehicleListingsScreen> {
         initial: _filters,
         offerType: widget.offerType,
         vehicleType: widget.vehicleType,
+        cityLabel: widget.cityId ?? 'Toute la Côte d’Ivoire',
       ),
     );
     if (result == null || !mounted) return;
@@ -478,12 +511,42 @@ class _MessageState extends StatelessWidget {
           children: [
             Icon(icon, size: 54, color: colors.onSurfaceVariant),
             const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center),
+            Text(message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700)),
             if (onAction != null && actionLabel != null) ...[
               const SizedBox(height: 16),
               FilledButton(onPressed: onAction, child: Text(actionLabel!)),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VehicleLoadingState extends StatelessWidget {
+  const _VehicleLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      itemCount: 4,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 12,
+        childAspectRatio: .54,
+      ),
+      itemBuilder: (_, __) => Container(
+        decoration: BoxDecoration(
+          color: colors.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(18),
         ),
       ),
     );

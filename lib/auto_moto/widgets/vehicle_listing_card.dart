@@ -1,7 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../../theme/app_theme.dart';
 import '../models/vehicle_listing.dart';
 import '../models/vehicle_seller_profile.dart';
 import '../vehicle_formatters.dart';
@@ -29,7 +28,7 @@ class VehicleListingCard extends StatelessWidget {
         verificationStatus == VehicleSellerVerificationStatus.verified;
     return Card(
       margin: EdgeInsets.zero,
-      color: colors.surface,
+      color: colors.surfaceContainerLow,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
@@ -38,110 +37,199 @@ class VehicleListingCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 112,
-              height: 142,
-              color: colors.surfaceContainerHighest,
-              child: listing.coverMedia == null
-                  ? Icon(
-                      listing.vehicleType == VehicleType.motorcycle
-                          ? Icons.two_wheeler_rounded
-                          : Icons.directions_car_rounded,
-                      size: 48,
-                      color: colors.onSurfaceVariant,
-                    )
-                  : CachedNetworkImage(
-                      imageUrl: listing.coverMedia!.thumbnailUrl ??
-                          listing.coverMedia!.downloadUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
+            AspectRatio(
+              aspectRatio: 4 / 3,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _VehicleCover(listing: listing),
+                  if (listing.condition != VehicleCondition.unknown)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: _ImageBadge(
+                        label: listing.condition == VehicleCondition.newVehicle
+                            ? 'Neuf'
+                            : 'Occasion',
                       ),
-                      errorWidget: (_, __, ___) =>
-                          const Icon(Icons.broken_image_outlined),
                     ),
+                  if (onFavoriteChanged != null)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Material(
+                        color: colors.surface.withValues(alpha: .9),
+                        shape: const CircleBorder(),
+                        child: IconButton(
+                          key: ValueKey('favorite_${listing.id}'),
+                          visualDensity: VisualDensity.compact,
+                          tooltip: isFavorite
+                              ? 'Retirer des favoris'
+                              : 'Ajouter aux favoris',
+                          onPressed: () => onFavoriteChanged!(!isFavorite),
+                          icon: Icon(
+                            isFavorite
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            color: isFavorite
+                                ? colors.primary
+                                : colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+              child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       '${listing.brand} ${listing.model}'.trim(),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    if (listing.year != null) ...[
-                      const SizedBox(height: 2),
-                      Text('${listing.year}',
-                          style: Theme.of(context).textTheme.bodySmall),
-                    ],
-                    const SizedBox(height: 8),
-                    Text(
-                      formatVehiclePrice(
-                        listing.price,
-                        currency: listing.currency,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: AppColors.primary,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w800,
                           ),
                     ),
-                    const SizedBox(height: 7),
-                    Text(
-                      '${vehicleOfferLabel(listing.offerType)} • ${listing.cityName}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
+                    const SizedBox(height: 5),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        formatVehiclePrice(
+                          listing.price,
+                          currency: listing.currency,
+                        ),
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: colors.primary,
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
                     ),
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
+                    if (listing.year != null)
+                      Text(
+                        listing.mileageKm == null
+                            ? '${listing.year}'
+                            : '${listing.year} · ${listing.mileageKm} km',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: colors.onSurfaceVariant,
+                            ),
+                      ),
+                    const SizedBox(height: 3),
+                    Row(
                       children: [
-                        _Badge(
-                          label: listing.sellerType ==
-                                  VehicleSellerType.professional
-                              ? 'Professionnel'
-                              : 'Particulier',
+                        Icon(
+                          Icons.location_on_outlined,
+                          size: 14,
+                          color: colors.onSurfaceVariant,
                         ),
-                        if (isVerified)
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(
+                            listing.cityName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _Badge(
+                            label: vehicleOfferLabel(listing.offerType),
+                          ),
+                        ),
+                        if (isVerified) ...[
+                          const SizedBox(width: 4),
                           const _Badge(
                             label: 'Vérifié',
                             icon: Icons.verified_rounded,
                             highlighted: true,
                           ),
+                        ],
                       ],
                     ),
                   ],
-                ),
               ),
             ),
-            if (onFavoriteChanged != null)
-              IconButton(
-                key: ValueKey('favorite_${listing.id}'),
-                tooltip:
-                    isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris',
-                onPressed: () => onFavoriteChanged!(!isFavorite),
-                icon: Icon(
-                  isFavorite
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                  color:
-                      isFavorite ? AppColors.primary : colors.onSurfaceVariant,
-                ),
-              ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _VehicleCover extends StatelessWidget {
+  const _VehicleCover({required this.listing});
+
+  final VehicleListing listing;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final media = listing.coverMedia;
+    if (media == null) {
+      return ColoredBox(
+        color: colors.surfaceContainerHighest,
+        child: Icon(
+          listing.vehicleType == VehicleType.motorcycle
+              ? Icons.two_wheeler_rounded
+              : Icons.directions_car_rounded,
+          size: 40,
+          color: colors.onSurfaceVariant,
+        ),
+      );
+    }
+    return CachedNetworkImage(
+      imageUrl: media.thumbnailUrl ?? media.downloadUrl,
+      fit: BoxFit.cover,
+      placeholder: (_, __) => ColoredBox(
+        color: colors.surfaceContainerHighest,
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      ),
+      errorWidget: (_, __, ___) => ColoredBox(
+        color: colors.surfaceContainerHighest,
+        child: const Icon(Icons.broken_image_outlined),
+      ),
+    );
+  }
+}
+
+class _ImageBadge extends StatelessWidget {
+  const _ImageBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: colors.surface.withValues(alpha: .92),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: colors.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
       ),
     );
   }
@@ -161,13 +249,13 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final foreground =
-        highlighted ? AppColors.primary : colors.onSurfaceVariant;
+    final foreground = highlighted ? colors.primary : colors.onSurfaceVariant;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color:
-            highlighted ? AppColors.primary10 : colors.surfaceContainerHighest,
+        color: highlighted
+            ? colors.primaryContainer
+            : colors.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -177,12 +265,16 @@ class _Badge extends StatelessWidget {
             Icon(icon, size: 13, color: foreground),
             const SizedBox(width: 3),
           ],
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w600,
-                ),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: foreground,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
           ),
         ],
       ),

@@ -122,6 +122,8 @@ class _VehicleSellerProfileScreenState
               else ...[
                 _profileHeader(),
                 const SizedBox(height: 20),
+                _sectionTitle('Informations vendeur'),
+                const SizedBox(height: 10),
                 TextFormField(
                   key: const Key('seller_display_name'),
                   controller: _name,
@@ -148,6 +150,8 @@ class _VehicleSellerProfileScreenState
                 ),
                 if (_isProfessional) ..._professionalFields(),
                 const SizedBox(height: 12),
+                _sectionTitle('Localisation'),
+                const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   key: const Key('seller_city'),
                   initialValue: _validCityValue(cities),
@@ -251,6 +255,13 @@ class _VehicleSellerProfileScreenState
       ),
     );
   }
+
+  Widget _sectionTitle(String value) => Text(
+        value,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+      );
 
   Widget _sellerTypeChoice() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,

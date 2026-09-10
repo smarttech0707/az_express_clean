@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../models/delivery_zone.dart';
 import '../../theme/app_theme.dart';
 import '../models/vehicle_listing.dart';
 import '../models/vehicle_media.dart';
@@ -21,6 +22,7 @@ class VehicleListingFormScreen extends StatefulWidget {
     required this.profile,
     required this.cityId,
     required this.cityName,
+    this.cities = const [],
     this.original,
     this.saveListing,
     this.mediaService,
@@ -30,6 +32,7 @@ class VehicleListingFormScreen extends StatefulWidget {
   final VehicleSellerProfile profile;
   final String cityId;
   final String cityName;
+  final List<DeliveryZone> cities;
   final VehicleListing? original;
   final VehicleListingSaver? saveListing;
   final VehicleMediaService? mediaService;
@@ -62,6 +65,8 @@ class _VehicleListingFormScreenState extends State<VehicleListingFormScreen> {
   int _step = 0;
   bool _saving = false;
   double _uploadProgress = 0;
+  late String _listingCityId;
+  late String _listingCityName;
 
   @override
   void initState() {
@@ -69,6 +74,8 @@ class _VehicleListingFormScreenState extends State<VehicleListingFormScreen> {
     _data = widget.original == null
         ? VehicleListingFormData()
         : VehicleListingFormData.fromListing(widget.original!);
+    _listingCityId = widget.original?.cityId ?? widget.cityId;
+    _listingCityName = widget.original?.cityName ?? widget.cityName;
     _media =
         VehicleMediaSelection(existing: widget.original?.media ?? const []);
     if (widget.original?.coverMediaId != null) {
@@ -295,12 +302,46 @@ class _VehicleListingFormScreenState extends State<VehicleListingFormScreen> {
           _field('description', 'Description',
               (value) => _data.description = value,
               maxLength: 3000, maxLines: 7),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.location_city_rounded),
-            title: Text(widget.cityName),
-            subtitle: const Text('Ville active AZ Express'),
+          DropdownButtonFormField<String>(
+            key: const Key('listing_city'),
+            initialValue: _validListingCityValue,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Ville de l’annonce',
+              prefixIcon: Icon(Icons.location_city_rounded),
+            ),
+            items: widget.cities
+                .where((city) => (city.cityId ?? city.id).isNotEmpty)
+                .map(
+                  (city) => DropdownMenuItem(
+                    value: city.cityId ?? city.id,
+                    child: Text(
+                      city.name ?? city.cityId ?? city.id,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: widget.cities.isEmpty
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    final city = widget.cities.firstWhere(
+                      (candidate) => (candidate.cityId ?? candidate.id) == value,
+                    );
+                    setState(() {
+                      _listingCityId = value;
+                      _listingCityName = city.name ?? value;
+                    });
+                  },
           ),
+          if (widget.cities.isEmpty)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.location_city_rounded),
+              title: Text(_listingCityName),
+              subtitle: const Text('Ville de l’annonce'),
+            ),
         ],
       );
 
@@ -606,12 +647,18 @@ class _VehicleListingFormScreenState extends State<VehicleListingFormScreen> {
     final listing = _data.toListing(
       sellerId: widget.profile.ownerId,
       profile: widget.profile,
-      cityId: widget.cityId,
-      cityName: widget.cityName,
+      cityId: _listingCityId,
+      cityName: _listingCityName,
       original: widget.original,
     );
     return listingId == null ? listing : listing.copyWith(id: listingId);
   }
+
+  String? get _validListingCityValue => widget.cities.any(
+        (city) => (city.cityId ?? city.id) == _listingCityId,
+      )
+      ? _listingCityId
+      : null;
 
   Future<void> _next() async {
     if (_step < _stepTitles.length - 1) {
