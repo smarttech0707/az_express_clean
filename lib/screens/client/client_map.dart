@@ -23,6 +23,7 @@ import 'client_wallet_page.dart';
 import 'boulangeries_list.dart';
 import '../immobilier/immobilier_home_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/live_marker_cache.dart';
 import '../../event/screens/event_home_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,7 +41,11 @@ enum _PermState { checking, granted, denied, serviceOff }
 // MAP SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 class ClientMap extends StatefulWidget {
-  const ClientMap({super.key});
+  const ClientMap({super.key, this.driversFeed});
+
+  /// Injection de test uniquement. `null` en production → vraie requête
+  /// Firestore `livreurs` en ligne (voir [onlineDriversFeed]).
+  final LiveDriverFeed? driversFeed;
 
   @override
   State<ClientMap> createState() => _ClientMapState();
@@ -52,7 +57,8 @@ class _ClientMapState extends State<ClientMap>
   LatLng? _clientPosition;
   _PermState _permState = _PermState.checking;
   Set<Marker> _markers = {};
-  StreamSubscription<QuerySnapshot>? _driversSub;
+  Map<String, Marker> _driverMarkers = {};
+  StreamSubscription<LiveDriverSnapshot>? _driversSub;
   int _onlineDrivers = 0;
 
   // Icônes cachées pour éviter de les recréer à chaque update
@@ -179,40 +185,34 @@ class _ClientMapState extends State<ClientMap>
   // ── Écoute des livreurs en temps réel ──────────────────────────────────────
   void _listenDrivers() {
     _driversSub?.cancel();
-    _driversSub = FirebaseFirestore.instance
-        .collection('livreurs')
-        .where('isOnline', isEqualTo: true)
-        .snapshots()
-        .listen(_onDriversSnapshot, onError: (_) {
+    final feed = widget.driversFeed ?? onlineDriversFeed;
+    _driversSub = feed().listen(_onDriversSnapshot, onError: (_) {
       // Erreur Firestore silencieuse — on garde l'UI stable
     });
   }
 
-  void _onDriversSnapshot(QuerySnapshot snapshot) {
+  void _onDriversSnapshot(LiveDriverSnapshot snapshot) {
     if (!mounted) return;
-
-    final Set<Marker> newMarkers = {};
-
-    // Marqueur client
-    if (_clientPosition != null) {
-      newMarkers.add(Marker(
-        markerId: const MarkerId('client'),
-        position: _clientPosition!,
-        infoWindow: const InfoWindow(title: 'Vous'),
-        icon: _clientIcon ??
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-        zIndexInt: 2,
-      ));
-    }
-
-    // Marqueurs livreurs
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
+    final changes = <LiveMarkerChange>[];
+    for (final change in snapshot.docChanges) {
+      final doc = change.doc;
+      if (change.type == LiveMarkerChangeType.removed) {
+        changes.add(LiveMarkerChange(doc.id, LiveMarkerChangeType.removed));
+        continue;
+      }
+      final data = doc.data;
       final lat = (data['lat'] as num?)?.toDouble() ?? 0;
       final lng = (data['lng'] as num?)?.toDouble() ?? 0;
-      if (lat == 0 || lng == 0) continue;
-
-      newMarkers.add(Marker(
+      if (lat == 0 || lng == 0) {
+        changes.add(LiveMarkerChange(doc.id, LiveMarkerChangeType.modified));
+        continue;
+      }
+      changes.add(LiveMarkerChange(
+        doc.id,
+        change.type == LiveMarkerChangeType.added
+            ? LiveMarkerChangeType.added
+            : LiveMarkerChangeType.modified,
+        marker: Marker(
         markerId: MarkerId(doc.id),
         position: LatLng(lat, lng),
         infoWindow: InfoWindow(
@@ -222,11 +222,25 @@ class _ClientMapState extends State<ClientMap>
         icon: _driverIcon ??
             BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         zIndexInt: 1,
+        ),
       ));
     }
 
+    _driverMarkers = applyLiveMarkerChanges(_driverMarkers, changes);
+
     setState(() {
-      _markers = newMarkers;
+      _markers = {
+        if (_clientPosition != null)
+          Marker(
+            markerId: const MarkerId('client'),
+            position: _clientPosition!,
+            infoWindow: const InfoWindow(title: 'Vous'),
+            icon: _clientIcon ??
+                BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            zIndexInt: 2,
+          ),
+        ..._driverMarkers.values,
+      };
       _onlineDrivers = snapshot.docs.length;
     });
   }

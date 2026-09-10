@@ -14,6 +14,52 @@ import '../../services/active_city_service.dart';
 import '../../services/google_routes_service.dart';
 import '../../theme/app_theme.dart';
 
+class DriverMapCameraThrottle {
+  DriverMapCameraThrottle({required this.minInterval});
+  final Duration minInterval;
+  DateTime? _lastMoveAt;
+
+  bool shouldMove(DateTime now) {
+    if (_lastMoveAt == null || now.difference(_lastMoveAt!) >= minInterval) {
+      _lastMoveAt = now;
+      return true;
+    }
+    return false;
+  }
+}
+
+class DriverMapWriteThrottle {
+  DriverMapWriteThrottle({
+    required this.minInterval,
+    required this.minDistanceMeters,
+  });
+
+  final Duration minInterval;
+  final double minDistanceMeters;
+  DateTime? _lastWriteAt;
+  LatLng? _lastWrittenPosition;
+
+  bool shouldWrite(DateTime now, LatLng position) {
+    if (_lastWriteAt != null && now.difference(_lastWriteAt!) < minInterval) {
+      return false;
+    }
+    final previous = _lastWrittenPosition;
+    if (previous != null &&
+        Geolocator.distanceBetween(
+              previous.latitude,
+              previous.longitude,
+              position.latitude,
+              position.longitude,
+            ) <
+            minDistanceMeters) {
+      return false;
+    }
+    _lastWriteAt = now;
+    _lastWrittenPosition = position;
+    return true;
+  }
+}
+
 /// Carte du livreur — suivi GPS temps réel, itinéraire, ETA.
 class DriverMap extends StatefulWidget {
   final OrderModel order;
@@ -60,6 +106,8 @@ class _DriverMapState extends State<DriverMap>
 
   List<LatLng> _routeToClient = [];
   List<LatLng> _routeToDest = [];
+  Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
 
   double _distToClient = 0;
   double _distToDest = 0;
@@ -75,6 +123,16 @@ class _DriverMapState extends State<DriverMap>
   LatLng? _lastRoutePos;
   bool _bgGranted = true;
   final ActiveCityService _activeCityService = ActiveCityService();
+  final _cameraThrottle = DriverMapCameraThrottle(
+    minInterval: const Duration(milliseconds: 200),
+  );
+  final _writeThrottle = DriverMapWriteThrottle(
+    minInterval: const Duration(seconds: 5),
+    minDistanceMeters: 15,
+  );
+  Position? _pendingWritePosition;
+  bool _writingPosition = false;
+  bool _disposed = false;
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulse;
@@ -87,6 +145,8 @@ class _DriverMapState extends State<DriverMap>
       ..repeat(reverse: true);
     _pulse = Tween<double>(begin: 0.4, end: 1.0)
         .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+    _markers = _buildMarkers();
+    _polylines = _buildPolylines();
     _loadMotoIcon();
     _startGPS();
   }
@@ -95,7 +155,12 @@ class _DriverMapState extends State<DriverMap>
     try {
       final icon = await BitmapDescriptor.asset(
           const ImageConfiguration(size: Size(52, 52)), 'assets/motorbike.png');
-      if (mounted) setState(() => _motoIcon = icon);
+      if (mounted) {
+        setState(() {
+          _motoIcon = icon;
+          _markers = _buildMarkers();
+        });
+      }
     } catch (_) {}
   }
 
@@ -139,8 +204,7 @@ class _DriverMapState extends State<DriverMap>
     if (!mounted) return;
     final latlng = LatLng(pos.latitude, pos.longitude);
 
-    // Envoie position + ville GPS, sans reverse geocoding ni appel externe.
-    unawaited(_writePosition(pos));
+    _schedulePositionWrite(pos);
 
     setState(() {
       _driverPos = latlng;
@@ -155,9 +219,12 @@ class _DriverMapState extends State<DriverMap>
             1000;
         _etaToDest = _eta(_distToDest, pos.speed);
       }
+      _markers = _buildMarkers();
     });
 
-    if (_followDriver && _mapCtrl != null) {
+    if (_followDriver &&
+        _mapCtrl != null &&
+        _cameraThrottle.shouldMove(DateTime.now())) {
       _mapCtrl!.animateCamera(CameraUpdate.newLatLng(latlng));
     }
 
@@ -172,11 +239,34 @@ class _DriverMapState extends State<DriverMap>
     }
   }
 
+  void _schedulePositionWrite(Position pos) {
+    _pendingWritePosition = pos;
+    if (_writingPosition) return;
+    unawaited(_flushPositionWrites());
+  }
+
+  Future<void> _flushPositionWrites() async {
+    while (!_disposed && _pendingWritePosition != null) {
+      final pos = _pendingWritePosition!;
+      _pendingWritePosition = null;
+      final latLng = LatLng(pos.latitude, pos.longitude);
+      if (!_writeThrottle.shouldWrite(DateTime.now(), latLng)) continue;
+
+      _writingPosition = true;
+      try {
+        await _writePosition(pos);
+      } finally {
+        _writingPosition = false;
+      }
+    }
+  }
+
   Future<void> _writePosition(Position pos) async {
     final cityState = await _activeCityService.resolveGps(
       latitude: pos.latitude,
       longitude: pos.longitude,
     );
+    if (_disposed) return;
     await FirebaseFirestore.instance
         .collection('livreurs')
         .doc(widget.driverId)
@@ -204,7 +294,10 @@ class _DriverMapState extends State<DriverMap>
       _routeToDest = model2.points;
     }
     if (mounted) {
-      setState(() => _loadingRoute = false);
+      setState(() {
+        _loadingRoute = false;
+        _polylines = _buildPolylines();
+      });
       if (!_firstFit) {
         _firstFit = true;
         _fitAll();
@@ -252,13 +345,15 @@ class _DriverMapState extends State<DriverMap>
 
   @override
   void dispose() {
+    _disposed = true;
+    _pendingWritePosition = null;
     _gpsSub?.cancel();
     _pulseCtrl.dispose();
     _mapCtrl?.dispose();
     super.dispose();
   }
 
-  Set<Marker> get _markers => {
+  Set<Marker> _buildMarkers() => {
         Marker(
           markerId: const MarkerId('client'),
           position: _clientPos,
@@ -292,7 +387,7 @@ class _DriverMapState extends State<DriverMap>
           ),
       };
 
-  Set<Polyline> get _polylines => {
+  Set<Polyline> _buildPolylines() => {
         if (_routeToClient.isNotEmpty)
           Polyline(
             polylineId: const PolylineId('to_client'),

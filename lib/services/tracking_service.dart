@@ -90,6 +90,11 @@ class TrackingService extends ChangeNotifier {
   StreamSubscription<DocumentSnapshot>? _driverSub;
   LatLng? _lastRouteCalcPos;
   Timer? _animTimer;
+  int _routeRevision = 0;
+  bool _isAnimating = false;
+
+  int get routeRevision => _routeRevision;
+  bool get isAnimating => _isAnimating;
 
   // Recalcule la route si le livreur a bougé de plus de 200m — aligné avec RealtimeTrackingService
   static const double _routeRefreshMeters = 200;
@@ -99,6 +104,7 @@ class TrackingService extends ChangeNotifier {
   static const int _animStepMs = 16;
 
   void _start() {
+    if (_driverId.isEmpty) return;
     _driverSub = FirebaseFirestore.instance
         .collection('livreurs')
         .doc(_driverId)
@@ -131,6 +137,7 @@ class TrackingService extends ChangeNotifier {
 
   void _animateMarkerTo(LatLng target) {
     _animTimer?.cancel();
+    _isAnimating = true;
     final start = _state.driverPosition!;
     final steps = (_animDurationMs / _animStepMs).round();
     var step = 0;
@@ -144,10 +151,12 @@ class TrackingService extends ChangeNotifier {
           _lerp(start.latitude, target.latitude, progress),
           _lerp(start.longitude, target.longitude, progress),
         );
+        final isFinalTick = step >= steps;
         _state = _state.copyWith(driverPosition: interpolated);
+        _isAnimating = !isFinalTick;
         notifyListeners();
 
-        if (step >= steps) {
+        if (isFinalTick) {
           t.cancel();
           _refreshRouteIfNeeded(target);
         }
@@ -235,6 +244,7 @@ class TrackingService extends ChangeNotifier {
       etaToDest: etaToDest,
       routeLoading: false,
     );
+    _routeRevision++;
     notifyListeners();
   }
 
@@ -244,8 +254,21 @@ class TrackingService extends ChangeNotifier {
     return ((distKm / 25) * 60).round().clamp(1, 180);
   }
 
+  @visibleForTesting
+  void debugStartVisualTransition({
+    required LatLng from,
+    required LatLng to,
+  }) {
+    // Le test couvre uniquement l'interpolation visuelle : marquer la route
+    // comme fraîche évite un appel Directions réel à la dernière frame.
+    _lastRouteCalcPos = to;
+    _state = _state.copyWith(driverPosition: from);
+    _animateMarkerTo(to);
+  }
+
   @override
   void dispose() {
+    _isAnimating = false;
     _animTimer?.cancel();
     _driverSub?.cancel();
     super.dispose();

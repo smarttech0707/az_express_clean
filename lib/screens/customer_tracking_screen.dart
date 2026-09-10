@@ -16,6 +16,25 @@ import '../widgets/driver_marker.dart';
 import '../widgets/route_polyline.dart';
 import '../widgets/eta_card.dart';
 
+/// Cadence les commandes vers la vue native Google Maps sans limiter
+/// l'interpolation Flutter du marqueur.
+class TrackingCameraThrottle {
+  TrackingCameraThrottle({required this.minInterval});
+
+  final Duration minInterval;
+  DateTime? _lastCommandAt;
+
+  bool shouldMove(DateTime now, {required bool force}) {
+    if (force ||
+        _lastCommandAt == null ||
+        now.difference(_lastCommandAt!) >= minInterval) {
+      _lastCommandAt = now;
+      return true;
+    }
+    return false;
+  }
+}
+
 /// Écran de suivi professionnel côté client — style Google Maps / Yango.
 class CustomerTrackingScreen extends StatefulWidget {
   final OrderModel order;
@@ -56,6 +75,10 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
   BitmapDescriptor? _motoIcon;
   BitmapDescriptor? _clientIcon;
   BitmapDescriptor? _destIcon;
+  int _appliedRouteRevision = -1;
+  final _cameraThrottle = TrackingCameraThrottle(
+    minInterval: const Duration(milliseconds: 200),
+  );
 
   // ── Pulsation indicateur livreur ───────────────────────────────────────────
   late AnimationController _pulseCtrl;
@@ -298,15 +321,27 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
 
   void _onTrackingUpdate() {
     if (!mounted) return;
-    _rebuildMarkers();
-    _rebuildPolylines();
-    if (_tracking.followDriver) _followWithBearing();
+    final routesChanged = _appliedRouteRevision != _tracking.routeRevision;
+    setState(() {
+      _markers = _buildMarkers();
+      if (routesChanged) {
+        _polylines = _buildPolylines();
+        _appliedRouteRevision = _tracking.routeRevision;
+      }
+    });
+    if (_tracking.followDriver) {
+      _followWithBearing(force: !_tracking.isAnimating);
+    }
   }
 
   // Caméra Uber-style : suit le livreur avec son cap et un léger tilt
-  void _followWithBearing() {
+  void _followWithBearing({bool force = false}) {
     final driverPos = _tracking.animatedDriverPos;
-    if (_mapCtrl == null || driverPos == null) return;
+    if (_mapCtrl == null ||
+        driverPos == null ||
+        !_cameraThrottle.shouldMove(DateTime.now(), force: force)) {
+      return;
+    }
     _mapCtrl!.animateCamera(CameraUpdate.newCameraPosition(CameraPosition(
       target: driverPos,
       zoom: 16,
@@ -316,8 +351,10 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
   }
 
   void _rebuildMarkers() {
-    setState(() {
-      _markers = MapMarkersBuilder.buildForClient(
+    setState(() => _markers = _buildMarkers());
+  }
+
+  Set<Marker> _buildMarkers() => MapMarkersBuilder.buildForClient(
         clientPos: _clientPos,
         driverPos: _tracking.animatedDriverPos,
         destination: _destPos,
@@ -327,17 +364,11 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
         driverName: _driverName,
         driverHeading: _tracking.animatedHeading,
       );
-    });
-  }
 
-  void _rebuildPolylines() {
-    setState(() {
-      _polylines = RoutePolylineBuilder.buildForClient(
+  Set<Polyline> _buildPolylines() => RoutePolylineBuilder.buildForClient(
         routeToClient: _tracking.routeToClient,
         routeToDest: _tracking.routeToDest,
       );
-    });
-  }
 
   void _fitAllVisible() {
     if (_mapCtrl == null) return;

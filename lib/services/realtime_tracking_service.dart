@@ -33,8 +33,10 @@ class RealtimeTrackingService extends ChangeNotifier {
   double _animatedHeading = 0;
   RouteModel _routeToClient = RouteModel.empty();
   RouteModel _routeToDest = RouteModel.empty();
+  int _routeRevision = 0;
   bool _routeLoading = false;
   bool _followDriver = true;
+  bool _isAnimating = false;
   DateTime _lastUpdateTime = DateTime(2000);
 
   // ── Internes ───────────────────────────────────────────────────────────────
@@ -58,8 +60,10 @@ class RealtimeTrackingService extends ChangeNotifier {
   LatLng? get destination => _destination;
   RouteModel get routeToClient => _routeToClient;
   RouteModel get routeToDest => _routeToDest;
+  int get routeRevision => _routeRevision;
   bool get routeLoading => _routeLoading;
   bool get followDriver => _followDriver;
+  bool get isAnimating => _isAnimating;
   LatLng? get animatedDriverPos => _animatedPos;
   double get animatedHeading => _animatedHeading;
   DateTime get lastUpdateTime => _lastUpdateTime;
@@ -75,6 +79,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   void switchToDelivery(LatLng deliveryDest) {
     _overrideTarget = deliveryDest;
     _routeToDest = RouteModel.empty();
+    _routeRevision++;
     _lastRouteCalc = DateTime(2000); // force recalc immédiat
     notifyListeners();
     if (_driverLocation != null) {
@@ -137,8 +142,6 @@ class RealtimeTrackingService extends ChangeNotifier {
     } else {
       _animatedPos = newLoc.latLng;
       _animatedHeading = newLoc.heading;
-      _startAnimation(
-          newLoc.latLng, newLoc.latLng, newLoc.heading, newLoc.heading);
     }
 
     notifyListeners();
@@ -180,6 +183,7 @@ class RealtimeTrackingService extends ChangeNotifier {
     _headingFrom = fromH;
     _headingTo = toH;
     _animStart = DateTime.now();
+    _isAnimating = true;
     _animTimer?.cancel();
     _animTimer = Timer.periodic(const Duration(milliseconds: 16), _onAnimTick);
   }
@@ -198,14 +202,16 @@ class RealtimeTrackingService extends ChangeNotifier {
     // Ease-out cubic pour mouvement naturel
     t = 1 - (1 - t) * (1 - t) * (1 - t);
 
+    final isFinalTick = elapsed >= _animDurationMs;
     _animatedPos = LatLng(
       _animFrom!.latitude + (_animTo!.latitude - _animFrom!.latitude) * t,
       _animFrom!.longitude + (_animTo!.longitude - _animFrom!.longitude) * t,
     );
     _animatedHeading = _lerpAngle(_headingFrom, _headingTo, t);
+    _isAnimating = !isFinalTick;
     notifyListeners();
 
-    if (elapsed >= _animDurationMs) {
+    if (isFinalTick) {
       _animatedPos = _animTo;
       _animatedHeading = _headingTo;
       timer.cancel();
@@ -240,6 +246,7 @@ class RealtimeTrackingService extends ChangeNotifier {
       );
     }
 
+    _routeRevision++;
     _routeLoading = false;
     notifyListeners();
   }
@@ -250,10 +257,31 @@ class RealtimeTrackingService extends ChangeNotifier {
     await _calculateRoutes(_driverLocation!.latLng);
   }
 
+  @visibleForTesting
+  void debugStartVisualTransition({
+    required LatLng from,
+    required LatLng to,
+    double fromHeading = 0,
+    double toHeading = 0,
+  }) {
+    if (_disposed) return;
+    _driverLocation = DriverLocationModel(
+      driverId: _driverId,
+      latitude: from.latitude,
+      longitude: from.longitude,
+      heading: fromHeading,
+      timestamp: DateTime.now(),
+    );
+    _animatedPos = from;
+    _animatedHeading = fromHeading;
+    _startAnimation(from, to, fromHeading, toHeading);
+  }
+
   // ── Dispose ────────────────────────────────────────────────────────────────
   @override
   void dispose() {
     _disposed = true;
+    _isAnimating = false;
     _animTimer?.cancel();
     _firestoreSub?.cancel();
     super.dispose();

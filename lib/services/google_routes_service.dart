@@ -49,6 +49,7 @@ class GoogleRoutesService {
   // ── Cache itinéraires : clé = grille 100m × 100m, TTL 5 minutes ───────────
   // Arrondir à 3 décimales ≈ 111m de précision
   static final Map<String, _CachedRoute> _routeCache = {};
+  static final Map<String, Future<RouteModel>> _inFlightRouteModels = {};
   static const _routeCacheTtl = Duration(minutes: 5);
   static const _maxRouteCacheEntries = 50;
 
@@ -58,6 +59,7 @@ class GoogleRoutesService {
   @visibleForTesting
   static void debugResetCache() {
     _routeCache.clear();
+    _inFlightRouteModels.clear();
     debugDirectionsGet = null;
   }
 
@@ -68,6 +70,37 @@ class GoogleRoutesService {
   // ── Route complète avec détails (distance API + durée trafic) ─────────────
 
   static Future<RouteModel> getRouteModel({
+    required LatLng origin,
+    required LatLng destination,
+    bool withTraffic = false,
+  }) {
+    if (!withTraffic) {
+      final cached = _routeCache[_routeKey(origin, destination)];
+      if (cached != null && !cached.isExpired(_routeCacheTtl)) {
+        return Future.value(cached.route);
+      }
+    }
+
+    final inFlightKey =
+        '${_routeKey(origin, destination)}|traffic=$withTraffic';
+    final existing = _inFlightRouteModels[inFlightKey];
+    if (existing != null) return existing;
+
+    late final Future<RouteModel> request;
+    request = _fetchRouteModel(
+      origin: origin,
+      destination: destination,
+      withTraffic: withTraffic,
+    ).whenComplete(() {
+      if (identical(_inFlightRouteModels[inFlightKey], request)) {
+        _inFlightRouteModels.remove(inFlightKey);
+      }
+    });
+    _inFlightRouteModels[inFlightKey] = request;
+    return request;
+  }
+
+  static Future<RouteModel> _fetchRouteModel({
     required LatLng origin,
     required LatLng destination,
     bool withTraffic = false,

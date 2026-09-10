@@ -9,6 +9,25 @@ import '../../services/notification_service.dart';
 import '../../services/tracking_service.dart';
 import '../../theme/app_theme.dart';
 
+/// Cadence les commandes vers la vue native Google Maps sans limiter
+/// l'interpolation Flutter du marqueur.
+class OrderTrackingCameraThrottle {
+  OrderTrackingCameraThrottle({required this.minInterval});
+
+  final Duration minInterval;
+  DateTime? _lastCommandAt;
+
+  bool shouldMove(DateTime now, {required bool force}) {
+    if (force ||
+        _lastCommandAt == null ||
+        now.difference(_lastCommandAt!) >= minInterval) {
+      _lastCommandAt = now;
+      return true;
+    }
+    return false;
+  }
+}
+
 class OrderTrackingMap extends StatefulWidget {
   final OrderModel order;
 
@@ -33,6 +52,12 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
   late TrackingService _tracking;
   GoogleMapController? _mapCtrl;
   BitmapDescriptor? _motoIcon;
+  Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
+  int _appliedRouteRevision = -1;
+  final _cameraThrottle = OrderTrackingCameraThrottle(
+    minInterval: const Duration(milliseconds: 200),
+  );
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulse;
@@ -52,6 +77,9 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
           : null,
     );
     _tracking.addListener(_onUpdate);
+    _markers = _buildMarkers();
+    _polylines = _buildPolylines();
+    _appliedRouteRevision = _tracking.routeRevision;
 
     _pulseCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 900))
@@ -66,15 +94,20 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
     try {
       final icon = await BitmapDescriptor.asset(
           const ImageConfiguration(size: Size(48, 48)), 'assets/motorbike.png');
-      if (mounted) setState(() => _motoIcon = icon);
+      if (mounted) {
+        setState(() {
+          _motoIcon = icon;
+          _markers = _buildMarkers();
+        });
+      }
     } catch (_) {}
   }
 
   void _onUpdate() {
     if (!mounted) return;
-    setState(() {});
+    _updateMapVisuals();
     if (_followDriver && _tracking.state.driverPosition != null) {
-      _fitBounds();
+      _fitBounds(force: !_tracking.isAnimating);
     }
     _checkEtaMilestones();
   }
@@ -106,14 +139,18 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
     }
   }
 
-  void _fitBounds() {
+  void _fitBounds({bool force = false}) {
     final s = _tracking.state;
     final pts = <LatLng>[
       s.clientPosition,
       if (s.driverPosition != null) s.driverPosition!,
       if (s.destination != null) s.destination!,
     ];
-    if (pts.length < 2 || _mapCtrl == null) return;
+    if (pts.length < 2 ||
+        _mapCtrl == null ||
+        !_cameraThrottle.shouldMove(DateTime.now(), force: force)) {
+      return;
+    }
 
     double minLat = pts.first.latitude, maxLat = pts.first.latitude;
     double minLng = pts.first.longitude, maxLng = pts.first.longitude;
@@ -130,6 +167,17 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
         70));
   }
 
+  void _updateMapVisuals() {
+    final routesChanged = _appliedRouteRevision != _tracking.routeRevision;
+    setState(() {
+      _markers = _buildMarkers();
+      if (routesChanged) {
+        _polylines = _buildPolylines();
+        _appliedRouteRevision = _tracking.routeRevision;
+      }
+    });
+  }
+
   @override
   void dispose() {
     _tracking.removeListener(_onUpdate);
@@ -139,7 +187,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
     super.dispose();
   }
 
-  Set<Marker> get _markers {
+  Set<Marker> _buildMarkers() {
     final s = _tracking.state;
     return {
       Marker(
@@ -169,7 +217,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
     };
   }
 
-  Set<Polyline> get _polylines {
+  Set<Polyline> _buildPolylines() {
     final s = _tracking.state;
     return {
       if (s.routeToClient.isNotEmpty)
@@ -237,7 +285,7 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
             GestureDetector(
               onTap: () {
                 setState(() => _followDriver = !_followDriver);
-                if (_followDriver) _fitBounds();
+                if (_followDriver) _fitBounds(force: true);
               },
               child: Container(
                 margin: const EdgeInsets.all(8),
@@ -265,7 +313,10 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
             mapToolbarEnabled: false,
             onMapCreated: (c) {
               _mapCtrl = c;
-              Future.delayed(const Duration(milliseconds: 500), _fitBounds);
+              Future.delayed(
+                const Duration(milliseconds: 500),
+                () => _fitBounds(force: true),
+              );
             },
             onCameraMoveStarted: () {
               if (_followDriver) setState(() => _followDriver = false);

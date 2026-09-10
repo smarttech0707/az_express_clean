@@ -6,13 +6,18 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../../widgets/driver_marker.dart';
+import '../../widgets/live_marker_cache.dart';
 
 /// Page admin — suivi en temps réel de tous les livreurs en ligne.
 ///
 /// Affiche une carte avec la position de chaque livreur actif,
 /// et une liste avec statut GPS, dernière mise à jour, vitesse.
 class AdminLiveTrackingPage extends StatefulWidget {
-  const AdminLiveTrackingPage({super.key});
+  const AdminLiveTrackingPage({super.key, this.driversFeed});
+
+  /// Injection de test uniquement. `null` en production → vraie requête
+  /// Firestore `livreurs` en ligne (voir [onlineDriversFeed]).
+  final LiveDriverFeed? driversFeed;
 
   @override
   State<AdminLiveTrackingPage> createState() => _AdminLiveTrackingPageState();
@@ -22,11 +27,12 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
   // ── Carte ──────────────────────────────────────────────────────────────────
   GoogleMapController? _mapCtrl;
   Set<Marker> _markers = {};
+  Map<String, Marker> _driverMarkers = {};
   BitmapDescriptor? _motoIcon;
 
   // ── Données livreurs ───────────────────────────────────────────────────────
   final List<_DriverStatus> _drivers = [];
-  StreamSubscription<QuerySnapshot>? _sub;
+  StreamSubscription<LiveDriverSnapshot>? _sub;
   bool _streamError = false;
 
   // ── Abengourou centre (position par défaut) ────────────────────────────────
@@ -45,22 +51,19 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
   }
 
   void _subscribeToDrivers() {
-    _sub = FirebaseFirestore.instance
-        .collection('livreurs')
-        .where('isOnline', isEqualTo: true)
-        .snapshots()
-        .listen(_onDriversUpdate, onError: (_) {
+    final feed = widget.driversFeed ?? onlineDriversFeed;
+    _sub = feed().listen(_onDriversUpdate, onError: (_) {
       // Master Prompt 121 — la carte cessait de se mettre à jour en silence
       // sur une panne réseau prolongée, sans que l'admin le sache.
       if (mounted) setState(() => _streamError = true);
     });
   }
 
-  void _onDriversUpdate(QuerySnapshot snap) {
+  void _onDriversUpdate(LiveDriverSnapshot snap) {
     if (!mounted) return;
     if (_streamError) _streamError = false;
     final list = snap.docs.map((doc) {
-      final d = doc.data() as Map<String, dynamic>;
+      final d = doc.data;
       final lat = (d['lat'] as num?)?.toDouble();
       final lng = (d['lng'] as num?)?.toDouble();
       final updatedAt = d['updatedAt'] != null
@@ -84,13 +87,37 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
     }).toList();
 
     list.sort((a, b) => a.name.compareTo(b.name));
+    final statusesById = {for (final driver in list) driver.id: driver};
+    final changes = <LiveMarkerChange>[];
+
+    for (final change in snap.docChanges) {
+      final doc = change.doc;
+      if (change.type == LiveMarkerChangeType.removed) {
+        changes.add(LiveMarkerChange(doc.id, LiveMarkerChangeType.removed));
+        continue;
+      }
+      final driver = statusesById[doc.id];
+      if (driver == null || driver.lat == null || driver.lng == null) {
+        changes.add(LiveMarkerChange(doc.id, LiveMarkerChangeType.modified));
+        continue;
+      }
+      changes.add(LiveMarkerChange(
+        driver.id,
+        change.type == LiveMarkerChangeType.added
+            ? LiveMarkerChangeType.added
+            : LiveMarkerChangeType.modified,
+        marker: _markerFor(driver),
+      ));
+    }
+
+    _driverMarkers = applyLiveMarkerChanges(_driverMarkers, changes);
 
     setState(() {
       _drivers
         ..clear()
         ..addAll(list);
+      _markers = _driverMarkers.values.toSet();
     });
-    _rebuildMarkers();
   }
 
   void _rebuildMarkers() {
@@ -98,7 +125,18 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
     final markers = <Marker>{};
     for (final d in _drivers) {
       if (d.lat == null || d.lng == null) continue;
-      markers.add(Marker(
+      markers.add(_markerFor(d));
+    }
+    setState(() {
+      _driverMarkers
+        ..clear()
+        ..addEntries(markers.map((marker) => MapEntry(marker.markerId.value, marker)));
+      _markers = markers;
+    });
+  }
+
+  Marker _markerFor(_DriverStatus d) {
+    return Marker(
         markerId: MarkerId(d.id),
         position: LatLng(d.lat!, d.lng!),
         icon: _motoIcon ??
@@ -112,9 +150,7 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
         flat: true,
         anchor: const Offset(0.5, 0.5),
         zIndexInt: d.gpsOk ? 2 : 1,
-      ));
-    }
-    setState(() => _markers = markers);
+    );
   }
 
   void _centerOn(_DriverStatus d) {
