@@ -20,6 +20,7 @@ class DeliveryZone {
   final double? radiusKm;
   final ZoneCoordinateSource coordinateSource;
   final bool isServiceable;
+  final bool isMarketplaceEnabled;
   final bool? isActive;
   final num? order;
 
@@ -37,6 +38,7 @@ class DeliveryZone {
     this.radiusKm,
     this.coordinateSource = ZoneCoordinateSource.unknown,
     this.isServiceable = false,
+    this.isMarketplaceEnabled = false,
     this.isActive,
     this.order,
   });
@@ -56,6 +58,7 @@ class DeliveryZone {
       radiusKm: _doubleOrNull(data['radiusKm']),
       coordinateSource: _coordinateSource(data['coordinateSource']),
       isServiceable: data['isServiceable'] as bool? ?? false,
+      isMarketplaceEnabled: data['isMarketplaceEnabled'] as bool? ?? false,
       isActive: data['isActive'] as bool?,
       order: data['order'] as num?,
     );

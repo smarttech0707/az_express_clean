@@ -13,8 +13,25 @@ import '../../providers/active_city_provider.dart';
 import '../../services/pharmacy_guard_repository.dart';
 import '../../services/tarif_service.dart';
 
+typedef PharmacyGuardStreamLoader = Stream<List<PharmacyGuard>> Function(
+  String cityName,
+);
+typedef PharmacyPartnerStreamLoader = Stream<List<PharmacyGuard>> Function(
+  String cityId,
+  String cityName,
+);
+
 class PharmacieGardePage extends StatefulWidget {
-  const PharmacieGardePage({super.key});
+  const PharmacieGardePage({
+    super.key,
+    this.guardsLoader,
+    this.partnersLoader,
+    this.loadPosition = true,
+  });
+
+  final PharmacyGuardStreamLoader? guardsLoader;
+  final PharmacyPartnerStreamLoader? partnersLoader;
+  final bool loadPosition;
 
   @override
   State<PharmacieGardePage> createState() => _PharmacieGardePageState();
@@ -22,7 +39,8 @@ class PharmacieGardePage extends StatefulWidget {
 
 class _PharmacieGardePageState extends State<PharmacieGardePage>
     with SingleTickerProviderStateMixin {
-  final _repository = PharmacyGuardRepository();
+  late final PharmacyGuardRepository? _repository =
+      widget.guardsLoader == null ? PharmacyGuardRepository() : null;
   late final TabController _tabs;
   Position? _position;
 
@@ -30,7 +48,7 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
   void initState() {
     super.initState();
     _tabs = TabController(length: 4, vsync: this);
-    _loadPosition();
+    if (widget.loadPosition) _loadPosition();
   }
 
   Future<void> _loadPosition() async {
@@ -53,8 +71,21 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
     super.dispose();
   }
 
+  String? _activeCityName(ActiveCityProvider provider) {
+    final cityId = provider.activeCityId;
+    if (cityId == null) return null;
+    for (final city in provider.activeCities) {
+      if (city.cityId == cityId) return city.name;
+    }
+    return null;
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final cityProvider = context.watch<ActiveCityProvider>();
+    final cityId = cityProvider.activeCityId;
+    final cityName = _activeCityName(cityProvider);
+    return Scaffold(
         backgroundColor: const Color(0xFFF5F5F5),
         appBar: AppBar(
           title: const Text('Pharmacies de garde'),
@@ -74,8 +105,16 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
             ],
           ),
         ),
-        body: StreamBuilder<List<PharmacyGuard>>(
-          stream: _repository.watchPublicGuards(city: 'Abengourou'),
+        body: cityId == null || cityName == null
+            ? const _Message(
+                icon: Icons.location_city_outlined,
+                text:
+                    'Sélectionnez une ville pour voir les pharmacies de garde.',
+              )
+            : StreamBuilder<List<PharmacyGuard>>(
+          key: ValueKey(cityId),
+          stream: widget.guardsLoader?.call(cityName) ??
+              _repository!.watchPublicGuards(city: cityName),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return const _Message(
@@ -97,30 +136,77 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
               controller: _tabs,
               children: [
                 ...periodLists,
-                _PartnerPharmacies(position: _position)
+                _PartnerPharmacies(
+                  position: _position,
+                  cityId: cityId,
+                  cityName: cityName,
+                  streamLoader: widget.partnersLoader,
+                )
               ],
             );
           },
         ),
       );
+  }
 }
 
 class _PartnerPharmacies extends StatelessWidget {
-  const _PartnerPharmacies({required this.position});
+  const _PartnerPharmacies({
+    required this.position,
+    required this.cityId,
+    required this.cityName,
+    this.streamLoader,
+  });
   final Position? position;
+  final String cityId;
+  final String cityName;
+  final PharmacyPartnerStreamLoader? streamLoader;
 
   @override
-  Widget build(BuildContext context) =>
-      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+  Widget build(BuildContext context) {
+    final loader = streamLoader;
+    if (loader != null) {
+      return StreamBuilder<List<PharmacyGuard>>(
+        stream: loader(cityId, cityName),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final guards = snapshot.data!;
+          if (guards.isEmpty) {
+            return const _Message(
+              icon: Icons.handshake_outlined,
+              text: 'Aucune pharmacie partenaire enregistrée.',
+            );
+          }
+          final now = DateTime.now().toUtc();
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: guards.length,
+            itemBuilder: (context, index) => _GuardCard(
+              guard: guards[index],
+              now: now,
+              position: position,
+            ),
+          );
+        },
+      );
+    }
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
             .collection('pharmacies')
-            .orderBy('name')
+            .where('cityId', isEqualTo: cityId)
             .snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.data!.docs.isEmpty) {
+          final docs = snapshot.data!.docs
+              .where((doc) => doc.data()['isActive'] != false)
+              .toList(growable: false)
+            ..sort((left, right) => ((left.data()['name'] as String?) ?? '')
+                .compareTo((right.data()['name'] as String?) ?? ''));
+          if (docs.isEmpty) {
             return const _Message(
                 icon: Icons.handshake_outlined,
                 text: 'Aucune pharmacie partenaire enregistrée.');
@@ -128,15 +214,15 @@ class _PartnerPharmacies extends StatelessWidget {
           final now = DateTime.now().toUtc();
           return ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: snapshot.data!.docs.length,
+            itemCount: docs.length,
             itemBuilder: (context, index) {
-              final doc = snapshot.data!.docs[index];
+              final doc = docs[index];
               final data = doc.data();
               final guard = PharmacyGuard(
                 id: 'partner-${doc.id}',
                 pharmacyId: doc.id,
                 name: data['name'] as String? ?? 'Pharmacie',
-                city: data['city'] as String? ?? 'Abengourou',
+                city: data['cityName'] as String? ?? cityName,
                 address: data['address'] as String?,
                 phone: data['phone'] as String?,
                 latitude: (data['lat'] as num?)?.toDouble(),
@@ -150,14 +236,15 @@ class _PartnerPharmacies extends StatelessWidget {
                 partnerPharmacyId: doc.id,
               );
               return _GuardCard(
-                  guard: guard,
-                  now: now,
-                  position: position,
-                  partnerOnly: true);
+                guard: guard,
+                now: now,
+                position: position,
+              );
             },
           );
         },
       );
+}
 }
 
 class _GuardList extends StatelessWidget {
@@ -196,13 +283,11 @@ class _GuardCard extends StatelessWidget {
   const _GuardCard(
       {required this.guard,
       required this.now,
-      required this.position,
-      this.partnerOnly = false});
+      required this.position});
 
   final PharmacyGuard guard;
   final DateTime now;
   final Position? position;
-  final bool partnerOnly;
 
   String _date(DateTime value) {
     final local = value.toLocal();
@@ -227,6 +312,8 @@ class _GuardCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final onDuty = guard.isOnDutyAt(now);
     final expired = guard.isExpiredAt(now);
+    final partnerOnly = guard.linkedPartner &&
+        guard.partnerPharmacyId?.trim().isNotEmpty == true;
     final hasMap = (guard.latitude != null && guard.longitude != null) ||
         guard.address?.trim().isNotEmpty == true;
     final distance =
@@ -273,6 +360,11 @@ class _GuardCard extends StatelessWidget {
               ),
             ]),
             const SizedBox(height: 12),
+            if (!partnerOnly)
+              const Text('NON PARTENAIRE',
+                  style: TextStyle(
+                      color: Colors.grey, fontWeight: FontWeight.bold)),
+            if (!partnerOnly) const SizedBox(height: 6),
             if (!partnerOnly) ...[
               _GuardBadge(onDuty: onDuty, expired: expired, guard: guard),
               const SizedBox(height: 6),
@@ -280,7 +372,7 @@ class _GuardCard extends StatelessWidget {
                   ? 'Jusqu’au ${_date(guard.guardEndAt)}'
                   : 'Du ${_date(guard.guardStartAt)} au ${_date(guard.guardEndAt)}'),
             ] else
-              const Text('PARTENAIRE AZ EXPRESS',
+              const Text('PARTENAIRE AZ',
                   style: TextStyle(
                       color: Colors.blue, fontWeight: FontWeight.bold)),
             if (guard.lastSyncedAt != null) ...[

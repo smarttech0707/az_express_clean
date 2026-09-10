@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'admin_pharmacy_guards_page.dart';
+import '../../models/delivery_zone.dart';
 import '../../utils/partner_location_validator.dart';
 import '../../widgets/partner_location_input.dart';
 
@@ -25,6 +26,10 @@ class AdminPharmaciesPage extends StatelessWidget {
         text: existing == null ? _generatePassword() : '');
     bool isOnDuty = data?['isOnDuty'] ?? false;
     bool showPass = existing == null; // visible by default for new pharmacies
+    String? selectedCityId = data?['cityId'] as String?;
+    String? selectedCityName = data?['cityName'] as String?;
+    List<DeliveryZone> availableCities = const [];
+    final citiesFuture = _loadReferenceCities();
 
     showDialog(
       context: context,
@@ -50,6 +55,66 @@ class AdminPharmaciesPage extends StatelessWidget {
                 _field(hoursCtrl, 'Horaires (ex: 08h–22h)', Icons.access_time),
                 const SizedBox(height: 10),
 
+                FutureBuilder<List<DeliveryZone>>(
+                  future: citiesFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: LinearProgressIndicator(),
+                      );
+                    }
+                    availableCities = snapshot.data ?? const [];
+                    final validSelection = availableCities.any(
+                      (city) => city.cityId == selectedCityId,
+                    );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: validSelection ? selectedCityId : null,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Ville *',
+                            prefixIcon: Icon(Icons.location_city_outlined),
+                          ),
+                          items: availableCities
+                              .where((city) => city.cityId != null)
+                              .map(
+                                (city) => DropdownMenuItem(
+                                  value: city.cityId,
+                                  child: Text(
+                                    city.name ?? city.cityId!,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (cityId) {
+                            final city = availableCities.firstWhere(
+                              (candidate) => candidate.cityId == cityId,
+                            );
+                            setS(() {
+                              selectedCityId = city.cityId;
+                              selectedCityName = city.name ?? city.cityId;
+                            });
+                          },
+                        ),
+                        if (!validSelection && existing != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Ville à renseigner',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                      ],
+                    );
+                  },
+                ),
                 PartnerLocationInput(
                   latitudeController: latCtrl,
                   longitudeController: lngCtrl,
@@ -184,6 +249,17 @@ class AdminPharmaciesPage extends StatelessWidget {
                   backgroundColor: Colors.red, foregroundColor: Colors.white),
               onPressed: () async {
                 if (nameCtrl.text.trim().isEmpty) return;
+                final selectedCities = availableCities
+                    .where((city) => city.cityId == selectedCityId)
+                    .toList(growable: false);
+                if (selectedCities.length != 1 ||
+                    selectedCityName == null ||
+                    selectedCityName!.trim().isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                    content: Text('Sélectionnez une ville valide.'),
+                  ));
+                  return;
+                }
                 final newPass = passCtrl.text.trim();
                 // Le mot de passe ne transite plus jamais par une écriture
                 // Firestore directe — uniquement via setPharmaciePassword()
@@ -201,6 +277,8 @@ class AdminPharmaciesPage extends StatelessWidget {
                   'phone': phoneCtrl.text.trim(),
                   'hours': hoursCtrl.text.trim(),
                   'isOnDuty': isOnDuty,
+                  'cityId': selectedCityId,
+                  'cityName': selectedCityName,
                   'lat': double.parse(latCtrl.text.trim()),
                   'lng': double.parse(lngCtrl.text.trim()),
                 };
@@ -239,6 +317,22 @@ class AdminPharmaciesPage extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<List<DeliveryZone>> _loadReferenceCities() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('zones_livraison')
+        .where('type', isEqualTo: 'ville')
+        .where('isActive', isEqualTo: true)
+        .where('isServiceable', isEqualTo: true)
+        .limit(100)
+        .get();
+    final cities = snapshot.docs
+        .map((document) => DeliveryZone.fromMap(document.id, document.data()))
+        .where((city) => city.cityId != null && city.name?.trim().isNotEmpty == true)
+        .toList()
+      ..sort((left, right) => left.name!.compareTo(right.name!));
+    return cities;
   }
 
   @override
