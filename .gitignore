@@ -75,3 +75,5 @@ functions/.env.*
 .scratch_shots/
 *.pre-mfa-backup
 functions/scripts/reports/cleanup_production_test_data_*.json
+
+.dart_appdata/
