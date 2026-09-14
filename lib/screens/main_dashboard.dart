@@ -117,11 +117,32 @@ class _MainDashboardState extends State<MainDashboard>
 @visibleForTesting
 Widget buildClientOrderScreen() => const LivraisonScreen();
 
+/// LOT 3 Premium V1 — construit `_FloatingNav` isolément pour les tests
+/// widget (même pattern que [buildClientOrderScreen]/
+/// [isAuthenticatedClientSession] ci-dessus) : `MainDashboard` complet
+/// nécessite Firebase Auth + Firestore + GoogleMap (via `ClientMap`,
+/// toujours construite en page 0), hors de portée d'un test widget sans
+/// mocks Firebase dédiés — ce composant, lui, ne dépend d'aucun des deux.
+@visibleForTesting
+Widget buildFloatingNavForTest({
+  int currentIndex = 0,
+  required AppText text,
+  ValueChanged<int>? onTap,
+  VoidCallback? onCommander,
+}) =>
+    _FloatingNav(
+      currentIndex: currentIndex,
+      text: text,
+      onTap: onTap ?? (_) {},
+      onCommander: onCommander ?? () {},
+    );
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BOUTON FLOTTANT AZ IA — accès rapide à l'assistant conversationnel
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// NAVIGATION FLOTTANTE RESPONSIVE
+// NAVIGATION FLOTTANTE RESPONSIVE — LOT 3 : surface premium (light/dark),
+// bordure discrète, ombre navFloat déjà premium (inchangée).
 // ─────────────────────────────────────────────────────────────────────────────
 class _FloatingNav extends StatelessWidget {
   final int currentIndex;
@@ -138,6 +159,7 @@ class _FloatingNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     final safeBottom = AppLayout.safeBottom(context);
     final navH = AppLayout.r(context, 72);
     final hPad = AppLayout.lg(context);
@@ -148,9 +170,10 @@ class _FloatingNav extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(hPad, 0, hPad, bPad),
       child: Container(
         height: navH,
-        decoration: const BoxDecoration(
-          color: Colors.white,
+        decoration: BoxDecoration(
+          color: AppColors.premiumSurface(brightness),
           borderRadius: AppRadius.xxlR,
+          border: Border.all(color: AppColors.premiumBorder(brightness)),
           boxShadow: AppShadow.navFloat,
         ),
         child: Row(
@@ -212,6 +235,10 @@ class _NavTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const kPrimary = AppColors.primary;
+    // LOT 3 — état inactif = textMuted premium (theme-aware), au lieu de
+    // l'ancien `AppColors.textLight` statique (illisible sur fond sombre
+    // une fois la surface de la nav devenue bleu nuit, voir ci-dessous).
+    final inactive = AppColors.premiumTextMuted(Theme.of(context).brightness);
     final iconSize = AppLayout.iconMd(context);
     final labelSize = AppTypography.labelSmall(context);
 
@@ -256,7 +283,7 @@ class _NavTab extends StatelessWidget {
                   curve: Curves.easeOutBack,
                   child: Icon(
                     selected ? icon : iconOff,
-                    color: selected ? kPrimary : AppColors.textLight,
+                    color: selected ? kPrimary : inactive,
                     size: iconSize,
                   ),
                 ),
@@ -268,7 +295,7 @@ class _NavTab extends StatelessWidget {
                 style: GoogleFonts.urbanist(
                   fontSize: labelSize,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
-                  color: selected ? kPrimary : AppColors.textLight,
+                  color: selected ? kPrimary : inactive,
                 ),
                 child:
                     Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),

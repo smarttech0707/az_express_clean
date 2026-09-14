@@ -79,6 +79,9 @@ class AppColors {
 
   // ── Mode sombre (Master Prompt 120) — jamais de noir pur, mêmes teintes
   // "slate" foncées que le reste de la palette pour rester cohérent.
+  // Conservées telles quelles pour compatibilité (consommées ailleurs) —
+  // le thème lui-même (voir [AppTheme._build]) utilise désormais les tokens
+  // "premium" ci-dessous, plus profonds, comme nouvelle source de vérité.
   static const bgDark = Color(0xFF0B0F14); // bleu nuit AZ
   static const cardDark = Color(0xFF1E293B); // slate-800
   static const textDark = Color(0xFFF8FAFC); // slate-50
@@ -86,6 +89,98 @@ class AppColors {
   static const textLightDark = Color(0xFF94A3B8); // slate-400
   static const dividerDark = Color(0xFF334155); // slate-700
   static const borderDark = Color(0xFF334155);
+
+  // ════════════════════════════════════════════════════════════════════════
+  // PREMIUM V1 — LOT 1 : Design tokens (additif uniquement, 2026-09-14).
+  // Nouvelle référence bleu-nuit/blanc-cassé demandée par l'audit UI/UX
+  // Premium V1 — ne remplace aucun token existant ci-dessus (toujours
+  // consommés par de nombreux écrans), vient s'ajouter comme nouvelle
+  // couche pour [AppTheme._build] et tout futur composant Design System.
+  // ════════════════════════════════════════════════════════════════════════
+
+  /// Alias explicite du token de marque — `primary` reste le nom consommé
+  /// par tout le code existant (jamais renommé), `brandPrimary` est un
+  /// second nom pour la même valeur, cohérent avec le vocabulaire du brief
+  /// Premium V1 ("brandPrimary = #FF6B00").
+  static const Color brandPrimary = primary;
+
+  /// Variante CTA orange à meilleur contraste (orange-700) — disponible pour
+  /// un futur bouton "CTA premium" nécessitant un ratio de contraste plus
+  /// élevé que `primary` (texte blanc sur `primary` ≈ 2.9:1, sous le seuil
+  /// AA). Volontairement PAS câblée dans `ElevatedButtonTheme` dans ce lot
+  /// (changerait visuellement tous les boutons existants) — voir tests
+  /// `test/theme/app_theme_test.dart` pour la mesure de contraste exacte.
+  static const Color primaryCtaAccessible = Color(0xFFC2410C);
+
+  // ── Bleu AZ Premium — variantes adaptées clair/sombre, coexistent avec
+  // `blue`/`info` (non modifiés, toujours utilisés tels quels ailleurs).
+  static const Color bluePremiumLight = Color(0xFF1D4ED8);
+  static const Color bluePremiumDark = Color(0xFF3B82F6);
+  static Color bluePremium(Brightness b) =>
+      b == Brightness.dark ? bluePremiumDark : bluePremiumLight;
+
+  // ── Surfaces & texte Premium — cibles exactes du brief.
+  static const Color premiumBgLight = Color(0xFFFAFAF8);
+  static const Color premiumBgDark = Color(0xFF0B1220);
+  static const Color premiumSurfaceLight = Color(0xFFFFFFFF);
+  static const Color premiumSurfaceDark = Color(0xFF111A2E);
+  static const Color premiumSurfaceElevatedLight =
+      Color(0xFFFFFFFF); // pas de valeur distincte donnée pour le clair
+  static const Color premiumSurfaceElevatedDark = Color(0xFF16223B);
+  static const Color premiumBorderLight = Color(0xFFE7E5E0);
+  static const Color premiumBorderDark = Color(0xFF22314F);
+  static const Color premiumTextPrimaryLight = Color(0xFF111827);
+  static const Color premiumTextPrimaryDark = Color(0xFFF8FAFC);
+  static const Color premiumTextSecondaryLight = Color(0xFF4B5563);
+  static const Color premiumTextSecondaryDark = Color(0xFFB6C2D9);
+  static const Color premiumTextMutedLight = Color(0xFF9CA3AF);
+  static const Color premiumTextMutedDark = Color(0xFF7C8AA5);
+
+  // ── Résolveurs par luminosité — mécanisme réutilisable consommé par
+  // [AppTheme._build] ; pas encore appliqué à un écran métier dans ce lot.
+  static Color premiumBg(Brightness b) =>
+      b == Brightness.dark ? premiumBgDark : premiumBgLight;
+  static Color premiumSurface(Brightness b) =>
+      b == Brightness.dark ? premiumSurfaceDark : premiumSurfaceLight;
+  static Color premiumSurfaceElevated(Brightness b) => b == Brightness.dark
+      ? premiumSurfaceElevatedDark
+      : premiumSurfaceElevatedLight;
+  static Color premiumBorder(Brightness b) =>
+      b == Brightness.dark ? premiumBorderDark : premiumBorderLight;
+  static Color premiumTextPrimary(Brightness b) =>
+      b == Brightness.dark ? premiumTextPrimaryDark : premiumTextPrimaryLight;
+  static Color premiumTextSecondary(Brightness b) => b == Brightness.dark
+      ? premiumTextSecondaryDark
+      : premiumTextSecondaryLight;
+  static Color premiumTextMuted(Brightness b) =>
+      b == Brightness.dark ? premiumTextMutedDark : premiumTextMutedLight;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DÉGRADÉS PREMIUM — LOT 1, item 5 (fond premium très subtil).
+// Deux teintes quasiment identiques par mode — pas d'image, pas de texture,
+// pas de bruit animé, pas de BackdropFilter (coût GPU nul de plus qu'un
+// `Container` classique). Réutilisable plus tard sur un conteneur racine ;
+// NE modifie PAS HomeScreen ni aucun écran dans ce lot.
+// ══════════════════════════════════════════════════════════════════════════════
+class AppGradients {
+  AppGradients._();
+
+  static const Color _lightDeep = Color(0xFFF3F1EC);
+  static const Color _darkDeep = Color(0xFF0E1728);
+
+  /// Dégradé de fond premium — clair : `#FAFAF8 → #F3F1EC` (très légèrement
+  /// plus chaud/profond) ; sombre : `#0B1220 → #0E1728`.
+  static LinearGradient premiumBackground(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    return LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: isDark
+          ? const [AppColors.premiumBgDark, _darkDeep]
+          : const [AppColors.premiumBgLight, _lightDeep],
+    );
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -115,6 +210,26 @@ class AppTypography {
   static double labelLarge(BuildContext ctx) => _r(ctx, 13);
   static double labelMedium(BuildContext ctx) => _r(ctx, 12);
   static double labelSmall(BuildContext ctx) => _r(ctx, 11);
+
+  // ── LOT 1 Premium V1 — tailles de base (référence 390px, sans le facteur
+  // d'échelle par largeur) exposées publiquement afin que [AppTheme._build]
+  // puisse construire le `TextTheme` M3 à partir de cette MÊME échelle,
+  // plutôt que de dupliquer des tailles différentes (trouvaille de l'audit :
+  // deux hiérarchies typographiques divergentes — ex. titleLarge M3=22 vs
+  // AppTypography.titleLarge=18). `ThemeData` n'a pas de `BuildContext`,
+  // d'où ces constantes non responsives séparées des méthodes ci-dessus.
+  static const double baseDisplayLarge = 34;
+  static const double baseDisplayMedium = 28;
+  static const double baseHeadline = 24;
+  static const double baseTitleLarge = 18;
+  static const double baseTitleMedium = 16;
+  static const double baseTitleSmall = 14;
+  static const double baseBodyLarge = 16;
+  static const double baseBodyMedium = 14;
+  static const double baseBodySmall = 13;
+  static const double baseLabelLarge = 13;
+  static const double baseLabelMedium = 12;
+  static const double baseLabelSmall = 11;
 
   // ── Constructeur de style — Urbanist partout (Master Prompt 120), plus
   // aucun branchement SF Pro (iOS)/Poppins (Android/Web) : une seule police
@@ -369,6 +484,32 @@ class AppRadius {
   static const BorderRadius official22R = cardR;
   static const BorderRadius official28R =
       BorderRadius.all(Radius.circular(official28));
+
+  // ── LOT 1 Premium V1 — nouvelle référence de rayon (item 3 du brief).
+  // Additif uniquement : ne remplace ni l'échelle fine historique
+  // (xs/sm/md/lg/xl/xxl/pill) ni le système "officiel" à 3 niveaux
+  // (official18/22/28, Master Prompt 126) — tous deux déjà largement
+  // consommés par des écrans existants. Aucun remplacement massif dans ce
+  // lot ; disponible pour toute nouvelle consommation.
+  static const double premiumXs = 8.0;
+  static const double premiumSm = 12.0;
+  static const double premiumMd = 16.0;
+  static const double premiumLg = 20.0;
+  static const double premiumXl = 24.0; // = xl existant, alias volontaire
+  static const double premiumPill = 999.0;
+
+  static const BorderRadius premiumXsR =
+      BorderRadius.all(Radius.circular(premiumXs));
+  static const BorderRadius premiumSmR =
+      BorderRadius.all(Radius.circular(premiumSm));
+  static const BorderRadius premiumMdR =
+      BorderRadius.all(Radius.circular(premiumMd));
+  static const BorderRadius premiumLgR =
+      BorderRadius.all(Radius.circular(premiumLg));
+  static const BorderRadius premiumXlR =
+      BorderRadius.all(Radius.circular(premiumXl));
+  static const BorderRadius premiumPillR =
+      BorderRadius.all(Radius.circular(premiumPill));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -408,6 +549,18 @@ class AppShadow {
           color: c.withValues(alpha: opacity),
           blurRadius: 16,
           offset: const Offset(0, 6),
+        ),
+      ];
+
+  /// Niveau premium "glow" (LOT 1, item 4) — halo très discret dérivé de
+  /// `brandPrimary`, opacité faible, blur modéré. Réservé aux surfaces
+  /// premium (ex. carte mise en avant) ; jamais un `BackdropFilter`, jamais
+  /// un blur additionnel — juste une ombre colorée légère.
+  static List<BoxShadow> glow({Color? color, double opacity = 0.10}) => [
+        BoxShadow(
+          color: (color ?? AppColors.primary).withValues(alpha: opacity),
+          blurRadius: 20,
+          offset: const Offset(0, 8),
         ),
       ];
 }
@@ -493,13 +646,19 @@ class AppTheme {
   static ThemeData _build(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
 
-    final bg = isDark ? AppColors.bgDark : AppColors.bg;
-    final surface = isDark ? AppColors.cardDark : AppColors.card;
-    final onSurface = isDark ? AppColors.textDark : AppColors.text;
-    final textMuted = isDark ? AppColors.textMutedDark : AppColors.textMuted;
-    final textLight = isDark ? AppColors.textLightDark : AppColors.textLight;
-    final divider = isDark ? AppColors.dividerDark : AppColors.divider;
-    final border = isDark ? AppColors.borderDark : AppColors.border;
+    // ── LOT 1 Premium V1 — source unique : les tokens `AppColors.premium*`
+    // (bleu nuit profond / blanc cassé) remplacent ici les anciens tokens
+    // `bg`/`bgDark`, `card`/`cardDark`, etc. comme valeurs réellement
+    // consommées par le thème. Les anciens tokens restent inchangés dans
+    // `AppColors` (toujours utilisés directement par de nombreux écrans),
+    // seule cette fonction de construction du thème central est repointée.
+    final bg = AppColors.premiumBg(brightness);
+    final surface = AppColors.premiumSurface(brightness);
+    final onSurface = AppColors.premiumTextPrimary(brightness);
+    final textMuted = AppColors.premiumTextSecondary(brightness);
+    final textLight = AppColors.premiumTextMuted(brightness);
+    final divider = AppColors.premiumBorder(brightness);
+    final border = AppColors.premiumBorder(brightness);
     final inputBorder =
         isDark ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
 
@@ -513,7 +672,7 @@ class AppTheme {
         primaryContainer: isDark ? AppColors.primaryDark : AppColors.primaryBg,
         onPrimaryContainer:
             isDark ? AppColors.primaryBg : AppColors.primaryDark,
-        secondary: AppColors.blue,
+        secondary: AppColors.bluePremium(brightness),
         onSecondary: Colors.white,
         surface: surface,
         onSurface: onSurface,
@@ -526,41 +685,92 @@ class AppTheme {
       scaffoldBackgroundColor: bg,
     );
 
-    // ── TextTheme M3 — Urbanist partout (Master Prompt 120) ────────────────
+    // ── TextTheme M3 — Urbanist partout (Master Prompt 120), construit à
+    // partir de la MÊME échelle qu'`AppTypography` (LOT 1 Premium V1, item
+    // 2) : chaque taille/poids provient de `AppTypography.baseXxx`/du poids
+    // déjà utilisé par les méthodes `AppTypography.xxxStyle()` correspon-
+    // dantes — plus aucune taille inventée séparément ici. `displaySmall`/
+    // `headlineMedium`/`headlineSmall` n'ont pas d'équivalent nommé distinct
+    // dans `AppTypography` (échelle plus plate) : réutilisent la valeur du
+    // niveau le plus proche plutôt que d'introduire un nouveau chiffre hors
+    // de cette échelle.
     final textTheme = TextTheme(
       displayLarge: _ts(
-          size: 57,
-          weight: FontWeight.w400,
-          spacing: -0.25,
+          size: AppTypography.baseDisplayLarge,
+          weight: FontWeight.w700,
+          spacing: -0.5,
           color: onSurface,
           display: true),
       displayMedium: _ts(
-          size: 45, weight: FontWeight.w400, color: onSurface, display: true),
+          size: AppTypography.baseDisplayMedium,
+          weight: FontWeight.w700,
+          spacing: -0.3,
+          color: onSurface,
+          display: true),
       displaySmall: _ts(
-          size: 36, weight: FontWeight.w400, color: onSurface, display: true),
+          size: AppTypography.baseHeadline,
+          weight: FontWeight.w600,
+          color: onSurface,
+          display: true),
       headlineLarge: _ts(
-          size: 32, weight: FontWeight.w700, color: onSurface, display: true),
+          size: AppTypography.baseHeadline,
+          weight: FontWeight.w600,
+          color: onSurface,
+          display: true),
       headlineMedium: _ts(
-          size: 28, weight: FontWeight.w600, color: onSurface, display: true),
+          size: AppTypography.baseTitleLarge,
+          weight: FontWeight.w600,
+          color: onSurface,
+          display: true),
       headlineSmall: _ts(
-          size: 24, weight: FontWeight.w600, color: onSurface, display: true),
-      titleLarge: _ts(size: 22, weight: FontWeight.w600, color: onSurface),
+          size: AppTypography.baseTitleMedium,
+          weight: FontWeight.w600,
+          color: onSurface,
+          display: true),
+      titleLarge: _ts(
+          size: AppTypography.baseTitleLarge,
+          weight: FontWeight.w600,
+          color: onSurface),
       titleMedium: _ts(
-          size: 16, weight: FontWeight.w600, spacing: 0.15, color: onSurface),
+          size: AppTypography.baseTitleMedium,
+          weight: FontWeight.w600,
+          spacing: 0.15,
+          color: onSurface),
       titleSmall: _ts(
-          size: 14, weight: FontWeight.w600, spacing: 0.10, color: onSurface),
+          size: AppTypography.baseTitleSmall,
+          weight: FontWeight.w600,
+          spacing: 0.10,
+          color: onSurface),
       bodyLarge: _ts(
-          size: 16, weight: FontWeight.w500, spacing: 0.15, color: onSurface),
+          size: AppTypography.baseBodyLarge,
+          weight: FontWeight.w500,
+          spacing: 0.15,
+          color: onSurface),
       bodyMedium: _ts(
-          size: 14, weight: FontWeight.w400, spacing: 0.25, color: textMuted),
+          size: AppTypography.baseBodyMedium,
+          weight: FontWeight.w400,
+          spacing: 0.25,
+          color: textMuted),
       bodySmall: _ts(
-          size: 13, weight: FontWeight.w400, spacing: 0.40, color: textLight),
+          size: AppTypography.baseBodySmall,
+          weight: FontWeight.w400,
+          spacing: 0.40,
+          color: textLight),
       labelLarge: _ts(
-          size: 14, weight: FontWeight.w600, spacing: 0.10, color: onSurface),
+          size: AppTypography.baseLabelLarge,
+          weight: FontWeight.w600,
+          spacing: 0.10,
+          color: onSurface),
       labelMedium: _ts(
-          size: 12, weight: FontWeight.w500, spacing: 0.50, color: textMuted),
+          size: AppTypography.baseLabelMedium,
+          weight: FontWeight.w500,
+          spacing: 0.50,
+          color: textMuted),
       labelSmall: _ts(
-          size: 11, weight: FontWeight.w500, spacing: 0.50, color: textLight),
+          size: AppTypography.baseLabelSmall,
+          weight: FontWeight.w500,
+          spacing: 0.50,
+          color: textLight),
     );
 
     return base.copyWith(
@@ -730,7 +940,7 @@ class AppTheme {
       // ── Snackbar ───────────────────────────────────────────────────────
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: isDark ? AppColors.cardDark : AppColors.text,
+        backgroundColor: isDark ? surface : AppColors.text,
         contentTextStyle:
             _ts(size: 13, weight: FontWeight.w400, color: Colors.white),
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.mdR),

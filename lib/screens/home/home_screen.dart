@@ -10,6 +10,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../l10n/app_text.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/tap_effect.dart';
+import '../../widgets/premium_background.dart';
+import '../../widgets/app_card.dart';
+import '../../widgets/glass_kit.dart';
 import '../../services/notification_service.dart';
 import '../admin/admin_login.dart';
 import '../main_dashboard.dart';
@@ -18,6 +21,13 @@ import '../seller/seller_dashboard.dart';
 import '../pro/pro_portal.dart';
 import '../support/support_screen.dart';
 import '../../ekbine/screens/ek_home_screen.dart';
+
+// LOT 3 Premium V1 (pilote) — refonte visuelle uniquement. Aucune navigation,
+// aucune logique de connexion/permissions/Firebase n'a été modifiée dans ce
+// fichier : chaque méthode ci-dessous (`_onLogoTap`, `_onProTap`,
+// `_showSOSConfirm`, `_sendSOS`, `_goToDashboard`) est restée identique à
+// l'avant-LOT 3 — seul l'habillage visuel des widgets construits par
+// `build()` a changé.
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -240,6 +250,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final language = AppLanguage.of(context);
     final text = AppText(language.locale);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return PopScope(
       canPop: false,
@@ -268,22 +279,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.light,
+        // LOT 3 — le fond n'est plus un orange plein (icônes système
+        // toujours claires) : la teinte de la barre système suit désormais
+        // le thème actif, comme un vrai fond blanc cassé / bleu nuit.
+        value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
         child: Scaffold(
-          backgroundColor: AppColors.primary,
-          body: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Color(0xFFFF8A3D),
-                  AppColors.primary,
-                  Color(0xFFFFB36B),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                stops: [0.0, 0.55, 1.0],
-              ),
-            ),
+          body: PremiumBackground(
             child: SafeArea(
               child: CustomScrollView(
                 keyboardDismissBehavior:
@@ -305,8 +306,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     child: GestureDetector(
                       onTap: _onLogoTap,
                       child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          vertical: AppLayout.xxl(context),
+                        padding: EdgeInsets.fromLTRB(
+                          AppLayout.xl(context),
+                          AppLayout.xs(context),
+                          AppLayout.xl(context),
+                          AppLayout.lg(context),
                         ),
                         child: _HeroSection(
                           text: text,
@@ -339,7 +343,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TOP BAR
+// TOP BAR — LOT 3 : couleurs premium (plus de blanc en dur sur fond orange),
+// wordmark en accent orange, chips theme-aware.
 // ─────────────────────────────────────────────────────────────────────────────
 class _TopBar extends StatelessWidget {
   final AppText text;
@@ -359,7 +364,7 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hPad = AppLayout.xl(context);
-    final vPad = AppLayout.sm(context);
+    final vPad = AppLayout.md(context);
 
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
@@ -375,10 +380,12 @@ class _TopBar extends StatelessWidget {
                 child: Text(
                   'AZ EXPRESS',
                   style: GoogleFonts.urbanist(
-                    color: Colors.white,
+                    // Petit accent orange (marque) plutôt qu'un fond orange
+                    // plein — cohérent avec "orange = accent principal".
+                    color: AppColors.primary,
                     fontSize: AppTypography.titleLarge(context),
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 2.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 2.0,
                   ),
                 ),
               ),
@@ -401,6 +408,11 @@ class _SosChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedText = isDark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
+    final color = sent ? mutedText : AppColors.error;
     final hPad = AppLayout.md(context);
     final vPad = AppLayout.xs(context) + 3;
     final iconSz = AppLayout.iconSm(context);
@@ -412,25 +424,19 @@ class _SosChip extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
         decoration: BoxDecoration(
-          color: sent
-              ? Colors.white.withValues(alpha: 0.15)
-              : Colors.red.withValues(alpha: 0.22),
+          color: color.withValues(alpha: isDark ? 0.16 : 0.10),
           borderRadius: AppRadius.pillR,
-          border: Border.all(
-            color: sent ? Colors.white38 : Colors.red.shade300,
-            width: 1.5,
-          ),
+          border: Border.all(color: color.withValues(alpha: 0.35), width: 1.2),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sos_rounded,
-                color: sent ? Colors.white54 : Colors.white, size: iconSz),
+            Icon(Icons.sos_rounded, color: color, size: iconSz),
             SizedBox(width: AppLayout.xs(context) + 1),
             Text(
               sent ? 'Envoyé' : 'SOS',
               style: GoogleFonts.urbanist(
-                color: sent ? Colors.white54 : Colors.white,
+                color: color,
                 fontSize: txtSz,
                 fontWeight: FontWeight.w800,
               ),
@@ -449,6 +455,13 @@ class _LangButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final isDark = brightness == Brightness.dark;
+    final surface = AppColors.premiumSurface(brightness);
+    final border = AppColors.premiumBorder(brightness);
+    final iconColor = isDark
+        ? AppColors.premiumTextSecondaryDark
+        : AppColors.premiumTextSecondaryLight;
     final btnSz = AppLayout.r(context, 36);
     final iconSz = AppLayout.iconSm(context) + 2;
 
@@ -457,11 +470,12 @@ class _LangButton extends StatelessWidget {
         width: btnSz,
         height: btnSz,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
+          color: surface,
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white24),
+          border: Border.all(color: border),
+          boxShadow: AppShadow.xs,
         ),
-        child: Icon(Icons.language_rounded, color: Colors.white, size: iconSz),
+        child: Icon(Icons.language_rounded, color: iconColor, size: iconSz),
       ),
       shape: const RoundedRectangleBorder(borderRadius: AppRadius.lgR),
       elevation: 4,
@@ -478,7 +492,9 @@ class _LangButton extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HERO — 100% responsive, aucune taille fixe
+// HERO — LOT 3 : médaillon logo + halo très discret + texte hiérarchisé,
+// theme-aware (aucun texte blanc en dur sur un fond qui n'est plus orange).
+// 100% responsive, aucune taille fixe.
 // ─────────────────────────────────────────────────────────────────────────────
 class _HeroSection extends StatelessWidget {
   final AppText text;
@@ -487,91 +503,157 @@ class _HeroSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textPrimary = isDark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+
     // Logo = 22% de la hauteur d'écran, borné entre 110 et 180
     final logoSz = AppLayout.hf(context, 0.165).clamp(88.0, 136.0);
+    final haloSz = logoSz * 1.48;
 
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Stack(
+      alignment: Alignment.topCenter,
       children: [
-        // Logo pulsant
-        AnimatedBuilder(
-          animation: pulseAnim,
-          builder: (_, child) =>
-              Transform.scale(scale: pulseAnim.value, child: child),
-          child: Container(
-            width: logoSz,
-            height: logoSz,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.white.withValues(alpha: 0.35),
-                  blurRadius: 48,
-                  spreadRadius: 8,
-                ),
-                BoxShadow(
-                  color: AppColors.primaryDark.withValues(alpha: 0.4),
-                  blurRadius: 24,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: EdgeInsets.all(logoSz * 0.08),
-              child: Image.asset(
-                'assets/logo.png',
-                fit: BoxFit.contain,
-                gaplessPlayback: true,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.delivery_dining,
-                  color: AppColors.primary,
-                  size: logoSz * 0.5,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              key: const ValueKey('home-hero-ambient-halo'),
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0, -0.42),
+                  radius: 0.82,
+                  colors: [
+                    AppColors.primary.withValues(alpha: isDark ? 0.055 : 0.040),
+                    AppColors.primary.withValues(alpha: 0),
+                  ],
                 ),
               ),
             ),
           ),
         ),
-
-        SizedBox(height: AppLayout.lg(context)),
-
-        // Titre
-        Text(
-          text.t('welcome'),
-          textAlign: TextAlign.center,
-          style: AppTypography.headlineStyle(context,
-              color: Colors.white, weight: FontWeight.w700),
-        ),
-
-        SizedBox(height: AppLayout.sm(context) + 2),
-
-        // Badge localisation
-        Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: AppLayout.md(context),
-            vertical: AppLayout.xs(context) + 2,
-          ),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
-            borderRadius: AppRadius.pillR,
-            border: Border.all(color: Colors.white24),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.location_on_rounded,
-                  color: Colors.white, size: AppLayout.iconSm(context)),
-              SizedBox(width: AppLayout.xs(context) + 1),
-              Flexible(
-                child: Text(
-                  'Abengourou & environs',
-                  style: AppTypography.labelLargeStyle(context,
-                      color: Colors.white, weight: FontWeight.w600),
-                ),
+        Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Médaillon logo + halo très discret (dégradé radial, jamais animé
+            // séparément — seul le médaillon pulse déjà).
+            SizedBox(
+              width: logoSz,
+              height: logoSz,
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  Positioned(
+                    left: (logoSz - haloSz) / 2,
+                    top: (logoSz - haloSz) / 2,
+                    child: Container(
+                      width: haloSz,
+                      height: haloSz,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            AppColors.primary
+                                .withValues(alpha: isDark ? 0.12 : 0.07),
+                            AppColors.primary.withValues(alpha: 0.0),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  AnimatedBuilder(
+                    animation: pulseAnim,
+                    builder: (_, child) =>
+                        Transform.scale(scale: pulseAnim.value, child: child),
+                    child: Container(
+                      width: logoSz,
+                      height: logoSz,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white,
+                        border: Border.all(
+                          color: AppColors.primary
+                              .withValues(alpha: isDark ? 0.18 : 0.12),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black
+                                .withValues(alpha: isDark ? 0.18 : 0.07),
+                            blurRadius: 12,
+                            offset: const Offset(0, 5),
+                          ),
+                          BoxShadow(
+                            color: AppColors.primary
+                                .withValues(alpha: isDark ? 0.16 : 0.10),
+                            blurRadius: 10,
+                            spreadRadius: -2,
+                          ),
+                        ],
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.all(logoSz * 0.08),
+                        child: Image.asset(
+                          'assets/logo.png',
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                          errorBuilder: (_, __, ___) => Icon(
+                            Icons.delivery_dining,
+                            color: AppColors.primary,
+                            size: logoSz * 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+
+            SizedBox(height: AppLayout.md(context)),
+
+            // Titre — texte hiérarchisé (theme-aware, ni blanc ni noir en dur).
+            Text(
+              text.t('welcome'),
+              textAlign: TextAlign.center,
+              style: AppTypography.headlineStyle(context,
+                  color: textPrimary, weight: FontWeight.w600),
+            ),
+
+            SizedBox(height: AppLayout.sm(context) + 2),
+
+            // Badge localisation — accent orange discret.
+            Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: AppLayout.md(context),
+                vertical: AppLayout.xs(context) + 2,
+              ),
+              decoration: BoxDecoration(
+                color:
+                    AppColors.primary.withValues(alpha: isDark ? 0.14 : 0.08),
+                borderRadius: AppRadius.pillR,
+                border: Border.all(
+                    color: AppColors.primary
+                        .withValues(alpha: isDark ? 0.34 : 0.22)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.location_on_rounded,
+                      color: AppColors.primary,
+                      size: AppLayout.iconSm(context)),
+                  SizedBox(width: AppLayout.xs(context) + 1),
+                  Flexible(
+                    child: Text(
+                      'Abengourou & environs',
+                      style: AppTypography.labelLargeStyle(context,
+                          color: AppColors.primary, weight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -579,7 +661,10 @@ class _HeroSection extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECTION CARTES — responsive
+// SECTION CARTES — LOT 3 : plus de panneau gris plein écran (l'arrière-plan
+// est désormais `PremiumBackground` sur toute la page) — les cartes
+// premium reposent directement dessus. Livraison/Courses (carte
+// "Commander") reste visuellement prioritaire (AppCard.elevated + glow).
 // ─────────────────────────────────────────────────────────────────────────────
 class _CardsSection extends StatelessWidget {
   final AppText text;
@@ -598,58 +683,58 @@ class _CardsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final isDark = brightness == Brightness.dark;
+    final textPrimary = isDark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+    final textMuted = isDark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     final hPad = AppLayout.xl(context);
-    final vTop = AppLayout.xxl(context) + 4;
-    final vBottom = AppLayout.safeBottom(context) + AppLayout.md(context);
+    final vBottom = AppLayout.safeBottom(context) + AppLayout.lg(context);
 
     final cards = [
+      // Livraison/Courses (point d'entrée "Commander") — priorité visuelle
+      // explicite demandée par le brief : carte élevée (glow), en premier.
       _CardData(
         title: text.t('order'),
         subtitle: text.t('fast_delivery'),
         icon: Icons.shopping_bag_rounded,
         badge: '🚀 Express',
-        gradient: const [Color(0xFF1A1A2E), Color(0xFF16213E)],
+        accent: AppColors.primary,
+        priority: true,
         onTap: onOrder,
       ),
+      // E-Kbine garde son identité de sous-marque (vert/teal) — jamais
+      // écrasée par l'orange principal (déjà acté ailleurs dans le projet).
       _CardData(
         title: 'E-Kbine Services',
         subtitle: 'Crédit · Internet · Mobile Money',
         icon: Icons.sim_card_rounded,
         badge: '⚡ Instantané',
-        gradient: const [Color(0xFF004D40), Color(0xFF00695C)],
+        accent: const Color(0xFF00897B),
+        priority: false,
         onTap: onEkbine,
       ),
     ];
 
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        color: Color(0xFFF2F4F7),
-        borderRadius: AppRadius.topXxl,
-      ),
-      padding: EdgeInsets.fromLTRB(hPad, vTop, hPad, vBottom),
+    return Padding(
+      padding: EdgeInsets.fromLTRB(hPad, 0, hPad, vBottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Handle
-          Center(
-            child: Container(
-              width: AppLayout.r(context, 36),
-              height: AppLayout.r(context, 4),
-              margin: EdgeInsets.only(bottom: AppLayout.xxl(context)),
-              decoration: const BoxDecoration(
-                color: AppColors.border,
-                borderRadius: AppRadius.pillR,
-              ),
-            ),
-          ),
+          const AzDivider(),
+          SizedBox(height: AppLayout.md(context)),
 
           // Titre section
           Row(
             children: [
               Expanded(
                 child: Text('Nos services',
-                    style: AppTypography.titleMediumStyle(context)),
+                    style: AppTypography.titleLargeStyle(context,
+                        color: textPrimary, weight: FontWeight.w700)),
               ),
               SizedBox(width: AppLayout.sm(context)),
               Container(
@@ -657,8 +742,9 @@ class _CardsSection extends StatelessWidget {
                   horizontal: AppLayout.sm(context) + 2,
                   vertical: AppLayout.xs(context),
                 ),
-                decoration: const BoxDecoration(
-                  color: AppColors.primary10,
+                decoration: BoxDecoration(
+                  color:
+                      AppColors.primary.withValues(alpha: isDark ? 0.10 : 0.06),
                   borderRadius: AppRadius.pillR,
                 ),
                 child: Text('Abengourou',
@@ -701,10 +787,11 @@ class _CardsSection extends StatelessWidget {
               width: double.infinity,
               padding: EdgeInsets.symmetric(vertical: AppLayout.md(context)),
               decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.06),
-                borderRadius: AppRadius.lgR,
-                border:
-                    Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+                color:
+                    AppColors.primary.withValues(alpha: isDark ? 0.12 : 0.06),
+                borderRadius: AppRadius.premiumLgR,
+                border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.22)),
               ),
               child: Wrap(
                 alignment: WrapAlignment.center,
@@ -737,8 +824,8 @@ class _CardsSection extends StatelessWidget {
               ),
               decoration: BoxDecoration(
                 color: Colors.transparent,
-                borderRadius: AppRadius.lgR,
-                border: Border.all(color: AppColors.border),
+                borderRadius: AppRadius.premiumLgR,
+                border: Border.all(color: AppColors.premiumBorder(brightness)),
               ),
               child: Wrap(
                 alignment: WrapAlignment.center,
@@ -746,16 +833,14 @@ class _CardsSection extends StatelessWidget {
                 spacing: AppLayout.xs(context) + 2,
                 children: [
                   Icon(Icons.business_center_rounded,
-                      size: AppLayout.iconSm(context),
-                      color: AppColors.textMuted),
+                      size: AppLayout.iconSm(context), color: textMuted),
                   Text(
                     'Espace Professionnel',
                     style: AppTypography.labelLargeStyle(context,
-                        color: AppColors.textMuted, weight: FontWeight.w600),
+                        color: textMuted, weight: FontWeight.w600),
                   ),
                   Icon(Icons.arrow_forward_ios_rounded,
-                      size: AppLayout.iconSm(context) - 4,
-                      color: AppColors.textLight),
+                      size: AppLayout.iconSm(context) - 4, color: textMuted),
                 ],
               ),
             ),
@@ -771,131 +856,159 @@ class _CardData {
   final String subtitle;
   final IconData icon;
   final String badge;
-  final List<Color> gradient;
+  final Color accent;
+  final bool priority;
   final VoidCallback onTap;
   const _CardData({
     required this.title,
     required this.subtitle,
     required this.icon,
     required this.badge,
-    required this.gradient,
+    required this.accent,
+    required this.priority,
     required this.onTap,
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CARTE SERVICE — responsive, aucune taille fixe
+// CARTE SERVICE — LOT 3 : `AppCard.elevated`/`.standard` (LOT 2) au lieu
+// d'une carte blanche/dégradé pleine couleur codée en dur. Accent par icône
+// uniquement (pas de fond saturé plein écran) — responsive, aucune taille
+// fixe.
 // ─────────────────────────────────────────────────────────────────────────────
-class _ServiceCard extends StatefulWidget {
+class _ServiceCard extends StatelessWidget {
   final _CardData data;
   const _ServiceCard({required this.data});
 
   @override
-  State<_ServiceCard> createState() => _ServiceCardState();
-}
-
-class _ServiceCardState extends State<_ServiceCard> {
-  @override
   Widget build(BuildContext context) {
-    final d = widget.data;
+    final d = data;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final iconSz = AppLayout.r(context, 44);
     final innerSz = AppLayout.iconMd(context);
-    final accent = d.gradient.last;
+    final titleColor = isDark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+    final subtitleColor = isDark
+        ? AppColors.premiumTextSecondaryDark
+        : AppColors.premiumTextSecondaryLight;
 
-    return TapEffect(
-      onTap: d.onTap,
-      scaleDown: 0.96,
-      haptic: HapticType.light,
-      child: Container(
-        constraints: BoxConstraints(minHeight: AppLayout.r(context, 76)),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: AppRadius.cardR,
-          boxShadow: AppShadow.card,
+    final content = Row(
+      children: [
+        // Icône
+        Container(
+          width: iconSz,
+          height: iconSz,
+          decoration: BoxDecoration(
+            color: d.accent.withValues(alpha: isDark ? 0.22 : 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(d.icon, color: d.accent, size: innerSz),
         ),
-        padding: EdgeInsets.symmetric(
-          horizontal: AppLayout.lg(context) + 2,
-          vertical: AppLayout.md(context),
+
+        SizedBox(width: AppLayout.lg(context)),
+
+        // Texte
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Badge
+              Container(
+                constraints: const BoxConstraints(minHeight: 24),
+                margin: EdgeInsets.only(bottom: AppLayout.xs(context) + 1),
+                padding: EdgeInsets.symmetric(
+                  horizontal: AppLayout.sm(context),
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: d.accent.withValues(alpha: isDark ? 0.18 : 0.10),
+                  borderRadius: AppRadius.pillR,
+                  border: Border.all(
+                    color: d.accent.withValues(alpha: isDark ? 0.34 : 0.22),
+                  ),
+                ),
+                child: Text(
+                  d.badge,
+                  style: GoogleFonts.urbanist(
+                    color: d.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ),
+              Text(
+                d.title,
+                style: AppTypography.titleMediumStyle(context,
+                    color: titleColor, weight: FontWeight.w700),
+              ),
+              SizedBox(height: AppLayout.xs(context) / 2),
+              Text(
+                d.subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.urbanist(
+                  color: subtitleColor,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
         ),
-        child: Row(
-          children: [
-            // Icône
-            Container(
-              width: iconSz,
-              height: iconSz,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(d.icon, color: accent, size: innerSz),
-            ),
 
-            SizedBox(width: AppLayout.lg(context)),
-
-            // Texte
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Badge
-                  Container(
-                    constraints: const BoxConstraints(minHeight: 24),
-                    margin: EdgeInsets.only(bottom: AppLayout.xs(context) + 1),
-                    padding: EdgeInsets.symmetric(
-                      horizontal: AppLayout.sm(context),
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.10),
-                      borderRadius: AppRadius.pillR,
-                    ),
-                    child: Text(
-                      d.badge,
-                      style: GoogleFonts.urbanist(
-                        color: accent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    d.title,
-                    style: AppTypography.titleMediumStyle(context,
-                        color: AppColors.text, weight: FontWeight.w600),
-                  ),
-                  SizedBox(height: AppLayout.xs(context) / 2),
-                  Text(
-                    d.subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.urbanist(
-                      color: AppColors.textLight,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Flèche
-            Container(
+        // Flèche
+        SizedBox(
+          width: AppLayout.r(context, 44),
+          height: AppLayout.r(context, 44),
+          child: Center(
+            child: Container(
               width: AppLayout.r(context, 32),
               height: AppLayout.r(context, 32),
               decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.10),
+                color: d.accent.withValues(alpha: isDark ? 0.18 : 0.10),
                 shape: BoxShape.circle,
+                border: Border.all(
+                  color: d.accent.withValues(alpha: isDark ? 0.30 : 0.18),
+                ),
               ),
               child: Icon(
                 Icons.arrow_forward_rounded,
-                color: accent,
+                color: d.accent,
                 size: AppLayout.iconSm(context) - 1,
               ),
             ),
-          ],
+          ),
         ),
+      ],
+    );
+
+    final cardPadding = EdgeInsets.symmetric(
+      horizontal: AppLayout.lg(context) + 2,
+      vertical: AppLayout.md(context) + 2,
+    );
+
+    final card = d.priority
+        ? AppCard.elevated(onTap: d.onTap, padding: cardPadding, child: content)
+        : AppCard.standard(
+            onTap: d.onTap, padding: cardPadding, child: content);
+
+    return Container(
+      key:
+          ValueKey('home-service-card-${d.priority ? 'elevated' : 'standard'}'),
+      constraints: BoxConstraints(minHeight: AppLayout.r(context, 76)),
+      decoration: BoxDecoration(
+        borderRadius: AppRadius.premiumXlR,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.16 : 0.055),
+            blurRadius: d.priority ? 15 : 11,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
+      child: card,
     );
   }
 }
