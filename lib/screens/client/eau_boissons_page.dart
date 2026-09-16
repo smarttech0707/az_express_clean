@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
+import '../../theme/app_theme.dart';
 
 class EauBoissonsPage extends StatefulWidget {
   const EauBoissonsPage({super.key});
@@ -262,23 +263,22 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
   }
 
   Widget _paymentSelector() {
+    final brightness = Theme.of(context).brightness;
+    final muted = AppColors.premiumTextSecondary(brightness);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
-        ],
+        color: AppColors.premiumSurfaceElevated(brightness),
+        borderRadius: AppRadius.lgR,
+        border: Border.all(color: AppColors.premiumBorder(brightness)),
+        boxShadow: AppShadow.xs,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Mode de paiement",
+          Text("Mode de paiement",
               style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey)),
+                  fontSize: 13, fontWeight: FontWeight.bold, color: muted)),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(
@@ -288,24 +288,27 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
                     color: _paymentMethod == 'cash'
-                        ? Colors.teal.shade700
-                        : Colors.grey.shade100,
+                        ? AppColors.primary
+                        : AppColors.premiumSurface(brightness),
+                    border: Border.all(
+                        color: _paymentMethod == 'cash'
+                            ? AppColors.primary
+                            : AppColors.premiumBorder(brightness)),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.money,
-                            color: _paymentMethod == 'cash'
-                                ? Colors.white
-                                : Colors.grey,
+                            color:
+                                _paymentMethod == 'cash' ? Colors.white : muted,
                             size: 18),
                         const SizedBox(width: 6),
                         Text("Espèces",
                             style: TextStyle(
                                 color: _paymentMethod == 'cash'
                                     ? Colors.white
-                                    : Colors.grey,
+                                    : muted,
                                 fontWeight: FontWeight.bold)),
                       ]),
                 ),
@@ -319,30 +322,33 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
                     color: _paymentMethod == 'wallet'
-                        ? Colors.teal.shade700
-                        : Colors.grey.shade100,
+                        ? AppColors.primary
+                        : AppColors.premiumSurface(brightness),
+                    border: Border.all(
+                        color: _paymentMethod == 'wallet'
+                            ? AppColors.primary
+                            : AppColors.premiumBorder(brightness)),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
                     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                       Icon(Icons.account_balance_wallet,
-                          color: _paymentMethod == 'wallet'
-                              ? Colors.white
-                              : Colors.grey,
+                          color:
+                              _paymentMethod == 'wallet' ? Colors.white : muted,
                           size: 18),
                       const SizedBox(width: 6),
                       Text("Wallet",
                           style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
-                                  : Colors.grey,
+                                  : muted,
                               fontWeight: FontWeight.bold)),
                     ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
                                 ? Colors.white70
-                                : Colors.grey.shade400,
+                                : muted,
                             fontSize: 11)),
                   ]),
                 ),
@@ -356,51 +362,52 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     final categories = <String>{};
     for (final p in _products) {
       categories.add(p["category"] as String);
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.premiumBg(brightness),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             expandedHeight: 150,
             pinned: true,
-            backgroundColor: Colors.teal.shade700,
-            foregroundColor: Colors.white,
+            backgroundColor: AppColors.premiumSurface(brightness),
+            foregroundColor: AppColors.premiumTextPrimary(brightness),
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.teal.shade800, Colors.teal.shade500],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  color: AppColors.premiumSurface(brightness),
+                  border: Border(
+                    bottom:
+                        BorderSide(color: Colors.teal.withValues(alpha: .3)),
                   ),
                 ),
-                child: const SafeArea(
+                child: SafeArea(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      SizedBox(height: 40),
-                      Icon(Icons.water_drop, color: Colors.white, size: 48),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 40),
+                      const Icon(Icons.water_drop,
+                          color: Colors.teal, size: 42),
+                      const SizedBox(height: 8),
                       Text("Eau & Boissons",
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
+                          style: AppTypography.titleLargeStyle(context,
+                              color: AppColors.premiumTextPrimary(brightness))),
                       Text("Livraison rapide à domicile",
-                          style:
-                              TextStyle(color: Colors.white70, fontSize: 13)),
+                          style: AppTypography.bodySmallStyle(context,
+                              color:
+                                  AppColors.premiumTextSecondary(brightness))),
                     ],
                   ),
                 ),
               ),
             ),
             title: const Text("Eau & Boissons"),
-            centerTitle: true,
+            centerTitle: false,
           ),
 
           SliverToBoxAdapter(
@@ -412,7 +419,7 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                   // ── ADRESSE ─────────────────────────────────
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.premiumSurfaceElevated(brightness),
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
@@ -466,96 +473,103 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                     final p = catProducts[i];
                     final qty = _cart[p["id"]] ?? 0;
                     final color = p["color"] as Color;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
-                              blurRadius: 6)
-                        ],
-                      ),
-                      child: ListTile(
-                        leading: Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Material(
+                        color: AppColors.premiumSurfaceElevated(brightness),
+                        elevation: 1,
+                        shadowColor: AppColors.black10,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(
+                            color: AppColors.premiumBorder(brightness),
                           ),
-                          child: Icon(p["icon"] as IconData,
-                              color: color, size: 24),
                         ),
-                        title: Text(p["name"],
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: Text(
-                          "${p['price']} FCFA",
-                          style: TextStyle(
-                              color: Colors.teal.shade700,
-                              fontWeight: FontWeight.bold),
-                        ),
-                        trailing: qty == 0
-                            ? GestureDetector(
-                                onTap: () => setState(() => _cart[p["id"]] = 1),
-                                child: Container(
-                                  width: 36,
-                                  height: 36,
-                                  decoration: BoxDecoration(
-                                    color: Colors.teal.shade700,
-                                    borderRadius: BorderRadius.circular(10),
+                        clipBehavior: Clip.antiAlias,
+                        child: ListTile(
+                          leading: Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(p["icon"] as IconData,
+                                color: color, size: 24),
+                          ),
+                          title: Text(p["name"],
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text(
+                            "${p['price']} FCFA",
+                            style: TextStyle(
+                                color: Colors.teal.shade700,
+                                fontWeight: FontWeight.bold),
+                          ),
+                          trailing: qty == 0
+                              ? GestureDetector(
+                                  onTap: () =>
+                                      setState(() => _cart[p["id"]] = 1),
+                                  child: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: Colors.teal.shade700,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(Icons.add,
+                                        color: Colors.white, size: 22),
                                   ),
-                                  child: const Icon(Icons.add,
-                                      color: Colors.white, size: 22),
+                                )
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => setState(() {
+                                        if (qty == 1) {
+                                          _cart.remove(p["id"]);
+                                        } else {
+                                          _cart[p["id"]] = qty - 1;
+                                        }
+                                      }),
+                                      child: Container(
+                                        width: 30,
+                                        height: 30,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade200,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child:
+                                            const Icon(Icons.remove, size: 18),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10),
+                                      child: Text("$qty",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16)),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () => setState(
+                                          () => _cart[p["id"]] = qty + 1),
+                                      child: Container(
+                                        width: 30,
+                                        height: 30,
+                                        decoration: BoxDecoration(
+                                          color: Colors.teal.shade700,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.add,
+                                            color: Colors.white, size: 18),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              )
-                            : Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () => setState(() {
-                                      if (qty == 1) {
-                                        _cart.remove(p["id"]);
-                                      } else {
-                                        _cart[p["id"]] = qty - 1;
-                                      }
-                                    }),
-                                    child: Container(
-                                      width: 30,
-                                      height: 30,
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.shade200,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: const Icon(Icons.remove, size: 18),
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10),
-                                    child: Text("$qty",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16)),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => setState(
-                                        () => _cart[p["id"]] = qty + 1),
-                                    child: Container(
-                                      width: 30,
-                                      height: 30,
-                                      decoration: BoxDecoration(
-                                        color: Colors.teal.shade700,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: const Icon(Icons.add,
-                                          color: Colors.white, size: 18),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                        ),
                       ),
                     );
                   },
@@ -575,19 +589,17 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
           ? null
           : Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 12,
-                      offset: Offset(0, -3))
-                ],
+              decoration: BoxDecoration(
+                color: AppColors.premiumSurfaceElevated(brightness),
+                border: Border(
+                  top: BorderSide(color: AppColors.premiumBorder(brightness)),
+                ),
+                boxShadow: AppShadow.xs,
               ),
               child: ScaleButton(
                 onPressed: _loading ? null : _placeOrder,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal.shade700,
+                  backgroundColor: AppColors.primary,
                   minimumSize: const Size.fromHeight(52),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),

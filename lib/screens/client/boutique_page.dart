@@ -9,6 +9,7 @@ import '../../l10n/app_text.dart';
 import '../../services/firestore_service.dart';
 import 'client_wallet_page.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/premium_empty_state.dart';
 
 class BoutiquePage extends StatefulWidget {
   const BoutiquePage({super.key});
@@ -419,16 +420,17 @@ class _BoutiquePageState extends State<BoutiquePage>
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.premiumBg(brightness),
       body: NestedScrollView(
         headerSliverBuilder: (context, _) => [
           SliverAppBar(
             expandedHeight:
                 (MediaQuery.of(context).size.height * 0.22).clamp(160.0, 240.0),
             pinned: true,
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
+            backgroundColor: AppColors.premiumSurface(brightness),
+            foregroundColor: AppColors.premiumTextPrimary(brightness),
             actions: [
               // Wallet button
               StreamBuilder<DocumentSnapshot>(
@@ -449,17 +451,19 @@ class _BoutiquePageState extends State<BoutiquePage>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: AppColors.primary10,
+                        border: Border.all(color: AppColors.primary20),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
                         children: [
                           const Icon(Icons.account_balance_wallet,
-                              size: 14, color: Colors.white),
+                              size: 14, color: AppColors.primary),
                           const SizedBox(width: 4),
                           Text("$wallet FCFA",
-                              style: const TextStyle(
-                                  color: Colors.white,
+                              style: TextStyle(
+                                  color:
+                                      AppColors.premiumTextPrimary(brightness),
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12)),
                         ],
@@ -471,11 +475,10 @@ class _BoutiquePageState extends State<BoutiquePage>
             ],
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFFE65100), Color(0xFFFF8F00)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                decoration: BoxDecoration(
+                  color: AppColors.premiumSurface(brightness),
+                  border: const Border(
+                    bottom: BorderSide(color: AppColors.primary20),
                   ),
                 ),
                 child: SafeArea(
@@ -486,11 +489,11 @@ class _BoutiquePageState extends State<BoutiquePage>
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const Icon(Icons.storefront,
-                            color: Colors.white, size: 40),
+                            color: AppColors.primary, size: 40),
                         const SizedBox(height: 10),
                         Text(context.tr('shop_title'),
-                            style: const TextStyle(
-                                color: Colors.white,
+                            style: TextStyle(
+                                color: AppColors.premiumTextPrimary(brightness),
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold)),
                       ],
@@ -500,12 +503,12 @@ class _BoutiquePageState extends State<BoutiquePage>
               ),
             ),
             title: Text(context.tr('boutique')),
-            centerTitle: true,
+            centerTitle: false,
             bottom: TabBar(
               controller: _tabCtrl,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white70,
+              indicatorColor: AppColors.primary,
+              labelColor: AppColors.primary,
+              unselectedLabelColor: AppColors.premiumTextSecondary(brightness),
               tabs: [
                 Tab(
                     icon: const Icon(Icons.grid_view, size: 18),
@@ -566,17 +569,10 @@ class _ProductsTab extends StatelessWidget {
         }
         final allDocs = snap.data?.docs ?? [];
         if (allDocs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.storefront_outlined,
-                    size: 64, color: Colors.grey),
-                const SizedBox(height: 12),
-                Text(context.tr('no_products'),
-                    style: const TextStyle(color: Colors.grey, fontSize: 15)),
-              ],
-            ),
+          return PremiumEmptyState(
+            icon: Icons.storefront_outlined,
+            title: context.tr('no_products'),
+            message: 'Les nouveaux produits AZ Market apparaîtront ici.',
           );
         }
 
@@ -803,17 +799,10 @@ class _MyOrdersTab extends StatelessWidget {
         }
         final docs = snap.data?.docs ?? [];
         if (docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.receipt_long_outlined,
-                    size: 56, color: Colors.grey),
-                const SizedBox(height: 12),
-                Text(context.tr('no_orders'),
-                    style: const TextStyle(color: Colors.grey)),
-              ],
-            ),
+          return PremiumEmptyState(
+            icon: Icons.receipt_long_outlined,
+            title: context.tr('no_orders'),
+            message: 'Vos prochaines commandes seront regroupées ici.',
           );
         }
         return ListView.builder(

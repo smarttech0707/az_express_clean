@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "boulangeries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "vehicle_conversations",
       "queryScope": "COLLECTION",
       "fields": [

@@ -12,6 +12,8 @@ import '../../services/firestore_service.dart';
 import '../../providers/active_city_provider.dart';
 import '../../services/pharmacy_guard_repository.dart';
 import '../../services/tarif_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/premium_empty_state.dart';
 
 typedef PharmacyGuardStreamLoader = Stream<List<PharmacyGuard>> Function(
   String cityName,
@@ -85,68 +87,68 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
     final cityProvider = context.watch<ActiveCityProvider>();
     final cityId = cityProvider.activeCityId;
     final cityName = _activeCityName(cityProvider);
+    final brightness = Theme.of(context).brightness;
     return Scaffold(
-        backgroundColor: const Color(0xFFF5F5F5),
-        appBar: AppBar(
-          title: const Text('Pharmacies de garde'),
-          backgroundColor: Colors.red.shade700,
-          foregroundColor: Colors.white,
-          bottom: TabBar(
-            controller: _tabs,
-            isScrollable: true,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            indicatorColor: Colors.white,
-            tabs: const [
-              Tab(text: 'Maintenant'),
-              Tab(text: 'Cette semaine'),
-              Tab(text: 'Ce mois'),
-              Tab(text: 'Partenaires AZ'),
-            ],
-          ),
+      backgroundColor: AppColors.premiumBg(brightness),
+      appBar: AppBar(
+        title: const Text('Pharmacies de garde'),
+        backgroundColor: AppColors.premiumSurface(brightness),
+        foregroundColor: AppColors.premiumTextPrimary(brightness),
+        bottom: TabBar(
+          controller: _tabs,
+          isScrollable: true,
+          labelColor: AppColors.primary,
+          unselectedLabelColor: AppColors.premiumTextSecondary(brightness),
+          indicatorColor: AppColors.primary,
+          tabs: const [
+            Tab(text: 'Maintenant'),
+            Tab(text: 'Cette semaine'),
+            Tab(text: 'Ce mois'),
+            Tab(text: 'Partenaires AZ'),
+          ],
         ),
-        body: cityId == null || cityName == null
-            ? const _Message(
-                icon: Icons.location_city_outlined,
-                text:
-                    'Sélectionnez une ville pour voir les pharmacies de garde.',
-              )
-            : StreamBuilder<List<PharmacyGuard>>(
-          key: ValueKey(cityId),
-          stream: widget.guardsLoader?.call(cityName) ??
-              _repository!.watchPublicGuards(city: cityName),
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return const _Message(
-                  icon: Icons.cloud_off_rounded,
-                  text:
-                      'Les gardes sont momentanément indisponibles. Réessayez plus tard.');
-            }
-            if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final periodLists = PharmacyGuardPeriod.values
-                .map((period) => _GuardList(
-                      guards: snapshot.data!,
-                      period: period,
+      ),
+      body: cityId == null || cityName == null
+          ? const _Message(
+              icon: Icons.location_city_outlined,
+              text: 'Sélectionnez une ville pour voir les pharmacies de garde.',
+            )
+          : StreamBuilder<List<PharmacyGuard>>(
+              key: ValueKey(cityId),
+              stream: widget.guardsLoader?.call(cityName) ??
+                  _repository!.watchPublicGuards(city: cityName),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const _Message(
+                      icon: Icons.cloud_off_rounded,
+                      text:
+                          'Les gardes sont momentanément indisponibles. Réessayez plus tard.');
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final periodLists = PharmacyGuardPeriod.values
+                    .map((period) => _GuardList(
+                          guards: snapshot.data!,
+                          period: period,
+                          position: _position,
+                        ))
+                    .toList(growable: false);
+                return TabBarView(
+                  controller: _tabs,
+                  children: [
+                    ...periodLists,
+                    _PartnerPharmacies(
                       position: _position,
-                    ))
-                .toList(growable: false);
-            return TabBarView(
-              controller: _tabs,
-              children: [
-                ...periodLists,
-                _PartnerPharmacies(
-                  position: _position,
-                  cityId: cityId,
-                  cityName: cityName,
-                  streamLoader: widget.partnersLoader,
-                )
-              ],
-            );
-          },
-        ),
-      );
+                      cityId: cityId,
+                      cityName: cityName,
+                      streamLoader: widget.partnersLoader,
+                    )
+                  ],
+                );
+              },
+            ),
+    );
   }
 }
 
@@ -193,58 +195,58 @@ class _PartnerPharmacies extends StatelessWidget {
       );
     }
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance
-            .collection('pharmacies')
-            .where('cityId', isEqualTo: cityId)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final docs = snapshot.data!.docs
-              .where((doc) => doc.data()['isActive'] != false)
-              .toList(growable: false)
-            ..sort((left, right) => ((left.data()['name'] as String?) ?? '')
-                .compareTo((right.data()['name'] as String?) ?? ''));
-          if (docs.isEmpty) {
-            return const _Message(
-                icon: Icons.handshake_outlined,
-                text: 'Aucune pharmacie partenaire enregistrée.');
-          }
-          final now = DateTime.now().toUtc();
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              final data = doc.data();
-              final guard = PharmacyGuard(
-                id: 'partner-${doc.id}',
-                pharmacyId: doc.id,
-                name: data['name'] as String? ?? 'Pharmacie',
-                city: data['cityName'] as String? ?? cityName,
-                address: data['address'] as String?,
-                phone: data['phone'] as String?,
-                latitude: (data['lat'] as num?)?.toDouble(),
-                longitude: (data['lng'] as num?)?.toDouble(),
-                guardStartAt: now,
-                guardEndAt: now.add(const Duration(days: 1)),
-                sourceType: 'partner',
-                isVerified: true,
-                isActive: true,
-                linkedPartner: true,
-                partnerPharmacyId: doc.id,
-              );
-              return _GuardCard(
-                guard: guard,
-                now: now,
-                position: position,
-              );
-            },
-          );
-        },
-      );
-}
+      stream: FirebaseFirestore.instance
+          .collection('pharmacies')
+          .where('cityId', isEqualTo: cityId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snapshot.data!.docs
+            .where((doc) => doc.data()['isActive'] != false)
+            .toList(growable: false)
+          ..sort((left, right) => ((left.data()['name'] as String?) ?? '')
+              .compareTo((right.data()['name'] as String?) ?? ''));
+        if (docs.isEmpty) {
+          return const _Message(
+              icon: Icons.handshake_outlined,
+              text: 'Aucune pharmacie partenaire enregistrée.');
+        }
+        final now = DateTime.now().toUtc();
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final doc = docs[index];
+            final data = doc.data();
+            final guard = PharmacyGuard(
+              id: 'partner-${doc.id}',
+              pharmacyId: doc.id,
+              name: data['name'] as String? ?? 'Pharmacie',
+              city: data['cityName'] as String? ?? cityName,
+              address: data['address'] as String?,
+              phone: data['phone'] as String?,
+              latitude: (data['lat'] as num?)?.toDouble(),
+              longitude: (data['lng'] as num?)?.toDouble(),
+              guardStartAt: now,
+              guardEndAt: now.add(const Duration(days: 1)),
+              sourceType: 'partner',
+              isVerified: true,
+              isActive: true,
+              linkedPartner: true,
+              partnerPharmacyId: doc.id,
+            );
+            return _GuardCard(
+              guard: guard,
+              now: now,
+              position: position,
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 class _GuardList extends StatelessWidget {
@@ -281,9 +283,7 @@ class _GuardList extends StatelessWidget {
 
 class _GuardCard extends StatelessWidget {
   const _GuardCard(
-      {required this.guard,
-      required this.now,
-      required this.position});
+      {required this.guard, required this.now, required this.position});
 
   final PharmacyGuard guard;
   final DateTime now;
@@ -604,14 +604,10 @@ class _Message extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 64, color: Colors.grey.shade400),
-            const SizedBox(height: 12),
-            Text(text, textAlign: TextAlign.center),
-          ]),
-        ),
+  Widget build(BuildContext context) => PremiumEmptyState(
+        icon: icon,
+        title: text,
+        message: 'Les disponibilités publiées apparaîtront ici.',
+        accent: AppColors.red,
       );
 }

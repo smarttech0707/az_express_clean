@@ -1063,9 +1063,50 @@ service cloud.firestore {
     }
 
     // ── Config business (commissions, seuils) — réservée aux admins ─────────
+    // Exception minimale : le formulaire client Blanchisserie consomme
+    // uniquement son catalogue de services et son prix au kilo. Les autres
+    // documents app_config (paiement, commissions, seuils...) restent privés.
     match /app_config/{configId} {
-      allow read:  if isAdmin();
+      allow read:  if isAdmin() || (isAuth() && configId == 'blanchisserie');
       allow write: if isAdmin();
+    }
+
+    match /simple_services/{serviceId} {
+      function publicSimpleService(data) {
+        return data.keys().hasOnly([
+            'name', 'phone', 'serviceType', 'isAvailable', 'photoUrl',
+            'createdAt', 'updatedAt'
+          ])
+          && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+          // Numéro professionnel volontairement affiché avec un bouton Appeler.
+          && data.phone is string && data.phone.size() > 0 && data.phone.size() <= 30
+          && data.serviceType is string && data.serviceType.size() > 0
+          && data.serviceType.size() <= 100
+          && data.isAvailable is bool
+          && data.photoUrl is string;
+      }
+
+      // L'app initialise une session Firebase, anonyme ou réelle, avant le
+      // catalogue. Une requête cliente doit conserver isAvailable == true.
+      allow read: if hasAdminPermission('tricycle')
+        || (isAuth() && resource.data.isAvailable == true);
+      allow create, update: if hasAdminPermission('tricycle')
+        && publicSimpleService(request.resource.data);
+      allow delete: if hasAdminPermission('tricycle');
+    }
+
+    // Identité et coordonnées exactes séparées du catalogue public.
+    match /simple_service_private/{serviceId} {
+      function privateSimpleService(data) {
+        return data.keys().hasOnly([
+          'idNumber', 'idPhotoUrl', 'lat', 'lng', 'createdAt', 'updatedAt',
+          'migrationVersion'
+        ]);
+      }
+      allow read: if hasAdminPermission('tricycle');
+      allow create, update: if hasAdminPermission('tricycle')
+        && privateSimpleService(request.resource.data);
+      allow delete: if hasAdminPermission('tricycle');
     }
 
     match /driver_rankings/{driverId} {

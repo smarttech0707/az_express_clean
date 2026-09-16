@@ -147,6 +147,16 @@ class LivraisonScreen extends StatefulWidget {
 
 class _LivraisonScreenState extends State<LivraisonScreen>
     with TickerProviderStateMixin {
+  Brightness get _brightness => Theme.of(context).brightness;
+  Color get _premiumSurfaceElevated =>
+      AppColors.premiumSurfaceElevated(_brightness);
+  Color get _premiumBorder => AppColors.premiumBorder(_brightness);
+  Color get _premiumText => _brightness == Brightness.dark
+      ? AppColors.premiumTextPrimaryDark
+      : AppColors.premiumTextPrimaryLight;
+  Color get _premiumMuted => _brightness == Brightness.dark
+      ? AppColors.premiumTextMutedDark
+      : AppColors.premiumTextMutedLight;
   // ── Animations ─────────────────────────────────────────────────────────────
   late final AnimationController _routeAnim;
   late final AnimationController _pulseCtrl;
@@ -884,7 +894,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         if (!didPop) _goBack();
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.dark,
+        value: Theme.of(context).brightness == Brightness.dark
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
         child: Scaffold(
           backgroundColor: Colors.black,
           resizeToAvoidBottomInset: false,
@@ -977,6 +989,15 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Top bar ───────────────────────────────────────────────────────────────
 
   Widget _buildTopBar() {
+    final brightness = Theme.of(context).brightness;
+    final surface = AppColors.premiumSurface(brightness);
+    final border = AppColors.premiumBorder(brightness);
+    final textPrimary = brightness == Brightness.dark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+    final muted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     const titles = [
       '📍 Où récupérons-nous ?',
       '👤 Qui remet le colis ?',
@@ -993,12 +1014,12 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: AppShadow.md,
+            color: surface,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: border),
+            boxShadow: AppShadow.sm,
           ),
-          child: const Icon(Icons.arrow_back_rounded,
-              size: 20, color: AppColors.text),
+          child: Icon(Icons.arrow_back_rounded, size: 20, color: textPrimary),
         ),
       ),
       const SizedBox(width: 10),
@@ -1007,8 +1028,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: 14),
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
+            color: surface,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: border),
             boxShadow: AppShadow.sm,
           ),
           child: Row(children: [
@@ -1017,7 +1039,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                   style: GoogleFonts.urbanist(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.text),
+                      color: textPrimary),
                   overflow: TextOverflow.ellipsis),
             ),
             const SizedBox(width: 8),
@@ -1034,7 +1056,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                         decoration: BoxDecoration(
                           color: i < _phase
                               ? AppColors.primary
-                              : AppColors.divider,
+                              : muted.withValues(alpha: 0.35),
                           borderRadius: BorderRadius.circular(3),
                         ),
                       )),
@@ -1048,6 +1070,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Panel bas ─────────────────────────────────────────────────────────────
 
   Widget _buildBottomPanel(double bottomPad) {
+    final brightness = Theme.of(context).brightness;
     final screenH = MediaQuery.of(context).size.height;
     final topPad = MediaQuery.of(context).padding.top;
     final keyboardH = MediaQuery.of(context).viewInsets.bottom;
@@ -1067,18 +1090,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxPanelH),
           child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            decoration: BoxDecoration(
+              color: AppColors.premiumSurface(brightness),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border(
+                top: BorderSide(color: AppColors.premiumBorder(brightness)),
+              ),
               boxShadow: [
                 BoxShadow(
-                    color: Color(0x1A000000),
-                    blurRadius: 32,
-                    offset: Offset(0, -8)),
-                BoxShadow(
-                    color: Color(0x08000000),
-                    blurRadius: 8,
-                    offset: Offset(0, -2)),
+                    color: Colors.black.withValues(
+                        alpha: brightness == Brightness.dark ? 0.28 : 0.10),
+                    blurRadius: 22,
+                    offset: const Offset(0, -8)),
               ],
             ),
             child: _buildPanelContent(bottomPad),
@@ -1110,7 +1134,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Phase 1 : sélection point récupération ───────────────────────────────
 
   Widget _buildPickupSearchPanel(double bottomPad) {
-    return Padding(
+    return SingleChildScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.fromLTRB(20, 14, 20, bottomPad + 16),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         _handle(),
@@ -1124,11 +1149,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                   style: GoogleFonts.urbanist(
                       fontSize: 19,
                       fontWeight: FontWeight.w800,
-                      color: AppColors.text)),
+                      color: _premiumText)),
               const SizedBox(height: 4),
               Text('Recherchez une adresse ou déplacez la carte.',
-                  style: GoogleFonts.urbanist(
-                      fontSize: 12, color: AppColors.textMuted)),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted)),
             ],
           ),
         ),
@@ -1387,20 +1412,24 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         // Champ poids optionnel
         Container(
           decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
+            color: shouldUseLightFill ? AppColors.bg : _premiumSurfaceElevated,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: _premiumBorder),
           ),
           child: TextField(
             controller: _poidsCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
+            style: GoogleFonts.urbanist(
+                fontSize: 14,
+                color: shouldUseLightFill ? AppColors.text : _premiumText),
             decoration: InputDecoration(
               filled: shouldUseLightFill ? true : null,
               fillColor: shouldUseLightFill ? AppColors.bg : null,
               hintText: 'Poids en kg (optionnel)',
               hintStyle: GoogleFonts.urbanist(
-                  fontSize: 13, color: AppColors.textLight),
+                  fontSize: 13,
+                  color:
+                      shouldUseLightFill ? AppColors.textLight : _premiumMuted),
               prefixIcon: const Padding(
                 padding: EdgeInsets.only(left: 12, right: 8),
                 child: Icon(Icons.scale_rounded,
@@ -1422,22 +1451,26 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         const SizedBox(height: 10),
         Container(
           decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
+            color: shouldUseLightFill ? AppColors.bg : _premiumSurfaceElevated,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: _premiumBorder),
           ),
           child: TextField(
             controller: _shoppingBudgetCtrl,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             onChanged: (_) => setState(() {}),
-            style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
+            style: GoogleFonts.urbanist(
+                fontSize: 14,
+                color: shouldUseLightFill ? AppColors.text : _premiumText),
             decoration: InputDecoration(
               filled: shouldUseLightFill ? true : null,
               fillColor: shouldUseLightFill ? AppColors.bg : null,
               hintText: 'Budget d’achat (optionnel)',
               hintStyle: GoogleFonts.urbanist(
-                  fontSize: 13, color: AppColors.textLight),
+                  fontSize: 13,
+                  color:
+                      shouldUseLightFill ? AppColors.textLight : _premiumMuted),
               helperText: 'Montant des achats, hors frais de livraison',
               prefixIcon: const Icon(Icons.shopping_basket_outlined,
                   color: AppColors.textMuted, size: 18),
@@ -1475,9 +1508,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.divider),
+            color: _premiumSurfaceElevated,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: _premiumBorder),
           ),
           child: Column(children: [
             _routeRow(
@@ -1491,8 +1524,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             ),
             Padding(
               padding: const EdgeInsets.only(left: 14),
-              child:
-                  Container(width: 1.5, height: 18, color: AppColors.divider),
+              child: Container(width: 1.5, height: 18, color: _premiumBorder),
             ),
             _routeRow(
               icon: Icons.place_rounded,
@@ -1512,21 +1544,21 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.divider),
+            color: _premiumSurfaceElevated,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: _premiumBorder),
           ),
           child: Row(children: [
             Text(_categoryLabel,
                 style: GoogleFonts.urbanist(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.text)),
+                    color: _premiumText)),
             if (_poidsCtrl.text.isNotEmpty) ...[
               const SizedBox(width: 8),
               Text('· ${_poidsCtrl.text} kg',
-                  style: GoogleFonts.urbanist(
-                      fontSize: 12, color: AppColors.textMuted)),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted)),
             ],
             const Spacer(),
             GestureDetector(
@@ -1547,19 +1579,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           Container(
             padding: const EdgeInsets.symmetric(vertical: 10),
             decoration: BoxDecoration(
-              color: AppColors.bg,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.divider),
+              color: _premiumSurfaceElevated,
+              borderRadius: AppRadius.premiumLgR,
+              border: Border.all(color: _premiumBorder),
             ),
             child: Row(children: [
               Expanded(
                   child: _miniStat(Icons.straighten_rounded, 'Distance',
                       _route.distanceText, const Color(0xFF1565C0))),
-              Container(width: 1, height: 26, color: AppColors.divider),
+              Container(width: 1, height: 26, color: _premiumBorder),
               Expanded(
                   child: _miniStat(Icons.access_time_rounded, 'Délai',
                       _etaRange, const Color(0xFF22C55E))),
-              Container(width: 1, height: 26, color: AppColors.divider),
+              Container(width: 1, height: 26, color: _premiumBorder),
               Expanded(
                   child: _miniStat(
                       _deliveryMode == 'express'
@@ -1621,11 +1653,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                       style: GoogleFonts.urbanist(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: AppColors.text)),
+                          color: _premiumText)),
                   if (_tarifResult?.isNight == true)
                     Text('🌙 Tarif nuit',
                         style: GoogleFonts.urbanist(
-                            fontSize: 11, color: AppColors.textMuted)),
+                            fontSize: 11, color: _premiumMuted)),
                 ])),
             Text(_selectedPrice > 0 ? '$_selectedPrice FCFA' : '—',
                 style: GoogleFonts.urbanist(
@@ -1640,9 +1672,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: AppColors.bg,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.divider),
+              color: _premiumSurfaceElevated,
+              borderRadius: AppRadius.premiumLgR,
+              border: Border.all(color: _premiumBorder),
             ),
             child: Column(children: [
               Row(children: [
@@ -1669,7 +1701,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             style: GoogleFonts.urbanist(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: AppColors.text)),
+                color: _premiumText)),
         const SizedBox(height: 10),
 
         _payRow(
@@ -1788,10 +1820,13 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: sel ? iconColor.withValues(alpha: 0.06) : AppColors.bg,
-          borderRadius: BorderRadius.circular(16),
+          color: sel
+              ? iconColor.withValues(
+                  alpha: _brightness == Brightness.dark ? 0.14 : 0.06)
+              : _premiumSurfaceElevated,
+          borderRadius: AppRadius.premiumLgR,
           border: Border.all(
-            color: sel ? iconColor : AppColors.divider,
+            color: sel ? AppColors.primary : _premiumBorder,
             width: sel ? 2 : 1,
           ),
           boxShadow: sel
@@ -1808,11 +1843,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             decoration: BoxDecoration(
               color: sel
                   ? iconColor.withValues(alpha: 0.14)
-                  : AppColors.divider.withValues(alpha: 0.5),
+                  : _premiumBorder.withValues(alpha: 0.65),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon,
-                color: sel ? iconColor : AppColors.textLight, size: 22),
+            child: Icon(icon, color: sel ? iconColor : _premiumMuted, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1824,7 +1858,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                     style: GoogleFonts.urbanist(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
-                        color: sel ? iconColor : AppColors.text)),
+                        color: sel ? iconColor : _premiumText)),
                 if (badge != null) ...[
                   const SizedBox(width: 6),
                   Container(
@@ -1843,8 +1877,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                 ],
               ]),
               Text(subtitle,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 11, color: AppColors.textMuted)),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 11, color: _premiumMuted)),
               Row(children: [
                 const Icon(Icons.access_time_rounded,
                     size: 11, color: Colors.grey),
@@ -1852,7 +1886,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                 Text(etaText,
                     style: GoogleFonts.urbanist(
                         fontSize: 10,
-                        color: AppColors.textLight,
+                        color: _premiumMuted,
                         fontWeight: FontWeight.w600)),
               ]),
             ],
@@ -1881,8 +1915,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Suggestions overlay ───────────────────────────────────────────────────
 
   Widget _buildSuggestionsOverlay(double topPad, double keyboardHeight) {
+    final brightness = Theme.of(context).brightness;
     return Container(
-      color: Colors.white,
+      color: AppColors.premiumSurface(brightness),
       margin: EdgeInsets.only(top: topPad + 60),
       // Scaffold a resizeToAvoidBottomInset:false, donc cette zone n'est
       // jamais compensée automatiquement pour le clavier (contrairement au
@@ -1948,16 +1983,13 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.search_off_rounded,
-              size: 56, color: AppColors.divider),
+          Icon(Icons.search_off_rounded, size: 56, color: _premiumBorder),
           const SizedBox(height: 12),
           Text('Aucun lieu trouvé',
-              style: GoogleFonts.urbanist(
-                  fontSize: 15, color: AppColors.textMuted)),
+              style: GoogleFonts.urbanist(fontSize: 15, color: _premiumMuted)),
           const SizedBox(height: 4),
           Text('Essayez : "Cafétou", "CHU", "Marché"…',
-              style: GoogleFonts.urbanist(
-                  fontSize: 12, color: AppColors.textLight)),
+              style: GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted)),
           const SizedBox(height: 18),
           Wrap(
             alignment: WrapAlignment.center,
@@ -1995,7 +2027,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
               'Cette action interroge un service externe.',
               style: GoogleFonts.urbanist(
                 fontSize: 11,
-                color: AppColors.textLight,
+                color: _premiumMuted,
               ),
             ),
           ],
@@ -2036,7 +2068,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             style: GoogleFonts.urbanist(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: AppColors.textMuted,
+                color: _premiumMuted,
                 letterSpacing: 0.3),
           ),
         ),
@@ -2057,8 +2089,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                       fontWeight: FontWeight.w600,
                       color: titleColor)),
               subtitle: Text(place.address,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 12, color: AppColors.textMuted)),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted)),
               onTap: () => _selectPlace(place),
             )),
       ],
@@ -2092,11 +2124,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         ]),
 
         // Flèche
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.arrow_forward_rounded,
-                color: AppColors.divider, size: 22),
+            Icon(Icons.arrow_forward_rounded, color: _premiumBorder, size: 22),
           ]),
         ),
 
@@ -2139,7 +2170,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         width: 36,
         height: 4,
         decoration: BoxDecoration(
-            color: AppColors.divider, borderRadius: BorderRadius.circular(2)),
+            color: _premiumBorder, borderRadius: BorderRadius.circular(2)),
       ));
 
   Widget _addressChip({
@@ -2178,7 +2209,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                   style: GoogleFonts.urbanist(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.text),
+                      color: _premiumText),
                   overflow: TextOverflow.ellipsis),
             ],
           )),
@@ -2240,8 +2271,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                           'Déplacez la carte ou recherchez une adresse',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 12, color: AppColors.textMuted),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted),
                 ),
               ],
             ),
@@ -2256,12 +2287,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       avatar: Icon(icon, size: 16, color: AppColors.primary),
       label: Text(label,
           style: GoogleFonts.urbanist(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.text)),
+              fontSize: 12, fontWeight: FontWeight.w600, color: _premiumText)),
       onPressed: onTap,
-      backgroundColor: Colors.white,
-      side: const BorderSide(color: AppColors.border),
+      backgroundColor: _premiumSurfaceElevated,
+      side: BorderSide(color: _premiumBorder),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     );
   }
@@ -2303,11 +2332,14 @@ class _LivraisonScreenState extends State<LivraisonScreen>
               const Icon(Icons.check_circle_outline_rounded,
                   color: Colors.white, size: 20),
             const SizedBox(width: 8),
-            Text(label,
-                style: GoogleFonts.urbanist(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white)),
+            Flexible(
+              child: Text(label,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.urbanist(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+            ),
           ]),
         ),
       ),
@@ -2328,6 +2360,20 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       platform: Theme.of(context).platform,
       brightness: Theme.of(context).brightness,
     );
+    final brightness = Theme.of(context).brightness;
+    final surface = shouldUseLightFill
+        ? Colors.white
+        : AppColors.premiumSurfaceElevated(brightness);
+    final textPrimary = shouldUseLightFill
+        ? AppColors.text
+        : brightness == Brightness.dark
+            ? AppColors.premiumTextPrimaryDark
+            : AppColors.premiumTextPrimaryLight;
+    final textMuted = shouldUseLightFill
+        ? AppColors.textLight
+        : brightness == Brightness.dark
+            ? AppColors.premiumTextMutedDark
+            : AppColors.premiumTextMutedLight;
     return GestureDetector(
       onTap: () {
         setState(() {
@@ -2340,10 +2386,12 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          color: surface,
+          borderRadius: AppRadius.premiumLgR,
           border: Border.all(
-            color: isActive ? AppColors.primary : AppColors.border,
+            color: isActive
+                ? AppColors.primary
+                : AppColors.premiumBorder(brightness),
             width: isActive ? 1.5 : 1,
           ),
           boxShadow: isActive ? AppShadow.sm : AppShadow.xs,
@@ -2356,13 +2404,12 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             controller: ctrl,
             focusNode: focus,
             autofocus: autoFocus,
-            style: GoogleFonts.urbanist(fontSize: 13, color: AppColors.text),
+            style: GoogleFonts.urbanist(fontSize: 13, color: textPrimary),
             decoration: InputDecoration(
               filled: shouldUseLightFill ? true : null,
               fillColor: shouldUseLightFill ? Colors.white : null,
               hintText: hint,
-              hintStyle: GoogleFonts.urbanist(
-                  fontSize: 13, color: AppColors.textLight),
+              hintStyle: GoogleFonts.urbanist(fontSize: 13, color: textMuted),
               border: InputBorder.none,
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -2384,8 +2431,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                   _searched = false;
                 });
               },
-              child: const Icon(Icons.close_rounded,
-                  size: 16, color: AppColors.textLight),
+              child: Icon(Icons.close_rounded, size: 16, color: _premiumMuted),
             ),
         ]),
       ),
@@ -2406,12 +2452,26 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       platform: Theme.of(context).platform,
       brightness: Theme.of(context).brightness,
     );
+    final brightness = Theme.of(context).brightness;
+    final surface = shouldUseLightFill
+        ? AppColors.bg
+        : AppColors.premiumSurfaceElevated(brightness);
+    final textPrimary = shouldUseLightFill
+        ? AppColors.text
+        : brightness == Brightness.dark
+            ? AppColors.premiumTextPrimaryDark
+            : AppColors.premiumTextPrimaryLight;
+    final textMuted = shouldUseLightFill
+        ? AppColors.textLight
+        : brightness == Brightness.dark
+            ? AppColors.premiumTextMutedDark
+            : AppColors.premiumTextMutedLight;
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.bg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
+        color: surface,
+        borderRadius: AppRadius.premiumLgR,
+        border: Border.all(color: AppColors.premiumBorder(brightness)),
       ),
       child: TextField(
         controller: ctrl,
@@ -2428,7 +2488,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         onSubmitted: (_) => nextFocusNode != null
             ? nextFocusNode.requestFocus()
             : FocusScope.of(context).unfocus(),
-        style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
+        style: GoogleFonts.urbanist(fontSize: 14, color: textPrimary),
         textCapitalization: TextCapitalization.words,
         decoration: InputDecoration(
           // Android conserve intégralement le rendu déjà validé. Sur
@@ -2436,13 +2496,12 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           // recouvrir ce champ clair avec `cardDark`, incompatible avec le
           // texte explicitement défini ci-dessus.
           filled: shouldUseLightFill ? true : null,
-          fillColor: shouldUseLightFill ? AppColors.bg : null,
+          fillColor: shouldUseLightFill ? surface : null,
           hintText: hint,
-          hintStyle:
-              GoogleFonts.urbanist(fontSize: 13, color: AppColors.textLight),
+          hintStyle: GoogleFonts.urbanist(fontSize: 13, color: textMuted),
           prefixIcon: Padding(
             padding: const EdgeInsets.only(left: 12, right: 8),
-            child: Icon(icon, color: AppColors.textMuted, size: 20),
+            child: Icon(icon, color: _premiumMuted, size: 20),
           ),
           prefixIconConstraints: const BoxConstraints(),
           border: InputBorder.none,
@@ -2513,18 +2572,18 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           Text(label,
               style: GoogleFonts.urbanist(
                   fontSize: 10,
-                  color: AppColors.textMuted,
+                  color: _premiumMuted,
                   fontWeight: FontWeight.w600)),
           Text(name,
               style: GoogleFonts.urbanist(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.text),
+                  color: _premiumText),
               overflow: TextOverflow.ellipsis),
           if (contact.isNotEmpty)
             Text('👤 $contact${phone.isNotEmpty ? ' · $phone' : ''}',
-                style: GoogleFonts.urbanist(
-                    fontSize: 11, color: AppColors.textMuted)),
+                style:
+                    GoogleFonts.urbanist(fontSize: 11, color: _premiumMuted)),
         ],
       )),
       GestureDetector(
@@ -2532,15 +2591,15 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: _premiumSurfaceElevated,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.divider),
+            border: Border.all(color: _premiumBorder),
           ),
           child: Text('Modifier',
               style: GoogleFonts.urbanist(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.text)),
+                  color: _premiumText)),
         ),
       ),
     ]);
@@ -2551,12 +2610,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       Icon(icon, size: 14, color: color),
       const SizedBox(height: 2),
       Text(label,
-          style: GoogleFonts.urbanist(fontSize: 9, color: AppColors.textMuted)),
+          style: GoogleFonts.urbanist(fontSize: 9, color: _premiumMuted)),
       Text(value,
           style: GoogleFonts.urbanist(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: AppColors.text)),
+              fontSize: 11, fontWeight: FontWeight.w700, color: _premiumText)),
     ]);
   }
 
@@ -2575,10 +2632,13 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: sel ? color.withValues(alpha: 0.05) : AppColors.bg,
-          borderRadius: BorderRadius.circular(14),
+          color: sel
+              ? color.withValues(
+                  alpha: _brightness == Brightness.dark ? 0.14 : 0.05)
+              : _premiumSurfaceElevated,
+          borderRadius: AppRadius.premiumLgR,
           border: Border.all(
-            color: sel ? color : AppColors.divider,
+            color: sel ? AppColors.primary : _premiumBorder,
             width: sel ? 2 : 1,
           ),
         ),
@@ -2601,10 +2661,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                   style: GoogleFonts.urbanist(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: disabled ? AppColors.textLight : AppColors.text)),
+                      color: disabled ? _premiumMuted : _premiumText)),
               Text(sub,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 11, color: AppColors.textMuted)),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 11, color: _premiumMuted)),
             ],
           )),
           Icon(

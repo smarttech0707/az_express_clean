@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
+import '../../theme/app_theme.dart';
 
 class ColisPage extends StatefulWidget {
   const ColisPage({super.key});
@@ -231,23 +232,22 @@ class _ColisPageState extends State<ColisPage> {
   }
 
   Widget _paymentSelector() {
+    final brightness = Theme.of(context).brightness;
+    final muted = AppColors.premiumTextSecondary(brightness);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
-        ],
+        color: AppColors.premiumSurfaceElevated(brightness),
+        borderRadius: AppRadius.lgR,
+        border: Border.all(color: AppColors.premiumBorder(brightness)),
+        boxShadow: AppShadow.xs,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Mode de paiement",
+          Text("Mode de paiement",
               style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey)),
+                  fontSize: 13, fontWeight: FontWeight.bold, color: muted)),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(
@@ -257,24 +257,27 @@ class _ColisPageState extends State<ColisPage> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
                     color: _paymentMethod == 'cash'
-                        ? Colors.orange.shade700
-                        : Colors.grey.shade100,
+                        ? AppColors.primary
+                        : AppColors.premiumSurface(brightness),
+                    border: Border.all(
+                        color: _paymentMethod == 'cash'
+                            ? AppColors.primary
+                            : AppColors.premiumBorder(brightness)),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.money,
-                            color: _paymentMethod == 'cash'
-                                ? Colors.white
-                                : Colors.grey,
+                            color:
+                                _paymentMethod == 'cash' ? Colors.white : muted,
                             size: 18),
                         const SizedBox(width: 6),
                         Text("Espèces",
                             style: TextStyle(
                                 color: _paymentMethod == 'cash'
                                     ? Colors.white
-                                    : Colors.grey,
+                                    : muted,
                                 fontWeight: FontWeight.bold)),
                       ]),
                 ),
@@ -288,30 +291,33 @@ class _ColisPageState extends State<ColisPage> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
                     color: _paymentMethod == 'wallet'
-                        ? Colors.orange.shade700
-                        : Colors.grey.shade100,
+                        ? AppColors.primary
+                        : AppColors.premiumSurface(brightness),
+                    border: Border.all(
+                        color: _paymentMethod == 'wallet'
+                            ? AppColors.primary
+                            : AppColors.premiumBorder(brightness)),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
                     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                       Icon(Icons.account_balance_wallet,
-                          color: _paymentMethod == 'wallet'
-                              ? Colors.white
-                              : Colors.grey,
+                          color:
+                              _paymentMethod == 'wallet' ? Colors.white : muted,
                           size: 18),
                       const SizedBox(width: 6),
                       Text("Wallet",
                           style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
-                                  : Colors.grey,
+                                  : muted,
                               fontWeight: FontWeight.bold)),
                     ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
                                 ? Colors.white70
-                                : Colors.grey.shade400,
+                                : muted,
                             fontSize: 11)),
                   ]),
                 ),
@@ -325,46 +331,46 @@ class _ColisPageState extends State<ColisPage> {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.premiumBg(brightness),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             expandedHeight: 150,
             pinned: true,
-            backgroundColor: Colors.orange.shade700,
-            foregroundColor: Colors.white,
+            backgroundColor: AppColors.premiumSurface(brightness),
+            foregroundColor: AppColors.premiumTextPrimary(brightness),
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.orange.shade800, Colors.orange.shade500],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  color: AppColors.premiumSurface(brightness),
+                  border: const Border(
+                    bottom: BorderSide(color: AppColors.primary20),
                   ),
                 ),
-                child: const SafeArea(
+                child: SafeArea(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      SizedBox(height: 40),
-                      Icon(Icons.card_giftcard, color: Colors.white, size: 48),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 40),
+                      const Icon(Icons.card_giftcard,
+                          color: AppColors.primary, size: 42),
+                      const SizedBox(height: 8),
                       Text("Colis & Cadeaux",
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
+                          style: AppTypography.titleLargeStyle(context,
+                              color: AppColors.premiumTextPrimary(brightness))),
                       Text("Envoi entre particuliers",
-                          style:
-                              TextStyle(color: Colors.white70, fontSize: 13)),
+                          style: AppTypography.bodySmallStyle(context,
+                              color:
+                                  AppColors.premiumTextSecondary(brightness))),
                     ],
                   ),
                 ),
               ),
             ),
             title: const Text("Colis & Cadeaux"),
-            centerTitle: true,
+            centerTitle: false,
           ),
           SliverToBoxAdapter(
             child: Padding(
@@ -433,16 +439,17 @@ class _ColisPageState extends State<ColisPage> {
                   const SizedBox(height: 12),
 
                   // Fragile switch
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
+                  Material(
+                    color: AppColors.premiumSurfaceElevated(brightness),
+                    elevation: 1,
+                    shadowColor: AppColors.black10,
+                    shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.05),
-                            blurRadius: 8)
-                      ],
+                      side: BorderSide(
+                        color: AppColors.premiumBorder(brightness),
+                      ),
                     ),
+                    clipBehavior: Clip.antiAlias,
                     child: SwitchListTile(
                       value: _fragile,
                       onChanged: (v) => setState(() => _fragile = v),
@@ -518,7 +525,7 @@ class _ColisPageState extends State<ColisPage> {
                   const SizedBox(height: 10),
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.premiumSurfaceElevated(brightness),
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
@@ -580,7 +587,7 @@ class _ColisPageState extends State<ColisPage> {
                             fontWeight: FontWeight.bold),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange.shade700,
+                        backgroundColor: AppColors.primary,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
                       ),
@@ -605,7 +612,7 @@ class _ColisPageState extends State<ColisPage> {
 
   Widget _card(List<Widget> children) => Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.premiumSurfaceElevated(Theme.of(context).brightness),
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(

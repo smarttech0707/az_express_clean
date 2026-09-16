@@ -473,9 +473,13 @@ service firebase.storage {
 
     // ── SERVICES SIMPLES (admin) ──────────────────────────────────────────
     match /simple_services/{docId}/{file} {
-      allow read:  if isAuth();
-      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
-      allow delete: if isRealUser() && isAdmin();
+      // La photo de catalogue est cliente; le justificatif id_photo.jpg reste
+      // strictement réservé aux administrateurs habilités Tricycle.
+      allow read: if (isAuth() && file == 'photo.jpg')
+        || hasAdminPermission('tricycle');
+      allow create, update: if isRealUser() && isImage() && maxSize(10)
+        && hasAdminPermission('tricycle');
+      allow delete: if isRealUser() && hasAdminPermission('tricycle');
     }
 
     // ── CAPTURES D'ÉCRAN SUPPORT ─────────────────────────────────────────

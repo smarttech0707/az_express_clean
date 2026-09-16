@@ -23,8 +23,27 @@ void main() {
 
   Widget app() => ChangeNotifierProvider<ActiveCityProvider>.value(
         value: cityProvider,
-        child: const MaterialApp(
-          home: LivraisonScreen(startStartupServices: false),
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: const LivraisonScreen(startStartupServices: false),
+        ),
+      );
+
+  Widget premiumApp(Brightness brightness, {double textScale = 1}) =>
+      ChangeNotifierProvider<ActiveCityProvider>.value(
+        value: cityProvider,
+        child: MaterialApp(
+          theme:
+              brightness == Brightness.light ? AppTheme.light : AppTheme.dark,
+          darkTheme: AppTheme.dark,
+          themeMode:
+              brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
+          home: const LivraisonScreen(startStartupServices: false),
         ),
       );
 
@@ -72,6 +91,31 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
 
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Premium V1 reste lisible en light et dark sans overflow',
+      (tester) async {
+    for (final brightness in [Brightness.light, Brightness.dark]) {
+      await tester.pumpWidget(premiumApp(brightness));
+      await tester.pump();
+      expect(find.textContaining('Étape'), findsNothing);
+      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('Premium V1 dark reste responsive à 320px et textScale 1.6',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(premiumApp(Brightness.dark, textScale: 1.6));
+    await tester.pump();
+
+    expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

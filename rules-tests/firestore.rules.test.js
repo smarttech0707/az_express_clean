@@ -599,6 +599,160 @@ test('app_config: lecture refusée sans être admin (contrairement à config)', 
   await assertFails(asClient('u1').doc('app_config/business').get());
 });
 
+test('boulangeries: catalogue lisible par une session authentifiée, écriture client refusée', async () => {
+  await seed((db) => db.doc('boulangeries/b1').set({
+    name: 'Boulangerie Test', isActive: true,
+  }));
+  await assertSucceeds(
+    asAnonymous('anon1').collection('boulangeries')
+      .where('isActive', '==', true).orderBy('name').get(),
+  );
+  await assertFails(
+    asClient('u1').doc('boulangeries/b1').update({ name: 'Détournée' }),
+  );
+});
+
+test('app_config: seul blanchisserie est lisible par le client et reste non modifiable', async () => {
+  await seed(async (db) => {
+    await db.doc('app_config/blanchisserie').set({
+      services: ['Lavage'], pricePerKg: 1000,
+    });
+    await db.doc('app_config/payment').set({ privateNumber: 'secret' });
+  });
+  const db = asClient('u1');
+  await assertSucceeds(db.doc('app_config/blanchisserie').get());
+  await assertFails(db.doc('app_config/payment').get());
+  await assertFails(unauth().doc('app_config/blanchisserie').get());
+  await assertFails(
+    db.doc('app_config/blanchisserie').update({ pricePerKg: 1 }),
+  );
+});
+
+test('simple_services: un client authentifié lit les catalogues Tricycle et Taxi disponibles', async () => {
+  await seed(async (db) => {
+    await db.doc('simple_services/tricycle-1').set({
+      name: 'Prestataire Tricycle', phone: '0700000000', photoUrl: '',
+      serviceType: 'tricycle', isAvailable: true,
+    });
+    await db.doc('simple_services/taxi-1').set({
+      name: 'Prestataire Taxi', phone: '0500000000', photoUrl: '',
+      serviceType: 'taxi_nuit', isAvailable: true,
+    });
+  });
+  const db = asClient('u1');
+  await assertSucceeds(db.collection('simple_services')
+    .where('serviceType', '==', 'tricycle')
+    .where('isAvailable', '==', true).get());
+  await assertSucceeds(db.collection('simple_services')
+    .where('serviceType', '==', 'taxi_nuit')
+    .where('isAvailable', '==', true).get());
+});
+
+test('simple_services: session non authentifiée refusée et fiche indisponible invisible au client', async () => {
+  await seed(async (db) => {
+    await db.doc('simple_services/public').set({
+      name: 'Visible', phone: '0700000000', photoUrl: '',
+      serviceType: 'tricycle', isAvailable: true,
+    });
+    await db.doc('simple_services/hidden').set({
+      name: 'Masqué', phone: '0700000000', photoUrl: '',
+      serviceType: 'tricycle', isAvailable: false,
+    });
+  });
+  await assertFails(unauth().doc('simple_services/public').get());
+  await assertFails(asClient('u1').doc('simple_services/hidden').get());
+});
+
+test('simple_service_private: client sans lecture et sans écriture', async () => {
+  await seed((db) => db.doc('simple_service_private/s1').set({
+    idNumber: 'CI-SECRET', idPhotoUrl: 'private/id.jpg', lat: 6.7, lng: -3.4,
+  }));
+  const db = asClient('u1');
+  await assertFails(db.doc('simple_service_private/s1').get());
+  await assertFails(db.doc('simple_service_private/s1').update({ idNumber: 'X' }));
+  await assertFails(db.doc('simple_service_private/s1').delete());
+});
+
+test('simple_services: client sans création, modification, suppression ni réinjection privée', async () => {
+  await seed((db) => db.doc('simple_services/s1').set({
+    name: 'Prestataire', phone: '0700000000', photoUrl: '',
+    serviceType: 'tricycle', isAvailable: true,
+  }));
+  const db = asClient('u1');
+  await assertFails(db.doc('simple_services/s2').set({
+    name: 'Faux', phone: '0700000000', photoUrl: '',
+    serviceType: 'tricycle', isAvailable: true,
+  }));
+  await assertFails(db.doc('simple_services/s1').update({ name: 'Détourné' }));
+  await assertFails(db.doc('simple_services/s1').update({ idNumber: 'INJECTÉ' }));
+  await assertFails(db.doc('simple_services/s1').delete());
+});
+
+test('simple_services: admin tricycle administre catalogue et identité, autre sous-admin refusé', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/sub-tricycle').set({
+      role: 'sub', isActive: true, permissions: ['tricycle'],
+    });
+    await db.doc('admins/sub-other').set({
+      role: 'sub', isActive: true, permissions: ['services'],
+    });
+  });
+  await assertSucceeds(asAdmin('sub-tricycle').doc('simple_services/s1').set({
+    name: 'Prestataire', phone: '0700000000', serviceType: 'tricycle',
+    isAvailable: true, photoUrl: '',
+  }));
+  await assertSucceeds(asAdmin('sub-tricycle').doc('simple_service_private/s1').set({
+    idNumber: 'CI-SECRET', idPhotoUrl: 'private/id.jpg', lat: 6.7, lng: -3.4,
+  }));
+  await assertFails(asAdmin('sub-other').doc('simple_services/s2').set({
+    name: 'Prestataire', phone: '0700000000', photoUrl: '',
+    serviceType: 'tricycle', isAvailable: true,
+  }));
+  await assertFails(asAdmin('sub-other').doc('simple_service_private/s1').get());
+});
+
+test('simple_services: même un admin ne peut réinjecter un justificatif dans le catalogue', async () => {
+  await seed((db) => db.doc('admins/admin1').set({ role: 'super', isActive: true }));
+  await assertFails(asAdmin('admin1').doc('simple_services/s1').set({
+    name: 'Prestataire', phone: '0700000000', photoUrl: '',
+    serviceType: 'tricycle', isAvailable: true, idNumber: 'INTERDIT',
+  }));
+});
+
+test('simple_services: cycle admin atomique conserve puis supprime les deux documents', async () => {
+  await seed((db) => db.doc('admins/sub-tricycle').set({
+    role: 'sub', isActive: true, permissions: ['tricycle'],
+  }));
+  const db = asAdmin('sub-tricycle');
+  const publicRef = db.doc('simple_services/atomic-service');
+  const privateRef = db.doc('simple_service_private/atomic-service');
+
+  const create = db.batch();
+  create.set(publicRef, {
+    name: 'Prestataire test', phone: '0700000000', photoUrl: '',
+    serviceType: 'tricycle', isAvailable: true,
+  });
+  create.set(privateRef, {
+    idNumber: 'TEST-ID', idPhotoUrl: 'simple_services/test/id_photo.jpg',
+    lat: 6.7, lng: -3.4,
+  });
+  await assertSucceeds(create.commit());
+
+  const update = db.batch();
+  update.update(publicRef, { name: 'Prestataire modifié' });
+  update.update(privateRef, { lat: 6.8 });
+  await assertSucceeds(update.commit());
+  assert.equal((await publicRef.get()).data().name, 'Prestataire modifié');
+  assert.equal((await privateRef.get()).data().lat, 6.8);
+
+  const remove = db.batch();
+  remove.delete(publicRef);
+  remove.delete(privateRef);
+  await assertSucceeds(remove.commit());
+  assert.equal((await publicRef.get()).exists, false);
+  assert.equal((await privateRef.get()).exists, false);
+});
+
 test('orders: a paid wallet order without an atomic debit is rejected', async () => {
   await seed((db) => db.doc('clients/c1').set({ wallet: 2000, fakeOrderCount: 0, cashOnDeliveryEnabled: true }));
   await assertFails(asClient('c1').doc('orders/o1').set({

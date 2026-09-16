@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../l10n/app_text.dart';
 import '../../models/service_provider_model.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/premium_empty_state.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ENUMS
@@ -217,8 +218,9 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
   // ── BUILD ────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F3F7),
+      backgroundColor: AppColors.premiumBg(brightness),
       body: CustomScrollView(
         slivers: [
           // ── APP BAR ──────────────────────────────────────────────────────
@@ -226,16 +228,17 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
             expandedHeight:
                 (MediaQuery.of(context).size.height * 0.20).clamp(140.0, 200.0),
             pinned: true,
-            backgroundColor: widget.color,
-            foregroundColor: Colors.white,
+            backgroundColor: AppColors.premiumSurface(brightness),
+            foregroundColor: AppColors.premiumTextPrimary(brightness),
             elevation: 0,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: widget.gradient,
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  color: AppColors.premiumSurface(brightness),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: widget.color.withValues(alpha: 0.28),
+                    ),
                   ),
                 ),
                 child: SafeArea(
@@ -247,13 +250,23 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                       children: [
                         Row(
                           children: [
-                            Icon(widget.icon, color: Colors.white70, size: 26),
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: widget.color.withValues(alpha: 0.12),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(widget.icon,
+                                  color: widget.color, size: 22),
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 widget.title,
                                 style: GoogleFonts.urbanist(
-                                  color: Colors.white,
+                                  color:
+                                      AppColors.premiumTextPrimary(brightness),
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -265,7 +278,8 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                         Text(
                           context.tr('providers_in'),
                           style: GoogleFonts.urbanist(
-                              color: Colors.white70, fontSize: 12.5),
+                              color: AppColors.premiumTextSecondary(brightness),
+                              fontSize: 12.5),
                         ),
                       ],
                     ),
@@ -276,11 +290,11 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
             title: Text(
               widget.title,
               style: GoogleFonts.urbanist(
-                  color: Colors.white,
+                  color: AppColors.premiumTextPrimary(brightness),
                   fontSize: 16,
                   fontWeight: FontWeight.w600),
             ),
-            centerTitle: true,
+            centerTitle: false,
             actions: [
               IconButton(
                 icon: const Icon(Icons.tune_rounded),
@@ -299,15 +313,12 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                   // Barre de recherche
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.06),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
+                      color: AppColors.premiumSurfaceElevated(brightness),
+                      borderRadius: AppRadius.lgR,
+                      border: Border.all(
+                        color: AppColors.premiumBorder(brightness),
+                      ),
+                      boxShadow: AppShadow.xs,
                     ),
                     child: TextField(
                       controller: _searchCtrl,
@@ -1661,27 +1672,15 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 72, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
-          Text(
-            search.isEmpty
-                ? context.tr('no_provider')
-                : '${context.tr('no_result_for')} "$search"',
-            style: GoogleFonts.urbanist(fontSize: 16, color: Colors.grey),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            context.tr('come_back'),
-            style:
-                GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade400),
-          ),
-        ],
-      ),
+    return PremiumEmptyState(
+      icon: icon,
+      title: search.isEmpty
+          ? context.tr('no_provider')
+          : '${context.tr('no_result_for')} "$search"',
+      message: search.isEmpty
+          ? context.tr('come_back')
+          : 'Essayez une autre recherche ou revenez aux catégories.',
+      accent: AppColors.bluePremium(Theme.of(context).brightness),
     );
   }
 }

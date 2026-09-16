@@ -216,10 +216,11 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
       ),
     );
     if (ok == true) {
-      await FirebaseFirestore.instance
-          .collection("simple_services")
-          .doc(docId)
-          .delete();
+      final db = FirebaseFirestore.instance;
+      final batch = db.batch();
+      batch.delete(db.collection("simple_services").doc(docId));
+      batch.delete(db.collection("simple_service_private").doc(docId));
+      await batch.commit();
     }
   }
 
@@ -430,12 +431,38 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
       _serviceType = d["serviceType"] ?? "tricycle";
       _isAvailable = d["isAvailable"] ?? true;
       _existingPhotoUrl = d["photoUrl"];
+      // Compatibilité transitoire tant que la migration 5.3 n'est pas appliquée.
       _existingIdPhotoUrl = d["idPhotoUrl"];
       _idNumberCtrl.text = d["idNumber"] ?? "";
       final lat = (d["lat"] as num?)?.toDouble() ?? 0.0;
       final lng = (d["lng"] as num?)?.toDouble() ?? 0.0;
       if (lat != 0.0) _latCtrl.text = lat.toString();
       if (lng != 0.0) _lngCtrl.text = lng.toString();
+      _loadPrivateIdentity();
+    }
+  }
+
+  Future<void> _loadPrivateIdentity() async {
+    final docId = widget.docId;
+    if (docId == null) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('simple_service_private')
+          .doc(docId)
+          .get();
+      if (!snap.exists || !mounted) return;
+      final data = snap.data()!;
+      setState(() {
+        _idNumberCtrl.text = data['idNumber'] as String? ?? '';
+        _existingIdPhotoUrl = data['idPhotoUrl'] as String?;
+        final lat = (data['lat'] as num?)?.toDouble() ?? 0.0;
+        final lng = (data['lng'] as num?)?.toDouble() ?? 0.0;
+        if (lat != 0.0) _latCtrl.text = lat.toString();
+        if (lng != 0.0) _lngCtrl.text = lng.toString();
+      });
+    } catch (_) {
+      // Conserve le fallback legacy déjà chargé, sans recopier de champ privé
+      // vers le catalogue lors de la prochaine sauvegarde.
     }
   }
 
@@ -587,32 +614,51 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
     final photoUrl = await _uploadPhoto(docId);
     final idPhotoUrl = await _uploadIdPhoto(docId);
 
-    final payload = {
+    final publicPayload = <String, dynamic>{
       "name": _nameCtrl.text.trim(),
       "phone": _phoneCtrl.text.trim(),
       "serviceType": _serviceType,
       "isAvailable": _isAvailable,
       "photoUrl": photoUrl ?? "",
+      "updatedAt": FieldValue.serverTimestamp(),
+    };
+    final privatePayload = <String, dynamic>{
       "lat": double.tryParse(_latCtrl.text.trim()) ?? 0.0,
       "lng": double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
       "idNumber": _idNumberCtrl.text.trim(),
       "idPhotoUrl": idPhotoUrl ?? "",
+      "updatedAt": FieldValue.serverTimestamp(),
     };
 
     try {
-      if (widget.docId != null) {
-        await FirebaseFirestore.instance
-            .collection("simple_services")
-            .doc(docId)
-            .update(payload);
-        if (mounted) _snack("Mis à jour", Colors.green);
+      final db = FirebaseFirestore.instance;
+      final publicRef = db.collection("simple_services").doc(docId);
+      final privateRef = db.collection("simple_service_private").doc(docId);
+      final batch = db.batch();
+      if (widget.docId == null) {
+        publicPayload["createdAt"] = FieldValue.serverTimestamp();
+        privatePayload["createdAt"] = FieldValue.serverTimestamp();
       } else {
-        payload["createdAt"] = FieldValue.serverTimestamp();
-        await FirebaseFirestore.instance
-            .collection("simple_services")
-            .doc(docId)
-            .set(payload);
-        if (mounted) _snack("Ajouté avec succès", Colors.green);
+        // Une édition nettoie également une fiche legacy avant la migration.
+        publicPayload.addAll({
+          "idNumber": FieldValue.delete(),
+          "idPhotoUrl": FieldValue.delete(),
+          "lat": FieldValue.delete(),
+          "lng": FieldValue.delete(),
+        });
+      }
+      batch.set(
+        publicRef,
+        publicPayload,
+        SetOptions(merge: widget.docId != null),
+      );
+      batch.set(privateRef, privatePayload, SetOptions(merge: true));
+      await batch.commit();
+      if (mounted) {
+        _snack(
+          widget.docId != null ? "Mis à jour" : "Ajouté avec succès",
+          Colors.green,
+        );
       }
       if (mounted) Navigator.pop(context);
     } catch (e) {

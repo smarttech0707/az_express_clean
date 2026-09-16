@@ -8,6 +8,7 @@ import '../../services/real_estate_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/immobilier/property_filter_sheet.dart';
 import '../../widgets/stream_error_state.dart';
+import '../../widgets/premium_empty_state.dart';
 import 'listing_detail_screen.dart';
 import 'agent_dashboard_screen.dart';
 
@@ -109,13 +110,14 @@ class _ImmobilierHomeScreenState extends State<ImmobilierHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.premiumBg(brightness),
       appBar: AppBar(
         title: Text(_pageTitle),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        centerTitle: true,
+        backgroundColor: AppColors.premiumSurface(brightness),
+        foregroundColor: AppColors.premiumTextPrimary(brightness),
+        centerTitle: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.storefront_outlined),
@@ -253,19 +255,22 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return ChoiceChip(
       label: Text(label),
       selected: selected,
       onSelected: (_) => onTap(),
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.premiumSurfaceElevated(brightness),
       selectedColor: AppColors.primary.withValues(alpha: 0.15),
       side: BorderSide(
         color: selected
             ? AppColors.primary.withValues(alpha: 0.45)
-            : Colors.grey.shade400,
+            : AppColors.premiumBorder(brightness),
       ),
       labelStyle: TextStyle(
-          color: selected ? AppColors.primary : Colors.black87,
+          color: selected
+              ? AppColors.primary
+              : AppColors.premiumTextPrimary(brightness),
           fontWeight: FontWeight.w600),
     );
   }
@@ -278,16 +283,11 @@ class _ListingGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (listings.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.home_outlined, size: 56, color: Colors.grey.shade300),
-            const SizedBox(height: 12),
-            Text('Aucune annonce pour le moment',
-                style: TextStyle(color: Colors.grey.shade600)),
-          ],
-        ),
+      return const PremiumEmptyState(
+        icon: Icons.home_work_outlined,
+        title: 'Aucune annonce pour le moment',
+        message: 'Les nouvelles annonces immobilières apparaîtront ici.',
+        accent: Color(0xFF2E7D6B),
       );
     }
     return GridView.builder(
@@ -310,17 +310,16 @@ class _ListingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return GestureDetector(
       onTap: () => Navigator.push(context,
           AppTransitions.fadeSlide(ListingDetailScreen(listingId: listing.id))),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: const [
-            BoxShadow(
-                color: Colors.black12, blurRadius: 6, offset: Offset(0, 2))
-          ],
+          color: AppColors.premiumSurfaceElevated(brightness),
+          borderRadius: AppRadius.lgR,
+          border: Border.all(color: AppColors.premiumBorder(brightness)),
+          boxShadow: AppShadow.xs,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -362,8 +361,9 @@ class _ListingCard extends StatelessWidget {
                       '${listing.city} · ${RealEstatePropertyType.label(listing.propertyType)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style:
-                          TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.premiumTextSecondary(brightness))),
                   // Mission 5 : uniquement l'info la plus pertinente selon le
                   // type — surface pour un terrain, chambres pour un bien
                   // habitable, rien pour un type sans donnée renseignée.
@@ -371,11 +371,13 @@ class _ListingCard extends StatelessWidget {
                       listing.surfaceTerrain != null)
                     Text('${listing.surfaceTerrain!.toStringAsFixed(0)} m²',
                         style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade600))
+                            fontSize: 11,
+                            color: AppColors.premiumTextSecondary(brightness)))
                   else if (listing.bedrooms != null)
                     Text('${listing.bedrooms} ch.',
                         style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade600)),
+                            fontSize: 11,
+                            color: AppColors.premiumTextSecondary(brightness))),
                   const SizedBox(height: 4),
                   Text(
                     '${listing.price} FCFA${listing.priceType == 'rent' ? '/mois' : ''}',

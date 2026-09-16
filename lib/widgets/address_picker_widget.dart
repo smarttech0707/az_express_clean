@@ -37,6 +37,13 @@ class AddressPickerWidget extends StatefulWidget {
   final LatLng? referencePosition;
   final ValueChanged<AddressResult?> onChanged;
 
+  /// LOT 4.1 (Courses) — accent de la carte résultat GPS ("Ma position"),
+  /// optionnel. `null` préserve exactement le comportement déjà en place
+  /// (vert historique) pour les consommateurs qui ne le fournissent pas
+  /// (ex. `create_order.dart`, non touché par ce lot) — configuration
+  /// locale au lieu d'un changement de comportement partagé.
+  final Color? gpsAccentColor;
+
   const AddressPickerWidget({
     super.key,
     required this.title,
@@ -46,6 +53,7 @@ class AddressPickerWidget extends StatefulWidget {
     this.initialValue,
     this.showModeToggle = true,
     this.referencePosition,
+    this.gpsAccentColor,
   });
 
   @override
@@ -175,13 +183,13 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
   // ── BUILD ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
-        ],
+        color: AppColors.premiumSurfaceElevated(brightness),
+        borderRadius: AppRadius.premiumLgR,
+        border: Border.all(color: AppColors.premiumBorder(brightness)),
+        boxShadow: AppShadow.xs,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -204,8 +212,9 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
 
   // ── Toggle ─────────────────────────────────────────────────────────────────
   Widget _buildModeToggle() {
+    final brightness = Theme.of(context).brightness;
     return Container(
-      color: const Color(0xFFF8F8F8),
+      color: AppColors.premiumSurface(brightness),
       padding: const EdgeInsets.all(6),
       child: Row(
         children: [
@@ -218,6 +227,10 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
 
   Widget _modeTab(String label, AddressMode mode) {
     final sel = _mode == mode;
+    final brightness = Theme.of(context).brightness;
+    final muted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     return Expanded(
       child: GestureDetector(
         onTap: () => _switchMode(mode),
@@ -234,7 +247,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-              color: sel ? Colors.white : Colors.grey.shade600,
+              color: sel ? Colors.white : muted,
             ),
           ),
         ),
@@ -244,7 +257,16 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
 
   // ── Contenu GPS ────────────────────────────────────────────────────────────
   Widget _buildGPSContent() {
+    final brightness = Theme.of(context).brightness;
+    final muted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     if (_loading) {
+      // LOT 4.1 (Courses) — bug réel trouvé et corrigé : ce texte n'était
+      // pas contraint dans le Row (ni Expanded ni Flexible), provoquant un
+      // RenderFlex overflow sur un écran étroit (iPhone 390px). Fix sûr
+      // pour les deux consommateurs (Courses et create_order.dart) —
+      // aucun changement de comportement, juste l'ajout d'un Expanded.
       return Row(children: [
         const SizedBox(
           width: 20,
@@ -253,30 +275,39 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
               strokeWidth: 2, color: AppColors.primary),
         ),
         const SizedBox(width: 12),
-        Text('Localisation GPS en cours…',
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+        Expanded(
+          child: Text('Localisation GPS en cours…',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: muted, fontSize: 14)),
+        ),
       ]);
     }
 
     if (_error != null) {
+      // LOT 4.1 — `Colors.red.shade*` n'était pas theme-aware (rouge pâle
+      // fixe, jamais vérifié en dark mode) ; remplacé par le token déjà
+      // existant `AppColors.error` avec le même mécanisme de tinte par
+      // opacité déjà utilisé ailleurs dans ce fichier (`_buildResultCard`),
+      // aucune nouvelle couleur introduite.
       return GestureDetector(
         onTap: _detectGPS,
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.red.shade50,
+            color: AppColors.error
+                .withValues(alpha: brightness == Brightness.dark ? 0.16 : 0.08),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.red.shade200),
+            border: Border.all(color: AppColors.error.withValues(alpha: 0.35)),
           ),
           child: Row(children: [
-            Icon(Icons.location_off_rounded,
-                color: Colors.red.shade400, size: 20),
+            const Icon(Icons.location_off_rounded,
+                color: AppColors.error, size: 20),
             const SizedBox(width: 10),
             Expanded(
                 child: Text(_error!,
                     style:
-                        TextStyle(color: Colors.red.shade700, fontSize: 13))),
-            Icon(Icons.refresh_rounded, color: Colors.red.shade400, size: 18),
+                        const TextStyle(color: AppColors.error, fontSize: 13))),
+            const Icon(Icons.refresh_rounded, color: AppColors.error, size: 18),
           ]),
         ),
       );
@@ -290,12 +321,17 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
       );
     }
 
+    // LOT 4.1 — `gpsAccentColor` (fourni par Courses) recentre cette carte
+    // sur le bleu premium ("localisation" dans la palette Premium V1) ;
+    // sans le paramètre, le vert historique est conservé à l'identique pour
+    // les autres consommateurs (ex. `create_order.dart`).
+    final accent = widget.gpsAccentColor ?? const Color(0xFF2E7D32);
     return _buildResultCard(
       icon: Icons.my_location_rounded,
-      color: const Color(0xFF2E7D32),
+      color: accent,
       trailing: IconButton(
         icon: const Icon(Icons.refresh_rounded, size: 18),
-        color: const Color(0xFF2E7D32),
+        color: accent,
         tooltip: 'Relancer le GPS',
         onPressed: _detectGPS,
       ),
@@ -304,15 +340,19 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
 
   // ── Contenu Manuel ─────────────────────────────────────────────────────────
   Widget _buildManualContent() {
+    final brightness = Theme.of(context).brightness;
+    final muted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     if (_result == null) {
       return GestureDetector(
         onTap: _openPicker,
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: const Color(0xFFF5F5F5),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade300),
+            color: AppColors.premiumSurface(brightness),
+            borderRadius: AppRadius.mdR,
+            border: Border.all(color: AppColors.premiumBorder(brightness)),
           ),
           child: Row(children: [
             const Icon(Icons.search_rounded,
@@ -321,10 +361,10 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
             Expanded(
               child: Text(
                 widget.hint,
-                style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+                style: TextStyle(color: muted, fontSize: 14),
               ),
             ),
-            Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
+            Icon(Icons.chevron_right_rounded, color: muted),
           ]),
         ),
       );
@@ -348,6 +388,13 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
     required Color color,
     required Widget trailing,
   }) {
+    final brightness = Theme.of(context).brightness;
+    final textPrimary = brightness == Brightness.dark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+    final muted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -368,14 +415,17 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(
               _result!.address,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: textPrimary),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 2),
             Text(
               '${_result!.latitude.toStringAsFixed(5)}, ${_result!.longitude.toStringAsFixed(5)}',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+              style: TextStyle(fontSize: 11, color: muted),
             ),
           ]),
         ),
@@ -385,20 +435,23 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
   }
 
   Widget _emptyState(IconData icon, String label) {
+    final brightness = Theme.of(context).brightness;
+    final muted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F5),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
+        color: AppColors.premiumSurface(brightness),
+        borderRadius: AppRadius.mdR,
+        border: Border.all(color: AppColors.premiumBorder(brightness)),
       ),
       child: Row(children: [
         Icon(icon, color: AppColors.primary, size: 22),
         const SizedBox(width: 12),
         Expanded(
-            child: Text(label,
-                style: TextStyle(color: Colors.grey.shade500, fontSize: 14))),
-        Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
+            child: Text(label, style: TextStyle(color: muted, fontSize: 14))),
+        Icon(Icons.chevron_right_rounded, color: muted),
       ]),
     );
   }

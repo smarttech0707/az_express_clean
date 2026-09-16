@@ -9,16 +9,19 @@ const {
   assertSucceeds,
   assertFails,
 } = require('@firebase/rules-unit-testing');
-const { ref, uploadBytes, deleteObject } = require('firebase/storage');
+const {
+  ref, uploadBytes, deleteObject, getBytes,
+} = require('firebase/storage');
 
 let testEnv;
 
 test.before(async () => {
   testEnv = await initializeTestEnvironment({
-    projectId: 'az-express-storage-test',
+    projectId: 'az-express-b0469',
     storage: {
       rules: fs.readFileSync(path.join(__dirname, '..', 'storage.rules'), 'utf8'),
     },
+    firestore: {},
   });
 });
 
@@ -28,6 +31,11 @@ function storageFor(uid, provider = 'password') {
   return testEnv.authenticatedContext(uid, {
     firebase: { sign_in_provider: provider },
   }).storage();
+}
+
+async function seedAdmin(uid, data) {
+  await testEnv.withSecurityRulesDisabled((context) =>
+    context.firestore().doc(`admins/${uid}`).set(data));
 }
 
 const image = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
@@ -137,4 +145,40 @@ test('Auto Moto logo: suppression cross-user refusée', async () => {
     contentType: 'image/jpeg',
   }));
   await assertFails(deleteObject(ref(storageFor('seller2'), path)));
+});
+
+test('Services simples Storage: client lit photo.jpg mais jamais id_photo.jpg', async () => {
+  await seedAdmin('admin-simple', { role: 'super', isActive: true });
+  const adminStorage = storageFor('admin-simple');
+  const publicPhoto = 'simple_services/s1/photo.jpg';
+  const privatePhoto = 'simple_services/s1/id_photo.jpg';
+  await assertSucceeds(uploadBytes(ref(adminStorage, publicPhoto), image, {
+    contentType: 'image/jpeg',
+  }));
+  await assertSucceeds(uploadBytes(ref(adminStorage, privatePhoto), image, {
+    contentType: 'image/jpeg',
+  }));
+  await assertSucceeds(getBytes(ref(storageFor('client1'), publicPhoto)));
+  await assertFails(getBytes(ref(storageFor('client1'), privatePhoto)));
+  await assertFails(getBytes(
+    ref(testEnv.unauthenticatedContext().storage(), publicPhoto),
+  ));
+});
+
+test('Services simples Storage: sous-admin habilité gère les justificatifs, client refusé', async () => {
+  await seedAdmin('sub-simple', {
+    role: 'sub', isActive: true, permissions: ['tricycle'],
+  });
+  const privatePhoto = 'simple_services/s2/id_photo.jpg';
+  await assertSucceeds(uploadBytes(
+    ref(storageFor('sub-simple'), privatePhoto),
+    image,
+    { contentType: 'image/jpeg' },
+  ));
+  await assertSucceeds(getBytes(ref(storageFor('sub-simple'), privatePhoto)));
+  await assertFails(uploadBytes(
+    ref(storageFor('client2'), privatePhoto),
+    image,
+    { contentType: 'image/jpeg' },
+  ));
 });

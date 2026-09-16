@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../ekbine/screens/ek_home_screen.dart';
 import '../../l10n/app_text.dart';
+import '../../theme/app_theme.dart';
 import 'service_providers_page.dart';
 import 'service_provider_register_page.dart';
 
@@ -223,9 +224,10 @@ class _ServicesHubPageState extends State<ServicesHubPage>
   @override
   Widget build(BuildContext context) {
     final screenH = MediaQuery.of(context).size.height;
+    final brightness = Theme.of(context).brightness;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F3F7),
+      backgroundColor: AppColors.premiumBg(brightness),
       body: CustomScrollView(
         controller: _scrollCtrl,
         slivers: [
@@ -233,20 +235,15 @@ class _ServicesHubPageState extends State<ServicesHubPage>
           SliverAppBar(
             expandedHeight: (screenH * 0.18).clamp(130.0, 200.0),
             pinned: true,
-            backgroundColor: const Color(0xFF1565C0),
-            foregroundColor: Colors.white,
+            backgroundColor: AppColors.premiumSurface(brightness),
+            foregroundColor: AppColors.premiumTextPrimary(brightness),
             elevation: 0,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF0D47A1),
-                      Color(0xFF1565C0),
-                      Color(0xFF1976D2)
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                decoration: BoxDecoration(
+                  color: AppColors.premiumSurface(brightness),
+                  border: const Border(
+                    bottom: BorderSide(color: AppColors.blue20),
                   ),
                 ),
                 child: SafeArea(
@@ -260,7 +257,7 @@ class _ServicesHubPageState extends State<ServicesHubPage>
                         Text(
                           context.tr('services_title'),
                           style: GoogleFonts.urbanist(
-                            color: Colors.white,
+                            color: AppColors.premiumTextPrimary(brightness),
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
                           ),
@@ -269,7 +266,8 @@ class _ServicesHubPageState extends State<ServicesHubPage>
                         Text(
                           context.tr('services_sub'),
                           style: GoogleFonts.urbanist(
-                              color: Colors.white70, fontSize: 12.5),
+                              color: AppColors.premiumTextSecondary(brightness),
+                              fontSize: 12.5),
                         ),
                       ],
                     ),
@@ -283,12 +281,12 @@ class _ServicesHubPageState extends State<ServicesHubPage>
               child: Text(
                 context.tr('services_title'),
                 style: GoogleFonts.urbanist(
-                    color: Colors.white,
+                    color: AppColors.premiumTextPrimary(brightness),
                     fontSize: 17,
                     fontWeight: FontWeight.w600),
               ),
             ),
-            centerTitle: true,
+            centerTitle: false,
           ),
 
           // ── BARRE DE RECHERCHE ────────────────────────────────────────────
