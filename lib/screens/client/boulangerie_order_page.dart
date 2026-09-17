@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../../services/tarif_service.dart';
 import '../../services/firestore_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
 import '../../providers/active_city_provider.dart';
 
 class BoulangerieOrderPage extends StatefulWidget {
@@ -1286,6 +1287,11 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
       };
 
       if (payMethod == 'wallet') {
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
+        if (!mounted) return false;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) return false;
         final clientRef =
             FirebaseFirestore.instance.collection('clients').doc(user.uid);
         final orderRef =
@@ -1294,7 +1300,13 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
           final snap = await tx.get(clientRef);
           final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
           if (wallet < totalAmount) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': wallet - totalAmount});
+          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
+          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
+          // débit ne soit réutilisé pour valider plusieurs commandes.
+          tx.update(clientRef, {
+            'wallet': wallet - totalAmount,
+            'lastPaidOrderId': orderId,
+          });
           tx.set(orderRef, orderData);
         });
       } else {

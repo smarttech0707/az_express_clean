@@ -56,7 +56,30 @@ service cloud.firestore {
     function notPresent(field) {
       return !(field in request.resource.data);
     }
-    function walletDebitMatchesPaidOrder() {
+    // LOT 6 SECURITY (2026-09) — un `orderId` doit désormais être fourni et
+    // correspondre exactement à la commande en cours de création. Avant ce
+    // verrou, la fonction ne vérifiait que l'égalité arithmétique
+    // "solde après == solde avant - montant" sur le document clients/{uid} —
+    // une égalité qui ne référence AUCUN identifiant de commande. Dans une
+    // transaction Firestore lancée par le client (livraison_screen.dart,
+    // courses_screen.dart, create_order.dart, restaurant_menu.dart,
+    // boulangerie_order_page.dart, colis_page.dart, eau_boissons_page.dart,
+    // blanchisserie_page.dart — les 8 écrans qui créent une commande wallet
+    // en débitant le client dans la même transaction), rien n'empêchait un
+    // client malveillant (requête Firestore directe, pas l'app légitime) de
+    // débiter son wallet UNE seule fois d'un montant X puis de créer
+    // PLUSIEURS documents `orders` dans cette même transaction, chacun avec
+    // `budget` (ou `totalAmount` boulangerie) == X : chaque commande évaluait
+    // indépendamment la même égalité vraie une seule fois, donc toutes
+    // passaient `isPaid:true` pour un unique débit — un seul paiement
+    // validant N commandes. Le champ `lastPaidOrderId`, écrit par l'appelant
+    // dans la même transaction que le débit, ne peut porter qu'UNE seule
+    // valeur finale : seule la commande dont l'ID correspond exactement peut
+    // désormais satisfaire ce contrôle, fermant la réutilisation d'un même
+    // débit pour plusieurs commandes. Élargissement de sécurité pur — aucune
+    // commande légitime (un débit, une commande, même transaction) n'est
+    // affectée.
+    function walletDebitMatchesPaidOrder(orderId) {
       let client = /databases/$(database)/documents/clients/$(uid());
       let amount = request.resource.data.get('sellerType', '') == 'boulangerie'
         ? request.resource.data.get('totalAmount', -1)
@@ -67,8 +90,30 @@ service cloud.firestore {
         && request.resource.data.get('shoppingBudget', 0) is int
         && amount is int
         && getAfter(client).data.wallet == get(client).data.wallet
-          - amount;
+          - amount
+        && getAfter(client).data.get('lastPaidOrderId', '') == orderId;
     }
+
+    // LOT 6.1 (walletDebitMatchesPaidReservation) → LOT 6.3 (superseded) —
+    // historique conservé pour traçabilité de l'audit. LOT 6.1 avait d'abord
+    // fermé la réutilisation de débit sur `event_reservations` avec un
+    // mécanisme miroir de walletDebitMatchesPaidOrder (un champ
+    // `lastPaidReservationId` corrélé à l'ID de la réservation). LOT 6.2 a
+    // ensuite trouvé et fermé un second trou dans la MÊME approche
+    // (`totalAmount:0` passait le contrôle sans jamais rien débiter).
+    // LOT 6.3 a trouvé un troisième problème structurel, cette fois
+    // insoluble en règles Firestore seules : rien ne validait `totalAmount`/
+    // `items[].unitPrice` contre les vrais prix `event_offers` — un client
+    // pouvait réserver des prestations réelles en déclarant un prix inventé,
+    // plus bas. Revalider ça en règles exigerait de boucler sur `items[]`
+    // (jusqu'à 50 éléments) et relire un document par élément — confirmé
+    // dépasser la limite Firestore Rules "maximum of 1000 expressions to
+    // evaluate" lors de cet audit. Remplacé entièrement par
+    // `createEventReservationCF` (functions/eventReservations.js, Admin SDK,
+    // recalcule totalAmount depuis les vrais event_offers) — voir la règle
+    // `event_reservations.allow create: if false;` ci-dessous, qui rend
+    // cette fonction inutile et l'a fait supprimer plutôt que la laisser
+    // comme code mort.
 
     // Vérifie que la session courante correspond à la pharmacie propriétaire de la commande.
     // currentUid est lié par pharmacieLogin après validation du mot de passe.
@@ -150,12 +195,28 @@ service cloud.firestore {
       // Le livreur peut mettre à jour son propre doc :
       // - sans toucher au wallet (GPS, isOnline, token…)
       // - OU en diminuant son wallet (déduction commission à l'acceptation)
+      // LOT 6 SECURITY (2026-09) : `isSuspended` n'était protégé par AUCUNE
+      // des deux branches ci-dessous — seul `wallet` l'était. Un livreur
+      // suspendu pouvait donc s'auto-réactiver (`isSuspended: false`) par une
+      // simple écriture directe sur son propre document, contournant
+      // entièrement la suspension admin. Confirmé exploitable : aucune des
+      // deux branches ne limite les AUTRES champs modifiables (pas de
+      // `hasOnly()`), donc `isSuspended` passait déjà comme n'importe quel
+      // autre champ non listé. Corrigé en ajoutant `unchanged('isSuspended')`
+      // aux deux branches — champ désormais réservé à isAdmin(), comme prévu
+      // dès l'origine (cohérent avec le même verrou déjà en place sur
+      // `ekbine_agents.isSuspended`). GPS/isOnline/fcmToken/token et tout
+      // autre champ opérationnel restent inchangés et toujours modifiables
+      // par le livreur — aucun appelant Dart légitime n'écrit `isSuspended`
+      // depuis le livreur lui-même (seul `drivers_page.dart`, admin-only,
+      // l'écrit).
       allow update: if isAdmin()
-        || (isOwner(livreurId) && unchanged('wallet'))
+        || (isOwner(livreurId) && unchanged('wallet') && unchanged('isSuspended'))
         || (isOwner(livreurId)
             && request.resource.data.wallet is int
             && request.resource.data.wallet >= 0
-            && request.resource.data.wallet < resource.data.wallet);
+            && request.resource.data.wallet < resource.data.wallet
+            && unchanged('isSuspended'));
       allow delete: if isAdmin();
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(livreurId) || isAdmin();
@@ -333,6 +394,22 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // LOT 6 SECURITY (2026-09) — PIN artisan haché, même schéma que
+    // pharmacie_credentials ci-dessus. Remplace le stockage historique en
+    // clair (service_providers/{id}.artisanPin), lisible jusqu'ici par tout
+    // utilisateur authentifié via `allow read: if isAuth()` sur
+    // service_providers (nécessaire pour l'annuaire public artisans — nom/
+    // téléphone/photos — mais qui exposait aussi le PIN en clair dans le
+    // même document). Écriture/lecture exclusivement via les Cloud Functions
+    // setArtisanPin/artisanLogin (Admin SDK) — jamais directement par le
+    // client. Migration paresseuse : les artisans déjà approuvés avant ce
+    // correctif restent sur l'ancien champ en clair jusqu'à leur prochaine
+    // réinitialisation de PIN ou une migration dédiée (planifiée, non
+    // exécutée dans cette passe) — voir rapport LOT 6 SECURITY.
+    match /artisan_credentials/{providerId} {
+      allow read, write: if false;
+    }
+
     // Tours de garde publics, distincts des comptes pharmacies partenaires.
     // Le client ne voit que les entrées actives et vérifiées. Les écritures
     // restent exclusivement administratives ; les synchronisations serveur
@@ -423,12 +500,30 @@ service cloud.firestore {
         && (request.resource.data.isPaid == false
             || (request.resource.data.isPaid == true
                 && request.resource.data.get('paymentMethod', '') == 'wallet'
-                && walletDebitMatchesPaidOrder()))
+                && walletDebitMatchesPaidOrder(orderId)))
         && request.resource.data.status == 'pending';
+      // LOT 6 SECURITY (2026-09) : la branche livreur ci-dessous ne protégeait
+      // que budget/clientId/isPaid/paymentMethod/driverId — `shoppingBudget`
+      // et `sellerId` (le bénéficiaire réel du crédit versé par
+      // deliverOrderCF à la livraison) restaient librement réécrivables par
+      // le livreur assigné pendant une transition de statut par ailleurs
+      // légitime (ex. accepted→picked_up). Confirmé exploitable : un livreur
+      // pouvait accepter une commande wallet déjà payée (isPaid déjà true,
+      // fixé à la création) puis réécrire `sellerId`/`sellerType` vers un
+      // compte partenaire de son choix avant de livrer — deliverOrderCF
+      // créditerait alors intégralement ce nouveau bénéficiaire (isPaid déjà
+      // vrai, la seule garde ajoutée au Master Prompt 80). `pharmacieId` est
+      // protégé pour la même raison (route le crédit médicaments de
+      // payOrderFromWalletCF). Aucun appelant légitime ne modifie ces champs
+      // depuis le livreur (acceptOrder()/deliverOrderCF ne touchent jamais
+      // shoppingBudget/sellerId/sellerType/pharmacieId) — élargissement de
+      // sécurité pur.
       allow update: if isAdmin() ||
         (isAuth() && resource.data.driverId == uid()
           && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
           && unchanged('paymentMethod') && unchanged('driverId')
+          && unchanged('shoppingBudget') && unchanged('sellerId')
+          && unchanged('sellerType') && unchanged('pharmacieId')
           && (
             (resource.data.status == 'assigned'    && request.resource.data.status == 'accepted')
             || (resource.data.status == 'accepted' && request.resource.data.status == 'picked_up')
@@ -898,7 +993,38 @@ service cloud.firestore {
       // LIMITATION ARCHITECTURALE : le login artisan utilise signInAnonymously() explicitement.
       // isRealUser() casserait le login. Mitigation : Phase 5 — migrer vers Cloud Function artisanLogin().
       allow read:  if isAuth();
-      allow write: if isAdmin();
+      // LOT 6.2 SECURITY (2026-09) : `artisanPin` ne doit plus jamais pouvoir
+      // être (ré)écrit en clair sur ce document, y compris par un admin —
+      // seul setArtisanPin (Cloud Function, Admin SDK, hache dans
+      // artisan_credentials) doit désormais renseigner un PIN. Sans ce
+      // verrou, un build ADMIN plus ancien que ce correctif (qui écrivait
+      // encore directement `service_providers.artisanPin` en clair) aurait
+      // pu réintroduire silencieusement la faille corrigée au LOT 6 à chaque
+      // nouvelle approbation/édition — un vrai risque de régression par
+      // désynchronisation de version, pas seulement côté client.
+      //
+      // LOT 6.3 SECURITY — bug réel trouvé et corrigé dans CE verrou lui-même :
+      // la première version (`!('artisanPin' in request.resource.data)`)
+      // vérifiait l'ABSENCE du champ dans le document RÉSULTANT — pour un
+      // `update()`, ce document résultant inclut tous les champs existants
+      // non touchés (fusion, pas remplacement). Conséquence non anticipée :
+      // sur un ancien artisan pas encore migré (artisanPin encore présent
+      // en clair), TOUTE mise à jour admin — même approuver le dossier,
+      // même changer isAvailable, sans jamais toucher artisanPin — était
+      // rejetée en bloc, puisque le champ hérité restait "présent". Confirmé
+      // par test réel contre l'émulateur avant correction (pas supposé).
+      // Corrigé : `notPresent('artisanPin') || unchanged('artisanPin')` —
+      // autorise (a) les documents qui n'ont jamais eu ce champ, (b) une
+      // mise à jour qui n'introduit ni ne modifie sa valeur (le cas bloqué
+      // à tort ci-dessus, y compris quand la valeur héritée est identique
+      // des deux côtés), et (c) sa suppression (FieldValue.delete(), le
+      // champ devient absent -> notPresent devient vrai) ; rejette
+      // uniquement l'introduction d'une valeur NOUVELLE ou MODIFIÉE — le
+      // seul cas qui reproduirait la fuite déjà corrigée. setArtisanPin et
+      // le script de migration restent de toute façon en Admin SDK, hors
+      // d'atteinte de cette règle dans les deux versions.
+      allow write: if isAdmin()
+        && (notPresent('artisanPin') || unchanged('artisanPin'));
       allow update: if isRealUser() && !('artisanUid' in resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['artisanUid'])
         && request.resource.data.artisanUid == uid();
@@ -1351,25 +1477,16 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (isAuth() && resource.data.clientId == uid())
         || (isAuth() && uid() in resource.data.providerIds);
-      allow create: if isAuth()
-        && request.resource.data.clientId == uid()
-        && request.resource.data.status == 'pending'
-        && request.resource.data.items is list
-        && request.resource.data.items.size() > 0
-        && request.resource.data.items.size() <= 50
-        && request.resource.data.totalAmount is int
-        && request.resource.data.totalAmount >= 0
-        && request.resource.data.paymentMethod in ['wallet', 'cash', 'future']
-        && (
-          (request.resource.data.paymentMethod == 'wallet'
-            && request.resource.data.isPaid == true
-            && exists(/databases/$(database)/documents/clients/$(uid()))
-            && getAfter(/databases/$(database)/documents/clients/$(uid())).data.wallet
-              == get(/databases/$(database)/documents/clients/$(uid())).data.wallet
-                - request.resource.data.totalAmount)
-          || (request.resource.data.paymentMethod != 'wallet'
-            && request.resource.data.isPaid == false)
-        );
+      // LOT 6.3 SECURITY (2026-09) : création exclusivement via
+      // createEventReservationCF (Admin SDK) — voir l'historique complet
+      // juste au-dessus de isPharmacieOwnerOfOrder(). Aucune règle
+      // Firestore ne peut revalider fidèlement `totalAmount`/`items[]`
+      // contre les vrais prix `event_offers` (boucle sur liste + relecture
+      // par élément, infaisable en règles) ; seule une Cloud Function peut
+      // garantir que le prix payé correspond réellement aux prestations et
+      // quantités réservées. `event_service.dart` n'écrit plus jamais ce
+      // document directement.
+      allow create: if false;
       allow update: if isAdmin()
         || (isAuth() && resource.data.clientId == uid()
           && resource.data.status in ['pending', 'confirmed']

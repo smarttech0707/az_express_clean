@@ -760,7 +760,23 @@ test('orders: a paid wallet order without an atomic debit is rejected', async ()
   }));
 });
 
-test('orders: a paid wallet order with the exact atomic debit is allowed', async () => {
+// LOT 6 SECURITY (2026-09) : le débit atomique seul ne suffit plus — la
+// transaction doit désormais aussi écrire `lastPaidOrderId` sur le client,
+// égal à l'ID de la commande créée (voir walletDebitMatchesPaidOrder ci-
+// dessus et la section "LOT 6 SECURITY" en fin de fichier pour le test de
+// régression complet sur la réutilisation d'un même débit).
+test('orders: a paid wallet order with the exact atomic debit AND matching lastPaidOrderId is allowed', async () => {
+  await seed((db) => db.doc('clients/c1').set({ wallet: 2000, fakeOrderCount: 0, cashOnDeliveryEnabled: true }));
+  const db = asClient('c1');
+  const batch = db.batch();
+  batch.update(db.doc('clients/c1'), { wallet: 1000, lastPaidOrderId: 'o1' });
+  batch.set(db.doc('orders/o1'), {
+    clientId: 'c1', budget: 1000, isPaid: true, paymentMethod: 'wallet', status: 'pending',
+  });
+  await assertSucceeds(batch.commit());
+});
+
+test('orders: a paid wallet order with the exact atomic debit but WITHOUT lastPaidOrderId is rejected (LOT 6 SECURITY)', async () => {
   await seed((db) => db.doc('clients/c1').set({ wallet: 2000, fakeOrderCount: 0, cashOnDeliveryEnabled: true }));
   const db = asClient('c1');
   const batch = db.batch();
@@ -768,7 +784,7 @@ test('orders: a paid wallet order with the exact atomic debit is allowed', async
   batch.set(db.doc('orders/o1'), {
     clientId: 'c1', budget: 1000, isPaid: true, paymentMethod: 'wallet', status: 'pending',
   });
-  await assertSucceeds(batch.commit());
+  await assertFails(batch.commit());
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1408,7 +1424,17 @@ test('event: les documents KYC ne sont jamais publics', async () => {
   );
 });
 
-test('event: une réservation Wallet exige le débit atomique exact', async () => {
+// LOT 6.3 SECURITY (2026-09) : plus aucune création directe côté client,
+// quelle que soit sa forme — même un document parfaitement correct (débit
+// atomique exact, lastPaidReservationId correspondant, montant réel) est
+// désormais refusé, puisque seule createEventReservationCF (Admin SDK) peut
+// créer ce document. Remplace l'ancien test LOT 6.1/6.2 qui vérifiait le
+// mécanisme lastPaidReservationId, devenu obsolète (walletDebitMatchesPaidReservation
+// supprimée — voir l'historique juste avant isPharmacieOwnerOfOrder() dans
+// firestore.rules). La couverture du calcul de prix/anti-réutilisation de
+// débit vit désormais dans functions/test/eventReservations.test.js
+// (12 tests dédiés à createEventReservationCF).
+test('event: la création directe côté client est TOUJOURS refusée, même avec un débit atomique exact et un marqueur correspondant (LOT 6.3 : CF-only)', async () => {
   await seed((db) => db.doc('clients/client-event').set({ wallet: 100000 }));
   const reservation = {
     clientId: 'client-event',
@@ -1422,11 +1448,20 @@ test('event: une réservation Wallet exige le débit atomique exact', async () =
   await assertFails(
     asClient('client-event').doc('event_reservations/r-bad').set(reservation),
   );
+
   const clientDb = asClient('client-event');
   const batch = clientDb.batch();
-  batch.update(clientDb.doc('clients/client-event'), { wallet: 50000 });
+  batch.update(clientDb.doc('clients/client-event'), {
+    wallet: 50000, lastPaidReservationId: 'r-ok',
+  });
   batch.set(clientDb.doc('event_reservations/r-ok'), reservation);
-  await assertSucceeds(batch.commit());
+  await assertFails(batch.commit());
+
+  // Même une réservation cash (jamais concernée par le débit) est refusée.
+  await assertFails(asClient('client-event').doc('event_reservations/r-cash').set({
+    clientId: 'client-event', providerIds: ['p1'], items: [{ offerId: 'o1', quantity: 1 }],
+    totalAmount: 5000, paymentMethod: 'cash', isPaid: false, status: 'pending',
+  }));
 });
 
 test('event: un client ne peut qu’annuler sa réservation sans altérer le montant', async () => {
@@ -2321,4 +2356,465 @@ test('vehicle_seller_private_locations: super-admin lit, utilisateur non authent
   const path = 'vehicle_seller_private_locations/seller1';
   await assertSucceeds(asAdmin('admin1').doc(path).get());
   await assertFails(unauth().doc(path).get());
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT 6 SECURITY (2026-09) — régression pour les 4 failles auditées :
+// 1) livreur modifiant shoppingBudget/sellerId d'une commande assignée
+// 2) un seul débit wallet validant plusieurs commandes
+// 3) PIN artisan lisible par tout utilisateur authentifié
+// 4) livreur modifiant isSuspended sur son propre document
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── 1) orders : sellerId / shoppingBudget non modifiables par le livreur ──
+
+test('LOT 6 : un livreur assigné NE PEUT PAS réécrire sellerId pendant une transition de statut légitime (détournement du bénéficiaire du paiement)', async () => {
+  await seed((db) => db.doc('orders/o1').set({
+    clientId: 'c1', driverId: 'd1', sellerId: 's_legit', sellerType: 'restaurant',
+    budget: 2000, shoppingBudget: 0, isPaid: true, paymentMethod: 'wallet',
+    status: 'accepted',
+  }));
+  await assertFails(asClient('d1').doc('orders/o1').update({
+    status: 'picked_up', sellerId: 's_attacker',
+  }));
+});
+
+test('LOT 6 : un livreur assigné NE PEUT PAS réécrire shoppingBudget pendant une transition de statut légitime', async () => {
+  await seed((db) => db.doc('orders/o1').set({
+    clientId: 'c1', driverId: 'd1', budget: 1000, shoppingBudget: 0,
+    isPaid: true, paymentMethod: 'wallet', status: 'accepted',
+  }));
+  await assertFails(asClient('d1').doc('orders/o1').update({
+    status: 'picked_up', shoppingBudget: 50000,
+  }));
+});
+
+test('LOT 6 : un livreur assigné NE PEUT PAS réécrire pharmacieId (route le crédit médicaments)', async () => {
+  await seed((db) => db.doc('orders/o1').set({
+    clientId: 'c1', driverId: 'd1', pharmacieId: 'ph_legit', budget: 500,
+    isPaid: false, paymentMethod: 'wallet', status: 'accepted',
+  }));
+  await assertFails(asClient('d1').doc('orders/o1').update({
+    status: 'picked_up', pharmacieId: 'ph_attacker',
+  }));
+});
+
+test('LOT 6 (contrôle) : un livreur assigné peut toujours faire avancer le statut sans toucher aux champs financiers/bénéficiaire', async () => {
+  await seed((db) => db.doc('orders/o1').set({
+    clientId: 'c1', driverId: 'd1', sellerId: 's1', sellerType: 'restaurant',
+    budget: 2000, shoppingBudget: 0, isPaid: true, paymentMethod: 'wallet',
+    status: 'accepted',
+  }));
+  await assertSucceeds(asClient('d1').doc('orders/o1').update({ status: 'picked_up' }));
+});
+
+// ── 2) orders : un débit wallet ne peut plus valider plusieurs commandes ──
+
+test('LOT 6 : un unique débit wallet ne peut PAS valider deux commandes dans la même transaction client (réutilisation de débit)', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 1000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  const batch = clientDb.batch();
+  // Un seul débit de 500 FCFA — mais DEUX commandes à 500 FCFA chacune
+  // tentent de s'appuyer sur ce même débit (ancien contournement : chaque
+  // commande vérifiait indépendamment "solde après == solde avant - SON
+  // montant", satisfiable simultanément par les deux si leurs montants sont
+  // identiques au débit réel).
+  batch.update(clientDb.doc('clients/c1'), { wallet: 500, lastPaidOrderId: 'o1' });
+  batch.set(clientDb.doc('orders/o1'), {
+    clientId: 'c1', budget: 500, isPaid: true, paymentMethod: 'wallet', status: 'pending',
+  });
+  batch.set(clientDb.doc('orders/o2'), {
+    clientId: 'c1', budget: 500, isPaid: true, paymentMethod: 'wallet', status: 'pending',
+  });
+  await assertFails(batch.commit());
+});
+
+test('LOT 6 : un débit wallet sans lastPaidOrderId correspondant est refusé (repli sans le marqueur)', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 1000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  const batch = clientDb.batch();
+  batch.update(clientDb.doc('clients/c1'), { wallet: 500 }); // pas de lastPaidOrderId
+  batch.set(clientDb.doc('orders/o1'), {
+    clientId: 'c1', budget: 500, isPaid: true, paymentMethod: 'wallet', status: 'pending',
+  });
+  await assertFails(batch.commit());
+});
+
+test('LOT 6 (contrôle) : un paiement wallet légitime (un débit, une commande, lastPaidOrderId correspondant) reste autorisé', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 1000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  const batch = clientDb.batch();
+  batch.update(clientDb.doc('clients/c1'), { wallet: 500, lastPaidOrderId: 'o1' });
+  batch.set(clientDb.doc('orders/o1'), {
+    clientId: 'c1', budget: 500, isPaid: true, paymentMethod: 'wallet', status: 'pending',
+  });
+  await assertSucceeds(batch.commit());
+});
+
+// ── 3) artisan_credentials : PIN jamais lisible côté client, quel que soit le rôle ──
+
+test('LOT 6 : artisan_credentials est totalement verrouillé (lecture) — client, artisan lié et admin tous refusés', async () => {
+  await seed(async (db) => {
+    await db.doc('artisan_credentials/p1').set({ hash: 'salt:hash', updatedAt: new Date() });
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+  });
+  await assertFails(asClient('someone').doc('artisan_credentials/p1').get());
+  await assertFails(asClient('p1').doc('artisan_credentials/p1').get());
+  await assertFails(asAdmin('admin1').doc('artisan_credentials/p1').get());
+  await assertFails(unauth().doc('artisan_credentials/p1').get());
+});
+
+test('LOT 6 : artisan_credentials est totalement verrouillé (écriture) — même un admin ne peut pas écrire directement (CF-only, Admin SDK uniquement)', async () => {
+  await seed((db) => db.doc('admins/admin1').set({ role: 'super', isActive: true }));
+  await assertFails(asAdmin('admin1').doc('artisan_credentials/p1').set({ hash: 'x' }));
+  await assertFails(asClient('p1').doc('artisan_credentials/p1').set({ hash: 'x' }));
+});
+
+test('LOT 6 (contrôle) : service_providers reste lisible pour l\'annuaire public (nom/téléphone/photos), fonctionnement légitime inchangé', async () => {
+  await seed((db) => db.doc('service_providers/p1').set({
+    name: 'Kouassi Plomberie', phone: '0700000000', subcategory: 'plombier',
+    photos: [], status: 'approved', isAvailable: true,
+  }));
+  await assertSucceeds(asClient('anyone').doc('service_providers/p1').get());
+});
+
+// Note : la liaison artisanUid à la première connexion et le renouvellement
+// du PIN passent tous deux par artisanLogin/setArtisanPin (Cloud Functions,
+// Admin SDK — bypass des règles Firestore par construction), pas par une
+// écriture directe côté client sur ce document — non testable au niveau des
+// règles seules, cohérent avec l'architecture déjà documentée dans
+// firestore.rules (le login artisan reste explicitement anonyme).
+
+// ── 4) livreurs : isSuspended non modifiable par le livreur lui-même ──
+
+test('LOT 6 : un livreur ne peut PAS s\'auto-réactiver (isSuspended: false) après suspension', async () => {
+  await seed((db) => db.doc('livreurs/d1').set({ wallet: 500, isOnline: false, isSuspended: true }));
+  await assertFails(asClient('d1').doc('livreurs/d1').update({ isSuspended: false }));
+});
+
+test('LOT 6 : un livreur ne peut PAS non plus s\'auto-suspendre ou toucher isSuspended dans un sens ou l\'autre', async () => {
+  await seed((db) => db.doc('livreurs/d1').set({ wallet: 500, isOnline: true, isSuspended: false }));
+  await assertFails(asClient('d1').doc('livreurs/d1').update({ isSuspended: true }));
+});
+
+test('LOT 6 : isSuspended reste protégé même quand le livreur diminue légitimement son propre wallet (branche acceptation de commande)', async () => {
+  await seed((db) => db.doc('livreurs/d1').set({ wallet: 500, isOnline: true, isSuspended: true }));
+  await assertFails(asClient('d1').doc('livreurs/d1').update({ wallet: 400, isSuspended: false }));
+});
+
+test('LOT 6 (contrôle) : un admin peut toujours suspendre/réactiver un livreur', async () => {
+  await seed(async (db) => {
+    await db.doc('livreurs/d1').set({ wallet: 500, isOnline: true, isSuspended: false });
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+  });
+  await assertSucceeds(asAdmin('admin1').doc('livreurs/d1').update({ isSuspended: true }));
+});
+
+test('LOT 6 (contrôle) : un livreur peut toujours mettre à jour sa position/isOnline sans toucher isSuspended (fonctionnement légitime inchangé)', async () => {
+  await seed((db) => db.doc('livreurs/d1').set({
+    wallet: 500, isOnline: true, isSuspended: false, lat: 6.7, lng: -3.4,
+  }));
+  await assertSucceeds(
+    asClient('d1').doc('livreurs/d1').update({ lat: 6.71, lng: -3.41, isOnline: false }),
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT 6.1 SECURITY (2026-09, suite) — event_reservations (même faille que
+// orders, trouvée en cartographiant tous les producteurs wallet), robustesse
+// de wallet_transactions falsifiées, et compatibilité "ancien" client wallet.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── event_reservations : même correctif que orders (lastPaidReservationId) ──
+
+test('LOT 6.1 : un unique débit wallet ne peut PAS valider deux réservations événementielles (même faille que orders)', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 1000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  const batch = clientDb.batch();
+  batch.update(clientDb.doc('clients/c1'), { wallet: 500, lastPaidReservationId: 'r1' });
+  batch.set(clientDb.doc('event_reservations/r1'), {
+    clientId: 'c1', status: 'pending', items: [{ x: 1 }], totalAmount: 500,
+    paymentMethod: 'wallet', isPaid: true,
+  });
+  batch.set(clientDb.doc('event_reservations/r2'), {
+    clientId: 'c1', status: 'pending', items: [{ x: 1 }], totalAmount: 500,
+    paymentMethod: 'wallet', isPaid: true,
+  });
+  await assertFails(batch.commit());
+});
+
+test('LOT 6.1 : une réservation événementielle payée par wallet sans lastPaidReservationId est refusée', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 1000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  const batch = clientDb.batch();
+  batch.update(clientDb.doc('clients/c1'), { wallet: 500 }); // pas de lastPaidReservationId
+  batch.set(clientDb.doc('event_reservations/r1'), {
+    clientId: 'c1', status: 'pending', items: [{ x: 1 }], totalAmount: 500,
+    paymentMethod: 'wallet', isPaid: true,
+  });
+  await assertFails(batch.commit());
+});
+
+// LOT 6.3 : superseded — voir le test "la création directe côté client est
+// TOUJOURS refusée" plus haut. Ce qui était "légitime" en LOT 6.1 (débit
+// exact + marqueur correspondant) est désormais refusé lui aussi : seule
+// createEventReservationCF crée ce document. Conservé comme test explicite
+// pour ne jamais laisser une future régression rouvrir ce chemin par erreur.
+test('LOT 6.3 : même le motif exact validé au LOT 6.1 (débit + lastPaidReservationId corrects) est désormais refusé côté client — CF-only', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 1000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  const batch = clientDb.batch();
+  batch.update(clientDb.doc('clients/c1'), { wallet: 500, lastPaidReservationId: 'r1' });
+  batch.set(clientDb.doc('event_reservations/r1'), {
+    clientId: 'c1', status: 'pending', items: [{ x: 1 }], totalAmount: 500,
+    paymentMethod: 'wallet', isPaid: true,
+  });
+  await assertFails(batch.commit());
+});
+
+test('LOT 6.1 (contrôle) : un ID de commande (lastPaidOrderId) ne peut PAS valider une réservation, ni l\'inverse (champs distincts, aucune confusion inter-collections)', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 1000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  // Le client débite pour une COMMANDE (o1) mais tente de faire passer une
+  // RÉSERVATION (r1) du même montant sur ce même débit.
+  const batch = clientDb.batch();
+  batch.update(clientDb.doc('clients/c1'), { wallet: 500, lastPaidOrderId: 'o1' });
+  batch.set(clientDb.doc('event_reservations/r1'), {
+    clientId: 'c1', status: 'pending', items: [{ x: 1 }], totalAmount: 500,
+    paymentMethod: 'wallet', isPaid: true,
+  });
+  await assertFails(batch.commit());
+});
+
+// ── wallet_transactions : falsification sans impact sur le solde réel ──────
+
+test('LOT 6.1 : une écriture wallet_transactions falsifiée (montant fantaisiste) n\'affecte jamais le solde réel du client — champs distincts, règles distinctes', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 100, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  // Le client PEUT écrire une entrée d'historique fantaisiste sur son propre
+  // journal (déjà accepté comme risque cosmétique — voir CLAUDE.md, aucun
+  // consommateur ne s'appuie dessus pour créditer/rembourser) ...
+  await assertSucceeds(clientDb.doc('clients/c1/wallet_transactions/fake1').set({
+    type: 'earning', amount: 999999999, description: 'faux gain', createdAt: new Date(),
+  }));
+  // ... mais ne peut PAS s'en servir pour augmenter son propre solde réel :
+  // la règle `clients.wallet` reste indépendante de `wallet_transactions`.
+  await assertFails(clientDb.doc('clients/c1').update({ wallet: 999999999 }));
+});
+
+test('LOT 6.1 : livreurs/wallet_transactions est aussi append-only (aucune mise à jour, même par le propriétaire)', async () => {
+  await seed((db) => db.doc('livreurs/d1/wallet_transactions/tx1').set({
+    type: 'earning', amount: 200, createdAt: new Date(),
+  }));
+  await assertFails(asClient('d1').doc('livreurs/d1/wallet_transactions/tx1').update({ amount: 99999 }));
+});
+
+test('LOT 6.1 : sellers/wallet_transactions est aussi append-only (aucune mise à jour, même par le propriétaire)', async () => {
+  await seed((db) => db.doc('sellers/s1/wallet_transactions/tx1').set({
+    type: 'sale', amount: 200, createdAt: new Date(),
+  }));
+  await assertFails(asClient('s1').doc('sellers/s1/wallet_transactions/tx1').update({ amount: 99999 }));
+});
+
+test('LOT 6.1 : wallet_transactions (top-level) est append-only — falsifier une transaction déjà écrite est refusé', async () => {
+  await seed((db) => db.doc('wallet_transactions/tx1').set({
+    uid: 'u1', type: 'ekbine_payment', amount: -500, createdAt: new Date(),
+  }));
+  await assertFails(asClient('u1').doc('wallet_transactions/tx1').update({ amount: -1 }));
+});
+
+test('LOT 6.1 : wallet_transactions (top-level) — un client ne peut PAS créer une entrée au nom d\'un autre utilisateur', async () => {
+  await assertFails(asClient('u1').doc('wallet_transactions/tx1').set({
+    uid: 'u2', type: 'ekbine_payment', amount: -500, createdAt: new Date(),
+  }));
+});
+
+test('LOT 6.1 : wallet_transactions (top-level) — même une entrée auto-attribuée ne permet aucune lecture par un tiers', async () => {
+  await seed((db) => db.doc('wallet_transactions/tx1').set({
+    uid: 'u1', type: 'ekbine_payment', amount: -500, createdAt: new Date(),
+  }));
+  await assertFails(asClient('u2').doc('wallet_transactions/tx1').get());
+});
+
+// ── Compatibilité "ancien" vs "nouveau" client wallet ──────────────────────
+
+test('LOT 6.1 : un compte client "ancien" (créé avant ce correctif, sans jamais avoir eu de champ lastPaidOrderId) peut toujours payer par wallet aujourd\'hui', async () => {
+  // Simule un document clients/{uid} pré-existant, créé bien avant l'ajout
+  // de lastPaidOrderId — aucun champ de ce type n'a jamais existé dessus.
+  await seed((db) => db.doc('clients/legacy1').set({
+    wallet: 2000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+    createdAt: new Date('2026-01-01'),
+  }));
+  const clientDb = asClient('legacy1');
+  const batch = clientDb.batch();
+  batch.update(clientDb.doc('clients/legacy1'), { wallet: 1000, lastPaidOrderId: 'o1' });
+  batch.set(clientDb.doc('orders/o1'), {
+    clientId: 'legacy1', budget: 1000, isPaid: true, paymentMethod: 'wallet', status: 'pending',
+  });
+  await assertSucceeds(batch.commit());
+});
+
+test('LOT 6.1 : un compte client "nouveau" (créé via la règle create actuelle) paie par wallet dès sa première commande', async () => {
+  await assertSucceeds(asClient('new1').doc('clients/new1').set({
+    name: 'Nouveau', phone: '0700000000', wallet: 0,
+    cashOnDeliveryEnabled: true, fakeOrderCount: 0, createdAt: new Date(),
+  }));
+  await seed((db) => db.doc('clients/new1').update({ wallet: 2000 }));
+  const clientDb = asClient('new1');
+  const batch = clientDb.batch();
+  batch.update(clientDb.doc('clients/new1'), { wallet: 1000, lastPaidOrderId: 'o1' });
+  batch.set(clientDb.doc('orders/o1'), {
+    clientId: 'new1', budget: 1000, isPaid: true, paymentMethod: 'wallet', status: 'pending',
+  });
+  await assertSucceeds(batch.commit());
+});
+
+// ── artisan_credentials : lecture verrouillée aussi après une migration simulée ──
+
+test('LOT 6.1 : un compte artisan "migré" (artisanPin absent, hash présent dans artisan_credentials) — le PIN historique reste illisible pour tout client', async () => {
+  await seed(async (db) => {
+    await db.doc('service_providers/p1').set({
+      name: 'Kouassi Plomberie', phone: '0700000000', status: 'approved',
+      // Pas de champ artisanPin — comme après une migration réussie.
+    });
+    await db.doc('artisan_credentials/p1').set({ hash: 'salt:hash', updatedAt: new Date() });
+  });
+  // L'annuaire public reste lisible (fonctionnement légitime inchangé) ...
+  await assertSucceeds(asClient('anyone').doc('service_providers/p1').get());
+  // ... mais le hash migré reste totalement hors de portée d'un client,
+  // exactement comme avant la migration (voir section LOT 6 plus haut).
+  await assertFails(asClient('anyone').doc('artisan_credentials/p1').get());
+  await assertFails(asClient('p1').doc('artisan_credentials/p1').get());
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOT 6.2 — revue finale : concurrence réelle (pas seulement un même batch),
+// plancher anti-"paiement gratuit" event_reservations, et blocage de la
+// réintroduction d'un PIN artisan en clair même par un admin.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LOT 6.2 : deux VRAIES transactions Firestore concurrentes (pas un même batch) ne peuvent jamais partager un débit — sérialisées par Firestore, une seule aboutit', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 500, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  const clientRef = clientDb.doc('clients/c1');
+
+  async function attemptPay(orderId) {
+    try {
+      await clientDb.runTransaction(async (tx) => {
+        const snap = await tx.get(clientRef);
+        const balance = snap.data().wallet;
+        if (balance < 500) throw new Error('SOLDE_INSUFFISANT');
+        tx.update(clientRef, { wallet: balance - 500, lastPaidOrderId: orderId });
+        tx.set(clientDb.doc(`orders/${orderId}`), {
+          clientId: 'c1', budget: 500, isPaid: true, paymentMethod: 'wallet', status: 'pending',
+        });
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Le wallet ne couvre qu'UN SEUL débit de 500 — deux tentatives réellement
+  // concurrentes (Promise.all, pas un batch) doivent voir Firestore les
+  // sérialiser : exactement une réussit, l'autre échoue (solde insuffisant
+  // après relecture lors du retry de transaction), jamais les deux.
+  const [resultA, resultB] = await Promise.all([attemptPay('oA'), attemptPay('oB')]);
+  assert.equal([resultA, resultB].filter(Boolean).length, 1,
+    'exactement une des deux transactions concurrentes doit réussir, jamais les deux ni aucune');
+
+  const finalWallet = (await clientRef.get()).data().wallet;
+  assert.equal(finalWallet, 0, 'le wallet ne doit être débité qu\'une seule fois au total');
+});
+
+// ── event_reservations : plancher anti-"paiement gratuit" (LOT 6.2) ───────
+
+test('LOT 6.2 : une réservation événementielle "payée" par wallet avec totalAmount:0 est refusée (débit trivialement nul, sinon "payée" sans jamais rien coûter)', async () => {
+  await seed((db) => db.doc('clients/c1').set({
+    wallet: 1000, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
+  }));
+  const clientDb = asClient('c1');
+  const batch = clientDb.batch();
+  // Débit nul (wallet inchangé) — mathématiquement cohérent avec
+  // totalAmount:0, mais ne doit plus jamais donner isPaid:true.
+  batch.update(clientDb.doc('clients/c1'), { lastPaidReservationId: 'r1' });
+  batch.set(clientDb.doc('event_reservations/r1'), {
+    clientId: 'c1', status: 'pending', items: [{ x: 1 }], totalAmount: 0,
+    paymentMethod: 'wallet', isPaid: true,
+  });
+  await assertFails(batch.commit());
+});
+
+// LOT 6.3 : superseded — même une réservation cash (jamais concernée par le
+// débit/plancher) ne peut plus être créée directement par le client.
+test('LOT 6.3 : une réservation cash/future, même à montant nul, est désormais refusée en écriture directe (CF-only)', async () => {
+  await assertFails(asClient('c1').doc('event_reservations/r1').set({
+    clientId: 'c1', status: 'pending', items: [{ x: 1 }], totalAmount: 0,
+    paymentMethod: 'cash', isPaid: false,
+  }));
+});
+
+// ── service_providers : artisanPin ne peut plus jamais être réécrit en clair, même par un admin (compatibilité "vieux build admin") ──
+
+test('LOT 6.2 : même un admin (simulant un ancien build qui écrivait encore artisanPin en clair) ne peut plus réintroduire ce champ', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('service_providers/p1').set({ name: 'Kouassi', phone: '0700000000', status: 'pending' });
+  });
+  await assertFails(asAdmin('admin1').doc('service_providers/p1').update({
+    status: 'approved', isAvailable: true, artisanPin: '1234',
+  }));
+});
+
+test('LOT 6.2 (contrôle) : un admin peut toujours approuver un artisan tant qu\'il ne touche pas artisanPin (fonctionnement légitime inchangé)', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('service_providers/p1').set({ name: 'Kouassi', phone: '0700000000', status: 'pending' });
+  });
+  await assertSucceeds(asAdmin('admin1').doc('service_providers/p1').update({
+    status: 'approved', isAvailable: true,
+  }));
+});
+
+test('LOT 6.2 (contrôle) : un admin peut toujours supprimer un artisanPin résiduel (nettoyage/migration), la suppression n\'est jamais bloquée', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('service_providers/p1').set({
+      name: 'Kouassi', phone: '0700000000', status: 'approved', artisanPin: '1234',
+    });
+  });
+  await assertSucceeds(asAdmin('admin1').doc('service_providers/p1').update({
+    artisanPin: deleteField(),
+  }));
+});
+
+test('LOT 6.3 DIAGNOSTIC : un admin qui met à jour un champ SANS RAPPORT sur un ancien document qui a encore artisanPin en clair — vérifie si le blocage LOT 6.2 bloque aussi les mises à jour légitimes avant migration', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('service_providers/p1').set({
+      name: 'Kouassi', phone: '0700000000', status: 'pending', artisanPin: '1234',
+    });
+  });
+  // Ne touche jamais artisanPin — seulement status/isAvailable.
+  await assertSucceeds(asAdmin('admin1').doc('service_providers/p1').update({
+    status: 'approved', isAvailable: true,
+  }));
 });

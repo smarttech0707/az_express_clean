@@ -644,6 +644,31 @@ test('deliverOrderCF: rejects an order that is not accepted/picked_up', async ()
   );
 });
 
+test('LOT 6 SECURITY: deliverOrderCF rejects a second delivery attempt on an already-delivered order — no double credit', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, isPaid: true },
+    'livreurs/d1': { wallet: 0 },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 1000);
+  assert.equal(store.get('orders/o1').status, 'delivered');
+
+  // Deuxième tentative de livraison de la même commande (double-tap, retry
+  // réseau, ou appel malveillant rejoué) — doit être rejetée AVANT tout
+  // nouveau crédit, grâce à la vérification de statut déjà faite à
+  // l'intérieur de la même transaction (status doit être accepted/picked_up).
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } }),
+    (err) => err.code === 'failed-precondition',
+  );
+  assert.equal(store.get('livreurs/d1').wallet, 1000, 'le livreur ne doit pas être crédité deux fois');
+});
+
 // ── payBoutiqueOrderCF ───────────────────────────────────────────────────
 
 test('payBoutiqueOrderCF: happy path debits client, credits seller, decrements stock, creates the order', async () => {

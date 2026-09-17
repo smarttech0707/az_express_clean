@@ -66,7 +66,15 @@ function buildResetAccountPassword({ db, auth, fieldValue, hashSecret, checkRate
       if (!/^\d{4,6}$/.test(pin)) {
         throw new HttpsError('invalid-argument', 'Le PIN doit contenir 4 a 6 chiffres');
       }
-      await accountDoc.ref.update({ artisanPin: pin });
+      // LOT 6 SECURITY (2026-09) : haché et stocké dans artisan_credentials
+      // (CF-only), jamais en clair sur service_providers.artisanPin — meme
+      // schema que la branche pharmacie ci-dessous (hashSecret + suppression
+      // du champ en clair pour CE compte precis, migration paresseuse par
+      // reinitialisation, pas une purge groupee des anciennes donnees).
+      await db.collection('artisan_credentials').doc(accountDoc.id).set({
+        hash: hashSecret(pin), updatedAt: fieldValue.serverTimestamp(),
+      });
+      await accountDoc.ref.update({ artisanPin: fieldValue.delete() });
       return { success: true, uid: accountDoc.id };
     }
     if (userType === 'pharmacie') {

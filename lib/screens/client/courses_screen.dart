@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
 import '../../services/tarif_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
 import '../../providers/active_city_provider.dart';
 import '../../widgets/address_picker_widget.dart';
 import '../../widgets/scale_button.dart';
@@ -516,6 +517,16 @@ class _CoursesScreenState extends State<CoursesScreen> {
       );
 
       if (_payment == 'wallet') {
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService — une
+        // app trop ancienne voit un message clair plutôt qu'un
+        // permission-denied brut au moment du débit.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          setState(() => _sending = false);
+          return;
+        }
         final clientRef =
             FirebaseFirestore.instance.collection('clients').doc(user!.uid);
         final orderRef =
@@ -524,7 +535,13 @@ class _CoursesScreenState extends State<CoursesScreen> {
           final snap = await tx.get(clientRef);
           final balance = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
           if (balance < totalBudget) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': balance - totalBudget});
+          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
+          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
+          // débit ne soit réutilisé pour valider plusieurs commandes.
+          tx.update(clientRef, {
+            'wallet': balance - totalBudget,
+            'lastPaidOrderId': order.id,
+          });
           tx.set(orderRef, order.toMap());
         });
         await FirestoreService().createOrder(order, alreadyCreated: true);

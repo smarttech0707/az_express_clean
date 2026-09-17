@@ -1396,13 +1396,29 @@ exports.submitServiceProviderApplication = onCall({ maxInstances: 2 }, async (re
     status:      'pending',
     rating:      0,
     ratingCount: 0,
-    artisanPin:  '',
+    // LOT 6.2 SECURITY : plus de placeholder artisanPin ici — le PIN n'est
+    // désormais jamais présent en clair sur ce document, même vide ; il est
+    // défini exclusivement par setArtisanPin (haché, artisan_credentials)
+    // au moment de l'approbation.
     createdAt:   admin.firestore.FieldValue.serverTimestamp(),
   });
 
   return { docId: docRef.id };
 });
 
+// LOT 6 SECURITY (2026-09) — ne compare plus jamais le PIN en clair via une
+// requête Firestore directe (`where('artisanPin','==',pin)`), qui exigeait
+// structurellement que le PIN reste lisible en clair dans le document
+// (et l'était : service_providers a `allow read: if isAuth()`, donc N'IMPORTE
+// QUEL utilisateur authentifié pouvait lire le PIN de n'importe quel artisan
+// simplement en lisant son document — confirmé exploitable, pas théorique).
+// Recherche désormais par téléphone seul, puis vérifie le PIN contre
+// artisan_credentials/{providerId} (haché, CF-only, jamais exposé par les
+// règles Firestore). Repli sur l'ancien champ en clair UNIQUEMENT pour les
+// artisans pas encore migrés (aucun document artisan_credentials) — migration
+// paresseuse, même pattern que pharmacieLogin ci-dessus : dès qu'un tel
+// artisan se reconnecte avec succès, son PIN est haché et le champ en clair
+// supprimé, sans qu'aucune migration groupée n'ait été nécessaire.
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
 // légère de maxInstances uniquement.
 exports.artisanLogin = onCall({ maxInstances: 2 }, async (request) => {
@@ -1416,20 +1432,89 @@ exports.artisanLogin = onCall({ maxInstances: 2 }, async (request) => {
 
   await checkRateLimit(`artisan_login_${phone}`, 'artisan_login', 10, 300);
 
-  const snap = await db.collection('service_providers')
+  const candidates = await db.collection('service_providers')
     .where('phone', '==', phone)
-    .where('artisanPin', '==', pin)
-    .limit(1)
+    .limit(10)
     .get();
-  if (snap.empty) return { success: false };
+  if (candidates.empty) return { success: false };
 
-  const doc = snap.docs[0];
+  let matchedDoc = null;
+  for (const doc of candidates.docs) {
+    const credSnap = await db.collection('artisan_credentials').doc(doc.id).get();
+    if (credSnap.exists) {
+      if (verifySecret(String(pin), credSnap.data().hash)) {
+        matchedDoc = doc;
+        break;
+      }
+      continue;
+    }
+    // Pas encore migré — comparer avec l'ancien champ en clair, puis migrer
+    // silencieusement ce seul compte (jamais de suppression groupée).
+    const legacyPin = String(doc.data().artisanPin || '');
+    if (legacyPin && legacyPin === String(pin)) {
+      await db.collection('artisan_credentials').doc(doc.id).set({
+        hash:      hashSecret(String(pin)),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      await doc.ref.update({ artisanPin: admin.firestore.FieldValue.delete() });
+      matchedDoc = doc;
+      break;
+    }
+  }
+  if (!matchedDoc) return { success: false };
+
   const uid = request.auth.uid;
-  if (doc.data().artisanUid !== uid) {
-    await doc.ref.update({ artisanUid: uid });
+  if (matchedDoc.data().artisanUid !== uid) {
+    await matchedDoc.ref.update({ artisanUid: uid });
   }
 
-  return { success: true, docId: doc.id, data: doc.data() };
+  // Ne jamais renvoyer le PIN (haché ou en clair) dans la réponse — le
+  // document n'en a de toute façon normalement plus besoin après migration.
+  const { artisanPin: _omit, ...safeData } = matchedDoc.data();
+  return { success: true, docId: matchedDoc.id, data: safeData };
+});
+
+// Définit/réinitialise le PIN d'un artisan (service_providers) — admin
+// uniquement (approbation initiale ou correction). Hache le PIN dans
+// artisan_credentials (CF-only) au lieu de l'écrire en clair sur
+// service_providers.artisanPin, lisible par tout utilisateur authentifié
+// (LOT 6 SECURITY, 2026-09 — voir artisanLogin ci-dessus pour le contexte
+// complet de la vulnérabilité corrigée).
+exports.setArtisanPin = onCall({ maxInstances: 2 }, async (request) => {
+  await requireAdminPermission({ request, db, permission: 'services' });
+
+  const { providerId, pin } = request.data || {};
+  if (!providerId || !pin) {
+    throw new HttpsError('invalid-argument', 'Paramètres manquants');
+  }
+  if (!/^\d{4,6}$/.test(String(pin))) {
+    throw new HttpsError('invalid-argument', 'Le PIN doit contenir 4 à 6 chiffres');
+  }
+
+  const providerRef  = db.collection('service_providers').doc(String(providerId));
+  const providerSnap = await providerRef.get();
+  if (!providerSnap.exists) {
+    throw new HttpsError('not-found', 'Prestataire introuvable');
+  }
+
+  await db.collection('artisan_credentials').doc(providerId).set({
+    hash:      hashSecret(String(pin)),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  // Le champ en clair historique est effacé pour CE compte précis dès qu'un
+  // admin (re)définit son PIN via ce chemin — jamais une suppression groupée
+  // d'anciennes données non validées, seulement le compte que cet appel
+  // vient de faire migrer.
+  await providerRef.update({ artisanPin: admin.firestore.FieldValue.delete() });
+
+  // Jamais le PIN (ni sa valeur en clair, ni son hash) dans le journal —
+  // seule la confirmation qu'une rotation a eu lieu et par qui.
+  await logAudit({
+    userId: request.auth.uid, userType: 'admin', action: 'set_artisan_pin',
+    targetId: String(providerId),
+  });
+
+  return { success: true };
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2214,6 +2299,12 @@ exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall, HttpsError
 exports.payBoutiqueOrderCF   = buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
 exports.payBoutiqueOrderCashCF = buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
 exports.refundExpiredBoutiqueOrderCF = buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
+
+// LOT 6.3 SECURITY — voir functions/eventReservations.js : totalAmount
+// désormais recalculé côté serveur à partir des vrais prix event_offers,
+// jamais confiance au prix/quantité fournis par le client.
+const { buildCreateEventReservation } = require('./eventReservations');
+exports.createEventReservationCF = buildCreateEventReservation({ db, admin, onCall, HttpsError, checkRateLimit });
 
 
 // ═══════════════════════════════════════════════════════════════════════════

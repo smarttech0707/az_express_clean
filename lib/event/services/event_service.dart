@@ -1,12 +1,14 @@
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
 import '../event_constants.dart';
 import '../models/event_models.dart';
+import 'event_reservation_attempts.dart';
 import '../../models/professional_subscription.dart';
 import '../../services/notification_service.dart';
 
@@ -15,13 +17,16 @@ class EventService {
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
     FirebaseStorage? storage,
+    FirebaseFunctions? functions,
   })  : db = firestore ?? FirebaseFirestore.instance,
         auth = auth ?? FirebaseAuth.instance,
-        storage = storage ?? FirebaseStorage.instance;
+        storage = storage ?? FirebaseStorage.instance,
+        functions = functions ?? FirebaseFunctions.instance;
 
   final FirebaseFirestore db;
   final FirebaseAuth auth;
   final FirebaseStorage storage;
+  final FirebaseFunctions functions;
   static const pageSize = 20;
 
   String newProviderId() => uid;
@@ -263,6 +268,15 @@ class EventService {
     return ref.getDownloadURL();
   }
 
+  // LOT 6.3 SECURITY : ne crée plus jamais le document directement — le
+  // client ne fournissait auparavant aucune garantie que `totalAmount`/
+  // `items[].unitPrice` correspondait aux vrais prix `event_offers` (les
+  // règles Firestore ne peuvent pas revalider fidèlement une liste
+  // d'éléments contre un catalogue serveur). createEventReservationCF
+  // recalcule le montant exclusivement à partir des offres réelles, ignore
+  // tout prix envoyé par le client, et débite le wallet atomiquement côté
+  // serveur si besoin. Seuls `offerId`/`quantity` sont transmis par item —
+  // jamais un prix.
   Future<String> createReservation({
     required List<EventCartItem> items,
     required DateTime eventDate,
@@ -277,49 +291,44 @@ class EventService {
     double? longitude,
   }) async {
     if (items.isEmpty) throw ArgumentError('La réservation est vide');
-    final total = items.fold<int>(0, (amount, e) => amount + e.total);
-    final reservation = db.collection('event_reservations').doc();
-    final client = db.collection('clients').doc(uid);
-    final transaction = client.collection('wallet_transactions').doc();
 
-    await db.runTransaction((tx) async {
-      if (paymentMethod == EventPaymentMethod.wallet) {
-        final clientSnap = await tx.get(client);
-        final balance = (clientSnap.data()?['wallet'] as num?)?.toInt() ?? 0;
-        if (balance < total) throw StateError('Solde Wallet insuffisant');
-        tx.update(client, {'wallet': balance - total});
-        tx.set(transaction, {
-          'type': 'debit',
-          'amount': -total,
-          'description': 'Réservation événementielle',
-          'orderId': reservation.id,
-          'provider': 'event',
-          'txId': transaction.id,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-      tx.set(reservation, {
-        'clientId': uid,
-        'providerIds': items.map((e) => e.offer.providerId).toSet().toList(),
-        'items': items.map((e) => e.toMap()).toList(),
-        'eventDate': Timestamp.fromDate(eventDate),
-        'eventTime': eventTime,
-        'address': address.trim(),
-        'description': description.trim(),
-        'latitude': latitude,
-        'longitude': longitude,
-        'delivery': delivery,
-        'installation': installation,
-        'dismantling': dismantling,
-        'totalAmount': total,
-        'paymentMethod': paymentMethod.name,
-        'isPaid': paymentMethod == EventPaymentMethod.wallet,
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    });
-    return reservation.id;
+    final sortedItems = items
+        .map((e) => {'offerId': e.offer.id, 'quantity': e.quantity})
+        .toList()
+      ..sort(
+          (a, b) => (a['offerId'] as String).compareTo(b['offerId'] as String));
+    final payload = <String, dynamic>{
+      'items': sortedItems,
+      // The time is a separate field; incidental seconds must not change a retry.
+      'eventDateMs': DateTime(eventDate.year, eventDate.month, eventDate.day)
+          .millisecondsSinceEpoch,
+      'eventTime': eventTime,
+      'address': address.trim(),
+      'description': description.trim(),
+      'paymentMethod': paymentMethod.name,
+      'delivery': delivery,
+      'installation': installation,
+      'dismantling': dismantling,
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+    try {
+      return await EventReservationAttempts().submit(
+        uid: uid,
+        payload: payload,
+        send: (request) async {
+          final callable = functions.httpsCallable('createEventReservationCF');
+          final result = await callable.call<Map<String, dynamic>>(request);
+          final data = Map<String, dynamic>.from(result.data as Map);
+          return data['reservationId'] as String;
+        },
+      );
+    } on FirebaseFunctionsException catch (e) {
+      // SOLDE_INSUFFISANT reste dans le message d'erreur pour compatibilité
+      // avec le parsing existant côté UI (même convention que les autres
+      // paiements wallet de l'app).
+      throw StateError(e.message ?? 'Échec de la réservation');
+    }
   }
 
   Future<void> cancelReservation(String id) =>

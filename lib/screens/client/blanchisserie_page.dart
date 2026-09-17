@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
+import '../../services/wallet_payment_compatibility.dart';
 import '../../theme/app_theme.dart';
 
 class BlanchisseriePage extends StatefulWidget {
@@ -117,6 +118,14 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
       };
 
       if (_paymentMethod == 'wallet') {
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          setState(() => _loading = false);
+          return;
+        }
         final clientRef =
             FirebaseFirestore.instance.collection('clients').doc(uid);
         final orderRef =
@@ -126,7 +135,13 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
           final snap = await tx.get(clientRef);
           final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
           if (wallet < _totalPrice) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': wallet - _totalPrice});
+          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
+          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
+          // débit ne soit réutilisé pour valider plusieurs commandes.
+          tx.update(clientRef, {
+            'wallet': wallet - _totalPrice,
+            'lastPaidOrderId': id,
+          });
           tx.set(orderRef, orderData);
         });
 

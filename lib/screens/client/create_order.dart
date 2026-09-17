@@ -17,6 +17,7 @@ import '../../services/firestore_service.dart';
 import '../../services/delivery_service.dart';
 import '../../services/tarif_service.dart';
 import '../../services/google_routes_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
 import '../../models/order_model.dart';
 import '../../models/route_model.dart';
 import '../../widgets/scale_button.dart';
@@ -463,6 +464,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       );
 
       if (_paymentMethod == 'wallet' && uid != null) {
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          setState(() => _sending = false);
+          return;
+        }
         final clientRef =
             FirebaseFirestore.instance.collection('clients').doc(uid);
         final orderRef =
@@ -471,7 +480,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           final snap = await tx.get(clientRef);
           final balance = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
           if (balance < deliveryFee) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': balance - deliveryFee});
+          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
+          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
+          // débit ne soit réutilisé pour valider plusieurs commandes.
+          tx.update(clientRef, {
+            'wallet': balance - deliveryFee,
+            'lastPaidOrderId': order.id,
+          });
           tx.set(orderRef, order.toMap());
         });
         await FirestoreService().createOrder(order, alreadyCreated: true);

@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 String _generatePin() {
@@ -176,8 +177,15 @@ class _RequestCardState extends State<_RequestCard> {
           .update({
         'status': 'approved',
         'isAvailable': true,
-        'artisanPin': pin,
         'approvedAt': FieldValue.serverTimestamp(),
+      });
+      // LOT 6 SECURITY : le PIN n'est plus jamais écrit en clair sur
+      // service_providers (document lisible par tout utilisateur
+      // authentifié) — setArtisanPin (Cloud Function) le hache et le
+      // stocke dans artisan_credentials (CF-only).
+      await FirebaseFunctions.instance.httpsCallable('setArtisanPin').call({
+        'providerId': widget.doc.id,
+        'pin': pin,
       });
       if (mounted) _showPin(pin);
     } catch (e) {
