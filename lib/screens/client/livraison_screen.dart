@@ -18,6 +18,7 @@ import '../../services/google_routes_service.dart';
 import '../../services/places_search_service.dart';
 import '../../services/places_service.dart';
 import '../../services/tarif_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/driver_marker.dart';
 import '../../widgets/glass_kit.dart';
@@ -825,6 +826,18 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       );
 
       if (_payment == 'wallet') {
+        // LOT 6.2 SECURITY : vérifie que ce build peut encore satisfaire la
+        // règle Firestore durcie (lastPaidOrderId) avant de tenter le débit
+        // — une app trop ancienne voit un message clair plutôt qu'un
+        // permission-denied brut. Repli permissif si la vérification
+        // échoue elle-même (voir WalletPaymentCompatibilityService).
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          setState(() => _sending = false);
+          return;
+        }
         final clientRef =
             FirebaseFirestore.instance.collection('clients').doc(user!.uid);
         final orderRef =
@@ -833,7 +846,13 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           final snap = await tx.get(clientRef);
           final balance = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
           if (balance < totalAmount) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': balance - totalAmount});
+          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
+          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
+          // débit ne soit réutilisé pour valider plusieurs commandes.
+          tx.update(clientRef, {
+            'wallet': balance - totalAmount,
+            'lastPaidOrderId': order.id,
+          });
           tx.set(orderRef, order.toMap());
         });
         await FirestoreService().createOrder(order, alreadyCreated: true);

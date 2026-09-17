@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../services/wallet_payment_compatibility.dart';
 import '../../theme/app_theme.dart';
 import '../event_constants.dart';
 import '../models/event_models.dart';
@@ -867,7 +868,9 @@ class EventCartScreen extends StatelessWidget {
 }
 
 class EventCheckoutScreen extends StatefulWidget {
-  const EventCheckoutScreen({super.key});
+  const EventCheckoutScreen({super.key, this.ensureWalletCompatible});
+
+  final Future<bool> Function(BuildContext)? ensureWalletCompatible;
 
   @override
   State<EventCheckoutScreen> createState() => _EventCheckoutScreenState();
@@ -885,6 +888,7 @@ class _EventCheckoutScreenState extends State<EventCheckoutScreen> {
   bool _installation = false;
   bool _dismantling = false;
   bool _saving = false;
+  bool _submissionLocked = false;
 
   @override
   void dispose() {
@@ -1038,23 +1042,49 @@ class _EventCheckoutScreenState extends State<EventCheckoutScreen> {
   }
 
   Future<void> _submit() async {
+    if (_submissionLocked) return;
     if (!_form.currentState!.validate()) return;
+    _submissionLocked = true;
     setState(() => _saving = true);
     final state = context.read<EventProvider>();
+    final submission = (
+      items: state.cart,
+      eventDate: _date,
+      eventTime:
+          '${_time.hour.toString().padLeft(2, '0')}:${_time.minute.toString().padLeft(2, '0')}',
+      address: _address.text,
+      description: _description.text,
+      paymentMethod: _payment,
+      delivery: _delivery,
+      installation: _installation,
+      dismantling: _dismantling,
+      latitude: _point.latitude,
+      longitude: _point.longitude,
+    );
     try {
+      // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService — une app
+      // trop ancienne voit un message clair plutôt qu'un permission-denied
+      // brut au moment du débit. Uniquement pour le wallet (cash/future ne
+      // sont jamais concernés par lastPaidReservationId).
+      if (submission.paymentMethod == EventPaymentMethod.wallet) {
+        if (!mounted) return;
+        final compatible = await (widget.ensureWalletCompatible ??
+            WalletPaymentCompatibilityService.ensureCompatible)(context);
+        if (!compatible) return;
+      }
+      if (!mounted) return;
       await state.service.createReservation(
-        items: state.cart,
-        eventDate: _date,
-        eventTime:
-            '${_time.hour.toString().padLeft(2, '0')}:${_time.minute.toString().padLeft(2, '0')}',
-        address: _address.text,
-        description: _description.text,
-        paymentMethod: _payment,
-        delivery: _delivery,
-        installation: _installation,
-        dismantling: _dismantling,
-        latitude: _point.latitude,
-        longitude: _point.longitude,
+        items: submission.items,
+        eventDate: submission.eventDate,
+        eventTime: submission.eventTime,
+        address: submission.address,
+        description: submission.description,
+        paymentMethod: submission.paymentMethod,
+        delivery: submission.delivery,
+        installation: submission.installation,
+        dismantling: submission.dismantling,
+        latitude: submission.latitude,
+        longitude: submission.longitude,
       );
       state.clearCart();
       if (!mounted) return;
@@ -1068,6 +1098,7 @@ class _EventCheckoutScreenState extends State<EventCheckoutScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text('Échec : $e')));
     } finally {
+      _submissionLocked = false;
       if (mounted) setState(() => _saving = false);
     }
   }

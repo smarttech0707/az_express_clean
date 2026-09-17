@@ -3,6 +3,7 @@ import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
@@ -823,8 +824,15 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
       "isAvailable": _isAvailable,
       "idNumber": _idNumberCtrl.text.trim(),
       "idPhotoUrl": idPhotoUrl ?? "",
-      "artisanPin": _artisanPinCtrl.text.trim(),
+      // LOT 6 SECURITY : le PIN n'est plus jamais écrit ici en clair sur
+      // service_providers (document lisible par tout utilisateur
+      // authentifié, `allow read: if isAuth()`) — voir l'appel à la Cloud
+      // Function setArtisanPin ci-dessous, qui le hache et le stocke dans
+      // artisan_credentials (CF-only). Le champ historique `artisanPin`
+      // n'est ni lu ni réécrit par ce formulaire.
     };
+
+    final newPin = _artisanPinCtrl.text.trim();
 
     try {
       if (widget.docId != null) {
@@ -842,6 +850,21 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
             .doc(docId)
             .set(payload);
         if (mounted) _snack("Prestataire ajouté avec succès", Colors.green);
+      }
+      // Le PIN n'est envoyé que s'il a été saisi/modifié — jamais réécrit à
+      // vide par mégarde sur un artisan qui a déjà un PIN haché en place.
+      if (newPin.isNotEmpty) {
+        try {
+          await FirebaseFunctions.instance.httpsCallable('setArtisanPin').call({
+            'providerId': docId,
+            'pin': newPin,
+          });
+        } catch (e) {
+          if (mounted) {
+            _snack("Prestataire enregistré, mais le PIN n'a pas pu être "
+                "défini : $e", Colors.orange);
+          }
+        }
       }
       if (_removedPhotos.isNotEmpty) {
         unawaited(deleteStorageUrls(_removedPhotos));

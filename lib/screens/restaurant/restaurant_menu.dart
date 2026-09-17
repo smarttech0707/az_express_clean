@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
 import '../../providers/active_city_provider.dart';
 
 class RestaurantMenu extends StatefulWidget {
@@ -178,6 +179,14 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
       );
 
       if (_paymentMethod == 'wallet') {
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          setState(() => _ordering = false);
+          return;
+        }
         final clientRef =
             FirebaseFirestore.instance.collection('clients').doc(uid);
         final orderRef =
@@ -193,7 +202,13 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
           final snap = await tx.get(clientRef);
           final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
           if (wallet < orderTotal) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': wallet - orderTotal});
+          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
+          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
+          // débit ne soit réutilisé pour valider plusieurs commandes.
+          tx.update(clientRef, {
+            'wallet': wallet - orderTotal,
+            'lastPaidOrderId': order.id,
+          });
           tx.set(orderRef, order.toMap());
         });
 
