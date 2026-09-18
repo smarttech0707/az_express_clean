@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import '../../services/artisan_account_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 String _generatePin() {
@@ -166,28 +166,26 @@ class _RequestCard extends StatefulWidget {
 
 class _RequestCardState extends State<_RequestCard> {
   bool _loading = false;
+  String? _approvalPin;
 
   Future<void> _approve() async {
+    if (_loading) return;
     setState(() => _loading = true);
-    final pin = _generatePin();
+    final pin = _approvalPin ??= _generatePin();
+    final presentationContext = Navigator.of(context).context;
     try {
-      await FirebaseFirestore.instance
-          .collection('service_providers')
-          .doc(widget.doc.id)
-          .update({
-        'status': 'approved',
-        'isAvailable': true,
-        'approvedAt': FieldValue.serverTimestamp(),
-      });
-      // LOT 6 SECURITY : le PIN n'est plus jamais écrit en clair sur
-      // service_providers (document lisible par tout utilisateur
-      // authentifié) — setArtisanPin (Cloud Function) le hache et le
-      // stocke dans artisan_credentials (CF-only).
-      await FirebaseFunctions.instance.httpsCallable('setArtisanPin').call({
-        'providerId': widget.doc.id,
-        'pin': pin,
-      });
-      if (mounted) _showPin(pin);
+      final pinIsCurrent = await ArtisanAccountService().setPin(
+        providerId: widget.doc.id, pin: pin, approve: true,
+      );
+      if (presentationContext.mounted) {
+        if (pinIsCurrent) {
+          _showPin(pin, presentationContext: presentationContext);
+        } else {
+          ScaffoldMessenger.of(presentationContext).showSnackBar(const SnackBar(
+            content: Text('Demande déjà approuvée. Le PIN actuel est conservé.'),
+          ));
+        }
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -237,9 +235,9 @@ class _RequestCardState extends State<_RequestCard> {
     if (mounted) setState(() => _loading = false);
   }
 
-  void _showPin(String pin) {
+  void _showPin(String pin, {BuildContext? presentationContext}) {
     showDialog(
-      context: context,
+      context: presentationContext ?? context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

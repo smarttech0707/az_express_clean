@@ -1,6 +1,7 @@
 'use strict';
 
 const { HttpsError } = require('firebase-functions/v2/https');
+const { setPin } = require('./artisanCredentials');
 
 function normalizePhone(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -71,10 +72,10 @@ function buildResetAccountPassword({ db, auth, fieldValue, hashSecret, checkRate
       // schema que la branche pharmacie ci-dessous (hashSecret + suppression
       // du champ en clair pour CE compte precis, migration paresseuse par
       // reinitialisation, pas une purge groupee des anciennes donnees).
-      await db.collection('artisan_credentials').doc(accountDoc.id).set({
-        hash: hashSecret(pin), updatedAt: fieldValue.serverTimestamp(),
+      await setPin({
+        db, fieldValue, providerId: accountDoc.id, pin,
+        actorUid: request.auth.uid, expectedPhone: accountDoc.data().phone,
       });
-      await accountDoc.ref.update({ artisanPin: fieldValue.delete() });
       return { success: true, uid: accountDoc.id };
     }
     if (userType === 'pharmacie') {

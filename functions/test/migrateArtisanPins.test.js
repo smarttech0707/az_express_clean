@@ -1,102 +1,58 @@
 'use strict';
-
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {
-  planDocument,
-  safeSummary,
-} = require('../scripts/migrateArtisanPins');
+const { randomInt } = require('node:crypto');
+const { hashSecret } = require('../passwordHash');
+const { planDocument, safeSummary, migrationExitCode, runMigration } = require('../scripts/migrateArtisanPins');
+const secret = () => String(randomInt(100000, 1000000));
 
-test('plan: PIN en clair sans hash existant -> needs_migration', () => {
-  const plan = planDocument({ name: 'Kouassi', artisanPin: '4821' }, false);
-  assert.equal(plan.outcome, 'needs_migration');
-  assert.equal(plan.hasPlainPin, true);
+test('legacy-only state needs migration', () => {
+  assert.equal(planDocument({ artisanPin: secret() }, null).outcome, 'needs_migration');
 });
-
-test('plan: aucun PIN en clair -> clean (déjà migré ou jamais approuvé)', () => {
-  const plan = planDocument({ name: 'Kouassi' }, true);
-  assert.equal(plan.outcome, 'clean');
+test('valid migrated credentials remain clean', () => {
+  assert.equal(planDocument({ status: 'approved' }, { hash: hashSecret(secret()) }).outcome, 'clean');
 });
-
-test('plan: PIN en clair vide (chaîne vide, artisan pas encore approuvé) -> clean', () => {
-  const plan = planDocument({ name: 'Kouassi', artisanPin: '' }, false);
-  assert.equal(plan.outcome, 'clean');
+test('matching partial state is resumable, not skipped as an anomaly', () => {
+  const value = secret();
+  assert.equal(planDocument({ artisanPin: value }, { hash: hashSecret(value) }).outcome, 'resume_cleanup');
 });
-
-test('plan: PIN en clair ET hash déjà présent -> anomaly, jamais traité automatiquement', () => {
-  const plan = planDocument({ name: 'Kouassi', artisanPin: '4821' }, true);
-  assert.equal(plan.outcome, 'anomaly');
+test('mismatching credentials, malformed hashes and approved accounts without credentials are anomalies', () => {
+  const value = secret();
+  assert.equal(planDocument({ artisanPin: value }, { hash: hashSecret(value + 'x') }).reason, 'credential_mismatch');
+  assert.equal(planDocument({}, { hash: 'invalid' }).reason, 'invalid_credential');
+  assert.equal(planDocument({ status: 'approved' }, null).reason, 'missing_credential');
+  assert.equal(planDocument({ status: 'pending' }, null).outcome, 'clean');
 });
-
-test('plan: document déjà nettoyé est idempotent (ré-exécution sans effet)', () => {
-  const plan = planDocument({ name: 'Kouassi' }, false);
-  assert.equal(plan.outcome, 'clean');
+test('safe summaries never serialize sensitive or arbitrary fields', () => {
+  const value = secret();
+  const summary = safeSummary({ dryRun: true, errors: 0, anomalies: 0, applied: 0,
+    needsMigration: 1, resumable: 0, pin: value, hash: hashSecret(value), documentIds: ['private-id'] });
+  const text = JSON.stringify(summary);
+  assert.ok(!text.includes(value));
+  assert.ok(!text.includes('private-id'));
+  assert.ok(!Object.hasOwn(summary, 'hash'));
 });
-
-test('rapport sécurisé ne contient jamais de PIN, de hash ni d\'identifiant de document', () => {
-  const report = safeSummary({
-    dryRun: true, inspected: 3, needsMigration: 1, alreadyClean: 2,
-    anomalies: 0, proposedCredentialWrites: 1, proposedPlainDeletes: 1,
-    applied: 0, errors: 0,
-    documentIds: ['secret-provider-id'], plainPin: '4821', hash: 'salt:deadbeef',
-  });
-  const serialized = JSON.stringify(report);
-  assert.equal(serialized.includes('secret-provider-id'), false);
-  assert.equal(serialized.includes('4821'), false);
-  assert.equal(serialized.includes('deadbeef'), false);
+test('incomplete execution or anomalies produce nonzero exit status', () => {
+  assert.equal(migrationExitCode({ dryRun: false, errors: 1 }), 2);
+  assert.equal(migrationExitCode({ dryRun: true, anomalies: 1 }), 2);
+  assert.equal(migrationExitCode({ dryRun: false, incomplete: true }), 2);
+  assert.equal(migrationExitCode({ dryRun: true, incomplete: true }), 0);
+  assert.equal(migrationExitCode({ dryRun: false, incomplete: false }), 0);
 });
-
-test('runMigration en dry-run ne modifie jamais Firestore', async () => {
-  const { runMigration } = require('../scripts/migrateArtisanPins');
-  const providers = {
-    p1: { name: 'A', artisanPin: '1234' },
-    p2: { name: 'B' }, // déjà propre
-  };
-  const credentials = {};
-  const written = [];
-  const deleted = [];
-
-  const fakeDb = {
+test('dry-run uses consistent transactional reads without writing', async () => {
+  const data = { artisanPin: secret() };
+  let writes = 0;
+  const db = {
     collection(name) {
-      if (name === 'service_providers') {
-        return {
-          async get() {
-            return {
-              docs: Object.entries(providers).map(([id, data]) => ({
-                id,
-                data: () => data,
-                ref: {
-                  async get() { return { exists: true, data: () => providers[id] }; },
-                  async update(patch) { deleted.push({ id, patch }); },
-                },
-              })),
-            };
-          },
-        };
-      }
-      if (name === 'artisan_credentials') {
-        return {
-          doc(id) {
-            return {
-              async get() {
-                return { exists: Object.hasOwn(credentials, id), data: () => credentials[id] };
-              },
-              async set(data) { written.push({ id, data }); credentials[id] = data; },
-            };
-          },
-        };
-      }
-      throw new Error(`unexpected collection ${name}`);
+      return { get: async () => ({ docs: [{ id: 'provider' }] }), doc: (id) => ({ path: name + '/' + id }) };
     },
+    runTransaction: async (callback) => callback({
+      get: async (ref) => ({ exists: ref.path.startsWith('service_providers/'), data: () => data }),
+      set: () => { writes++; }, update: () => { writes++; },
+    }),
   };
-  const fakeAdmin = { firestore: { FieldValue: { serverTimestamp: () => 'now', delete: () => 'DELETE' } } };
-
-  const summary = await runMigration({ db: fakeDb, admin: fakeAdmin, dryRun: true, log: () => {} });
-
-  assert.equal(summary.dryRun, true);
-  assert.equal(summary.inspected, 2);
+  const summary = await runMigration({ db, admin: { firestore: { FieldValue: {} } }, log: () => {} });
   assert.equal(summary.needsMigration, 1);
-  assert.equal(summary.alreadyClean, 1);
-  assert.equal(written.length, 0, 'dry-run ne doit jamais écrire artisan_credentials');
-  assert.equal(deleted.length, 0, 'dry-run ne doit jamais supprimer artisanPin');
+  assert.equal(summary.applied, 0);
+  assert.equal(writes, 0);
 });

@@ -1023,8 +1023,9 @@ service cloud.firestore {
       // seul cas qui reproduirait la fuite déjà corrigée. setArtisanPin et
       // le script de migration restent de toute façon en Admin SDK, hors
       // d'atteinte de cette règle dans les deux versions.
-      allow write: if isAdmin()
+      allow create, update: if isAdmin()
         && (notPresent('artisanPin') || unchanged('artisanPin'));
+      allow delete: if isAdmin();
       allow update: if isRealUser() && !('artisanUid' in resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['artisanUid'])
         && request.resource.data.artisanUid == uid();

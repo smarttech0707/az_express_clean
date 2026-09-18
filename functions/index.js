@@ -1421,101 +1421,13 @@ exports.submitServiceProviderApplication = onCall({ maxInstances: 2 }, async (re
 // supprimé, sans qu'aucune migration groupée n'ait été nécessaire.
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
 // légère de maxInstances uniquement.
-exports.artisanLogin = onCall({ maxInstances: 2 }, async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'Authentification requise');
-  }
-  const { phone, pin } = request.data;
-  if (!phone || !pin) {
-    throw new HttpsError('invalid-argument', 'Téléphone et PIN requis');
-  }
-
-  await checkRateLimit(`artisan_login_${phone}`, 'artisan_login', 10, 300);
-
-  const candidates = await db.collection('service_providers')
-    .where('phone', '==', phone)
-    .limit(10)
-    .get();
-  if (candidates.empty) return { success: false };
-
-  let matchedDoc = null;
-  for (const doc of candidates.docs) {
-    const credSnap = await db.collection('artisan_credentials').doc(doc.id).get();
-    if (credSnap.exists) {
-      if (verifySecret(String(pin), credSnap.data().hash)) {
-        matchedDoc = doc;
-        break;
-      }
-      continue;
-    }
-    // Pas encore migré — comparer avec l'ancien champ en clair, puis migrer
-    // silencieusement ce seul compte (jamais de suppression groupée).
-    const legacyPin = String(doc.data().artisanPin || '');
-    if (legacyPin && legacyPin === String(pin)) {
-      await db.collection('artisan_credentials').doc(doc.id).set({
-        hash:      hashSecret(String(pin)),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      await doc.ref.update({ artisanPin: admin.firestore.FieldValue.delete() });
-      matchedDoc = doc;
-      break;
-    }
-  }
-  if (!matchedDoc) return { success: false };
-
-  const uid = request.auth.uid;
-  if (matchedDoc.data().artisanUid !== uid) {
-    await matchedDoc.ref.update({ artisanUid: uid });
-  }
-
-  // Ne jamais renvoyer le PIN (haché ou en clair) dans la réponse — le
-  // document n'en a de toute façon normalement plus besoin après migration.
-  const { artisanPin: _omit, ...safeData } = matchedDoc.data();
-  return { success: true, docId: matchedDoc.id, data: safeData };
-});
-
-// Définit/réinitialise le PIN d'un artisan (service_providers) — admin
-// uniquement (approbation initiale ou correction). Hache le PIN dans
-// artisan_credentials (CF-only) au lieu de l'écrire en clair sur
-// service_providers.artisanPin, lisible par tout utilisateur authentifié
-// (LOT 6 SECURITY, 2026-09 — voir artisanLogin ci-dessus pour le contexte
-// complet de la vulnérabilité corrigée).
-exports.setArtisanPin = onCall({ maxInstances: 2 }, async (request) => {
-  await requireAdminPermission({ request, db, permission: 'services' });
-
-  const { providerId, pin } = request.data || {};
-  if (!providerId || !pin) {
-    throw new HttpsError('invalid-argument', 'Paramètres manquants');
-  }
-  if (!/^\d{4,6}$/.test(String(pin))) {
-    throw new HttpsError('invalid-argument', 'Le PIN doit contenir 4 à 6 chiffres');
-  }
-
-  const providerRef  = db.collection('service_providers').doc(String(providerId));
-  const providerSnap = await providerRef.get();
-  if (!providerSnap.exists) {
-    throw new HttpsError('not-found', 'Prestataire introuvable');
-  }
-
-  await db.collection('artisan_credentials').doc(providerId).set({
-    hash:      hashSecret(String(pin)),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-  // Le champ en clair historique est effacé pour CE compte précis dès qu'un
-  // admin (re)définit son PIN via ce chemin — jamais une suppression groupée
-  // d'anciennes données non validées, seulement le compte que cet appel
-  // vient de faire migrer.
-  await providerRef.update({ artisanPin: admin.firestore.FieldValue.delete() });
-
-  // Jamais le PIN (ni sa valeur en clair, ni son hash) dans le journal —
-  // seule la confirmation qu'une rotation a eu lieu et par qui.
-  await logAudit({
-    userId: request.auth.uid, userType: 'admin', action: 'set_artisan_pin',
-    targetId: String(providerId),
-  });
-
-  return { success: true };
-});
+const { buildArtisanLogin, buildSetArtisanPin } = require('./artisanAccounts');
+exports.artisanLogin = onCall({ maxInstances: 2 }, buildArtisanLogin({
+  db, fieldValue: admin.firestore.FieldValue, checkRateLimit,
+}));
+exports.setArtisanPin = onCall({ maxInstances: 2 }, buildSetArtisanPin({
+  db, fieldValue: admin.firestore.FieldValue,
+}));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTHENTIFICATION PHARMACIE — mot de passe haché (pharmacie_credentials)

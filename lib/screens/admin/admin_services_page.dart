@@ -3,7 +3,7 @@ import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import '../../services/artisan_account_service.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
@@ -649,7 +649,7 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
       _isAvailable = d["isAvailable"] ?? true;
       _idNumberCtrl.text = d["idNumber"] ?? "";
       _existingIdPhotoUrl = d["idPhotoUrl"];
-      _artisanPinCtrl.text = d["artisanPin"] ?? "";
+      // An unrelated edit must not replay a stale historical PIN over a reset.
     }
   }
 
@@ -791,6 +791,7 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
   }
 
   Future<void> _save() async {
+    if (_loading) return;
     if (_nameCtrl.text.trim().isEmpty) {
       _snack("Le nom est obligatoire", Colors.orange);
       return;
@@ -843,22 +844,26 @@ class _ServiceProviderFormState extends State<_ServiceProviderForm> {
         if (mounted) _snack("Prestataire mis à jour", Colors.green);
       } else {
         payload["createdAt"] = FieldValue.serverTimestamp();
-        payload["status"] = "approved";
+        // Approval and credential creation are committed together by the callable.
+        payload["status"] = "pending";
         payload["isVerified"] = true;
         await FirebaseFirestore.instance
             .collection("service_providers")
             .doc(docId)
             .set(payload);
-        if (mounted) _snack("Prestataire ajouté avec succès", Colors.green);
+        if (mounted) {
+          _snack("Prestataire enregistré en attente d'approbation", Colors.green);
+        }
       }
       // Le PIN n'est envoyé que s'il a été saisi/modifié — jamais réécrit à
       // vide par mégarde sur un artisan qui a déjà un PIN haché en place.
       if (newPin.isNotEmpty) {
         try {
-          await FirebaseFunctions.instance.httpsCallable('setArtisanPin').call({
-            'providerId': docId,
-            'pin': newPin,
-          });
+          await ArtisanAccountService().setPin(
+            providerId: docId,
+            pin: newPin,
+            approve: widget.docId == null || widget.existing?['status'] == 'pending',
+          );
         } catch (e) {
           if (mounted) {
             _snack("Prestataire enregistré, mais le PIN n'a pas pu être "

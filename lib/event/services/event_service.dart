@@ -20,12 +20,20 @@ class EventService {
     FirebaseFunctions? functions,
   })  : db = firestore ?? FirebaseFirestore.instance,
         auth = auth ?? FirebaseAuth.instance,
-        storage = storage ?? FirebaseStorage.instance,
-        functions = functions ?? FirebaseFunctions.instance;
+        _storage = storage,
+        functions = functions ??
+            FirebaseFunctions.instanceFor(region: 'europe-west1');
 
   final FirebaseFirestore db;
   final FirebaseAuth auth;
-  final FirebaseStorage storage;
+  // LOT 7.1 : résolu paresseusement — FirebaseStorage.instance lève sans
+  // bucket par défaut configuré (ex. dans un test qui n'exerce jamais
+  // l'upload). Construire EventService() pour n'utiliser que .functions/.db
+  // (comme le test de routage régional) ne doit jamais échouer pour une
+  // dépendance non utilisée. Comportement réel inchangé : le premier accès
+  // résout FirebaseStorage.instance exactement comme avant.
+  FirebaseStorage? _storage;
+  FirebaseStorage get storage => _storage ??= FirebaseStorage.instance;
   final FirebaseFunctions functions;
   static const pageSize = 20;
 

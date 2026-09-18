@@ -2818,3 +2818,34 @@ test('LOT 6.3 DIAGNOSTIC : un admin qui met à jour un champ SANS RAPPORT sur un
     status: 'approved', isAvailable: true,
   }));
 });
+
+test('LOT 7.1: admin create accepts a public profile without a plaintext PIN', async () => {
+  await seed((db) => db.doc('admins/admin1').set({ role: 'super', isActive: true }));
+  await assertSucceeds(asAdmin('admin1').doc('service_providers/new').set({ name: 'Provider', status: 'pending' }));
+  await assertFails(asAdmin('admin1').doc('service_providers/unsafe').set({ name: 'Provider', artisanPin: 'forbidden' }));
+  await assertFails(asClient('client').doc('service_providers/other').set({ name: 'Provider' }));
+});
+
+test('LOT 7.1: admin update preserves public edits but rejects plaintext introduction or change', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('service_providers/clean').set({ name: 'Provider' });
+    await db.doc('service_providers/legacy').set({ name: 'Provider', artisanPin: 'fixture-only' });
+  });
+  await assertSucceeds(asAdmin('admin1').doc('service_providers/clean').update({ name: 'Edited' }));
+  await assertSucceeds(asAdmin('admin1').doc('service_providers/legacy').update({ name: 'Edited' }));
+  await assertFails(asAdmin('admin1').doc('service_providers/clean').update({ artisanPin: 'forbidden' }));
+  await assertFails(asAdmin('admin1').doc('service_providers/legacy').update({ artisanPin: 'changed' }));
+});
+
+test('LOT 7.1: admin delete works for clean and legacy profiles; other users cannot delete', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('service_providers/clean').set({ name: 'Provider' });
+    await db.doc('service_providers/legacy').set({ name: 'Provider', artisanPin: 'fixture-only' });
+  });
+  await assertFails(asClient('client').doc('service_providers/clean').delete());
+  await assertFails(unauth().doc('service_providers/legacy').delete());
+  await assertSucceeds(asAdmin('admin1').doc('service_providers/clean').delete());
+  await assertSucceeds(asAdmin('admin1').doc('service_providers/legacy').delete());
+});
