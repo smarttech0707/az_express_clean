@@ -47,7 +47,10 @@ test('dry-run uses consistent transactional reads without writing', async () => 
       return { get: async () => ({ docs: [{ id: 'provider' }] }), doc: (id) => ({ path: name + '/' + id }) };
     },
     runTransaction: async (callback) => callback({
-      get: async (ref) => ({ exists: ref.path.startsWith('service_providers/'), data: () => data }),
+      // Mirrors the single-RPC read the migration performs on both documents.
+      getAll: async (...refs) => refs.map((ref) => ({
+        exists: ref.path.startsWith('service_providers/'), data: () => data,
+      })),
       set: () => { writes++; }, update: () => { writes++; },
     }),
   };

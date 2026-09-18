@@ -39,8 +39,9 @@ async function migrateProvider({ db, fieldValue, providerId, dryRun = true }) {
   const providerRef = db.collection('service_providers').doc(providerId);
   const credentialRef = db.collection('artisan_credentials').doc(providerId);
   return db.runTransaction(async (tx) => {
-    const provider = await tx.get(providerRef);
-    const credential = await tx.get(credentialRef);
+    // Read both documents in the same transaction RPC. The read set and
+    // atomic writes are unchanged; this does not guarantee conflict-free reads.
+    const [provider, credential] = await tx.getAll(providerRef, credentialRef);
     if (!provider.exists) return { outcome: 'clean', reason: 'removed', hasPlainPin: false, hasCredential: credential.exists };
     const plan = planDocument(provider.data(), credential.exists ? credential.data() : null);
     if (dryRun || !['needs_migration', 'resume_cleanup'].includes(plan.outcome)) return plan;
@@ -66,8 +67,9 @@ async function setPin({ db, fieldValue, providerId, pin, approve = false, actorU
   const auditRef = db.collection('audit_logs').doc();
   const nextCredential = credentialFor(String(pin), fieldValue);
   return db.runTransaction(async (tx) => {
-    const provider = await tx.get(providerRef);
-    const current = await tx.get(credentialRef);
+    // Grouped reads reduce round trips, not the need for conflict handling.
+    // Let the SDK propagate failures; never turn a failed commit into success.
+    const [provider, current] = await tx.getAll(providerRef, credentialRef);
     if (!provider.exists) throw new HttpsError('not-found', 'Prestataire introuvable');
     const data = provider.data();
     if (expectedPhone !== undefined && data.phone !== expectedPhone) {

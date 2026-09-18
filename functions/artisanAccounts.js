@@ -3,9 +3,12 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireAdminPermission } = require('./adminGuards');
 const { verifySecret } = require('./passwordHash');
-const { validCredential, planDocument, credentialFor, setPin } = require('./artisanCredentials');
+const { validCredential, planDocument, setPin } = require('./artisanCredentials');
 
-function buildArtisanLogin({ db, fieldValue, checkRateLimit }) {
+// LOT 7.4 / phase A: dual reader only. Login never creates, rotates or
+// cleans up credentials. Private credentials remain authoritative, even
+// when malformed or accompanied by a conflicting historical public PIN.
+function buildArtisanLogin({ db, checkRateLimit }) {
   return async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
     const { phone, pin } = request.data || {};
@@ -15,8 +18,9 @@ function buildArtisanLogin({ db, fieldValue, checkRateLimit }) {
     for (const candidate of candidates.docs) {
       const credentialRef = db.collection('artisan_credentials').doc(candidate.id);
       const result = await db.runTransaction(async (tx) => {
-        const provider = await tx.get(candidate.ref);
-        const credential = await tx.get(credentialRef);
+        // Read both documents in one transaction RPC. This reduces round trips,
+        // but does not eliminate contention or guarantee retryable errors.
+        const [provider, credential] = await tx.getAll(candidate.ref, credentialRef);
         if (!provider.exists || provider.data().phone !== phone) return null;
         const data = provider.data();
         const plan = planDocument(data, credential.exists ? credential.data() : null);
@@ -24,14 +28,18 @@ function buildArtisanLogin({ db, fieldValue, checkRateLimit }) {
           if (!validCredential(credential.data()) || !verifySecret(String(pin), credential.data().hash)) return null;
         } else {
           if (plan.outcome !== 'needs_migration' || String(data.artisanPin) !== String(pin)) return null;
-          tx.set(credentialRef, credentialFor(String(pin), fieldValue));
         }
-        tx.update(candidate.ref, {
-          artisanUid: request.auth.uid,
-          ...(['needs_migration', 'resume_cleanup'].includes(plan.outcome)
-            ? { artisanPin: fieldValue.delete() } : {}),
-        });
-        const { artisanPin: omitted, ...safeData } = data;
+        if (data.artisanUid !== request.auth.uid) {
+          tx.update(candidate.ref, { artisanUid: request.auth.uid });
+        }
+        // Explicit response contract: unknown legacy fields must not leak
+        // credentials, identity documents or notification tokens.
+        const safeData = {};
+        for (const key of ['name', 'phone', 'address', 'description', 'subcategory',
+          'category', 'photos', 'lat', 'lng', 'isAvailable', 'isVerified',
+          'status', 'rating', 'ratingCount', 'createdAt', 'approvedAt']) {
+          if (Object.hasOwn(data, key)) safeData[key] = data[key];
+        }
         return { success: true, docId: candidate.id, data: { ...safeData, artisanUid: request.auth.uid } };
       });
       if (result) return result;

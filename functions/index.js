@@ -1414,16 +1414,14 @@ exports.submitServiceProviderApplication = onCall({ maxInstances: 2 }, async (re
 // simplement en lisant son document — confirmé exploitable, pas théorique).
 // Recherche désormais par téléphone seul, puis vérifie le PIN contre
 // artisan_credentials/{providerId} (haché, CF-only, jamais exposé par les
-// règles Firestore). Repli sur l'ancien champ en clair UNIQUEMENT pour les
-// artisans pas encore migrés (aucun document artisan_credentials) — migration
-// paresseuse, même pattern que pharmacieLogin ci-dessus : dès qu'un tel
-// artisan se reconnecte avec succès, son PIN est haché et le champ en clair
-// supprimé, sans qu'aucune migration groupée n'ait été nécessaire.
+// Repli public uniquement en absence de credential prive.
+// LOT 7.4 phase A : les comptes historiques restent acceptes sans creation
+// de credential ni suppression du PIN public. Aucune migration au login.
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
 // légère de maxInstances uniquement.
 const { buildArtisanLogin, buildSetArtisanPin } = require('./artisanAccounts');
 exports.artisanLogin = onCall({ maxInstances: 2 }, buildArtisanLogin({
-  db, fieldValue: admin.firestore.FieldValue, checkRateLimit,
+  db, checkRateLimit,
 }));
 exports.setArtisanPin = onCall({ maxInstances: 2 }, buildSetArtisanPin({
   db, fieldValue: admin.firestore.FieldValue,
