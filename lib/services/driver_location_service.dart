@@ -96,7 +96,41 @@ class DriverLocationService {
   // indépendant, démarré dans `startTracking()`), qui réécrit la dernière
   // position connue à intervalle fixe qu'un nouvel événement GPS soit
   // survenu ou non.
-  static const _heartbeatInterval = Duration(seconds: 90);
+  //
+  // Correctif du 2026-10-05 (mesure en production sur une course active) : le
+  // `Timer.periodic` et la garde de `_heartbeatTick()` utilisaient la MÊME
+  // durée (90 s). Or `_lastSave` est affecté APRÈS l'`await` de l'écriture
+  // Firestore, donc quelques centaines de ms après le déclenchement du tick :
+  // au tick suivant, `now - _lastSave` valait ~89,5 s, soit strictement moins
+  // que la garde de 90 s → l'écriture était sautée, et un tick sur deux était
+  // perdu. Cadence réelle mesurée : exactement 180 s (écritures à 15:24:19
+  // puis 15:27:19), c'est-à-dire pile le seuil `STALE_MINUTES = 3` du
+  // dispatch — le livreur oscillait en permanence à la limite de l'exclusion.
+  // Corrigé en dissociant les deux durées : le timer de CONTRÔLE bat plus
+  // souvent (30 s) que l'ÂGE MAXIMAL toléré (90 s), si bien qu'un tick dont
+  // la garde renvoie n'a plus aucun effet — le tick suivant, 30 s plus tard,
+  // écrira. Cadence garantie à l'arrêt : 90 s ≤ écriture ≤ 120 s.
+  static const _heartbeatMaxAge = Duration(seconds: 90);
+  static const _heartbeatCheckInterval = Duration(seconds: 30);
+
+  /// Faut-il réécrire la dernière position connue ?
+  ///
+  /// Extrait en fonction pure pour être testable sans Geolocator ni Firestore.
+  /// Une écriture provoquée par un déplacement met aussi `_lastSave` à jour,
+  /// donc elle repousse naturellement le prochain heartbeat.
+  @visibleForTesting
+  static bool shouldHeartbeat({
+    required DateTime? lastSave,
+    required DateTime now,
+    Duration maxAge = _heartbeatMaxAge,
+  }) =>
+      lastSave == null || now.difference(lastSave) >= maxAge;
+
+  @visibleForTesting
+  static Duration get debugHeartbeatMaxAge => _heartbeatMaxAge;
+
+  @visibleForTesting
+  static Duration get debugHeartbeatCheckInterval => _heartbeatCheckInterval;
 
   // ── Démarrage du tracking ──────────────────────────────────────────────────
 
@@ -162,12 +196,12 @@ class DriverLocationService {
 
     // Heartbeat véritablement périodique — indépendant du stream de
     // position, garantit une écriture au moins toutes les
-    // `_heartbeatInterval`, même si le livreur ne bouge jamais assez pour
+    // `_heartbeatMaxAge`, même si le livreur ne bouge jamais assez pour
     // qu'un nouvel événement GPS n'arrive (voir commentaire du 2026-07-19
     // ci-dessus).
     _heartbeatTimer?.cancel();
     _heartbeatTimer =
-        Timer.periodic(_heartbeatInterval, (_) => _heartbeatTick());
+        Timer.periodic(_heartbeatCheckInterval, (_) => _heartbeatTick());
 
     _gpsState = GpsTrackingState.active;
     return _gpsState;
@@ -175,11 +209,12 @@ class DriverLocationService {
 
   Future<void> _heartbeatTick() async {
     if (_currentDriverId == null || _lastSavedPos == null) return;
-    // Ne réécrit que si aucune sauvegarde "naturelle" (mouvement réel) n'a
-    // déjà eu lieu depuis le dernier tick — évite une écriture en double
-    // juste après une vraie mise à jour de position.
-    if (_lastSave != null &&
-        DateTime.now().difference(_lastSave!) < _heartbeatInterval) {
+    // Ne réécrit que si la dernière sauvegarde (heartbeat OU mouvement réel)
+    // date d'au moins `_heartbeatMaxAge` — évite toute écriture en double
+    // juste après une vraie mise à jour de position. La garde est volontairement
+    // plus longue que la période du timer : voir le commentaire de
+    // `_heartbeatMaxAge`.
+    if (!shouldHeartbeat(lastSave: _lastSave, now: DateTime.now())) {
       return;
     }
     await _saveToFirestore(_lastSavedPos!);

@@ -10,10 +10,9 @@ import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../models/local_place.dart';
-import '../../models/order_model.dart';
 import '../../models/route_model.dart';
 import '../../providers/active_city_provider.dart';
-import '../../services/firestore_service.dart';
+import '../../services/delivery_order_service.dart';
 import '../../services/google_routes_service.dart';
 import '../../services/places_search_service.dart';
 import '../../services/places_service.dart';
@@ -195,6 +194,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
   // ── Route ──────────────────────────────────────────────────────────────────
   RouteModel _route = RouteModel.empty();
+
+  /// Logique de creation de livraison partagee avec le web
+  /// (voir lib/services/delivery_order_service.dart).
+  final _deliveryOrders = DeliveryOrderService();
   bool _routeLoading = false;
 
   // ── Commande ───────────────────────────────────────────────────────────────
@@ -786,27 +789,28 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         ),
       ]);
 
-      final order = OrderModel(
-        id: orderId,
+      // Construction et soumission déléguées à DeliveryOrderService : la même
+      // implémentation sert désormais au web, pour qu'il n'existe qu'UN seul
+      // chemin de débit wallet et qu'un seul schéma de commande. Tous les
+      // champs transmis ici sont ceux déjà écrits auparavant — comportement
+      // mobile inchangé.
+      final order = _deliveryOrders.buildOrder(
+        orderId: orderId,
+        clientId: user!.uid,
+        price: price,
+        shoppingBudget: shoppingBudget,
         description: descFull.isNotEmpty
             ? '[$modeLabel][$catLabel] $descFull'
             : '[$modeLabel][$catLabel] Livraison — ${_destination!.name}',
-        budget: price,
-        shoppingBudget: shoppingBudget,
-        status: 'pending',
-        latitude: _departure!.latitude,
-        longitude: _departure!.longitude,
-        deliveryAddress: _destination!.address,
+        pickupLat: _departure!.latitude,
+        pickupLng: _departure!.longitude,
         destLat: _destination!.latitude,
         destLng: _destination!.longitude,
-        type: 'livraison',
-        clientId: user?.uid,
+        deliveryAddress: _destination!.address,
+        deliveryMode: _deliveryMode,
+        paymentMethod: _payment,
         clientName: clientName,
         clientPhone: clientPhone,
-        paymentMethod: _payment,
-        isPaid: _payment == 'wallet',
-        forSelf: true,
-        deliveryMode: _deliveryMode,
         pickupContactName: pkName.isNotEmpty ? pkName : null,
         pickupContactPhone: pkPhone.isNotEmpty ? pkPhone : null,
         recipientName: rcpName.isNotEmpty ? rcpName : null,
@@ -831,6 +835,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         // — une app trop ancienne voit un message clair plutôt qu'un
         // permission-denied brut. Repli permissif si la vérification
         // échoue elle-même (voir WalletPaymentCompatibilityService).
+        // Reste ici : ce contrôle a besoin d'un BuildContext.
         if (!mounted) return;
         final compatible =
             await WalletPaymentCompatibilityService.ensureCompatible(context);
@@ -838,27 +843,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           setState(() => _sending = false);
           return;
         }
-        final clientRef =
-            FirebaseFirestore.instance.collection('clients').doc(user!.uid);
-        final orderRef =
-            FirebaseFirestore.instance.collection('orders').doc(order.id);
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap = await tx.get(clientRef);
-          final balance = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
-          if (balance < totalAmount) throw Exception('SOLDE_INSUFFISANT');
-          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
-          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
-          // débit ne soit réutilisé pour valider plusieurs commandes.
-          tx.update(clientRef, {
-            'wallet': balance - totalAmount,
-            'lastPaidOrderId': order.id,
-          });
-          tx.set(orderRef, order.toMap());
-        });
-        await FirestoreService().createOrder(order, alreadyCreated: true);
-      } else {
-        await FirestoreService().createOrder(order);
       }
+      await _deliveryOrders.submit(order);
       if (!mounted) return;
       Navigator.pushReplacement(
           context,

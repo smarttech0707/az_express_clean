@@ -482,11 +482,12 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
               child: _WaitBanner(pulse: _pulse),
             ),
 
-          // ── Indicateur GPS stale (>45s sans mise à jour) ─────────────────
-          if (_tracking.hasDriver &&
-              _tracking.lastUpdateTime.year > 2000 &&
-              DateTime.now().difference(_tracking.lastUpdateTime).inSeconds >
-                  45)
+          // ── Position du livreur non actualisée (voir driverStaleThreshold) ─
+          if (isDriverPositionStale(
+            hasDriver: _tracking.hasDriver,
+            lastUpdate: _tracking.lastUpdateTime,
+            now: DateTime.now(),
+          ))
             Positioned(
               top: topPad + 62,
               left: 60,
@@ -769,6 +770,35 @@ class _WaitBanner extends StatelessWidget {
       );
 }
 
+/// Âge maximal toléré avant de signaler que la position du livreur n'est plus
+/// actualisée.
+///
+/// DOIT rester strictement supérieur à l'âge maximal du heartbeat livreur
+/// (`DriverLocationService._heartbeatMaxAge` = 90 s, écriture garantie entre
+/// 90 s et 120 s à l'arrêt). L'ancienne valeur de 45 s était INFÉRIEURE à ce
+/// heartbeat : un livreur immobile — le cas normal dès qu'il atteint le point
+/// de récupération — déclenchait donc la bannière alors que son GPS, son
+/// service de tracking et ses écritures Firestore fonctionnaient parfaitement.
+/// Mesuré en production le 2026-10-05 : bannière affichée 75 % du temps sur
+/// une course réelle, livreur à 3 m du point de récupération.
+const driverStaleThreshold = Duration(seconds: 150);
+
+/// `true` si aucune mise à jour de la position du livreur n'est arrivée depuis
+/// plus de [driverStaleThreshold].
+///
+/// Purement informatif : la dernière position connue continue d'être affichée
+/// (les marqueurs sont construits depuis `MapMarkersBuilder.buildForClient`,
+/// qui ne consulte jamais cette fraîcheur).
+bool isDriverPositionStale({
+  required bool hasDriver,
+  required DateTime lastUpdate,
+  required DateTime now,
+  Duration threshold = driverStaleThreshold,
+}) =>
+    hasDriver &&
+    lastUpdate.year > 2000 &&
+    now.difference(lastUpdate) > threshold;
+
 class _StaleBanner extends StatelessWidget {
   const _StaleBanner();
 
@@ -788,7 +818,7 @@ class _StaleBanner extends StatelessWidget {
               const Icon(Icons.gps_off_rounded,
                   size: 14, color: AppColors.primary),
               const SizedBox(width: 6),
-              Text('GPS livreur indisponible',
+              Text('Position du livreur temporairement non actualisée',
                   style: GoogleFonts.urbanist(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
