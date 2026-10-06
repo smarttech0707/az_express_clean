@@ -582,20 +582,34 @@ service cloud.firestore {
 
     match /wallet_transactions/{txId} {
       allow read: if isAuth() && (resource.data.userId == uid() || resource.data.uid == uid() || isAdmin());
-      // Log E-Kbine uniquement (uid doit correspondre)
-      allow create: if isAuth() && request.resource.data.uid == uid();
+      // Unique écriture cliente légitime : le journal E-Kbine
+      // (lib/ekbine/services/ek_service.dart) — exactement ces 4 champs.
+      // Tout le flux FeexPay (recharges) est écrit par Cloud Function via
+      // l'Admin SDK, qui contourne ces règles : un client ne doit donc jamais
+      // pouvoir fabriquer ici un document ressemblant à un paiement confirmé
+      // (status/credited/userId/amount arbitraires), ce que l'ancienne règle
+      // — sans aucune contrainte de champs — autorisait.
+      allow create: if isAuth()
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'amount', 'createdAt'])
+        && request.resource.data.uid == uid()
+        && request.resource.data.type == 'ekbine_payment'
+        && request.resource.data.amount is int;
       allow update: if false;
       allow delete: if isAdmin();
     }
 
     match /withdrawal_requests/{reqId} {
       allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
-      allow create: if isRealUser()
-        && request.resource.data.userId == uid()
-        && request.resource.data.status == 'pending'
-        && request.resource.data.amount is int
-        && request.resource.data.amount >= 500
-        && request.resource.data.amount <= 500000;
+      // Création interdite au client : un retrait engage un mouvement d'argent
+      // réel et n'est créé que par `initiateWithdrawal` (Admin SDK), qui débite
+      // le wallet dans la même transaction et écrit `status:'processing'`.
+      // L'ancienne règle autorisait une création cliente avec
+      // `status == 'pending'` — un état que le serveur n'écrit jamais : elle
+      // ne décrivait donc plus aucun flux réel, et le seul appelant Flutter
+      // (`FirestoreService.createWithdrawalRequest`) est du code mort, sans
+      // aucun appelant. Interdire la création ferme cette porte plutôt que de
+      // se contenter d'aligner le nom du statut.
+      allow create: if false;
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
@@ -1303,6 +1317,22 @@ service cloud.firestore {
     match /ai_pending_actions/{actionId} {
       allow read: if isAuth() && (resource.data.uid == uid() || isAdmin());
       allow write: if false;
+    }
+
+    // ── LOT GEMINI 3/4 — registre d'idempotence des outils AZ IA ────────────
+    // `ai_tool_executions` garantit qu'un outil à effet durable (commande,
+    // annulation, recharge…) n'est pas exécuté deux fois entre plusieurs
+    // invocations azIaChat. Un client capable de lire ce registre pourrait
+    // inférer l'activité d'un compte ; un client capable d'y écrire pourrait
+    // soit fabriquer une réservation pour BLOQUER une action légitime, soit
+    // effacer une trace pour en REJOUER une. La collection est donc
+    // strictement serveur : l'Admin SDK contourne ces règles, aucune
+    // exception admin n'est nécessaire ici.
+    match /ai_tool_executions/{executionId} {
+      allow read:   if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
     // ── Master Prompt 108 — AIProviderService (multi-fournisseurs IA) ───────

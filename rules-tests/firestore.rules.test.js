@@ -582,6 +582,95 @@ test('pharmacies: un admin PEUT écrire les autres champs (sans password/accessC
   await assertSucceeds(asAdmin('admin1').doc('pharmacies/ph1').set({ name: 'Pharmacie X', isOnDuty: true }));
 });
 
+test('pharmacies: un admin ne peut PAS écrire le champ accessCode directement', async () => {
+  // Pendant du test `password` ci-dessus : la règle liste les DEUX clés, mais
+  // seule `password` était couverte jusqu'ici. On veut conserver les deux
+  // interdictions — c'est l'invariant que le correctif d'approbation respecte
+  // au lieu de le contourner.
+  await seed((db) => db.doc('admins/admin1').set({ role: 'super', isActive: true }));
+  await assertFails(asAdmin('admin1').doc('pharmacies/ph1').set({ name: 'Pharmacie X', accessCode: '1234' }));
+});
+
+test('pharmacies: la clé seule suffit à faire rejeter l’écriture, même vide ou nulle', async () => {
+  // C'est la cause exacte du bug d'approbation : `password: ''` passait la
+  // validation applicative mais `keys().hasAny([...])` rejette sur la simple
+  // PRÉSENCE de la clé, indépendamment de sa valeur.
+  await seed((db) => db.doc('admins/admin1').set({ role: 'super', isActive: true }));
+  await assertFails(asAdmin('admin1').doc('pharmacies/ph1').set({ name: 'Pharmacie X', password: '' }));
+  await assertFails(asAdmin('admin1').doc('pharmacies/ph2').set({ name: 'Pharmacie X', password: null }));
+  await assertFails(asAdmin('admin1').doc('pharmacies/ph3').set({ name: 'Pharmacie X', accessCode: '' }));
+});
+
+test('pharmacies: le document d’approbation corrigé est accepté tel quel (données légitimes conservées)', async () => {
+  // Payload exact produit par buildApprovedPharmacieDoc()
+  // (admin_pharmacie_requests_page.dart) — si quelqu'un y rajoute un jour
+  // password/accessCode, ce test passerait toujours mais celui du batch
+  // ci-dessous échouerait : les deux se complètent.
+  await seed((db) => db.doc('admins/admin1').set({ role: 'super', isActive: true }));
+  await assertSucceeds(asAdmin('admin1').doc('pharmacies/ph1').set({
+    name: 'Pharmacie Gabriel',
+    ownerName: 'Kone Awa',
+    phone: '0700000000',
+    address: 'Quartier Commerce, Abengourou',
+    lat: 6.7273,
+    lng: -3.4961,
+    isActive: true,
+    isOpen: false,
+    mustChangePassword: false,
+    createdAt: serverTimestamp(),
+  }));
+});
+
+test('approbation pharmacie: le batch complet réussit, et reste ATOMIQUE si un secret est réintroduit', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('pharmacie_requests/req1').set({
+      ownerName: 'Kone Awa', pharmacieName: 'Pharmacie Gabriel',
+      phone: '0700000000', address: 'Commerce', lat: 6.7273, lng: -3.4961,
+      status: 'pending',
+    });
+  });
+
+  const db = asAdmin('admin1');
+  const legitimate = {
+    name: 'Pharmacie Gabriel', ownerName: 'Kone Awa', phone: '0700000000',
+    address: 'Commerce', lat: 6.7273, lng: -3.4961,
+    isActive: true, isOpen: false, mustChangePassword: false,
+    createdAt: serverTimestamp(),
+  };
+
+  // Le batch tel qu'il est écrit après correctif : création + passage en
+  // `approved` dans la même opération.
+  const ok = db.batch();
+  ok.set(db.collection('pharmacies').doc('ph1'), legitimate);
+  ok.update(db.doc('pharmacie_requests/req1'), {
+    status: 'approved', approvedAt: serverTimestamp(), pharmacieId: 'ph1',
+  });
+  await assertSucceeds(ok.commit());
+
+  // Même batch avec `password` réintroduit : l'écriture pharmacie est refusée,
+  // donc TOUT le batch échoue — y compris la mise à jour de la demande, qui
+  // doit rester `pending`. C'est exactement le symptôme d'origine (aucune
+  // pharmacie créée, demande jamais approuvée).
+  await seed((d) => d.doc('pharmacie_requests/req2').set({
+    ownerName: 'Kone Awa', pharmacieName: 'Pharmacie Gabriel',
+    phone: '0700000000', address: 'Commerce', status: 'pending',
+  }));
+  const bad = db.batch();
+  bad.set(db.collection('pharmacies').doc('ph2'), { ...legitimate, password: '' });
+  bad.update(db.doc('pharmacie_requests/req2'), {
+    status: 'approved', approvedAt: serverTimestamp(), pharmacieId: 'ph2',
+  });
+  await assertFails(bad.commit());
+
+  await seed(async (d) => {
+    const req = await d.doc('pharmacie_requests/req2').get();
+    assert.equal(req.data().status, 'pending');
+    const pharm = await d.doc('pharmacies/ph2').get();
+    assert.equal(pharm.exists, false);
+  });
+});
+
 test('pharmacie_credentials: lecture et écriture interdites à tout client, même le propriétaire présumé', async () => {
   await seed((db) => db.doc('pharmacie_credentials/ph1').set({ hash: 'salt:hash' }));
   await assertFails(asClient('anyone').doc('pharmacie_credentials/ph1').get());
@@ -2848,4 +2937,196 @@ test('LOT 7.1: admin delete works for clean and legacy profiles; other users can
   await assertFails(unauth().doc('service_providers/legacy').delete());
   await assertSucceeds(asAdmin('admin1').doc('service_providers/clean').delete());
   await assertSucceeds(asAdmin('admin1').doc('service_providers/legacy').delete());
+});
+
+// ── LOT FEEXPAY (R4) : collection racine wallet_transactions ────────────────
+// Le flux de recharge FeexPay est écrit exclusivement par Cloud Function via
+// l'Admin SDK (qui contourne ces règles). La seule écriture cliente légitime
+// est le journal E-Kbine. Un client ne doit donc jamais pouvoir fabriquer ici
+// un document ressemblant à un paiement confirmé.
+
+test('FEEXPAY R4: le journal E-Kbine légitime reste autorisé', async () => {
+  await assertSucceeds(asClient('u1').doc('wallet_transactions/t1').set({
+    uid: 'u1', type: 'ekbine_payment', amount: -500, createdAt: serverTimestamp(),
+  }));
+});
+
+test('FEEXPAY R4: un faux statut completed est refusé', async () => {
+  await assertFails(asClient('u1').doc('wallet_transactions/t2').set({
+    uid: 'u1', type: 'ekbine_payment', amount: -500, createdAt: serverTimestamp(),
+    status: 'completed',
+  }));
+});
+
+test('FEEXPAY R4: un faux credited=true est refusé', async () => {
+  await assertFails(asClient('u1').doc('wallet_transactions/t3').set({
+    uid: 'u1', type: 'ekbine_payment', amount: 5000, createdAt: serverTimestamp(),
+    credited: true,
+  }));
+});
+
+test('FEEXPAY R4: une fausse recharge FeexPay est refusée', async () => {
+  await assertFails(asClient('u1').doc('wallet_transactions/t4').set({
+    uid: 'u1', userId: 'u1', userType: 'client', amount: 500000,
+    status: 'completed', credited: true, provider: 'FeexPay',
+    createdAt: serverTimestamp(),
+  }));
+});
+
+test('FEEXPAY R4: un type autre que le journal E-Kbine est refusé', async () => {
+  await assertFails(asClient('u1').doc('wallet_transactions/t5').set({
+    uid: 'u1', type: 'recharge', amount: 10000, createdAt: serverTimestamp(),
+  }));
+});
+
+test('FEEXPAY R4: tout champ supplémentaire est refusé', async () => {
+  await assertFails(asClient('u1').doc('wallet_transactions/t6').set({
+    uid: 'u1', type: 'ekbine_payment', amount: -500, createdAt: serverTimestamp(),
+    feexpayRef: 'injecte',
+  }));
+});
+
+test('FEEXPAY R4: écrire au nom d\'un autre utilisateur est refusé', async () => {
+  await assertFails(asClient('u1').doc('wallet_transactions/t7').set({
+    uid: 'victime', type: 'ekbine_payment', amount: -500, createdAt: serverTimestamp(),
+  }));
+});
+
+test('FEEXPAY R4: un montant non entier est refusé', async () => {
+  await assertFails(asClient('u1').doc('wallet_transactions/t8').set({
+    uid: 'u1', type: 'ekbine_payment', amount: 'beaucoup', createdAt: serverTimestamp(),
+  }));
+});
+
+test('FEEXPAY R4: lire la transaction d\'un autre utilisateur est refusé', async () => {
+  await seed(async (db) => {
+    await db.doc('wallet_transactions/other').set({
+      userId: 'victime', userType: 'client', amount: 1000, status: 'completed',
+    });
+  });
+  await assertFails(asClient('intrus').doc('wallet_transactions/other').get());
+  await assertSucceeds(asClient('victime').doc('wallet_transactions/other').get());
+});
+
+test('FEEXPAY R4: la mise à jour cliente reste interdite (append-only)', async () => {
+  await seed(async (db) => {
+    await db.doc('wallet_transactions/mine').set({
+      userId: 'u1', amount: 1000, status: 'pending', credited: false,
+    });
+  });
+  await assertFails(asClient('u1').doc('wallet_transactions/mine')
+    .update({ status: 'completed', credited: true }));
+});
+
+// ── LOT 4 : withdrawal_requests — création strictement serveur ──────────────
+// Un retrait engage un mouvement d'argent réel : il n'est créé que par
+// `initiateWithdrawal` (Admin SDK), qui débite le wallet dans la même
+// transaction. Aucun client ne doit pouvoir en fabriquer un.
+
+test('FEEXPAY LOT4: un client ne peut pas créer une demande de retrait', async () => {
+  await assertFails(asClient('u1').doc('withdrawal_requests/wd1').set({
+    userId: 'u1', userType: 'client', amount: 5000, status: 'pending',
+    createdAt: serverTimestamp(),
+  }));
+});
+
+test('FEEXPAY LOT4: même un statut serveur (processing) reste refusé au client', async () => {
+  await assertFails(asClient('u1').doc('withdrawal_requests/wd2').set({
+    userId: 'u1', userType: 'client', amount: 5000, status: 'processing',
+    createdAt: serverTimestamp(),
+  }));
+});
+
+test('FEEXPAY LOT4: un admin ne crée pas non plus directement un retrait', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+  });
+  await assertFails(asAdmin('admin1').doc('withdrawal_requests/wd3').set({
+    userId: 'u1', userType: 'client', amount: 5000, status: 'processing',
+    createdAt: serverTimestamp(),
+  }));
+});
+
+test('FEEXPAY LOT4: le propriétaire lit son retrait, jamais celui d\'un autre', async () => {
+  await seed(async (db) => {
+    await db.doc('withdrawal_requests/wd4').set({
+      userId: 'u1', userType: 'client', amount: 5000, status: 'provider_pending',
+    });
+  });
+  await assertSucceeds(asClient('u1').doc('withdrawal_requests/wd4').get());
+  await assertFails(asClient('intrus').doc('withdrawal_requests/wd4').get());
+});
+
+test('FEEXPAY LOT4: le client ne peut pas modifier son retrait (ni le finaliser)', async () => {
+  await seed(async (db) => {
+    await db.doc('withdrawal_requests/wd5').set({
+      userId: 'u1', userType: 'client', amount: 5000, status: 'provider_pending',
+      settlementConfirmed: false,
+    });
+  });
+  await assertFails(asClient('u1').doc('withdrawal_requests/wd5')
+    .update({ status: 'sent', settlementConfirmed: true }));
+});
+
+// ── LOT GEMINI 4 : ai_tool_executions — collection strictement serveur ──────
+// Registre d'idempotence des outils AZ IA. Un client qui pourrait le LIRE
+// inférerait l'activité d'un compte ; un client qui pourrait y ÉCRIRE
+// bloquerait une action légitime (fausse réservation) ou en rejouerait une
+// (effacement de trace). Aucun accès client, à aucun titre.
+
+test('GEMINI4: un client authentifié ne peut pas lire ai_tool_executions', async () => {
+  await seed(async (db) => {
+    await db.doc('ai_tool_executions/tool_abc').set({
+      uid: 'u1', toolName: 'initiate_wallet_recharge', status: 'completed',
+    });
+  });
+  await assertFails(asClient('u1').doc('ai_tool_executions/tool_abc').get());
+});
+
+test('GEMINI4: même le propriétaire logique de l\'action ne peut pas lire', async () => {
+  await seed(async (db) => {
+    await db.doc('ai_tool_executions/tool_mine').set({ uid: 'u1', status: 'running' });
+  });
+  await assertFails(asClient('u1').doc('ai_tool_executions/tool_mine').get());
+});
+
+test('GEMINI4: un client ne peut pas créer une réservation', async () => {
+  await assertFails(asClient('u1').doc('ai_tool_executions/tool_new').set({
+    uid: 'u1', toolName: 'cancel_order', status: 'running',
+  }));
+});
+
+test('GEMINI4: un client ne peut pas modifier une réservation', async () => {
+  await seed(async (db) => {
+    await db.doc('ai_tool_executions/tool_upd').set({ uid: 'u1', status: 'running' });
+  });
+  await assertFails(asClient('u1').doc('ai_tool_executions/tool_upd').update({ status: 'failed' }));
+});
+
+test('GEMINI4: un client ne peut pas supprimer une réservation (anti-rejeu)', async () => {
+  await seed(async (db) => {
+    await db.doc('ai_tool_executions/tool_del').set({ uid: 'u1', status: 'completed' });
+  });
+  await assertFails(asClient('u1').doc('ai_tool_executions/tool_del').delete());
+});
+
+test('GEMINI4: un utilisateur non authentifié est refusé sur toutes les opérations', async () => {
+  await seed(async (db) => {
+    await db.doc('ai_tool_executions/tool_anon').set({ uid: 'u1', status: 'completed' });
+  });
+  await assertFails(unauth().doc('ai_tool_executions/tool_anon').get());
+  await assertFails(unauth().doc('ai_tool_executions/tool_anon2').set({ uid: 'u1' }));
+  await assertFails(unauth().doc('ai_tool_executions/tool_anon').update({ status: 'failed' }));
+  await assertFails(unauth().doc('ai_tool_executions/tool_anon').delete());
+});
+
+test('GEMINI4: un admin n\'a pas non plus d\'accès client à ce registre', async () => {
+  await seed(async (db) => {
+    await db.doc('admins/admin1').set({ role: 'super', isActive: true });
+    await db.doc('ai_tool_executions/tool_admin').set({ uid: 'u1', status: 'completed' });
+  });
+  // L'Admin SDK serveur contourne les règles ; aucune exception n'est requise
+  // ici, et n'en accorder aucune réduit la surface d'attaque.
+  await assertFails(asAdmin('admin1').doc('ai_tool_executions/tool_admin').get());
+  await assertFails(asAdmin('admin1').doc('ai_tool_executions/tool_admin').delete());
 });
