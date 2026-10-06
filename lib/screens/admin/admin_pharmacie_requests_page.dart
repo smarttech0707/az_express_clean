@@ -4,6 +4,54 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../utils/partner_location_validator.dart';
 
+/// Document `pharmacies` créé à l'approbation d'une demande.
+///
+/// `password` / `accessCode` sont VOLONTAIREMENT absents : `firestore.rules`
+/// rejette tout batch admin contenant ne serait-ce que la CLÉ
+/// (`!request.resource.data.keys().hasAny(['password','accessCode'])`). Le
+/// secret vit haché dans `pharmacie_credentials`, écrit uniquement par les
+/// Cloud Functions `setPharmaciePassword()` / `pharmacieLogin()`.
+///
+/// Extrait en fonction pure pour être vérifiable sans Firestore.
+@visibleForTesting
+Map<String, dynamic> buildApprovedPharmacieDoc(
+  Map<String, dynamic> request, {
+  required double latitude,
+  required double longitude,
+  required Object createdAt,
+}) =>
+    {
+      'name': request['pharmacieName'] ?? '',
+      'ownerName': request['ownerName'] ?? '',
+      'phone': request['phone'] ?? '',
+      'address': request['address'] ?? '',
+      'lat': latitude,
+      'lng': longitude,
+      'isActive': true,
+      'isOpen': false,
+      'mustChangePassword': false,
+      'createdAt': createdAt,
+    };
+
+/// Message affiché à l'admin selon le résultat RÉEL du commit Firestore.
+///
+/// `error == null` est le seul cas qui produit un message de succès : un rejet
+/// Firestore ne peut donc jamais être présenté comme une réussite. Avant ce
+/// correctif, l'exception remontait dans un `VoidCallback` non attendu et
+/// l'écran restait totalement muet.
+@visibleForTesting
+({String message, bool isSuccess}) pharmacieApprovalFeedback({
+  required Object? error,
+  required String pharmacieName,
+}) =>
+    error == null
+        ? (message: '$pharmacieName approuvée !', isSuccess: true)
+        : (
+            message: 'Approbation impossible. Vérifiez vos droits '
+                'administrateur et réessayez.',
+            isSuccess: false
+          );
+
 class AdminPharmacieRequestsPage extends StatefulWidget {
   const AdminPharmacieRequestsPage({super.key});
 
@@ -45,20 +93,30 @@ class _AdminPharmacieRequestsPageState extends State<AdminPharmacieRequestsPage>
     final batch = db.batch();
 
     // Create pharmacie doc (auto-id)
+    //
+    // `password` / `accessCode` sont VOLONTAIREMENT absents : `firestore.rules`
+    // interdit à un admin d'écrire ces clés sur `pharmacies`
+    // (`!request.resource.data.keys().hasAny(['password','accessCode'])`), et
+    // la simple PRÉSENCE de la clé suffisait à faire rejeter tout le batch —
+    // donc aucune pharmacie ne pouvait être approuvée. Le secret vit désormais
+    // haché dans `pharmacie_credentials`, alimenté uniquement par les Cloud
+    // Functions `setPharmaciePassword()` / `pharmacieLogin()`. Après
+    // approbation, l'admin définit le mot de passe depuis l'écran Pharmacies
+    // (bouton dédié → `setPharmaciePassword`). La demande ne transportait de
+    // toute façon aucun mot de passe : `pharmacie_register.dart` n'en envoie
+    // pas, la valeur écrite ici était donc toujours la chaîne vide.
     final pharmRef = db.collection('pharmacies').doc();
-    batch.set(pharmRef, {
-      'name': data['pharmacieName'] ?? '',
-      'ownerName': data['ownerName'] ?? '',
-      'phone': data['phone'] ?? '',
-      'address': data['address'] ?? '',
-      'lat': latitude,
-      'lng': longitude,
-      'password': data['password'] ?? '',
-      'isActive': true,
-      'isOpen': false,
-      'mustChangePassword': false,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    batch.set(
+      pharmRef,
+      buildApprovedPharmacieDoc(
+        data,
+        // Non-null garanti : `PartnerLocationValidator.validate` ci-dessus
+        // retourne un message dès que l'une des deux coordonnées est nulle.
+        latitude: latitude!,
+        longitude: longitude!,
+        createdAt: FieldValue.serverTimestamp(),
+      ),
+    );
 
     batch.update(db.collection('pharmacie_requests').doc(docId), {
       'status': 'approved',
@@ -66,12 +124,29 @@ class _AdminPharmacieRequestsPageState extends State<AdminPharmacieRequestsPage>
       'pharmacieId': pharmRef.id,
     });
 
-    await batch.commit();
+    // Le batch reste atomique : création de la pharmacie et passage de la
+    // demande en `approved` réussissent ou échouent ensemble. Le message de
+    // succès n'est affiché QU'APRÈS confirmation du commit — auparavant, un
+    // rejet Firestore laissait l'écran totalement muet (l'exception remontait
+    // dans un `VoidCallback` non attendu, donc perdue en erreur asynchrone).
+    Object? commitError;
+    try {
+      await batch.commit();
+    } catch (e) {
+      commitError = e;
+      debugPrint('[ADMIN_PHARMACIE] approbation échouée '
+          'requestId=$docId type=${e.runtimeType}');
+    }
 
     if (!mounted) return;
+    final feedback = pharmacieApprovalFeedback(
+      error: commitError,
+      pharmacieName: '${data['pharmacieName'] ?? 'La pharmacie'}',
+    );
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('${data['pharmacieName']} approuvée !'),
-      backgroundColor: const Color(0xFF2E7D32),
+      content: Text(feedback.message),
+      backgroundColor:
+          feedback.isSuccess ? const Color(0xFF2E7D32) : Colors.red,
       behavior: SnackBarBehavior.floating,
     ));
   }

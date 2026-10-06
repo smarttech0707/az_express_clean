@@ -7,6 +7,28 @@ import '../../services/subscription_service.dart';
 import '../../utils/partner_location_validator.dart';
 import '../../widgets/partner_location_input.dart';
 
+/// Payload du formulaire : l'édition ne réécrit jamais un solde, même lu avant
+/// une transaction concurrente. Les valeurs initiales sont réservées à CREATE.
+Map<String, dynamic> buildSellerProfileData({
+  required bool isCreating,
+  required String name,
+  required String phone,
+  required String type,
+  required bool isActive,
+  required double latitude,
+  required double longitude,
+}) =>
+    {
+      'name': name,
+      'phone': phone,
+      'type': type,
+      'isActive': isActive,
+      'lat': latitude,
+      'lng': longitude,
+      if (isCreating) 'wallet': 0,
+      if (isCreating) 'createdAt': FieldValue.serverTimestamp(),
+    };
+
 class AdminSellersPage extends StatelessWidget {
   const AdminSellersPage({super.key});
 
@@ -368,16 +390,18 @@ class _SellerFormPageState extends State<_SellerFormPage> {
         );
       }
 
-      await FirebaseFirestore.instance.collection('sellers').doc(uid).set({
-        'name': name,
-        'phone': phone,
-        'type': _type,
-        'isActive': _isActive,
-        'lat': double.parse(_latCtrl.text.trim()),
-        'lng': double.parse(_lngCtrl.text.trim()),
-        'wallet': 0,
-        'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('sellers').doc(uid).set(
+            buildSellerProfileData(
+              isCreating: !_isEditing,
+              name: name,
+              phone: phone,
+              type: _type,
+              isActive: _isActive,
+              latitude: double.parse(_latCtrl.text.trim()),
+              longitude: double.parse(_lngCtrl.text.trim()),
+            ),
+            SetOptions(merge: true),
+          );
 
       if (!mounted) return;
       Navigator.pop(context);
