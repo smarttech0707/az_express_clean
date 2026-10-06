@@ -37,19 +37,41 @@ void main() async {
   // C2 — Canal de communication avec le ForegroundService (doit être avant runApp)
   if (!kIsWeb) FlutterForegroundTask.initCommunicationPort();
 
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } on FirebaseException catch (e) {
-    if (e.code != 'duplicate-app') rethrow;
-    // Firebase déjà initialisé côté natif Android (JVM survit entre lancements)
+  // ── Initialisation Firebase — ne doit JAMAIS empêcher runApp() ───────────
+  //
+  // ÉCRAN NOIR WEB (cause racine) : toutes les options de
+  // `DefaultFirebaseOptions.web` viennent de `String.fromEnvironment(...)`,
+  // dont la valeur par défaut implicite est la chaîne vide. Un
+  // `flutter build web --release` lancé SANS `--dart-define-from-file=.env`
+  // compile donc sans erreur, mais produit des options entièrement vides ;
+  // `Firebase.initializeApp` échoue alors à l'exécution, l'exception n'était
+  // ni du type `duplicate-app` ni rattrapée, et remontait hors de `main()`
+  // AVANT `runApp()` — aucune interface Flutter n'était jamais montée, d'où
+  // un écran noir sur TOUTES les routes, y compris les pages purement
+  // statiques (/confidentialite, /delete-account) qui n'ont aucun besoin de
+  // Firebase pour s'afficher.
+  //
+  // Android y échappait par accident : le plugin natif initialise déjà
+  // l'application par défaut depuis `google-services.json`, donc notre appel
+  // levait `duplicate-app` — le seul code que l'ancien `catch` tolérait.
+  //
+  // Le correctif ne masque pas le problème : l'échec est journalisé
+  // explicitement et exposé à l'interface, mais il ne peut plus empêcher le
+  // démarrage.
+  final startupDiagnostic = await _initializeFirebase();
+  if (startupDiagnostic != null) {
+    debugPrint('DÉMARRAGE AZ EXPRESS — Firebase indisponible : '
+        '$startupDiagnostic');
   }
 
   // L'attestation démarre immédiatement, mais ne bloque plus le premier
   // rendu. Les consommateurs Firebase différés attendent explicitement cette
   // Future avant d'émettre leur première requête.
-  final appCheckReady = kIsWeb ? Future<void>.value() : _activateAppCheck();
+  // App Check n'est jamais activé sur Web (aucune clé reCAPTCHA configurée),
+  // ni quand Firebase n'a pas pu s'initialiser (l'appel échouerait).
+  final appCheckReady = (kIsWeb || startupDiagnostic != null)
+      ? Future<void>.value()
+      : _activateAppCheck();
 
   // ── Crashlytics (mobile only — not supported on web) ─────────────
   if (!kIsWeb) {
@@ -66,13 +88,21 @@ void main() async {
   }
 
   // ── Persistence offline ───────────────────────────────────────────
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: 52428800, // 50 MB — CACHE_SIZE_UNLIMITED est déprécié
-  );
+  // Jamais tentée si Firebase n'est pas initialisé : `instance` lèverait et
+  // tuerait à nouveau le démarrage avant runApp().
+  if (startupDiagnostic == null) {
+    try {
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: true,
+        cacheSizeBytes: 52428800, // 50 MB — CACHE_SIZE_UNLIMITED est déprécié
+      );
+    } catch (e) {
+      debugPrint('Persistance Firestore non appliquée : $e');
+    }
+  }
 
   runApp(kIsWeb
-      ? const WebApp()
+      ? WebApp(startupDiagnostic: startupDiagnostic)
       : MultiProvider(
           providers: [
             ChangeNotifierProvider(create: (_) => MpProvider()),
@@ -87,7 +117,42 @@ void main() async {
           child: const AZExpressApp(),
         ));
 
-  if (!kIsWeb) unawaited(_initializeDeferred(appCheckReady));
+  if (!kIsWeb && startupDiagnostic == null) {
+    unawaited(_initializeDeferred(appCheckReady));
+  }
+}
+
+/// Initialise Firebase sans jamais lever.
+///
+/// @return `null` si Firebase est prêt, sinon une description courte et non
+/// sensible du problème (aucune clé, aucune valeur de configuration).
+Future<String?> _initializeFirebase() async {
+  late final FirebaseOptions options;
+  try {
+    options = DefaultFirebaseOptions.currentPlatform;
+  } catch (e) {
+    return 'plateforme non configurée ($e)';
+  }
+
+  // Détection explicite d'un build sans `--dart-define-from-file=.env` :
+  // inutile d'appeler initializeApp avec des options vides, l'échec est
+  // certain et le diagnostic serait moins clair.
+  if (options.apiKey.isEmpty || options.projectId.isEmpty) {
+    return 'configuration absente — relancer le build avec '
+        '--dart-define-from-file=.env';
+  }
+
+  try {
+    await Firebase.initializeApp(options: options);
+    return null;
+  } on FirebaseException catch (e) {
+    // Android : le plugin natif a déjà initialisé l'app par défaut depuis
+    // google-services.json — ce n'est pas une erreur.
+    if (e.code == 'duplicate-app') return null;
+    return 'FirebaseException ${e.code}';
+  } catch (e) {
+    return '${e.runtimeType}';
+  }
 }
 
 Future<void> _initializeDeferred(Future<void> appCheckReady) async {

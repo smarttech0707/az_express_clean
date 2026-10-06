@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../widgets/stream_error_state.dart';
 
 const _serviceTypes = [
   {
@@ -116,6 +117,16 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const SliverFillRemaining(
                   child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              // La variante filtrée par serviceType exige un index composite :
+              // un échec ne doit pas se présenter comme une liste vide.
+              if (snap.hasError) {
+                return const SliverFillRemaining(
+                  child: StreamErrorState(
+                    message: 'Impossible de charger les services.\n'
+                        'Vérifiez votre connexion et réessayez.',
+                  ),
                 );
               }
 

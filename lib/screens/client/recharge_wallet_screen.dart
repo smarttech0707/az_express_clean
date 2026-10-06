@@ -152,7 +152,9 @@ class _RechargeWalletScreenState extends State<RechargeWalletScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _errorMsg = e.toString().replaceAll('Exception: ', '');
+        // Jamais `e.toString()` : cela exposait le message brut du serveur
+        // (« Request failed with status code 502 ») directement à l'écran.
+        _errorMsg = FeexPayService.userMessage(e);
       });
     }
   }

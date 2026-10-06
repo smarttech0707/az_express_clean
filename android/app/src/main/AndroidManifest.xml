@@ -67,6 +67,19 @@
     <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID"
         tools:node="remove"/>
 
+    <!-- Permission MALFORMÉE injectée par flutter_sound_core 9.30.0 : le nom
+         littéral « Manifest.permission.CAPTURE_AUDIO_OUTPUT » lui manque le
+         préfixe `android.permission.` (bug amont du plugin). Elle ne désigne
+         donc aucune permission Android réelle et ne peut jamais être
+         accordée — mais elle apparaît en Play Console comme une permission
+         personnalisée inconnue à justifier. La retirer est strictement sans
+         effet fonctionnel : flutter_sound continue d'utiliser RECORD_AUDIO,
+         MODIFY_AUDIO_SETTINGS et BLUETOOTH, qui sont conservées (vérifié :
+         flutter_sound est réellement utilisé par audio_service.dart et
+         create_order.dart). Confirmé par le rapport de fusion du build release. -->
+    <uses-permission android:name="Manifest.permission.CAPTURE_AUDIO_OUTPUT"
+        tools:node="remove"/>
+
     <!-- Needed for url_launcher tel:, https: et intent caméra sur Android 11+ -->
     <queries>
         <intent>

@@ -120,7 +120,9 @@ class _WalletActionSheetState extends State<WalletActionSheet> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _errorMsg = e.toString().replaceAll('Exception: ', '');
+        // Même défaut que l'écran de recharge : `e.toString()` exposait le
+        // message brut du serveur à l'utilisateur.
+        _errorMsg = FeexPayService.userMessage(e);
       });
     }
   }

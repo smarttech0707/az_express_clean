@@ -12,6 +12,7 @@ import '../../l10n/app_text.dart';
 import '../../models/service_provider_model.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/premium_empty_state.dart';
+import '../../widgets/stream_error_state.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ENUMS
@@ -428,6 +429,16 @@ class _ServiceProvidersPageState extends State<ServiceProvidersPage> {
                 return const SliverFillRemaining(
                   child: Center(
                     child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+              // Un échec de chargement ne doit pas laisser croire qu'aucun
+              // artisan n'exerce dans cette catégorie.
+              if (snap.hasError) {
+                return const SliverFillRemaining(
+                  child: StreamErrorState(
+                    message: 'Impossible de charger les prestataires.\n'
+                        'Vérifiez votre connexion et réessayez.',
                   ),
                 );
               }

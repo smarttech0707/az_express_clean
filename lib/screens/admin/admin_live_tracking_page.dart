@@ -8,6 +8,17 @@ import 'package:intl/intl.dart';
 import '../../widgets/driver_marker.dart';
 import '../../widgets/live_marker_cache.dart';
 
+/// Âge maximal toléré avant de considérer le GPS d'un livreur comme inactif.
+///
+/// DOIT rester strictement supérieur au pire cas du heartbeat livreur
+/// (`DriverLocationService` : écriture garantie entre 90 s et 120 s à l'arrêt).
+/// L'ancienne valeur de 60 s était INFÉRIEURE à ce heartbeat : un livreur
+/// immobile mais parfaitement sain — le cas normal en attente de course ou
+/// arrivé au point de récupération — était affiché « GPS inactif » et sorti du
+/// compteur des livreurs en ligne. Même défaut que celui corrigé côté client
+/// (`driverStaleThreshold`), aligné sur la même valeur.
+const adminGpsFreshnessThreshold = Duration(seconds: 150);
+
 /// Page admin — suivi en temps réel de tous les livreurs en ligne.
 ///
 /// Affiche une carte avec la position de chaque livreur actif,
@@ -82,7 +93,9 @@ class _AdminLiveTrackingPageState extends State<AdminLiveTrackingPage> {
         speed: (d['speed'] as num?)?.toDouble() ?? 0,
         updatedAt: updatedAt,
         secsSince: secsSince,
-        gpsOk: lat != null && lng != null && secsSince < 60,
+        gpsOk: lat != null &&
+            lng != null &&
+            secsSince <= adminGpsFreshnessThreshold.inSeconds,
       );
     }).toList();
 

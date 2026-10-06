@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'admin_service_requests_page.dart';
 import '../../utils/storage_cleanup.dart';
+import '../../widgets/stream_error_state.dart';
 
 // ── DONNÉES STATIQUES (miroir de services_hub_page) ───────────
 
@@ -219,6 +220,17 @@ class _AdminServicesPageState extends State<AdminServicesPage> {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const SliverFillRemaining(
                   child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              // La variante filtrée exige un index composite : sans cette
+              // branche, un échec se présentait comme « aucun prestataire »,
+              // ce qui pousserait l'admin à recréer des fiches existantes.
+              if (snap.hasError) {
+                return const SliverFillRemaining(
+                  child: StreamErrorState(
+                    message: 'Impossible de charger les prestataires.\n'
+                        'Vérifiez votre connexion et réessayez.',
+                  ),
                 );
               }
 

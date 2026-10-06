@@ -11,6 +11,7 @@ import '../../services/firestore_service.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../widgets/stream_error_state.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import '../home/home_screen.dart';
@@ -492,6 +493,15 @@ class _OrdersTab extends StatelessWidget {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
+        // Un flux en échec (index manquant, réseau, permissions) ne doit
+        // jamais s'afficher comme « aucune commande » : le vendeur croirait
+        // n'avoir reçu aucune commande alors qu'il en a.
+        if (snap.hasError) {
+          return const StreamErrorState(
+            message: 'Impossible de charger vos commandes.\n'
+                'Vérifiez votre connexion et réessayez.',
+          );
+        }
 
         final all = snap.data ?? [];
         final orders =
@@ -567,6 +577,14 @@ class _ProductsTabState extends State<_ProductsTab> {
         builder: (ctx, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
+          }
+          // Sans cette branche, un échec de requête affichait « Aucun
+          // produit » — indiscernable d'un catalogue réellement vide.
+          if (snap.hasError) {
+            return const StreamErrorState(
+              message: 'Impossible de charger vos produits.\n'
+                  'Vérifiez votre connexion et réessayez.',
+            );
           }
           final docs = snap.data?.docs ?? [];
           if (docs.isEmpty) {
@@ -1396,6 +1414,9 @@ class _DriverSection extends StatelessWidget {
           .doc(driverId)
           .snapshots(),
       builder: (context, snap) {
+        // En échec, ne pas laisser tourner le spinner indéfiniment : cette
+        // carte livreur est un complément, la commande reste lisible sans.
+        if (snap.hasError) return const SizedBox.shrink();
         if (!snap.hasData) {
           return const SizedBox(
               height: 48,

@@ -818,39 +818,54 @@ class FirestoreService {
   }
 
   /// Admin rejette un retrait pending_manual → rembourse le wallet (déjà débité).
+  ///
+  /// Idempotent : le remboursement n'a lieu que si la demande est encore en
+  /// attente de traitement manuel et n'a pas déjà été remboursée. Sans ce
+  /// garde-fou, un second appel (double tap, reprise réseau) recréditait une
+  /// nouvelle fois le wallet — un double remboursement bien réel.
+  /// Une transaction remplace le batch : la lecture du statut et l'écriture
+  /// doivent être atomiques pour que deux appels simultanés se sérialisent.
   Future<void> rejectWithdrawal(String requestId) async {
-    final wdSnap =
-        await db.collection('withdrawal_requests').doc(requestId).get();
-    if (!wdSnap.exists) return;
-    final data = wdSnap.data()!;
-    final userId = data['userId'] as String?;
-    final userType = data['userType'] as String? ?? 'client';
-    final amount = (data['amount'] as num?)?.toInt() ?? 0;
-    final colName = _col(userType);
+    final wdRef = db.collection('withdrawal_requests').doc(requestId);
+    await db.runTransaction((tx) async {
+      final wdSnap = await tx.get(wdRef);
+      if (!wdSnap.exists) return;
+      final data = wdSnap.data()!;
 
-    final batch = db.batch();
-    batch.update(db.collection('withdrawal_requests').doc(requestId), {
-      'status': 'rejected',
-      'rejectedAt': FieldValue.serverTimestamp(),
+      final status = data['status'] as String?;
+      final alreadyRefunded = data['refunded'] == true;
+      // Seule une demande encore en traitement manuel peut être remboursée :
+      // un retrait déjà envoyé, rejeté ou compensé ne doit jamais l'être.
+      if (alreadyRefunded || status != 'pending_manual') return;
+
+      final userId = data['userId'] as String?;
+      final userType = data['userType'] as String? ?? 'client';
+      final amount = (data['amount'] as num?)?.toInt() ?? 0;
+      final colName = _col(userType);
+
+      tx.update(wdRef, {
+        'status': 'rejected',
+        'refunded': userId != null && amount > 0,
+        'rejectedAt': FieldValue.serverTimestamp(),
+      });
+      if (userId != null && amount > 0) {
+        tx.update(db.collection(colName).doc(userId), {
+          'wallet': FieldValue.increment(amount),
+        });
+        final txRef = db
+            .collection(colName)
+            .doc(userId)
+            .collection('wallet_transactions')
+            .doc();
+        tx.set(txRef, {
+          'type': 'refund',
+          'amount': amount,
+          'description': 'Remboursement retrait rejeté — $amount FCFA',
+          'withdrawId': requestId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
     });
-    if (userId != null && amount > 0) {
-      batch.update(db.collection(colName).doc(userId), {
-        'wallet': FieldValue.increment(amount),
-      });
-      final txRef = db
-          .collection(colName)
-          .doc(userId)
-          .collection('wallet_transactions')
-          .doc();
-      batch.set(txRef, {
-        'type': 'refund',
-        'amount': amount,
-        'description': 'Remboursement retrait rejeté — $amount FCFA',
-        'withdrawId': requestId,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-    }
-    await batch.commit();
   }
 
   Stream<QuerySnapshot> pendingRecharges() => db

@@ -15,6 +15,7 @@ import '../../widgets/wallet_action_sheet.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/single_photo_editor.dart';
 import '../../widgets/logout_confirm_dialog.dart';
+import '../../widgets/stream_error_state.dart';
 import '../../utils/storage_cleanup.dart';
 
 class RestaurantOwnerDashboard extends StatefulWidget {
@@ -394,6 +395,14 @@ class _MenuTab extends StatelessWidget {
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
+          }
+          // Un menu qui n'a pas pu être chargé ne doit pas se présenter
+          // comme un menu vide : le restaurateur ajouterait des doublons.
+          if (snap.hasError) {
+            return const StreamErrorState(
+              message: 'Impossible de charger votre menu.\n'
+                  'Vérifiez votre connexion et réessayez.',
+            );
           }
           final docs = snap.data?.docs ?? [];
           if (docs.isEmpty) {
@@ -832,6 +841,15 @@ class _OrdersTab extends StatelessWidget {
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
+        }
+        // Cette requête exige un index composite : en son absence elle
+        // échoue, et sans cette branche le restaurateur verrait « aucune
+        // commande » alors que des commandes l'attendent.
+        if (snap.hasError) {
+          return const StreamErrorState(
+            message: 'Impossible de charger les commandes.\n'
+                'Vérifiez votre connexion et réessayez.',
+          );
         }
         final docs = snap.data?.docs ?? [];
         if (docs.isEmpty) {

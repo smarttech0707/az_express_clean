@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/premium_background.dart';
 import '../../widgets/premium_empty_state.dart';
+import '../../widgets/stream_error_state.dart';
 import 'boulangerie_order_page.dart';
 
 class BoulangeriesList extends StatelessWidget {
@@ -93,6 +94,15 @@ class BoulangeriesList extends StatelessWidget {
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
+                }
+                // L'index composite (isActive, name) existe dans le fichier
+                // mais pas encore en production : sans cette branche, l'échec
+                // s'affichait comme « aucune boulangerie disponible ».
+                if (snap.hasError) {
+                  return const StreamErrorState(
+                    message: 'Impossible de charger les boulangeries.\n'
+                        'Vérifiez votre connexion et réessayez.',
+                  );
                 }
                 final docs = snap.data?.docs ?? [];
                 if (docs.isEmpty) {

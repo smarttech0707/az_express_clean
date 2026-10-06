@@ -11,6 +11,7 @@ import '../../services/tarif_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/wallet_payment_compatibility.dart';
 import '../../providers/active_city_provider.dart';
+import '../../widgets/stream_error_state.dart';
 
 class BoulangerieOrderPage extends StatefulWidget {
   final String boulangerieId;
@@ -533,6 +534,17 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const SliverToBoxAdapter(
                     child: Center(child: CircularProgressIndicator()));
+              }
+              // Filtre + tri sur des champs différents : cette requête exige
+              // un index composite. En cas d'échec, afficher l'erreur plutôt
+              // qu'un menu vide, qui ferait croire la boulangerie fermée.
+              if (snap.hasError) {
+                return const SliverToBoxAdapter(
+                  child: StreamErrorState(
+                    message: 'Impossible de charger le menu.\n'
+                        'Vérifiez votre connexion et réessayez.',
+                  ),
+                );
               }
               final docs = snap.data?.docs ?? [];
               // Mettre à jour le cache des données
