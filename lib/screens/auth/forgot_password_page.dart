@@ -3,10 +3,44 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
 import 'otp_verify_page.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/password_reset_email_guidance.dart';
+
+/// Rôles qui passent par cet écran. Tous les deux disposent d'une adresse
+/// e-mail RÉELLE, validée à l'inscription — contrairement aux partenaires
+/// (vendeur/restaurant/boulangerie/flotte), dont l'e-mail Firebase Auth est
+/// technique (`07…@az-seller.ci`) et donc non délivrable.
+enum AccountRecoveryRole { client, driver }
+
+/// Le canal SMS est-il proposé pour ce rôle ?
+///
+/// Il est masqué pour le livreur : le chemin SMS aboutit à
+/// `ResetPasswordPage`, qui appelle `resetAccountPassword` avec
+/// `userType: 'client'` CODÉ EN DUR (reset_password_page.dart). La
+/// réinitialisation viserait donc la collection `clients`, jamais `livreurs` —
+/// et `resetAccountPassword` n'a de toute façon aucune entrée `livreur` dans sa
+/// table de collections côté Cloud Function. Corriger cela proprement exige de
+/// modifier `functions/passwordReset.js`, hors du périmètre de ce correctif
+/// Flutter : on évite donc d'engager le livreur dans un flux trompeur plutôt
+/// que de le laisser réinitialiser le mauvais compte.
+@visibleForTesting
+bool smsRecoveryAvailable(AccountRecoveryRole role) =>
+    role == AccountRecoveryRole.client;
+
+/// Avertissement affiché quand le canal SMS reste proposé : Firebase Phone Auth
+/// est actuellement en échec côté projet (`INTERNAL (13) / Error code: 39`),
+/// alors que le lien e-mail passe par un autre service et fonctionne.
+const String kSmsRecoveryWarning =
+    'Le SMS peut être indisponible actuellement. Utilisez le lien par e-mail '
+    'si possible.';
 
 class ForgotPasswordPage extends StatefulWidget {
   final String? prefillPhone;
-  const ForgotPasswordPage({super.key, this.prefillPhone});
+  final AccountRecoveryRole role;
+  const ForgotPasswordPage({
+    super.key,
+    this.prefillPhone,
+    this.role = AccountRecoveryRole.client,
+  });
 
   @override
   State<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
@@ -15,8 +49,12 @@ class ForgotPasswordPage extends StatefulWidget {
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
-  bool _bySms = true;
+  // E-mail par défaut : c'est le seul canal de récupération réellement
+  // fonctionnel aujourd'hui pour ces deux rôles (voir kSmsRecoveryWarning).
+  bool _bySms = false;
   bool _loading = false;
+
+  bool get _smsAvailable => smsRecoveryAvailable(widget.role);
 
   @override
   void initState() {
@@ -51,9 +89,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     }
     setState(() => _loading = true);
     try {
-      await AuthService().sendEmailPasswordReset(email);
+      await sendResetEmailAndShowGuidance(
+        context: context,
+        sendEmail: () => AuthService().sendEmailPasswordReset(email),
+      );
       if (!mounted) return;
-      _snack('Lien de réinitialisation envoyé à $email', Colors.green);
       Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
       _snack(
@@ -69,6 +109,17 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   }
 
   Future<void> _submitSms() async {
+    // Défense en profondeur : même si la carte SMS réapparaissait un jour dans
+    // l'interface, un livreur ne doit jamais atteindre un reset qui viserait
+    // la collection `clients`.
+    if (!_smsAvailable) {
+      _snack(
+        'La réinitialisation par SMS n’est pas disponible pour ce compte. '
+        'Utilisez le lien par e-mail.',
+        Colors.orange,
+      );
+      return;
+    }
     final phone = _phoneCtrl.text.trim();
     if (!AuthService.isValidPhone(phone)) {
       _snack('Numéro de téléphone invalide', Colors.orange);
@@ -158,7 +209,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                                 fontWeight: FontWeight.bold)),
                         SizedBox(height: 4),
                         Text(
-                            'Choisissez comment recevoir\nvotre code de récupération',
+                            'Recevez un lien de réinitialisation\npar e-mail',
                             style:
                                 TextStyle(color: Colors.white70, fontSize: 12)),
                       ],
@@ -173,28 +224,60 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
 
-            // Sélecteur SMS / Email
+            // Sélecteur SMS / Email — l'e-mail est présenté en premier, et le
+            // SMS n'apparaît que pour les rôles où ce canal est exploitable.
             Row(
               children: [
                 Expanded(
                     child: _MethodCard(
-                  icon: Icons.sms_outlined,
-                  label: 'Recevoir un code\npar SMS',
-                  selected: _bySms,
-                  color: AppColors.primary,
-                  onTap: () => setState(() => _bySms = true),
-                )),
-                const SizedBox(width: 12),
-                Expanded(
-                    child: _MethodCard(
                   icon: Icons.email_outlined,
-                  label: 'Recevoir un lien\npar Email',
+                  label: 'Recevoir un lien\npar e-mail',
                   selected: !_bySms,
                   color: const Color(0xFF1E88E5),
                   onTap: () => setState(() => _bySms = false),
                 )),
+                if (_smsAvailable) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                      child: _MethodCard(
+                    icon: Icons.sms_outlined,
+                    label: 'Recevoir un code\npar SMS',
+                    selected: _bySms,
+                    color: AppColors.primary,
+                    onTap: () => setState(() => _bySms = true),
+                  )),
+                ],
               ],
             ),
+
+            if (_smsAvailable) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8E1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFFE082)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline,
+                        size: 18, color: Color(0xFFF57F17)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(kSmsRecoveryWarning,
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              Text(
+                'La réinitialisation se fait par e-mail pour ce compte.',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+              ),
+            ],
 
             const SizedBox(height: 28),
 

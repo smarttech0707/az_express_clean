@@ -1,5 +1,6 @@
 import 'dart:io';
 import '../../widgets/scale_button.dart';
+import '../../widgets/admin_restaurant_cards.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -277,62 +278,26 @@ class AdminRestaurantsPage extends StatelessWidget {
                       ),
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16),
-                    // Boutons actions
-                    Row(
-                      children: [
-                        // Gérer le menu
-                        Expanded(
-                          child: TextButton.icon(
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => _MenuManagePage(
-                                  restaurantId: doc.id,
-                                  restaurantName: data["name"] ?? "",
-                                ),
-                              ),
-                            ),
-                            icon: const Icon(Icons.menu_book,
-                                size: 18, color: Color(0xFF1565C0)),
-                            label: const Text(
-                              "Menu",
-                              style: TextStyle(color: Color(0xFF1565C0)),
-                            ),
+                    AdminRestaurantActions(
+                      onMenu: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => _MenuManagePage(
+                            restaurantId: doc.id,
+                            restaurantName: data["name"] ?? "",
                           ),
                         ),
-                        // Abonnement
-                        Expanded(
-                          child: TextButton.icon(
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => _RestaurantSubPage(
-                                  docId: doc.id,
-                                  data: data,
-                                ),
-                              ),
-                            ),
-                            icon: const Icon(Icons.workspace_premium_rounded,
-                                size: 18, color: Colors.amber),
-                            label: const Text(
-                              "Abo",
-                              style: TextStyle(color: Colors.amber),
-                            ),
+                      ),
+                      onSubscription: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => _RestaurantSubPage(
+                            docId: doc.id,
+                            data: data,
                           ),
                         ),
-                        // Supprimer
-                        Expanded(
-                          child: TextButton.icon(
-                            onPressed: () => _deleteRestaurant(context, doc),
-                            icon: const Icon(Icons.delete_outline,
-                                size: 18, color: Colors.red),
-                            label: const Text(
-                              "Supprimer",
-                              style: TextStyle(color: Colors.red),
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
+                      onDelete: () => _deleteRestaurant(context, doc),
                     ),
                   ],
                 ),
@@ -424,71 +389,16 @@ class _MenuManagePage extends StatelessWidget {
               final data = doc.data() as Map<String, dynamic>;
               final imageUrl = (data["imageUrl"] as String?) ?? "";
 
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.06),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: ListTile(
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  leading: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: imageUrl.isNotEmpty
-                        ? Image.network(
-                            imageUrl,
-                            width: 54,
-                            height: 54,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => _menuIcon(),
-                          )
-                        : _menuIcon(),
-                  ),
-                  title: Text(
-                    data["name"] ?? "—",
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: data["description"] != null &&
-                          (data["description"] as String).isNotEmpty
-                      ? Text(data["description"],
-                          style: const TextStyle(fontSize: 12))
-                      : null,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        "${data['price'] ?? 0} FCFA",
-                        style: const TextStyle(
-                          color: Color(0xFF1565C0),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined,
-                            color: Colors.grey, size: 20),
-                        onPressed: () => _goToAddItem(context, doc),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline,
-                            color: Colors.red, size: 20),
-                        onPressed: () async {
-                          await doc.reference.delete();
-                          await deleteStorageUrls([imageUrl]);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
+              return AdminRestaurantDishCard(
+                name: data["name"] ?? "—",
+                description: data["description"] as String? ?? "",
+                price: "${data['price'] ?? 0} FCFA",
+                imageUrl: imageUrl,
+                onEdit: () => _goToAddItem(context, doc),
+                onDelete: () async {
+                  await doc.reference.delete();
+                  await deleteStorageUrls([imageUrl]);
+                },
               );
             },
           );
@@ -1043,14 +953,6 @@ class _RestaurantSubPageState extends State<_RestaurantSubPage> {
     );
   }
 }
-
-Widget _menuIcon() => Container(
-      width: 54,
-      height: 54,
-      color: const Color(0xFF1565C0).withValues(alpha: 0.1),
-      child: const Icon(Icons.fastfood_rounded,
-          color: Color(0xFF1565C0), size: 26),
-    );
 
 Widget _dialogField(
   TextEditingController ctrl,

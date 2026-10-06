@@ -273,7 +273,9 @@ class _DriverLoginState extends State<DriverLogin> {
                 onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const ForgotPasswordPage())),
+                        builder: (_) => const ForgotPasswordPage(
+                              role: AccountRecoveryRole.driver,
+                            ))),
                 child: const Text('Mot de passe oublié ?',
                     style: TextStyle(
                         color: Color(0xFF167DB7),

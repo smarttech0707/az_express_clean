@@ -1252,7 +1252,6 @@ service cloud.firestore {
     // ── Événements sécurité — écriture réservée aux Cloud Functions ───────────
     match /security_events/{eventId} {
       allow read:   if isAdmin();
-      allow update: if isAdmin();
       allow write:  if false;
     }
 

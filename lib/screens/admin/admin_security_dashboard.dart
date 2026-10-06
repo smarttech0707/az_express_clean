@@ -1,8 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
 import '../../theme/app_theme.dart';
+
+String _securityErrorMessage(Object? error) {
+  if ((error is FirebaseException && error.code == 'permission-denied') ||
+      (error is PlatformException &&
+          (error.code == 'permission-denied' ||
+              (error.code == 'firebase_firestore' &&
+                  (error.message ?? '').contains('PERMISSION_DENIED'))))) {
+    return 'Accès sécurité non autorisé ou règles non configurées.';
+  }
+  return 'Impossible de charger les données de sécurité. Réessayez.';
+}
 
 class AdminSecurityDashboard extends StatefulWidget {
   const AdminSecurityDashboard({super.key});
@@ -71,9 +83,12 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
           .where('createdAt', isGreaterThan: _since24h)
           .count()
           .get(),
+      // rate_limits is server-only internal state, not a log of blocked calls.
+      // Count the existing order-limit events without exposing that collection.
       _db
-          .collection('rate_limits')
-          .where('updatedAt', isGreaterThan: _since1h)
+          .collection('security_events')
+          .where('eventType', isEqualTo: 'order_rate_limit_exceeded')
+          .where('createdAt', isGreaterThan: _since1h)
           .count()
           .get(),
       // Dispatching — commandes annulées faute de livreur
@@ -152,8 +167,14 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 const Icon(Icons.error_outline, color: Colors.red, size: 48),
                 const SizedBox(height: 12),
-                Text('Erreur : ${snap.error}',
-                    style: const TextStyle(color: Colors.red)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Text(
+                    _securityErrorMessage(snap.error),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
               ]),
             );
           }
@@ -244,7 +265,7 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
                 Expanded(
                     child: _StatCard(
                   icon: Icons.block_rounded,
-                  label: 'Rate limits\n(1h)',
+                  label: 'Commandes limitées\n(1h)',
                   value: '${s['rate_limited_1h']}',
                   color: (s['rate_limited_1h'] ?? 0) > 5
                       ? Colors.orange
@@ -437,6 +458,16 @@ class _RecentSecurityEvents extends StatelessWidget {
           .limit(10)
           .snapshots(),
       builder: (ctx, snap) {
+        if (snap.hasError) {
+          return _EmptyCard(
+            icon: Icons.error_outline,
+            message: _securityErrorMessage(snap.error),
+            color: Colors.red,
+          );
+        }
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
         if (!snap.hasData || snap.data!.docs.isEmpty) {
           return const _EmptyCard(
             icon: Icons.verified_user_rounded,
@@ -587,6 +618,16 @@ class _RecentAuditLogs extends StatelessWidget {
           .limit(15)
           .snapshots(),
       builder: (ctx, snap) {
+        if (snap.hasError) {
+          return _EmptyCard(
+            icon: Icons.error_outline,
+            message: _securityErrorMessage(snap.error),
+            color: Colors.red,
+          );
+        }
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
         if (!snap.hasData || snap.data!.docs.isEmpty) {
           return const _EmptyCard(
             icon: Icons.history_rounded,
@@ -683,6 +724,16 @@ class _TopZonesSection extends StatelessWidget {
           .limit(5)
           .snapshots(),
       builder: (ctx, snap) {
+        if (snap.hasError) {
+          return _EmptyCard(
+            icon: Icons.error_outline,
+            message: _securityErrorMessage(snap.error),
+            color: Colors.red,
+          );
+        }
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
         if (!snap.hasData || snap.data!.docs.isEmpty) {
           return const _EmptyCard(
             icon: Icons.location_on_rounded,
@@ -771,8 +822,11 @@ class _EmptyCard extends StatelessWidget {
       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(width: 10),
-        Text(message,
-            style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+        Flexible(
+          child: Text(message,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+        ),
       ]),
     );
   }

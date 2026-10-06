@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/password_reset_email_guidance.dart';
 
 /// Réinitialisation mot de passe / PIN pour tous les types d'utilisateurs
 /// professionnels (non-client).
@@ -99,10 +100,12 @@ class _GenericForgotPasswordPageState extends State<GenericForgotPasswordPage> {
     if (_isAdmin) {
       setState(() => _loading = true);
       try {
-        await FirebaseAuth.instance.sendPasswordResetEmail(email: ident);
+        await sendResetEmailAndShowGuidance(
+          context: context,
+          sendEmail: () =>
+              FirebaseAuth.instance.sendPasswordResetEmail(email: ident),
+        );
         if (!mounted) return;
-        _snack(
-            'Lien envoyé à $ident. Vérifiez votre boîte mail.', Colors.green);
         Navigator.pop(context);
       } on FirebaseAuthException catch (e) {
         _snack(

@@ -6,6 +6,7 @@ import '../../web_theme.dart';
 import '../../admin_auth_service.dart';
 import '../../widgets/az_logo.dart';
 import '../../../widgets/admin_email_verification_prompt.dart';
+import '../../../widgets/password_reset_email_guidance.dart';
 
 class WebAdminLoginPage extends StatefulWidget {
   const WebAdminLoginPage({super.key});
@@ -106,19 +107,13 @@ class _WebAdminLoginPageState extends State<WebAdminLoginPage> {
       _error = null;
     });
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      await sendResetEmailAndShowGuidance(
+        context: context,
+        sendEmail: () =>
+            FirebaseAuth.instance.sendPasswordResetEmail(email: email),
+      );
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Email de réinitialisation envoyé à $email',
-              style: GoogleFonts.inter(color: Colors.white)),
-          backgroundColor: kSuccess,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {

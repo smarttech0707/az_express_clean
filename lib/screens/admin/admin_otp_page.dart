@@ -57,6 +57,29 @@ String adminOtpErrorMessage(String code) => switch (code) {
 @visibleForTesting
 String normalizeAdminMfaPhone(String phone) => AuthService.toE164(phone.trim());
 
+/// Traduit les facteurs Firebase en descripteurs neutres pour
+/// [resolveAdminSecondFactor]. Ne transporte aucun secret : seulement le type,
+/// l'identifiant d'enrôlement et un libellé d'affichage.
+List<AdminEnrolledFactor> adminFactorsFromHints(List<MultiFactorInfo> hints) {
+  final factors = <AdminEnrolledFactor>[];
+  for (final hint in hints) {
+    if (hint is PhoneMultiFactorInfo) {
+      factors.add(AdminEnrolledFactor(
+        kind: AdminSecondFactor.sms,
+        enrollmentId: hint.uid,
+        label: hint.phoneNumber,
+      ));
+    } else if (hint is TotpMultiFactorInfo) {
+      factors.add(AdminEnrolledFactor(
+        kind: AdminSecondFactor.totp,
+        enrollmentId: hint.uid,
+        label: hint.displayName,
+      ));
+    }
+  }
+  return factors;
+}
+
 /// Résout exclusivement un vrai challenge Firebase MFA. En mode enrollment,
 /// le compte Admin existant est enrôlé avant tout accès au tableau de bord.
 class AdminOtpPage extends StatefulWidget {
@@ -72,6 +95,8 @@ class AdminOtpPage extends StatefulWidget {
         adminPhone = null,
         enrollmentSecret = null;
 
+  /// `adminPhone` peut être nul : l'enrôlement TOTP n'exige aucun numéro. Le
+  /// repli SMS n'est proposé que si un numéro est réellement enregistré.
   const AdminOtpPage.enrollment({
     super.key,
     required this.adminUid,
@@ -91,6 +116,12 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
   int? _resendToken;
   PhoneMultiFactorInfo? _phoneHint;
   MultiFactorSession? _enrollmentSession;
+  // Le secret TOTP ne vit qu'ici, en mémoire, et seulement le temps de
+  // l'enrôlement : jamais en Firestore, jamais en préférences, jamais loggé.
+  TotpSecret? _totpSecret;
+  AdminFactorResolution? _resolution;
+  AdminEnrolledFactor? _selectedFactor;
+  AdminSecondFactor _factor = AdminSecondFactor.totp;
   Timer? _countdownTimer;
   Timer? _sendTimeout;
   int _countdown = 60;
@@ -103,7 +134,15 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
   String get _phoneLabel =>
       _phoneHint?.phoneNumber ?? widget.adminPhone ?? 'numéro enregistré';
   String get _code => _controllers.map((controller) => controller.text).join();
-  bool get _canResend => _countdown <= 0 && !_sending && !_verifying;
+  bool get _canResend =>
+      _isSms && _countdown <= 0 && !_sending && !_verifying;
+  bool get _isSms => _factor == AdminSecondFactor.sms;
+  bool get _awaitingChoice => _resolution?.requiresChoice == true &&
+      _selectedFactor == null;
+  bool get _smsFallbackAvailable =>
+      widget.mode == AdminMfaMode.enrollment &&
+      !_isSms &&
+      (widget.adminPhone?.isNotEmpty == true);
 
   @override
   void initState() {
@@ -124,14 +163,33 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
       String? phoneNumber;
       if (widget.mode == AdminMfaMode.signIn) {
         final resolver = widget.resolver!;
+        final resolution =
+            _resolution ??= resolveAdminSecondFactor(
+                adminFactorsFromHints(resolver.hints));
+        if (!resolution.allowed) {
+          throw FirebaseAuthException(code: resolution.errorCode!);
+        }
+        // Deux facteurs enrôlés : l'Admin choisit, rien n'est envoyé avant.
+        final selected = _selectedFactor ?? resolution.single;
+        if (selected == null) {
+          if (mounted) setState(() => _sending = false);
+          return;
+        }
+        _selectedFactor = selected;
+        _factor = selected.kind;
+        if (!_isSms) {
+          // TOTP : aucun challenge réseau, le code vient de l'application.
+          if (mounted) setState(() => _sending = false);
+          return;
+        }
         final phoneHints = resolver.hints.whereType<PhoneMultiFactorInfo>();
         if (phoneHints.isEmpty) {
-          throw FirebaseAuthException(
-            code: 'unsupported-second-factor',
-            message: 'Aucun second facteur SMS n’est enrôlé.',
-          );
+          throw FirebaseAuthException(code: 'unsupported-second-factor');
         }
-        hint = phoneHints.first;
+        hint = phoneHints.firstWhere(
+          (candidate) => candidate.uid == selected.enrollmentId,
+          orElse: () => phoneHints.first,
+        );
         _phoneHint = hint;
         session = resolver.session;
       } else {
@@ -153,10 +211,22 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
           getSession: user.multiFactor.getSession,
         );
         session = _enrollmentSession!;
+        if (!_isSms) {
+          // TOTP prioritaire : Identity Platform génère un secret, l'Admin le
+          // saisit dans son application d'authentification. Aucun SMS, donc
+          // aucune dépendance au réseau opérateur.
+          _totpSecret ??= await TotpMultiFactorGenerator.generateSecret(session);
+          if (mounted) setState(() => _sending = false);
+          return;
+        }
+        final phone = widget.adminPhone;
+        if (phone == null || phone.isEmpty) {
+          throw FirebaseAuthException(code: 'invalid-phone-number');
+        }
         // Les documents Admin conservent historiquement le numéro tel qu'il a
         // été saisi (par exemple 07 01 02 03 04). Firebase Phone Auth exige
         // cependant le format international E.164 pour créer le challenge MFA.
-        phoneNumber = normalizeAdminMfaPhone(widget.adminPhone!);
+        phoneNumber = normalizeAdminMfaPhone(phone);
       }
 
       _sendTimeout?.cancel();
@@ -195,9 +265,9 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
       );
     } on FirebaseAuthException catch (e) {
       _onVerificationFailed(e);
-    } catch (e, stackTrace) {
+    } catch (e) {
       debugPrint('[ADMIN_MFA] création challenge échouée '
-          'type=${e.runtimeType} exception=$e\n$stackTrace');
+          'type=${e.runtimeType}');
       if (mounted) {
         setState(() {
           _sending = false;
@@ -210,9 +280,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
 
   void _onVerificationFailed(FirebaseAuthException error) {
     _sendTimeout?.cancel();
-    final stackTrace = StackTrace.current;
-    debugPrint('[ADMIN_MFA] challenge refusé code=${error.code} '
-        'message=${error.message} exception=$error\n$stackTrace');
+    debugPrint('[ADMIN_MFA] challenge refusé code=${error.code}');
     if (!mounted) return;
     setState(() {
       _sending = false;
@@ -232,6 +300,10 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
   }
 
   Future<void> _verify() async {
+    if (!_isSms) {
+      await _verifyTotp();
+      return;
+    }
     if (_code.length != 6) {
       _snack('Entrez les 6 chiffres du code.', Colors.orange);
       return;
@@ -248,25 +320,66 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
     await _completeWith(credential);
   }
 
-  Future<void> _completeWith(PhoneAuthCredential credential) async {
-    if (_verifying || _completed) return;
+  /// Vérifie un code d'application d'authentification. Le code est validé
+  /// localement AVANT tout appel réseau, et n'est jamais journalisé.
+  Future<void> _verifyTotp() async {
+    final error = validateAdminTotpCode(_code);
+    if (error != null) {
+      _snack(error, Colors.orange);
+      return;
+    }
+    if (widget.mode == AdminMfaMode.enrollment) {
+      final secret = _totpSecret;
+      if (secret == null) {
+        _snack('Aucun enrôlement actif. Recommencez la connexion Admin.',
+            Colors.red);
+        return;
+      }
+      await _completeWithAssertion(
+        () => TotpMultiFactorGenerator.getAssertionForEnrollment(
+            secret, _code.trim()),
+        displayName: 'Authenticator Admin AZ Express',
+      );
+      return;
+    }
+    final selected = _selectedFactor;
+    if (selected == null) {
+      _snack('Aucun facteur sélectionné.', Colors.red);
+      return;
+    }
+    await _completeWithAssertion(
+      () => TotpMultiFactorGenerator.getAssertionForSignIn(
+          selected.enrollmentId, _code.trim()),
+    );
+  }
+
+  Future<void> _completeWith(PhoneAuthCredential credential) =>
+      _completeWithAssertion(
+        () async => PhoneMultiFactorGenerator.getAssertion(credential),
+        displayName: 'Téléphone Admin AZ Express',
+      );
+
+  /// Chemin unique de validation du second facteur, partagé SMS et TOTP :
+  /// aucune branche ne mène au tableau de bord sans assertion acceptée par
+  /// Identity Platform, puis revalidation du rôle Admin.
+  Future<void> _completeWithAssertion(
+    Future<MultiFactorAssertion> Function() buildAssertion, {
+    String? displayName,
+  }) async {
+    if (!mounted || _verifying || _completed) return;
     setState(() => _verifying = true);
     try {
+      final assertion = await buildAssertion();
       User user;
       if (widget.mode == AdminMfaMode.signIn) {
-        final result = await widget.resolver!.resolveSignIn(
-          PhoneMultiFactorGenerator.getAssertion(credential),
-        );
+        final result = await widget.resolver!.resolveSignIn(assertion);
         user = result.user!;
       } else {
         final current = FirebaseAuth.instance.currentUser;
         if (current == null || current.uid != widget.adminUid) {
           throw FirebaseAuthException(code: 'user-mismatch');
         }
-        await current.multiFactor.enroll(
-          PhoneMultiFactorGenerator.getAssertion(credential),
-          displayName: 'Téléphone Admin AZ Express',
-        );
+        await current.multiFactor.enroll(assertion, displayName: displayName);
         user = current;
       }
 
@@ -292,15 +405,21 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
         context,
         MaterialPageRoute(
           builder: (_) => AdminDashboard(
-            adminData: <String, dynamic>{'uid': user.uid, ...data!},
+            adminData: <String, dynamic>{...data!, 'uid': user.uid},
           ),
         ),
       );
-    } on FirebaseAuthException catch (e, stackTrace) {
-      debugPrint('[ADMIN_MFA] echec code=${e.code} message=${e.message} '
-          'exception=$e\n$stackTrace');
+    } on FirebaseAuthException catch (e) {
+      debugPrint('[ADMIN_MFA] validation échouée code=${e.code}');
       _clearCode();
       _snack(_messageFor(e), Colors.red);
+    } on FirebaseException catch (e) {
+      debugPrint('[ADMIN_MFA] vérification rôle échouée code=${e.code}');
+      _snack(adminMfaErrorMessage(e.code), Colors.red);
+    } catch (e) {
+      debugPrint('[ADMIN_MFA] validation échouée type=${e.runtimeType}');
+      _snack('Impossible de terminer la validation Admin. Reconnectez-vous.',
+          Colors.red);
     } finally {
       if (mounted && !_completed) setState(() => _verifying = false);
     }
@@ -308,6 +427,30 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
 
   String _messageFor(FirebaseAuthException error) {
     return adminOtpErrorMessage(error.code);
+  }
+
+  void _selectFactor(AdminEnrolledFactor factor) {
+    if (_sending || _verifying || _completed) return;
+    setState(() {
+      _selectedFactor = factor;
+      _factor = factor.kind;
+      _sendFailed = false;
+    });
+    _clearCode();
+    _prepareChallenge();
+  }
+
+  /// Repli SMS explicite pendant l'enrôlement — le SMS reste pleinement
+  /// supporté, il n'est simplement plus le seul chemin possible.
+  void _useSmsInstead() {
+    if (_sending || _verifying || _completed) return;
+    setState(() {
+      _factor = AdminSecondFactor.sms;
+      _totpSecret = null;
+      _sendFailed = false;
+    });
+    _clearCode();
+    _prepareChallenge();
   }
 
   void _clearCode() {
@@ -351,6 +494,8 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
       widget.enrollmentSecret?.clear();
       unawaited(FirebaseAuth.instance.signOut());
     }
+    // Le secret TOTP ne doit pas survivre à l'écran.
+    _totpSecret = null;
     for (final controller in _controllers) {
       controller.dispose();
     }
@@ -358,6 +503,84 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
       focusNode.dispose();
     }
     super.dispose();
+  }
+
+  String get _instructions {
+    if (_awaitingChoice) {
+      return 'Choisissez votre second facteur.';
+    }
+    if (_isSms) return 'Code SMS envoyé au\n$_phoneLabel';
+    if (widget.mode == AdminMfaMode.enrollment) {
+      return 'Ajoutez ce compte dans Google Authenticator, Microsoft '
+          'Authenticator ou Authy, puis saisissez le code affiché.';
+    }
+    return 'Saisissez le code affiché par votre application '
+        'd’authentification.';
+  }
+
+  List<Widget> _buildFactorChoice() {
+    final factors = _resolution?.available ?? const <AdminEnrolledFactor>[];
+    return [
+      for (final factor in factors)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _selectFactor(factor),
+              icon: Icon(factor.kind == AdminSecondFactor.totp
+                  ? Icons.phonelink_lock
+                  : Icons.sms_outlined),
+              label: Text(factor.kind == AdminSecondFactor.totp
+                  ? 'Application d’authentification'
+                  : 'Code SMS${factor.label == null ? '' : ' · ${factor.label}'}'),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  /// Clé de configuration à saisir manuellement dans l'application
+  /// d'authentification (phase 1 : pas de QR code).
+  ///
+  /// Affichée uniquement pendant l'enrôlement, jamais après, jamais stockée,
+  /// jamais journalisée.
+  Widget _buildSecretCard() {
+    final secret = _totpSecret!;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Compte', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(FirebaseAuth.instance.currentUser?.email ?? 'Admin AZ Express'),
+          const SizedBox(height: 12),
+          const Text('Émetteur', style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text('AZ Express'),
+          const SizedBox(height: 12),
+          const Text('Clé de configuration',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          SelectableText(
+            secret.secretKey,
+            style: const TextStyle(
+                fontFamily: 'monospace', fontSize: 15, letterSpacing: 1.2),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Saisissez cette clé une seule fois dans votre application, puis '
+            'ne la conservez nulle part : elle ne sera plus affichée.',
+            style: TextStyle(fontSize: 12),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -386,10 +609,11 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
-              Text('Code SMS envoyé au\n$_phoneLabel',
-                  textAlign: TextAlign.center),
+              Text(_instructions, textAlign: TextAlign.center),
               const SizedBox(height: 28),
-              if (_sending)
+              if (_awaitingChoice)
+                ..._buildFactorChoice()
+              else if (_sending)
                 const CircularProgressIndicator(color: AppColors.primary)
               else if (_sendFailed)
                 ElevatedButton.icon(
@@ -398,6 +622,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
                   label: const Text('Réessayer'),
                 )
               else ...[
+                if (!_isSms && _totpSecret != null) _buildSecretCard(),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: List.generate(
@@ -427,13 +652,20 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                TextButton(
-                  onPressed:
-                      _canResend ? () => _prepareChallenge(resend: true) : null,
-                  child: Text(_canResend
-                      ? 'Renvoyer le code'
-                      : 'Renvoyer dans $_countdown secondes'),
-                ),
+                if (_isSms)
+                  TextButton(
+                    onPressed: _canResend
+                        ? () => _prepareChallenge(resend: true)
+                        : null,
+                    child: Text(_canResend
+                        ? 'Renvoyer le code'
+                        : 'Renvoyer dans $_countdown secondes'),
+                  ),
+                if (_smsFallbackAvailable)
+                  TextButton(
+                    onPressed: _verifying ? null : _useSmsInstead,
+                    child: const Text('Utiliser un code SMS à la place'),
+                  ),
               ],
             ],
           ),

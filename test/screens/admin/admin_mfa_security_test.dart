@@ -2,6 +2,51 @@ import 'package:az_express/screens/admin/admin_mfa_security.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('diagnostics Admin sans exception brute', () {
+    for (final code in [
+      'wrong-password',
+      'invalid-credential',
+      'user-not-found'
+    ]) {
+      test(code, () {
+        expect(adminMfaErrorMessage(code), contains('mot de passe incorrect'));
+      });
+    }
+    test('permission Firestore distincte du code SMS', () {
+      expect(adminMfaErrorMessage('permission-denied'), contains('Firestore'));
+    });
+    test('réseau indisponible', () {
+      expect(
+          adminMfaErrorMessage('network-request-failed'), contains('réseau'));
+    });
+    test('session expirée', () {
+      expect(adminMfaErrorMessage('user-token-expired'),
+          contains('Session expirée'));
+    });
+    test('challenge absent', () {
+      expect(adminMfaErrorMessage('missing-verification-id'),
+          contains('Aucun challenge'));
+    });
+    test('rôle mal typé refusé sans exception', () {
+      expect(
+          validateAdminRecord({'role': 42, 'isActive': true}).allowed, isFalse);
+    });
+    for (final role in [
+      'client',
+      'livreur',
+      'vendeur',
+      'restaurant',
+      'pharmacie',
+      'boulangerie',
+      'flotte',
+      'artisan'
+    ]) {
+      test('$role ne donne jamais accès Admin', () {
+        expect(validateAdminRecord({'role': role, 'isActive': true}).allowed,
+            isFalse);
+      });
+    }
+  });
   group('contrôle du rôle après MFA', () {
     test('accepte un super Admin valide', () {
       expect(

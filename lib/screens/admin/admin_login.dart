@@ -34,7 +34,7 @@ bool adminDevelopmentBypassAllowed({
 
 @visibleForTesting
 bool adminDevelopmentRoleAllowed(Map<String, dynamic> adminData) {
-  final role = adminData['role'] as String?;
+  final role = adminData['role'];
   return adminData['isActive'] == true &&
       (role == 'super' || (role == 'sub' && adminData['permissions'] is List));
 }
@@ -51,6 +51,7 @@ class _AdminLoginState extends State<AdminLogin> {
   final _passCtrl = TextEditingController();
   bool _showPass = false;
   bool _loading = false;
+  bool _loginInFlight = false;
   bool _emailVerificationRequired = false;
   bool _resendingVerificationEmail = false;
   String? _verificationEmail;
@@ -87,6 +88,7 @@ class _AdminLoginState extends State<AdminLogin> {
   }
 
   Future<void> _login() async {
+    if (_loginInFlight || _autoResuming || _resendingVerificationEmail) return;
     FocusScope.of(context).unfocus();
 
     final id = _idCtrl.text.trim();
@@ -97,6 +99,7 @@ class _AdminLoginState extends State<AdminLogin> {
       return;
     }
 
+    _loginInFlight = true;
     setState(() => _loading = true);
     setState(() => _emailVerificationRequired = false);
 
@@ -122,12 +125,11 @@ class _AdminLoginState extends State<AdminLogin> {
       }
 
       if (!mounted) return;
-      setState(() => _loading = false);
 
-      // Build adminData — all Firestore fields + uid. Backward compat: missing role = 'super'
+      // Le rôle doit être explicitement valide ; l’UID vient de Firebase Auth.
       final adminData = <String, dynamic>{
-        'uid': cred.user!.uid,
         ...adminDoc.data()!,
+        'uid': cred.user!.uid,
       };
       final access = validateAdminRecord(adminData);
       if (!access.allowed) {
@@ -158,12 +160,11 @@ class _AdminLoginState extends State<AdminLogin> {
 
       final adminPhone = adminData['phone'] as String?;
       final hasPhone = adminPhone != null && adminPhone.isNotEmpty;
-      if (!hasPhone) {
-        await FirebaseAuth.instance.signOut();
-        if (!mounted) return;
-        _error('2FA obligatoire : aucun téléphone Admin n’est configuré.');
-        return;
-      }
+      // La 2FA reste OBLIGATOIRE : l'enrôlement ci-dessous est le seul chemin
+      // vers le tableau de bord. Mais elle n'exige plus un numéro, puisque
+      // l'application d'authentification (TOTP) est désormais le facteur
+      // proposé en premier et ne dépend d'aucun réseau SMS. Un numéro
+      // enregistré reste utilisé pour proposer le repli SMS.
       final skipTwoFactor = adminDevelopmentBypassAllowed(
         isDebug: kDebugMode,
         buildFlagEnabled: _adminSkipTwoFactorBuildFlag,
@@ -188,8 +189,8 @@ class _AdminLoginState extends State<AdminLogin> {
         );
         return;
       }
-      debugPrint(
-          '[ADMIN_MFA] enrôlement requis uid=${_maskedUid(cred.user!.uid)}');
+      debugPrint('[ADMIN_MFA] enrôlement requis '
+          'uid=${_maskedUid(cred.user!.uid)} smsDisponible=$hasPhone');
       final enrollmentSecret = AdminEnrollmentSecret(pass);
       _passCtrl.clear();
       Navigator.pushReplacement(
@@ -213,22 +214,21 @@ class _AdminLoginState extends State<AdminLogin> {
         ),
       );
     } on FirebaseAuthException catch (e) {
+      debugPrint('[ADMIN_AUTH] login refusé code=${e.code}');
       if (!mounted) return;
       setState(() => _loading = false);
-      switch (e.code) {
-        case 'user-not-found':
-        case 'wrong-password':
-        case 'invalid-credential':
-          _error("Identifiant ou mot de passe incorrect");
-        case 'too-many-requests':
-          _error("Trop de tentatives. Réessayez plus tard.");
-        default:
-          _error("Erreur Firebase : ${e.code}");
-      }
+      _error(adminMfaErrorMessage(e.code));
+    } on FirebaseException catch (e) {
+      debugPrint('[ADMIN_AUTH] vérification rôle refusée code=${e.code}');
+      if (mounted) _error(adminMfaErrorMessage(e.code));
     } catch (e) {
+      debugPrint('[ADMIN_AUTH] login échoué type=${e.runtimeType}');
       if (!mounted) return;
       setState(() => _loading = false);
-      _error("Erreur : ${e.toString()}");
+      _error('Impossible de terminer la connexion Admin. Réessayez.');
+    } finally {
+      _loginInFlight = false;
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -237,6 +237,7 @@ class _AdminLoginState extends State<AdminLogin> {
       : '${uid.substring(0, 3)}…${uid.substring(uid.length - 3)}';
 
   Future<void> _resendVerificationEmail() async {
+    if (_loginInFlight || _resendingVerificationEmail || _autoResuming) return;
     if (!_verificationGuard.canSend()) {
       final seconds =
           (_verificationGuard.remaining().inMilliseconds / 1000).ceil();

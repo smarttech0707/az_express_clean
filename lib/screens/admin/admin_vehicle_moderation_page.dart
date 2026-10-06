@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
+import '../../theme/app_theme.dart';
+
 class AdminVehicleModerationPage extends StatefulWidget {
   const AdminVehicleModerationPage({super.key});
 
@@ -10,17 +12,23 @@ class AdminVehicleModerationPage extends StatefulWidget {
       _AdminVehicleModerationPageState();
 }
 
-class _AdminVehicleModerationPageState
-    extends State<AdminVehicleModerationPage> {
+class _AdminVehicleModerationPageState extends State<AdminVehicleModerationPage>
+    with SingleTickerProviderStateMixin {
   static const _pageSize = 20;
-  final _items = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-  DocumentSnapshot<Map<String, dynamic>>? _cursor;
-  int _tab = 0;
-  bool _loading = false;
-  bool _hasMore = true;
-  Object? _error;
+  static const _tabCount = 4;
+  late final TabController _tabController;
+  final _itemsByTab = List.generate(
+    _tabCount,
+    (_) => <QueryDocumentSnapshot<Map<String, dynamic>>>[],
+  );
+  final _cursors =
+      List<DocumentSnapshot<Map<String, dynamic>>?>.filled(_tabCount, null);
+  final _loadingByTab = List<bool>.filled(_tabCount, false);
+  final _hasMoreByTab = List<bool>.filled(_tabCount, true);
+  final _errorsByTab = List<Object?>.filled(_tabCount, null);
+  final _loadGenerationByTab = List<int>.filled(_tabCount, 0);
 
-  String get _collection => switch (_tab) {
+  String _collectionForTab(int tab) => switch (tab) {
         0 => 'vehicle_listings',
         1 || 2 => 'vehicle_seller_profiles',
         _ => 'vehicle_reports',
@@ -29,115 +37,192 @@ class _AdminVehicleModerationPageState
   @override
   void initState() {
     super.initState();
-    _reload();
+    _tabController = TabController(length: _tabCount, vsync: this)
+      ..addListener(_handleTabChange);
+    _loadMore(0);
   }
 
-  Future<void> _reload() async {
-    _items.clear();
-    _cursor = null;
-    _hasMore = true;
-    await _loadMore();
+  @override
+  void dispose() {
+    _tabController
+      ..removeListener(_handleTabChange)
+      ..dispose();
+    super.dispose();
   }
 
-  Future<void> _loadMore() async {
-    if (_loading || !_hasMore) return;
+  void _handleTabChange() {
+    final tab = _tabController.index;
+    if (_itemsByTab[tab].isEmpty && !_loadingByTab[tab] && _hasMoreByTab[tab]) {
+      _loadMore(tab);
+    }
+  }
+
+  Future<void> _reload(int tab) async {
     setState(() {
-      _loading = true;
-      _error = null;
+      _loadGenerationByTab[tab]++;
+      _itemsByTab[tab].clear();
+      _cursors[tab] = null;
+      _hasMoreByTab[tab] = true;
+      _loadingByTab[tab] = false;
+      _errorsByTab[tab] = null;
+    });
+    await _loadMore(tab);
+  }
+
+  Future<void> _loadMore(int tab) async {
+    if (_loadingByTab[tab] || !_hasMoreByTab[tab]) return;
+    final generation = _loadGenerationByTab[tab];
+    setState(() {
+      _loadingByTab[tab] = true;
+      _errorsByTab[tab] = null;
     });
     try {
+      final collection = _collectionForTab(tab);
       Query<Map<String, dynamic>> query = FirebaseFirestore.instance
-          .collection(_collection)
-          .orderBy(_collection == 'vehicle_reports' ? 'createdAt' : 'updatedAt',
+          .collection(collection)
+          .orderBy(collection == 'vehicle_reports' ? 'createdAt' : 'updatedAt',
               descending: true)
           .limit(_pageSize + 1);
-      if (_tab == 2) {
+      if (tab == 2) {
         query = query.where('sellerType', isEqualTo: 'professional');
       }
-      if (_cursor != null) query = query.startAfterDocument(_cursor!);
+      final cursor = _cursors[tab];
+      if (cursor != null) query = query.startAfterDocument(cursor);
       final snapshot = await query.get();
       final page = snapshot.docs.take(_pageSize).toList();
       if (!mounted) return;
+      if (generation != _loadGenerationByTab[tab]) return;
       setState(() {
-        _items.addAll(page);
-        _cursor = page.isEmpty ? null : page.last;
-        _hasMore = snapshot.docs.length > _pageSize;
+        _itemsByTab[tab].addAll(page);
+        _cursors[tab] = page.isEmpty ? null : page.last;
+        _hasMoreByTab[tab] = snapshot.docs.length > _pageSize;
       });
     } catch (error) {
-      if (mounted) setState(() => _error = error);
+      if (mounted && generation == _loadGenerationByTab[tab]) {
+        setState(() => _errorsByTab[tab] = error);
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && generation == _loadGenerationByTab[tab]) {
+        setState(() => _loadingByTab[tab] = false);
+      }
     }
   }
 
   @override
-  Widget build(BuildContext context) => DefaultTabController(
-        length: 4,
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('Modération Auto & Moto'),
-            bottom: TabBar(
-              isScrollable: true,
-              onTap: (value) {
-                _tab = value;
-                _reload();
-              },
-              tabs: const [
-                Tab(text: 'Annonces'),
-                Tab(text: 'Vendeurs'),
-                Tab(text: 'Pros/Magasins'),
-                Tab(text: 'Signalements'),
-              ],
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 400;
+    final textScaler = MediaQuery.textScalerOf(context);
+    final titleSize = compact ? 16.0 : AppTypography.titleLarge(context);
+    final tabHeight =
+        (textScaler.scale(AppTypography.labelLarge(context)) * 1.4 + 20)
+            .clamp(48.0, double.infinity);
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: compact ? 8 : 16,
+        toolbarHeight: (textScaler.scale(titleSize) * 1.4 + 16)
+            .clamp(56.0, double.infinity),
+        title: Tooltip(
+          message: 'Modération Auto & Moto',
+          child: Text(
+            'Modération Auto & Moto',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.titleLargeStyle(context).copyWith(
+              fontSize: titleSize,
             ),
           ),
-          body: SafeArea(top: false, child: _body()),
         ),
-      );
+        bottom: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          labelPadding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
+          labelStyle: AppTypography.labelLargeStyle(context),
+          unselectedLabelStyle: AppTypography.labelLargeStyle(context),
+          tabs: [
+            for (final label in const [
+              'Annonces',
+              'Vendeurs',
+              'Pros/Magasins',
+              'Signalements',
+            ])
+              Tab(
+                height: tabHeight,
+                child: Text(label, maxLines: 1, softWrap: false),
+              ),
+          ],
+        ),
+      ),
+      body: SafeArea(
+        top: false,
+        child: TabBarView(
+          controller: _tabController,
+          children: List.generate(_tabCount, _tabBody),
+        ),
+      ),
+    );
+  }
 
-  Widget _body() {
-    if (_loading && _items.isEmpty) {
+  Widget _tabBody(int tab) {
+    final items = _itemsByTab[tab];
+    final loading = _loadingByTab[tab];
+    final error = _errorsByTab[tab];
+    if (loading && items.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null && _items.isEmpty) {
+    if (error != null && items.isEmpty) {
       return Center(
         child: FilledButton.tonal(
-          onPressed: _reload,
+          onPressed: () => _reload(tab),
           child: const Text('Réessayer'),
         ),
       );
     }
-    if (_items.isEmpty) return const Center(child: Text('Aucun élément.'));
+    if (items.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Aucun élément.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
     return RefreshIndicator(
-      onRefresh: _reload,
+      onRefresh: () => _reload(tab),
       child: ListView.builder(
         padding: const EdgeInsets.all(12),
-        itemCount: _items.length + (_hasMore ? 1 : 0),
+        itemCount: items.length + (_hasMoreByTab[tab] ? 1 : 0),
         itemBuilder: (context, index) {
-          if (index == _items.length) {
+          if (index == items.length) {
             return Padding(
               padding: const EdgeInsets.all(12),
               child: OutlinedButton(
-                onPressed: _loading ? null : _loadMore,
-                child: Text(_loading ? 'Chargement…' : 'Charger la suite'),
+                onPressed: loading ? null : () => _loadMore(tab),
+                child: Text(loading ? 'Chargement…' : 'Charger la suite'),
               ),
             );
           }
-          return _card(_items[index]);
+          return _card(items[index], tab);
         },
       ),
     );
   }
 
-  Widget _card(QueryDocumentSnapshot<Map<String, dynamic>> document) {
+  Widget _card(
+    QueryDocumentSnapshot<Map<String, dynamic>> document,
+    int tab,
+  ) {
     final data = document.data();
-    final title = _tab == 0
+    final title = tab == 0
         ? data['title']
-        : _tab == 3
+        : tab == 3
             ? '${data['targetType']} • ${data['reason']}'
             : data['shopName'] ?? data['displayName'];
-    final status = _tab == 2
+    final status = tab == 2
         ? data['verificationStatus']
-        : _tab == 1
+        : tab == 1
             ? (data['suspended'] == true ? 'suspended' : 'active')
             : data['status'];
     return Card(
@@ -157,7 +242,11 @@ class _AdminVehicleModerationPageState
               Text(details, maxLines: 3, overflow: TextOverflow.ellipsis),
             ],
             const SizedBox(height: 8),
-            Wrap(spacing: 8, runSpacing: 6, children: _actions(document, data)),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: _actions(document, data, tab),
+            ),
           ],
         ),
       ),
@@ -167,40 +256,41 @@ class _AdminVehicleModerationPageState
   List<Widget> _actions(
     QueryDocumentSnapshot<Map<String, dynamic>> document,
     Map<String, dynamic> data,
+    int tab,
   ) {
-    if (_tab == 0) {
+    if (tab == 0) {
       return [
         _action(document.id, 'listing', 'suspend', 'Suspendre',
-            needsReason: true),
-        _action(document.id, 'listing', 'restore', 'Restaurer'),
-        _action(document.id, 'listing', 'archive', 'Archiver'),
+            tab: tab, needsReason: true),
+        _action(document.id, 'listing', 'restore', 'Restaurer', tab: tab),
+        _action(document.id, 'listing', 'archive', 'Archiver', tab: tab),
       ];
     }
-    if (_tab == 1) {
+    if (tab == 1) {
       final suspended = data['suspended'] == true;
       return [
         _action(document.id, 'seller', suspended ? 'restore' : 'suspend',
             suspended ? 'Restaurer' : 'Suspendre',
-            needsReason: !suspended),
+            tab: tab, needsReason: !suspended),
       ];
     }
-    if (_tab == 2) {
+    if (tab == 2) {
       return [
-        _action(document.id, 'verification', 'verify', 'Vérifier'),
+        _action(document.id, 'verification', 'verify', 'Vérifier', tab: tab),
         _action(document.id, 'verification', 'reject', 'Refuser',
-            needsReason: true),
+            tab: tab, needsReason: true),
       ];
     }
     return [
-      _action(document.id, 'report', 'resolve', 'Résoudre'),
-      _action(document.id, 'report', 'dismiss', 'Classer'),
+      _action(document.id, 'report', 'resolve', 'Résoudre', tab: tab),
+      _action(document.id, 'report', 'dismiss', 'Classer', tab: tab),
     ];
   }
 
   Widget _action(String id, String type, String action, String label,
-          {bool needsReason = false}) =>
+          {required int tab, bool needsReason = false}) =>
       FilledButton.tonal(
-        onPressed: () => _moderate(id, type, action, label, needsReason),
+        onPressed: () => _moderate(id, type, action, label, tab, needsReason),
         child: Text(label),
       );
 
@@ -209,6 +299,7 @@ class _AdminVehicleModerationPageState
     String type,
     String action,
     String label,
+    int tab,
     bool needsReason,
   ) async {
     final controller = TextEditingController();
@@ -247,7 +338,7 @@ class _AdminVehicleModerationPageState
         'action': action,
         'reason': reason
       });
-      await _reload();
+      await _reload(tab);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
