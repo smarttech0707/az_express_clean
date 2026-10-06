@@ -41,7 +41,19 @@ class WebAdminAuthResult {
 class AdminAuthService extends ChangeNotifier {
   static final instance = AdminAuthService._();
   AdminAuthService._() {
-    FirebaseAuth.instance.authStateChanges().listen(_restoreSession);
+    // Ce singleton est construit par `webRouter` (son `refreshListenable`),
+    // donc dès le premier rendu du site. Si Firebase n'a pas pu s'initialiser,
+    // `FirebaseAuth.instance` lève et l'exception remonte pendant le build du
+    // routeur — c'est-à-dire un écran vide, exactement le symptôme qu'on
+    // cherche à éliminer. On tolère donc l'absence de Firebase : aucun
+    // événement d'authentification n'arrive, `isAdmin` reste false, et les
+    // pages publiques s'affichent normalement. Le comportement habituel
+    // (Firebase disponible) est inchangé.
+    try {
+      FirebaseAuth.instance.authStateChanges().listen(_restoreSession);
+    } catch (e) {
+      debugPrint('AdminAuthService : authentification indisponible ($e)');
+    }
   }
 
   bool _isAdmin = false;

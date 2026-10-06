@@ -30,9 +30,12 @@ class _WebClientLoginPageState extends State<WebClientLoginPage> {
   }
 
   Future<void> _submit() async {
-    final phone = _phoneCtrl.text.trim();
+    // En connexion, ce champ porte un email OU un numéro ; en inscription,
+    // uniquement un numéro. Le contrôleur reste `_phoneCtrl` pour ne pas
+    // propager un renommage inutile dans tout le formulaire.
+    final identifier = _phoneCtrl.text.trim();
     final pass = _passCtrl.text.trim();
-    if (phone.isEmpty || pass.isEmpty) {
+    if (identifier.isEmpty || pass.isEmpty) {
       setState(() => _error = 'Remplis tous les champs');
       return;
     }
@@ -47,9 +50,9 @@ class _WebClientLoginPageState extends State<WebClientLoginPage> {
     });
 
     final err = _isLogin
-        ? await WebClientAuth.instance.login(phone, pass)
+        ? await WebClientAuth.instance.login(identifier, pass)
         : await WebClientAuth.instance
-            .register(_nameCtrl.text.trim(), phone, pass);
+            .register(_nameCtrl.text.trim(), identifier, pass);
 
     if (!mounted) return;
     setState(() => _loading = false);
@@ -194,14 +197,31 @@ class _FormCard extends StatelessWidget {
               style: GoogleFonts.inter(fontSize: 13, color: kTextMuted)),
           const SizedBox(height: 28),
           if (!isLogin) ...[
-            _field(nameCtrl, 'Nom complet', Icons.person_rounded),
+            _field(nameCtrl, 'Nom complet', Icons.person_rounded,
+                autofill: const [AutofillHints.name]),
             const SizedBox(height: 16),
           ],
-          _field(phoneCtrl, 'Numéro de téléphone', Icons.phone_rounded,
-              type: TextInputType.phone, hint: 'Ex: 07 00 00 00 00'),
+          // En CONNEXION, le champ accepte réellement les deux formes (voir
+          // WebClientAuth.resolveLoginEmail) — le libellé le reflète.
+          // En INSCRIPTION, le compte reste identifié par son numéro.
+          if (isLogin)
+            _field(phoneCtrl, 'Email ou numéro de téléphone',
+                Icons.alternate_email_rounded,
+                type: TextInputType.emailAddress,
+                hint: 'Ex: 07 00 00 00 00 ou nom@email.com',
+                autofill: const [AutofillHints.username])
+          else
+            _field(phoneCtrl, 'Numéro de téléphone', Icons.phone_rounded,
+                type: TextInputType.phone,
+                hint: 'Ex: 07 00 00 00 00',
+                autofill: const [AutofillHints.telephoneNumber]),
           const SizedBox(height: 16),
           _field(passCtrl, 'Mot de passe', Icons.lock_rounded,
-              obscure: true, hint: 'Minimum 6 caractères'),
+              obscure: true,
+              hint: 'Minimum 6 caractères',
+              autofill: [
+                isLogin ? AutofillHints.password : AutofillHints.newPassword
+              ]),
           if (error != null) ...[
             const SizedBox(height: 16),
             Container(
@@ -273,17 +293,58 @@ class _FormCard extends StatelessWidget {
     );
   }
 
+  // ── Palette locale du formulaire ──────────────────────────────────────────
+  // Cet écran est volontairement SOMBRE (fond #0D1117, carte #161B22), alors
+  // que le thème web global est passé à une palette CLAIRE : dans
+  // `web_theme.dart`, `kNavyCard` est un alias de `kCard`, c'est-à-dire
+  // `Color(0xFFFFFFFF)` — du blanc pur, malgré son nom. L'
+  // `inputDecorationTheme` de `WebApp` remplit donc les champs en blanc
+  // (`filled: true, fillColor: kNavyCard`) tandis que `_field` forçait le
+  // texte saisi en blanc : texte blanc sur fond blanc, donc illisible.
+  //
+  // Toutes les couleurs du champ sont désormais déclarées explicitement ici
+  // pour ne plus dépendre du thème global, quelle que soit son évolution.
+  static const _fieldFill = Color(0xFF0D1117); // = fond de page, tranche nette
+  static const _fieldText = Colors.white;
+  static const _fieldLabel = Color(0xB3FFFFFF); // blanc 70 %
+  static const _fieldHint = Color(0x80FFFFFF); // blanc 50 %
+  static const _fieldIcon = Color(0xCCFFFFFF); // blanc 80 %
+  static const _fieldBorder = Color(0x33FFFFFF); // blanc 20 %
+
   Widget _field(TextEditingController ctrl, String label, IconData icon,
-      {bool obscure = false, TextInputType? type, String? hint}) {
+      {bool obscure = false,
+      TextInputType? type,
+      String? hint,
+      List<String>? autofill}) {
+    OutlineInputBorder border(Color color, double width) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: color, width: width),
+        );
+
     return TextField(
       controller: ctrl,
       obscureText: obscure,
       keyboardType: type,
-      style: GoogleFonts.inter(color: Colors.white, fontSize: 15),
+      autofillHints: autofill,
+      style: GoogleFonts.inter(color: _fieldText, fontSize: 15),
+      cursorColor: kOrange,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        prefixIcon: Icon(icon, color: kTextMuted, size: 20),
+        labelStyle: GoogleFonts.inter(color: _fieldLabel, fontSize: 14),
+        floatingLabelStyle: GoogleFonts.inter(color: kOrange, fontSize: 14),
+        hintStyle: GoogleFonts.inter(color: _fieldHint, fontSize: 14),
+        prefixIcon: Icon(icon, color: _fieldIcon, size: 20),
+        filled: true,
+        fillColor: _fieldFill,
+        // Bordures explicites : sans elles, un thème global clair réintroduit
+        // un champ pâle sur la carte sombre.
+        border: border(_fieldBorder, 1),
+        enabledBorder: border(_fieldBorder, 1),
+        focusedBorder: border(kOrange, 1.6),
+        errorBorder: border(Colors.red.shade400, 1),
+        focusedErrorBorder: border(Colors.red.shade400, 1.6),
+        disabledBorder: border(_fieldBorder, 1),
       ),
     );
   }

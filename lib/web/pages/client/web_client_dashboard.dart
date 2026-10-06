@@ -5,15 +5,80 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../web_theme.dart';
 import '../../web_client_auth.dart';
+import 'web_delivery_page.dart';
+
+/// Route de la page Livraison Express, désormais réellement implémentée
+/// (`web_delivery_page.dart`) — elle n'affiche plus `_ServiceUnavailable`.
+const clientDeliveryRoute = '/app/commander';
+
+/// Sections RÉELLES du dashboard : chacune correspond à une page réellement
+/// implémentée (`_HomeTab`, `_OrdersTab`, `_WalletTab`, `_ProfileTab`).
+///
+/// Elles n'avaient AUCUNE URL avant ce correctif : l'onglet vivait uniquement
+/// dans un `int _tab` local, donc un rafraîchissement ou un retour navigateur
+/// ramenait toujours à l'accueil. L'URL est désormais la source de vérité.
+const clientSectionTabs = <String, int>{
+  '/app': 0,
+  '/app/commandes': 1,
+  '/app/wallet': 2,
+  '/app/profil': 3,
+};
+
+/// Chemin canonique d'un onglet, pour la navigation sortante.
+String clientPathForTab(int tab) => clientSectionTabs.entries
+    .firstWhere((e) => e.value == tab, orElse: () => clientSectionTabs.entries.first)
+    .key;
 
 class WebClientDashboard extends StatefulWidget {
-  const WebClientDashboard({super.key});
+  /// Route actuellement affichée. Transmise par go_router — sans elle, le
+  /// dashboard ne pouvait pas savoir quoi montrer et repartait toujours à
+  /// l'accueil, quelle que soit l'URL demandée.
+  final String location;
+
+  const WebClientDashboard({super.key, this.location = '/app'});
+
   @override
   State<WebClientDashboard> createState() => _WebClientDashboardState();
 }
 
 class _WebClientDashboardState extends State<WebClientDashboard> {
-  int _tab = 0; // 0=accueil, 1=commandes, 2=wallet, 3=profil
+  /// Onglet dérivé de l'URL : plus aucun état local à resynchroniser.
+  int get _tab => clientSectionTabs[widget.location] ?? 0;
+
+  /// Service demandé par l'URL mais SANS page web implémentée, ou `null`.
+  ///
+  /// Aucune page n'existe dans `lib/web/pages/client/` pour ces routes : le
+  /// répertoire ne contient que le dashboard et la connexion. Plutôt que de
+  /// fabriquer une fausse navigation, on l'affiche explicitement.
+  ({IconData icon, String title, Color color})? get _unavailableService {
+    final loc = widget.location;
+    if (clientSectionTabs.containsKey(loc)) return null;
+    // Livraison Express a maintenant une vraie page web.
+    if (loc == clientDeliveryRoute) return null;
+    if (!loc.startsWith('/app/')) return null;
+
+    // Le libellé et l'icône proviennent de la définition des cartes
+    // elles-mêmes : aucune duplication, aucun intitulé inventé.
+    for (final s in clientServiceCards) {
+      if (s.$5 == loc) return (icon: s.$1, title: s.$2, color: s.$4);
+    }
+    // Les deux actions du wallet, qui ne sont pas des cartes de service.
+    if (loc == '/app/recharge') {
+      return (icon: Icons.add_rounded, title: 'Recharger le wallet', color: kSuccess);
+    }
+    if (loc == '/app/retrait') {
+      return (
+        icon: Icons.arrow_upward_rounded,
+        title: 'Retirer de l\'argent',
+        color: kBlue
+      );
+    }
+    return null;
+  }
+
+  /// Navigation entre sections : passe par l'URL, pour que le rafraîchissement
+  /// et les boutons Précédent/Suivant du navigateur restent cohérents.
+  void _goToTab(int tab) => context.go(clientPathForTab(tab));
 
   @override
   Widget build(BuildContext context) {
@@ -24,32 +89,39 @@ class _WebClientDashboardState extends State<WebClientDashboard> {
       backgroundColor: const Color(0xFF0F1923),
       body: Row(
         children: [
-          if (!mob)
-            _Sidebar(
-                tab: _tab, onTab: (t) => setState(() => _tab = t), auth: auth),
+          if (!mob) _Sidebar(tab: _tab, onTab: _goToTab, auth: auth),
           Expanded(
             child: Column(
               children: [
-                _TopBar(
-                    auth: auth,
-                    tab: _tab,
-                    onTab: (t) => setState(() => _tab = t)),
+                _TopBar(auth: auth, tab: _tab, onTab: _goToTab),
                 Expanded(child: _body(auth)),
               ],
             ),
           ),
         ],
       ),
-      bottomNavigationBar: mob
-          ? _MobileNav(tab: _tab, onTab: (t) => setState(() => _tab = t))
-          : null,
+      bottomNavigationBar:
+          mob ? _MobileNav(tab: _tab, onTab: _goToTab) : null,
     );
   }
 
   Widget _body(WebClientAuth auth) {
+    // Livraison Express : vraie page, rendue dans le cadre du dashboard pour
+    // conserver la barre latérale et la navigation.
+    if (widget.location == clientDeliveryRoute) return const WebDeliveryPage();
+    // Une route de service prime : elle doit être annoncée honnêtement, pas
+    // remplacée silencieusement par l'accueil.
+    final service = _unavailableService;
+    if (service != null) {
+      return _ServiceUnavailable(
+        icon: service.icon,
+        title: service.title,
+        color: service.color,
+      );
+    }
     switch (_tab) {
       case 0:
-        return _HomeTab(auth: auth, onTab: (t) => setState(() => _tab = t));
+        return _HomeTab(auth: auth, onTab: _goToTab);
       case 1:
         return _OrdersTab(auth: auth);
       case 2:
@@ -57,7 +129,7 @@ class _WebClientDashboardState extends State<WebClientDashboard> {
       case 3:
         return _ProfileTab(auth: auth);
       default:
-        return _HomeTab(auth: auth, onTab: (t) => setState(() => _tab = t));
+        return _HomeTab(auth: auth, onTab: _goToTab);
     }
   }
 }
@@ -237,12 +309,12 @@ class _TopBar extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 // ONGLET ACCUEIL — grille de services
 // ─────────────────────────────────────────────────────────────────────────────
-class _HomeTab extends StatelessWidget {
-  final WebClientAuth auth;
-  final ValueChanged<int> onTab;
-  const _HomeTab({required this.auth, required this.onTab});
-
-  static const _services = [
+/// Cartes de service du dashboard client web — DÉFINITION UNIQUE.
+///
+/// Exposée au niveau du fichier pour que la liste des chemins ciblés soit
+/// vérifiable par un test : c'est exactement ce couplage (carte -> route)
+/// qui était cassé, chaque route reconstruisant le même dashboard.
+const clientServiceCards = <(IconData, String, String, Color, String)>[
     (
       Icons.delivery_dining_rounded,
       'Livraison Express',
@@ -327,7 +399,20 @@ class _HomeTab extends StatelessWidget {
       kOrangeD,
       '/app/colis'
     ),
-  ];
+];
+
+/// Chemins ciblés par les cartes de service ci-dessus.
+List<String> get clientServiceRoutes =>
+    clientServiceCards.map((c) => c.$5).toList(growable: false);
+
+class _HomeTab extends StatelessWidget {
+  final WebClientAuth auth;
+  final ValueChanged<int> onTab;
+  const _HomeTab({required this.auth, required this.onTab});
+
+  /// Définition unique des cartes de service — également lue par
+  /// `_WebClientDashboardState` pour nommer un service sans page web, afin
+  /// qu'aucun libellé ne soit dupliqué ni inventé.
 
   @override
   Widget build(BuildContext context) {
@@ -390,9 +475,9 @@ class _HomeTab extends StatelessWidget {
               mainAxisSpacing: 12,
               childAspectRatio: 1.3,
             ),
-            itemCount: _services.length,
+            itemCount: clientServiceCards.length,
             itemBuilder: (ctx, i) {
-              final s = _services[i];
+              final s = clientServiceCards[i];
               return _ServiceCard(
                 icon: s.$1,
                 title: s.$2,
@@ -977,6 +1062,112 @@ class _MobileNav extends StatelessWidget {
         BottomNavigationBarItem(
             icon: Icon(Icons.person_rounded), label: 'Profil'),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVICE SANS PAGE WEB
+// ─────────────────────────────────────────────────────────────────────────────
+/// Affiché lorsqu'une route `/app/<service>` est atteinte alors qu'AUCUNE page
+/// web ne l'implémente.
+///
+/// Vérifié : `lib/web/pages/client/` ne contient que le dashboard et la page
+/// de connexion. Les 12 cartes de service et les 2 actions du wallet ne
+/// pointent donc vers aucune page réelle. Avant ce correctif, le clic
+/// ramenait silencieusement à l'accueil (l'onglet interne repartait à 0) ;
+/// l'utilisateur croyait à un bouton cassé. On annonce désormais la limite
+/// plutôt que de simuler une navigation.
+class _ServiceUnavailable extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final Color color;
+
+  const _ServiceUnavailable({
+    required this.icon,
+    required this.title,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.all(hPad(context)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: color.withValues(alpha: 0.3)),
+                ),
+                child: Icon(icon, color: color, size: 40),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Ce service n\'est pas encore disponible depuis le site web. '
+                'Il est accessible dans l\'application mobile AZ Express.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: kTextMuted, fontSize: 14),
+              ),
+              const SizedBox(height: 28),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => context.go('/app'),
+                    icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kOrange,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
+                    ),
+                    label: Text('Retour à l\'accueil',
+                        style: GoogleFonts.inter(
+                            fontSize: 14, fontWeight: FontWeight.w700)),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => context.go('/app/commandes'),
+                    icon: const Icon(Icons.receipt_long_rounded, size: 18),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Color(0x33FFFFFF)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    label: Text('Mes commandes',
+                        style: GoogleFonts.inter(
+                            fontSize: 14, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

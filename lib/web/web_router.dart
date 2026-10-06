@@ -17,6 +17,37 @@ import 'pages/admin/web_admin_dashboard.dart';
 import 'pages/client/web_client_login.dart';
 import 'pages/client/web_client_dashboard.dart';
 
+/// Toutes les routes de l'espace client web.
+///
+/// Deux familles distinctes, volontairement regroupées ici pour qu'aucune
+/// route ne puisse exister sans que le dashboard sache quoi en faire :
+///   - les SECTIONS (`clientSectionTabs`), chacune adossée à une vraie page ;
+///   - les routes de SERVICE, qui n'ont aujourd'hui aucune page web (voir
+///     `WebClientDashboard` : elles affichent un état explicite au lieu de
+///     ramener silencieusement l'utilisateur à l'accueil).
+const clientAppRoutes = <String>[
+  // Sections réelles
+  '/app',
+  '/app/commandes',
+  '/app/wallet',
+  '/app/profil',
+  // Services sans page web dédiée
+  '/app/commander',
+  '/app/restaurants',
+  '/app/boulangeries',
+  '/app/pharmacies',
+  '/app/ekbine',
+  '/app/boutique',
+  '/app/eau',
+  '/app/blanchisserie',
+  '/app/artisans',
+  '/app/residences',
+  '/app/locations',
+  '/app/colis',
+  '/app/recharge',
+  '/app/retrait',
+];
+
 final webRouter = GoRouter(
   initialLocation: '/',
   refreshListenable: _MultiListenable([
@@ -65,38 +96,22 @@ final webRouter = GoRouter(
     GoRoute(path: '/connexion', builder: (_, __) => const WebClientLoginPage()),
 
     // ── App client (protégée) ─────────────────────────────────────────────────
-    GoRoute(path: '/app', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/commander', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/restaurants',
-        builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/boulangeries',
-        builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/pharmacies',
-        builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/ekbine', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/boutique', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/eau', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/blanchisserie',
-        builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/artisans', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/residences',
-        builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/locations', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/colis', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/recharge', builder: (_, __) => const WebClientDashboard()),
-    GoRoute(
-        path: '/app/retrait', builder: (_, __) => const WebClientDashboard()),
+    //
+    // BUG CORRIGÉ : ces routes construisaient toutes `const
+    // WebClientDashboard()` SANS lui transmettre la route demandée. Un clic
+    // sur une carte changeait donc l'URL, go_router reconstruisait… le même
+    // widget, dont l'onglet interne (`_tab`) repartait à 0 — l'utilisateur
+    // était ramené à l'accueil. Chaque route passe maintenant sa localisation
+    // au dashboard, qui en dérive ce qu'il affiche.
+    //
+    // `clientAppRoutes` est la liste unique : elle alimente les GoRoute ET la
+    // table de sections du dashboard, qui ne peuvent donc plus diverger.
+    for (final path in clientAppRoutes)
+      GoRoute(
+        path: path,
+        builder: (_, state) =>
+            WebClientDashboard(location: state.matchedLocation),
+      ),
 
     // ── Pages admin (protégées) ───────────────────────────────────────────────
     GoRoute(path: '/admin', redirect: (_, __) => '/admin/login'),

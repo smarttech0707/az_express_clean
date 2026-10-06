@@ -7,6 +7,7 @@ import '../../web_theme.dart';
 import '../../admin_auth_service.dart';
 import '../../widgets/az_logo.dart';
 import '../../../event/screens/admin_event_screen.dart';
+import 'ai_tool_executions_panel.dart';
 
 class WebAdminDashboard extends StatefulWidget {
   const WebAdminDashboard({super.key});
@@ -22,7 +23,7 @@ class _WebAdminDashboardState extends State<WebAdminDashboard>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 6, vsync: this);
+    _tabs = TabController(length: 7, vsync: this);
     // Vérifier auth au démarrage
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!AdminAuthService.instance.isAdmin) {
@@ -96,6 +97,9 @@ class _WebAdminDashboardState extends State<WebAdminDashboard>
             Tab(
                 icon: Icon(Icons.lock_reset_rounded, size: 18),
                 text: 'Réinitialisation'),
+            Tab(
+                icon: Icon(Icons.smart_toy_rounded, size: 18),
+                text: 'Exécutions IA'),
           ],
         ),
       ),
@@ -117,6 +121,7 @@ class _WebAdminDashboardState extends State<WebAdminDashboard>
                 _SosList(),
                 AdminEventScreen(),
                 _PasswordResetList(),
+                AiToolExecutionsPanel(),
               ],
             ),
           ),
