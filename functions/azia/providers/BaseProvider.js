@@ -14,11 +14,7 @@
 // `messages` : [{ role: 'user'|'assistant', content: string }]
 // `opts`     : { model?, temperature?, maxTokens?, system?, mediaType? }
 //
-// Ce contrat couvre uniquement génération de texte/chat/vision simple — pas
-// l'appel d'outils (tool-calling), qui reste spécifique à Claude aujourd'hui
-// (seul fournisseur réellement câblé aux outils AZ IA existants). Voir
-// AIProviderService.js pour la justification de cette limite volontaire.
-// ═══════════════════════════════════════════════════════════════════════════
+// Canonical history requires an explicit adapter capability.
 class BaseProvider {
   constructor(name) {
     if (new.target === BaseProvider) {
@@ -44,6 +40,10 @@ class BaseProvider {
   }
 
   supportsTools() {
+    return false;
+  }
+
+  supportsCanonicalHistory() {
     return false;
   }
 

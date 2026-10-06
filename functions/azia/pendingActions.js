@@ -1,6 +1,9 @@
 'use strict';
 
 const { buildConfirmResponse } = require('./responseBuilder');
+// Expurgation partagée (jeton, en-tête d'autorisation, URL, téléphone) —
+// voir functions/feexpaySanitize.js.
+const { sanitizeProviderMessage } = require('../feexpaySanitize');
 
 // 5 minutes pour toutes les actions (décision validée avec l'utilisateur —
 // pas de durée différenciée par type d'action).
@@ -105,8 +108,13 @@ function buildConfirmAction({
       try {
         finalResult = await tool.afterConfirm(uid, finalResult);
       } catch (err) {
-        console.error(`aiConfirmAction afterConfirm error (${outcome.toolName}):`, err.message);
-        finalResult = { ...finalResult, afterConfirmError: err.message };
+        // `afterConfirm` effectue le seul appel réseau externe du mécanisme
+        // (recharge FeexPay). Le message d'erreur était journalisé ET renvoyé
+        // au client tel quel : il pouvait porter une URL à query string ou un
+        // en-tête d'autorisation. On l'expurge des deux côtés.
+        const safe = sanitizeProviderMessage(err.message);
+        console.error(`aiConfirmAction afterConfirm error (${outcome.toolName}):`, safe);
+        finalResult = { ...finalResult, afterConfirmError: safe };
       }
     }
 

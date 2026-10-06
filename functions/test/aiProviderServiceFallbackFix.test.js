@@ -6,7 +6,8 @@
 // (alimenté par AI_ENABLE_FALLBACK). Ces tests prouvent que la source unique
 // de vérité est désormais bien `enableFallback`, avec compatibilité
 // ascendante préservée pour l'ancien champ Firestore (via normalizeConfig()),
-// et que `azia/index.js` reste strictement forcé sur Claude.
+// La surcharge forceProvider reste disponible pour les appelants explicites ;
+// azIaChat utilise désormais la configuration et l'historique canonique.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -177,7 +178,7 @@ test('7. Champ officiel enableFallback=true SEUL (sans fallbackEnabled) : compor
 });
 
 // ── 8. forceProvider:'claude' : OpenAI n'est jamais appelé, même mal configuré ─
-test('8. forceProvider:\'claude\' (comme azia/index.js) : OpenAI jamais appelé, même avec AI_DEFAULT_PROVIDER=openai et fallback activé', async () => {
+test('8. forceProvider:\'claude\' (surcharge explicite) : OpenAI jamais appelé, même avec AI_DEFAULT_PROVIDER=openai et fallback activé', async () => {
   const claude = makeFakeProvider('claude', { text: 'Claude répond', supportsTools: true });
   const openai = makeFakeProvider('openai', { text: 'ne devrait jamais être appelé' });
   const service = makeService(
@@ -187,7 +188,7 @@ test('8. forceProvider:\'claude\' (comme azia/index.js) : OpenAI jamais appelé,
   const result = await service.generateTurn({
     messages: [{ role: 'user', content: 'Débite mon wallet' }],
     tools: [{ name: 'create_pending_payment', description: 'x', input_schema: {} }],
-  }, { uid: 'u8', cache: false, forceProvider: 'claude' }); // reproduit exactement azia/index.js:182
+  }, { uid: 'u8', cache: false, forceProvider: 'claude' }); // optional explicit override remains supported
 
   assert.equal(openai.calls.length, 0, 'OpenAI ne doit JAMAIS être appelé quand forceProvider:\'claude\' est imposé (azIaChat)');
   assert.equal(result.provider, 'claude');

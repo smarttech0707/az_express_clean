@@ -6,6 +6,7 @@ const {
   DeepSeekProvider, MistralProvider, GroqProvider,
 } = require('./providers');
 const { buildRoute, normalizeConfig, ROUTER_DEFAULTS } = require('./aiRouter');
+const { classifyProviderFailure } = require('./providers/fallbackPolicy');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AIProviderService (Master Prompt 108) — orchestrateur multi-fournisseurs IA.
@@ -23,18 +24,10 @@ const { buildRoute, normalizeConfig, ROUTER_DEFAULTS } = require('./aiRouter');
 //   ├── MistralProvider   (réel — attend MISTRAL_API_KEY)
 //   └── GroqProvider      (réel — attend GROQ_API_KEY)
 //
-// Portée volontairement limitée à generateText/generateChat/generateVision
-// (texte/chat/vision simples, sans appel d'outils) — la boucle d'appel
-// d'outils d'AZ IA (functions/azia/index.js) reste spécifique à Claude et
-// n'est PAS routée à travers ce service : aucun des 5 autres fournisseurs
-// n'implémente le registre d'outils AZ IA (commandes, wallet, etc.), un
-// fallback qui tenterait de continuer une conversation avec outils sur un
-// autre fournisseur perdrait le contexte des appels déjà effectués — un vrai
-// risque fonctionnel, pas juste un détail technique. Ce service sert les
-// futurs besoins de génération simple (résumé, reformulation, description
-// d'image...) et fournit dès maintenant le suivi d'usage/coût réutilisé par
-// azIaChat pour son propre appel Claude (voir functions/azia/index.js).
-// ═══════════════════════════════════════════════════════════════════════════
+// Text, vision and canonical tool turns share routing and usage tracking.
+// Providers own native protocols; azIaChat owns sequential execution and its
+// invocation-local replay ledger. Native continuation state stays in adapters.
+
 
 // Tarifs approximatifs en USD par million de tokens — donnés à titre
 // indicatif pour l'ESTIMATION de coût uniquement (jamais une facturation
@@ -83,7 +76,12 @@ const FALLBACK_ORDER = ['claude', 'gemini', 'openai', 'deepseek', 'mistral', 'gr
 
 const DEFAULT_CONFIG = {
   provider: 'claude',
-  fallbackEnabled: false,
+  // L'ancien champ `fallbackEnabled` n'est volontairement PAS repris ici :
+  // l'inscrire dans les valeurs par défaut le ferait apparaître comme une
+  // valeur « explicite » dans la configuration fusionnée et prendrait le pas
+  // sur le champ officiel. Le défaut vient donc de
+  // ROUTER_DEFAULTS.enableFallback, et `fallbackEnabled` ne garde qu'un rôle
+  // de compatibilité pour un document `settings/ai` existant.
   ...ROUTER_DEFAULTS,
   preferredModel: null,
   temperature: 0.7,
@@ -121,9 +119,9 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
     if (cachedConfig && now - cachedConfigAt < CONFIG_CACHE_MS) return cachedConfig;
     try {
       const snap = await db.collection('settings').doc('ai').get();
-      cachedConfig = normalizeConfig({ ...DEFAULT_CONFIG, ...(snap.exists ? snap.data() : {}) });
+      cachedConfig = { ...DEFAULT_CONFIG, ...normalizeConfig(snap.exists ? snap.data() : {}) };
     } catch (_) {
-      cachedConfig = normalizeConfig({ ...DEFAULT_CONFIG });
+      cachedConfig = { ...DEFAULT_CONFIG, ...normalizeConfig({}) };
     }
     cachedConfigAt = now;
     return cachedConfig;
@@ -283,8 +281,10 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
     const route = turn
       ? buildRoute({
         config,
-        hasTools: (turn.tools || []).length > 0,
-        hasImage: !!turn.images,
+        hasTools: (turn.tools || []).length > 0 || (turn.messages || []).some(m =>
+          Array.isArray(m.content) && m.content.some(b => b.type === 'tool_call' || b.type === 'tool_result')),
+        hasImage: !!turn.images || (turn.messages || []).some(m =>
+          Array.isArray(m.content) && m.content.some(b => b.type === 'image')),
         complexity: turn.complexity,
         forceProvider: opts.forceProvider || opts.provider,
       })
@@ -304,7 +304,9 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
     // directement ici, pour ne plus jamais diverger de ce que buildRoute()
     // a déjà utilisé pour construire `route.fallbacks` juste au-dessus).
     const attemptOrder = route
-      ? order.filter((name) => !(turn.tools || []).length || providers[name]?.supportsTools?.())
+      ? [...new Set(order)].filter((name) =>
+        (!(turn.tools || []).length || providers[name]?.supportsTools?.())
+        && (!turn.canonicalHistory || providers[name]?.supportsCanonicalHistory?.()))
       : (config.enableFallback ? order : [startProvider]);
 
     let lastError = null;
@@ -320,16 +322,28 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
       }
       const t0 = Date.now();
       try {
+        // `preferredModel` est une préférence GLOBALE : l'appliquer à un
+        // fournisseur qui n'est pas celui pour lequel elle a été choisie
+        // enverrait par exemple un identifiant de modèle Claude à Gemini.
+        // Elle n'est donc retenue que pour le fournisseur initialement
+        // sélectionné ; tout autre fournisseur (repli) résout son propre
+        // modèle via sa configuration dédiée (GEMINI_MODEL, OPENAI_MODEL…).
+        const modelForThisProvider = config.models?.[providerName] ||
+          (providerName === startProvider
+            ? (opts.model || turn?.model || (config.provider === providerName ? config.preferredModel : undefined))
+            : undefined);
         const providerOptions = {
-          model: opts.model || config.preferredModel || undefined,
+          model: modelForThisProvider,
           temperature: opts.temperature ?? config.temperature,
           maxTokens: opts.maxTokens ?? config.maxTokens,
           system: opts.system,
           mediaType: opts.mediaType,
+          timeoutMs: opts.timeoutMs ?? config.timeout,
         };
         const turnOptions = {
           ...turn,
-          model: opts.model || turn?.model || config.preferredModel || undefined,
+          model: modelForThisProvider,
+          timeoutMs: opts.timeoutMs ?? config.timeout,
           temperature: opts.preserveProviderDefaults ? turn?.temperature : (turn?.temperature ?? config.temperature),
           maxTokens: turn?.maxTokens ?? opts.maxTokens ?? config.maxTokens,
         };
@@ -344,7 +358,13 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
         };
       } catch (err) {
         lastError = err;
-        console.error(`AIProviderService: ${providerName}.${method} a échoué — ${err.message}`);
+        // Éligibilité évaluée AVANT toute bascule : une erreur imputable à
+        // notre requête, à une clé invalide ou un refus de sécurité ne doit
+        // jamais être rejouée sur un autre fournisseur (voir fallbackPolicy).
+        const verdict = classifyProviderFailure(err);
+        console.error(`AIProviderService: ${providerName}.${method} a échoué — `
+          + `${err.message} [fallback=${verdict.eligible} ${verdict.reason}]`);
+        if (!verdict.eligible) break;
         // Même champ normalisé que ci-dessus (config.enableFallback) — avant
         // ce correctif, cette ligne vérifiait encore l'ancien `fallbackEnabled`
         // brut, ce qui pouvait interrompre la boucle après un seul échec même
@@ -431,12 +451,7 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
     generateChat:   (messages, opts)      => generate('generateChat',   [messages], opts || {}),
     generateVision: (prompt, image, opts) => generate('generateVision', [prompt, image], opts || {}),
     generateTurn:   (turn, opts)          => generate('generateTurn',   [turn], opts || {}),
-    // Exposé pour intégration additive dans azIaChat (boucle d'outils Claude
-    // existante, volontairement non réécrite — voir en-tête de ce fichier) :
-    // permet à azIaChat de continuer à journaliser son propre usage/coût
-    // dans les mêmes collections ai_usage/ai_logs/ai_daily_stats que ce
-    // service, sans passer par callWithFallback (qui perdrait le contexte
-    // d'outils déjà en cours).
+    // Aggregate usage for the bounded azIaChat sequence.
     recordUsage,
     estimateCost,
   };

@@ -74,9 +74,30 @@ test('9. Erreur OpenAI sans outil → fallback Claude autorisé si enableFallbac
   assert.deepEqual(route.fallbacks, ['claude', 'gemini']);
 });
 
-test('10. Erreur OpenAI APRÈS qu\'un outil a déjà été exécuté → aucun fallback (fallbacks vides sur un tour à outils sans fallback activé)', () => {
-  const route = buildRoute({ config: OPEN_CONFIG, hasTools: true }); // enableFallback absent -> false par défaut
+// Le repli est désormais ACTIVÉ par défaut (Claude principal, Gemini en
+// repli) : l'assertion d'origine ne prouvait l'absence de rejeu que par effet
+// de bord d'un fallback désactivé. On vérifie maintenant la vraie garantie,
+// sur ses propres termes : un repli explicitement coupé ne propose aucun
+// fournisseur, et un repli activé n'en propose que des compatibles outils.
+test('10. Repli explicitement coupé sur un tour à outils → aucun fournisseur de repli', () => {
+  const route = buildRoute({
+    config: { ...OPEN_CONFIG, enableFallback: false }, hasTools: true,
+  });
   assert.deepEqual(route.fallbacks, []);
+});
+
+test('10b. Repli activé sur un tour à outils → seuls des fournisseurs autorisés, jamais le fournisseur de départ', () => {
+  const route = buildRoute({
+    config: { ...OPEN_CONFIG, enableFallback: true, fallbackProviders: ['claude', 'gemini'] },
+    hasTools: true,
+  });
+  assert.equal(route.provider, 'claude', 'toolProvider reste la cible initiale');
+  assert.ok(!route.fallbacks.includes('claude'),
+    'le fournisseur de départ ne doit jamais figurer dans ses propres replis');
+  for (const candidate of route.fallbacks) {
+    assert.ok(OPEN_CONFIG.allowedProviders.includes(candidate),
+      `${candidate} doit être autorisé par la politique`);
+  }
 });
 
 test('11. Fournisseur non autorisé par la politique → erreur explicite, jamais un routage silencieux', () => {
@@ -90,7 +111,11 @@ test('12. Configuration Firestore invalide/partielle → repli sur des valeurs s
   const normalized = normalizeConfig({});
   assert.equal(normalized.defaultProvider, 'claude');
   assert.equal(normalized.toolProvider, 'claude');
-  assert.equal(normalized.enableFallback, false);
+  // Cible actée : le repli est activé par défaut (Claude principal, Gemini en
+  // repli) — un défaut à false laissait AZ IA sans aucun filet, puisque le
+  // document settings/ai n'existe pas en production.
+  assert.equal(normalized.enableFallback, true);
+  assert.deepEqual(normalized.fallbackProviders, ['claude', 'gemini']);
   assert.ok(Array.isArray(normalized.allowedProviders) && normalized.allowedProviders.length > 0);
 });
 

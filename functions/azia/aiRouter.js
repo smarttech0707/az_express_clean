@@ -24,14 +24,30 @@ function isOpenAIToolCallingEnabled() {
 
 const ROUTER_DEFAULTS = Object.freeze({
   defaultProvider: process.env.AI_DEFAULT_PROVIDER || 'claude',
-  complexProvider: process.env.AI_COMPLEX_PROVIDER || 'claude',
-  imageProvider: process.env.AI_IMAGE_PROVIDER || 'claude',
-  // AZ IA tools use server-side pending-action semantics. Claude remains the
-  // compatibility default until another adapter explicitly supports this protocol.
-  toolProvider: process.env.AI_TOOL_PROVIDER || 'claude',
-  fallbackProviders: asList(process.env.AI_FALLBACK_PROVIDERS, ['gemini', 'openai', 'mistral', 'deepseek', 'groq']),
+  complexProvider: process.env.AI_COMPLEX_PROVIDER || null,
+  imageProvider: process.env.AI_IMAGE_PROVIDER || null,
+  // Explicit tool override; otherwise follow the configured primary.
+  toolProvider: process.env.AI_TOOL_PROVIDER || null,
+  // Cible actée : Claude principal, Gemini en repli.
+  //
+  // ⚠️ Cette liste est un POOL, pas une chaîne orientée : `buildRoute()` en
+  // retire le fournisseur de départ (`filter(c => c !== provider)`). Elle doit
+  // donc contenir Claude ET Gemini pour que le repli fonctionne dans le sens
+  // réellement voulu (claude → gemini) — la réduire à ['gemini'] viderait au
+  // contraire les replis quand Gemini est le fournisseur de départ.
+  //
+  // OpenAI/Groq/Mistral/DeepSeek restent implémentés et activables
+  // explicitement (`AI_FALLBACK_PROVIDERS`, `settings/ai`) mais sont hors de
+  // la chaîne par défaut : aucune de leurs clés n'est requise au déploiement,
+  // et un incident Claude ne déclenche pas une cascade vers quatre
+  // fournisseurs non configurés.
+  fallbackProviders: asList(process.env.AI_FALLBACK_PROVIDERS, ['claude', 'gemini']),
   allowedProviders: asList(process.env.AI_ALLOWED_PROVIDERS, PROVIDERS),
-  enableFallback: asBoolean(process.env.AI_ENABLE_FALLBACK, false),
+  // Activé par défaut : `settings/ai` n'existe pas en production, donc un
+  // défaut à `false` revenait à n'avoir AUCUN filet si Claude tombe. Le
+  // basculement reste strictement conditionné à l'éligibilité de l'erreur
+  // (voir providers/fallbackPolicy.js), jamais déclenché à l'aveugle.
+  enableFallback: asBoolean(process.env.AI_ENABLE_FALLBACK, true),
   enableCache: asBoolean(process.env.AI_ENABLE_CACHE, true),
   enableMetrics: asBoolean(process.env.AI_ENABLE_METRICS, true),
 });
@@ -43,14 +59,28 @@ function normalizeConfig(config = {}) {
     ...ROUTER_DEFAULTS,
     ...config,
     defaultProvider,
-    complexProvider: config.complexProvider || defaultProvider,
-    imageProvider: config.imageProvider || defaultProvider,
-    toolProvider: config.toolProvider || 'claude',
+    provider: config.provider || defaultProvider,
+    complexProvider: config.complexProvider || ROUTER_DEFAULTS.complexProvider || defaultProvider,
+    imageProvider: config.imageProvider || ROUTER_DEFAULTS.imageProvider || defaultProvider,
+    // Explicit legacy overrides remain valid. An absent override follows the
+    // configured primary, rather than silently pinning every chat to Claude.
+    toolProvider: config.toolProvider || ROUTER_DEFAULTS.toolProvider || defaultProvider,
     fallbackProviders: asList(config.fallbackProviders, ROUTER_DEFAULTS.fallbackProviders),
     allowedProviders: asList(config.allowedProviders, ROUTER_DEFAULTS.allowedProviders),
     // Keep the legacy Firestore key active during migration. An explicit true
     // on either key enables fallback; the new key is the preferred one.
-    enableFallback: config.enableFallback === true || config.fallbackEnabled === true,
+    // Précédence EXPLICITE, et non un OU logique. L'ancienne forme
+    // (`config.enableFallback === true || config.fallbackEnabled === true`)
+    // laissait l'ancien champ écraser le champ officiel : poser
+    // `enableFallback: false` dans settings/ai pour couper un repli devenu
+    // indésirable n'avait aucun effet si `fallbackEnabled: true` traînait
+    // dans le même document. Un opérateur ne doit jamais se voir refuser un
+    // arrêt explicite du repli.
+    enableFallback: config.enableFallback !== undefined
+      ? config.enableFallback === true
+      : (config.fallbackEnabled !== undefined
+        ? config.fallbackEnabled === true
+        : ROUTER_DEFAULTS.enableFallback),
   };
 }
 

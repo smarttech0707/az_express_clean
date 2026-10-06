@@ -1,7 +1,11 @@
 'use strict';
 
 const crypto = require('crypto');
-const { MODEL, MAX_TOKENS, SYSTEM_PROMPT_BLOCKS } = require('./claudeClient');
+const { SYSTEM_PROMPT } = require('./systemPrompt');
+const { textBlock, toolResultBlock } = require('./canonicalHistory');
+const { createToolExecutionLedger } = require('./toolExecutionLedger');
+const { createPersistentToolLedger, isPersistentTool } = require('./persistentToolLedger');
+const MAX_TOKENS = 1024;
 const { getRecentMessages, appendMessage, clearHistory } = require('./conversationStore');
 const { buildRegistry } = require('./toolRegistry');
 const { buildConfirmAction, buildCleanupScheduler } = require('./pendingActions');
@@ -26,16 +30,10 @@ module.exports = function createAzIa({
   db, admin, onCall, onSchedule, checkRateLimit, logAudit, HttpsError,
   axios, feexpayOperatorCode, FEEXPAY_TOKEN, FEEXPAY_API_URL, WEBHOOK_URL,
   azIaChatSecrets = [], aiConfirmActionSecrets = [],
-  sendToToken,
+  sendToToken, providers,
 }) {
 
-  // Master Prompt 108 — orchestrateur multi-fournisseurs IA. La boucle
-  // d'appel d'outils Claude ci-dessous n'est PAS routée à travers ce service
-  // (voir en-tête d'AIProviderService.js pour pourquoi) ; seul son
-  // recordUsage() est réutilisé pour journaliser l'appel Claude déjà
-  // effectué dans ai_usage/ai_logs/ai_daily_stats, en plus (pas à la place)
-  // de logAiObservability() déjà existant.
-  const aiProviderService = createAIProviderService({ db, admin });
+  const aiProviderService = createAIProviderService({ db, admin, providers });
 
   const tools = buildRegistry({
     db, admin, logAudit, checkRateLimit, HttpsError,
@@ -45,16 +43,6 @@ module.exports = function createAzIa({
   const aiGateway = createAiGateway({ providerService: aiProviderService, policyEngine });
   const toolsByName = new Map(tools.map(t => [t.name, t]));
   const toolSchemas = policyEngine.getToolSchemas();
-  // Point de cache (prompt caching Anthropic) sur la dernière définition
-  // d'outil — les schémas d'outils sont identiques à chaque appel, donc mis
-  // en cache au même titre que SYSTEM_PROMPT_BLOCKS (voir claudeClient.js).
-  if (toolSchemas.length > 0) {
-    toolSchemas[toolSchemas.length - 1].cache_control = { type: 'ephemeral' };
-  }
-
-  // Exécute un outil et transforme toute erreur en résultat "is_error" pour
-  // Claude plutôt que de faire échouer toute la requête — une commande
-  // introuvable ou un solde inaccessible doit rester une réponse conversationnelle.
   async function executeTool(uid, name, input, conversationId) {
     const config = await aiProviderService.getConfig();
     if (!policyEngine.canExecute(name, config)) {
@@ -107,13 +95,7 @@ module.exports = function createAzIa({
       throw new HttpsError('invalid-argument', `Message trop long (${MAX_MESSAGE_LENGTH} caractères max)`);
     }
 
-    // Vision (Master Prompt 113, section 13) — image jointe au message
-    // (ordonnance, colis, produit, reçu...), attachée nativement au premier
-    // bloc du message utilisateur envoyé à Claude. Pas un outil séparé ni un
-    // appel routé via AIProviderService.generateVision() : la frontière déjà
-    // actée (Prompt 108) est que la boucle d'outils Claude reste spécifique à
-    // Claude — l'image fait donc partie du même appel messages.create(), pas
-    // d'un chemin parallèle.
+    // Images stay in the same canonical history as text and tool results.
     let imageBlock = null;
     const imageBase64 = request.data?.imageBase64;
     if (imageBase64) {
@@ -124,7 +106,7 @@ module.exports = function createAzIa({
       if (String(imageBase64).length > MAX_IMAGE_BASE64_LENGTH) {
         throw new HttpsError('invalid-argument', 'Image trop volumineuse.');
       }
-      imageBlock = { type: 'image', source: { type: 'base64', media_type: mediaType, data: String(imageBase64) } };
+      imageBlock = { type: 'image', mediaType, data: String(imageBase64) };
     }
 
     // Localisation GPS (Master Prompt 113, section 3) — transmise par le
@@ -148,19 +130,15 @@ module.exports = function createAzIa({
     // cette invocation) — suffisant pour le contexte conversationnel futur,
     // sans avoir à rejouer la mécanique d'outils entre deux appels.
     const history = await getRecentMessages(db, uid, conversationId);
-    const userContent = imageBlock ? [imageBlock, { type: 'text', text: message }] : message;
-    const messages = [...history, { role: 'user', content: userContent }];
+    const userContent = imageBlock ? [imageBlock, textBlock(message)] : [textBlock(message)];
+    const messages = [...history.map(m => ({ role: m.role, content: [textBlock(m.content)] })),
+      { role: 'user', content: userContent }];
+    const ledger = createToolExecutionLedger();
+    // Idempotence persistante inter-invocations (LOT GEMINI 3).
+    const persistentLedger = createPersistentToolLedger({ db, admin });
 
-    // ContextManager (Master Prompt 113) — bloc système dynamique, non
-    // mis en cache (contrairement à SYSTEM_PROMPT_BLOCKS ci-dessous, qui lui
-    // est strictement identique à chaque appel) puisqu'il varie par
-    // utilisateur/session. Coût Firestore : 1-2 lectures ciblées, avant tout
-    // appel Claude — remplace ce qui aurait sinon nécessité un aller-retour
-    // d'outil dédié pour la même information (section 18 du prompt).
     const userContextText = await buildUserContext(db, uid, safeLocation);
-    const system = userContextText
-      ? [...SYSTEM_PROMPT_BLOCKS, { type: 'text', text: userContextText }]
-      : SYSTEM_PROMPT_BLOCKS;
+    const system = [textBlock(SYSTEM_PROMPT), ...(userContextText ? [textBlock(userContextText)] : [])];
 
     const toolsUsed = [];
     // Réponses structurées (Master Prompt 117) — trace de chaque appel
@@ -171,8 +149,8 @@ module.exports = function createAzIa({
     let turnsTaken       = 0;
     let inputTokens       = 0;
     let outputTokens      = 0;
-    let providerUsed      = 'claude';
-    let modelUsed         = MODEL;
+    let providerUsed      = null;
+    let modelUsed         = null;
 
     async function callModel(withTools) {
       try {
@@ -181,7 +159,9 @@ module.exports = function createAzIa({
           messages,
           tools: withTools ? toolSchemas : [],
           maxTokens: MAX_TOKENS,
-        }, { uid, conversationId, forceProvider: 'claude' });
+          canonicalHistory: true,
+          turnIndex: turnsTaken,
+        }, { uid, conversationId });
         inputTokens += turn.usage.inputTokens;
         outputTokens += turn.usage.outputTokens;
         providerUsed = turn.provider || providerUsed;
@@ -200,6 +180,11 @@ module.exports = function createAzIa({
       for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
         turnsTaken = turn + 1;
         const response = await callModel(true);
+        for (const call of response.toolCalls) {
+          call.canonicalCallId = ledger.identify(call);
+          const block = response.assistantMessage?.find(b => b.type === 'tool_call' && b.id === call.id);
+          if (block) block.canonicalCallId = call.canonicalCallId;
+        }
         messages.push({ role: 'assistant', content: response.assistantMessage });
 
         const toolUseBlocks = response.toolCalls;
@@ -210,15 +195,30 @@ module.exports = function createAzIa({
 
         const toolResults = [];
         for (const block of toolUseBlocks) {
-          toolsUsed.push(block.name);
-          const result = await executeTool(uid, block.name, block.input, conversationId);
+          // Deux couches complémentaires :
+          //   1. `ledger` (mémoire) déduplique à l'intérieur de CETTE invocation ;
+          //   2. `persistentLedger` (Firestore) déduplique ENTRE invocations —
+          //      retry client, double clic, reconnexion, redémarrage de
+          //      fonction, instances concurrentes.
+          // Seuls les outils à effet durable passent par la couche persistante :
+          // une simple lecture n'a rien à réserver.
+          const { result } = await ledger.execute(block,
+            () => {
+              toolsUsed.push(block.name);
+              const tool = toolsByName.get(block.name);
+              if (!isPersistentTool(tool)) {
+                return executeTool(uid, block.name, block.input, conversationId);
+              }
+              return persistentLedger.execute(
+                { uid, conversationId, name: block.name, input: block.input },
+                () => executeTool(uid, block.name, block.input, conversationId),
+              ).then((outcome) => outcome.result);
+            });
           toolCalls.push({ name: block.name, input: block.input, result });
-          toolResults.push({
-            type:        'tool_result',
-            tool_use_id: block.id,
-            content:     JSON.stringify(result),
-            is_error:    !!(result && result.error),
-          });
+          toolResults.push(toolResultBlock({
+            toolCallId: block.id, canonicalCallId: block.canonicalCallId, name: block.name, content: result,
+            isError: !!(result && result.error),
+          }));
         }
         messages.push({ role: 'user', content: toolResults });
 

@@ -157,7 +157,10 @@ test('estimateCost() renvoie 0 pour un provider inconnu (pas d\'exception)', () 
 // ═══════════════════════════════════════════════════════════════════════════
 test('sans fallbackEnabled : un échec du provider configuré remonte directement, pas de bascule', async () => {
   const { db, store } = makeFakeDb();
-  store.set('settings/ai', { ...DEFAULT_CONFIG, provider: 'claude', fallbackEnabled: false });
+  // Champ OFFICIEL `enableFallback` : depuis que le repli est active par
+  // defaut, `...DEFAULT_CONFIG` porte deja enableFallback:true via
+  // ROUTER_DEFAULTS, qui prime a juste titre sur l'ancien champ.
+  store.set('settings/ai', { ...DEFAULT_CONFIG, provider: 'claude', enableFallback: false });
   const claude = makeFakeProvider('claude', { fail: true });
   const gemini = makeFakeProvider('gemini');
   const service = createAIProviderService({
@@ -322,7 +325,10 @@ test('un appel réussi écrit dans ai_usage, ai_logs et ai_daily_stats', async (
 
 test('un appel échoué (tous providers en échec) écrit quand même une trace success:false', async () => {
   const { db, store } = makeFakeDb();
-  store.set('settings/ai', { ...DEFAULT_CONFIG, provider: 'claude', fallbackEnabled: false });
+  // Champ OFFICIEL `enableFallback` : `...DEFAULT_CONFIG` porte désormais
+  // `enableFallback: true` (via ROUTER_DEFAULTS), qui prime à juste titre sur
+  // l'ancien `fallbackEnabled`.
+  store.set('settings/ai', { ...DEFAULT_CONFIG, provider: 'claude', enableFallback: false });
   const claude = makeFakeProvider('claude', { fail: true });
   const service = createAIProviderService({
     db, admin: fakeAdmin,
@@ -345,7 +351,11 @@ test('getConfig() renvoie les valeurs par défaut si settings/ai n\'existe pas',
   const service = createAIProviderService({ db, admin: fakeAdmin });
   const config = await service.getConfig();
   assert.equal(config.provider, 'claude');
-  assert.equal(config.fallbackEnabled, false);
+  // Cible actée : repli activé par défaut. L'ancien champ `fallbackEnabled`
+  // n'est plus inscrit dans les valeurs par défaut (il écrasait sinon le champ
+  // officiel) — c'est `enableFallback` qui porte la vérité.
+  assert.equal(config.enableFallback, true);
+  assert.equal(config.fallbackEnabled, undefined);
   assert.equal(config.temperature, 0.7);
   assert.equal(config.maxTokens, 1024);
 });
