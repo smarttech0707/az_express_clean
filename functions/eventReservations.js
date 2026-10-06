@@ -26,7 +26,11 @@ const MAX_QUANTITY_PER_ITEM = 1000;
 const WALLET_MIN_AMOUNT = 500; // même plancher que orders.budget
 
 function buildCreateEventReservation({ db, admin, onCall, HttpsError, checkRateLimit }) {
-  return onCall(async (request) => {
+  // maxInstances explicite : sans plafond, cette fonction se réserve à elle
+  // seule l'intégralité du quota Cloud Run de la région et bloque alors toute
+  // mise à jour des 82 autres fonctions. 2 instances × 80 requêtes simultanées
+  // couvrent très largement le volume de réservations réel.
+  return onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
     const {

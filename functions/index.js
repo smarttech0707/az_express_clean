@@ -9,6 +9,28 @@ const admin  = require('firebase-admin');
 const axios  = require('axios');
 const crypto = require('crypto');
 const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
+const {
+  isAuthorizedWebhookCall,
+  processFeexPayWebhookEvent,
+  resolvePayoutEndpoint,
+  sanitizePayoutMotif,
+  assertWithdrawalCanStart,
+  classifyPayoutInitiation,
+  compensateFailedWithdrawal,
+  classifyCollectInitiationFailure,
+  buildInitiationFailureLog,
+  COLLECT_UNCERTAIN_STATUS,
+  UNCERTAIN_RETRY_BLOCK_MS,
+} = require('./feexpayPayments');
+const {
+  delayMsForCheck,
+  verifyAndApplyWithdrawal,
+  buildPendingWithdrawalChecker,
+} = require('./feexpayPayoutScheduler');
+const {
+  createStatusVerifier,
+  createPayoutStatusVerifier,
+} = require('./feexpayVerification');
 const { buildResetAccountPassword } = require('./passwordReset');
 const { buildManageProfessionalSubscription } = require('./professionalSubscriptions');
 const { buildManageAdminPartnerAccount } = require('./adminPartnerAccounts');
@@ -34,15 +56,21 @@ exports.manageAdminPartnerAccount = onCall(
     db,
     auth: admin.auth(),
     fieldValue: admin.firestore.FieldValue,
+    checkRateLimit,
+    logAudit,
+    logSecurityEvent,
   }),
 );
 
+// maxInstances 5 → 2 (quota Cloud Run régional, voir la note plus bas sur les
+// déclencheurs de notification) : avec une concurrence de 80, 2 instances
+// servent déjà 160 publications simultanées.
 exports.publishMarketplaceProduct = onCall(
-  { maxInstances: 5 },
+  { maxInstances: 2 },
   buildPublishMarketplaceProduct({ db, admin }),
 );
 exports.republishMarketplaceProduct = onCall(
-  { maxInstances: 5 },
+  { maxInstances: 2 },
   buildRepublishMarketplaceProduct({ db, admin }),
 );
 exports.expireMarketplaceProducts = onSchedule(
@@ -75,7 +103,39 @@ exports.syncPharmacyGuards = onSchedule(
 const FEEXPAY_TOKEN_SECRET = defineSecret('FEEXPAY_TOKEN');
 const FEEXPAY_WEBHOOK_SECRET = defineSecret('FEEXPAY_WEBHOOK_SECRET');
 const ANTHROPIC_API_KEY_SECRET = defineSecret('ANTHROPIC_API_KEY');
+
+// ── Clés des fournisseurs IA — Secret Manager, jamais functions/.env ────────
+// Elles étaient jusqu'ici de simples variables d'environnement issues de
+// `functions/.env`. Or le CLI Firebase applique ce fichier à TOUTES les
+// fonctions du codebase, quel que soit le `--only` du déploiement : les clés
+// se retrouvaient donc montées en clair jusque sur les fonctions de paiement
+// FeexPay, les triggers de notification et `pharmacieLogin`, qui n'en ont
+// aucun usage. Une variable d'environnement n'a ni versionnage, ni rotation,
+// ni traçabilité d'accès, et reste lisible par quiconque obtient un droit de
+// lecture sur le projet.
+//
+// Les providers lisent `process.env.<NOM>` : `defineSecret` monte la valeur
+// sous ce même nom au runtime, donc AUCUN code de provider ne change — seule
+// la déclaration `secrets:` par fonction détermine qui y a accès.
+// Seuls les fournisseurs réellement en service sont déclarés : Claude
+// (principal) et Gemini (repli). `defineSecret` crée une dépendance de
+// DÉPLOIEMENT — déclarer un secret absent de Secret Manager ferait échouer le
+// déploiement, or OPENAI/GROQ/MISTRAL/DEEPSEEK n'y existent pas.
+//
+// Pour activer un fournisseur optionnel plus tard, trois gestes :
+//   1. `firebase functions:secrets:set <NOM>` (saisie masquée)
+//   2. rétablir ici `const X_SECRET = defineSecret('<NOM>');`
+//   3. l'ajouter à `azIaChatSecrets` ET à `fallbackProviders`
+//      (`settings/ai` ou AI_FALLBACK_PROVIDERS)
+// Sans ces gestes, le provider reste présent dans le code mais inerte :
+// `isConfigured()` renvoie false et aucune requête ne part.
+const GEMINI_API_KEY_SECRET = defineSecret('GEMINI_API_KEY');
+
 const FEEXPAY_API_URL        = 'https://api.feexpay.me';
+// Identifiant de boutique exige par l'API Payout V2 (champ `shop`). Ce n'est
+// pas un secret : valeur de configuration lue depuis l'environnement des
+// fonctions. Absente, les retraits echouent proprement AVANT tout debit.
+const FEEXPAY_SHOP_ID        = () => String(process.env.FEEXPAY_SHOP_ID || '').trim();
 const PROJECT_ID             = 'az-express-b0469';
 
 // Le secret est inclus dans l'URL du webhook → FeexPay le renvoie
@@ -226,6 +286,30 @@ exports.initiateFeexPayPayment = onCall({
     throw new HttpsError('already-exists', 'Un paiement est déjà en cours. Attendez sa confirmation.');
   }
 
+  // Un échec AMBIGU (502, timeout…) laisse la transaction en
+  // `provider_uncertain` : FeexPay a peut-être créé la demande et sollicité le
+  // téléphone. Relancer immédiatement risquerait un second débit réel pour une
+  // seule intention d'achat. On bloque donc une nouvelle tentative pendant une
+  // fenêtre bornée — jamais indéfiniment, sinon un utilisateur resterait
+  // bloqué si aucun webhook n'arrive jamais. Requête à deux égalités, de même
+  // forme que celle ci-dessus : aucun nouvel index composite nécessaire.
+  const uncertainSnap = await db.collection('wallet_transactions')
+    .where('userId', '==', uid)
+    .where('status', '==', COLLECT_UNCERTAIN_STATUS)
+    .limit(5)
+    .get();
+  const blockingUncertain = uncertainSnap.docs.find((doc) => {
+    const createdAt = doc.data().createdAt?.toDate?.();
+    return createdAt ? (Date.now() - createdAt.getTime()) < UNCERTAIN_RETRY_BLOCK_MS : true;
+  });
+  if (blockingUncertain) {
+    throw new HttpsError(
+      'already-exists',
+      'Une demande de paiement précédente est encore en cours de vérification. '
+      + 'Vérifiez votre téléphone, puis réessayez dans quelques minutes.',
+    );
+  }
+
   // ── Créer la transaction pending ─────────────────────────────────────────
   const txRef = db.collection('wallet_transactions').doc();
   const txId  = txRef.id;
@@ -268,9 +352,49 @@ exports.initiateFeexPayPayment = onCall({
     );
     feexpayData = response.data;
   } catch (err) {
-    const msg = err.response?.data?.message || err.message;
-    await txRef.update({ status: 'error', errorMessage: msg });
-    throw new HttpsError('internal', `Erreur FeexPay : ${msg}`);
+    // Diagnostic structuré : l'ancien chemin ne retenait que
+    // `data.message || err.message`, donc un 502 de passerelle ne laissait
+    // qu'un message axios générique, remonté tel quel à l'application et
+    // absent de Cloud Logging. Aucun corps brut, aucune URL complète, aucun
+    // jeton, aucun téléphone ne sort d'ici.
+    const verdict = classifyCollectInitiationFailure(err);
+    console.error(buildInitiationFailureLog(verdict, txId));
+
+    // Un échec AMBIGU n'est jamais marqué comme définitif : la transaction
+    // reste rapprochable par `txId` (le même identifiant a été envoyé à
+    // FeexPay dans le champ `id`), et un webhook tardif pourra toujours la
+    // créditer après vérification serveur.
+    await txRef.update({
+      status: verdict.txStatus,
+      errorReason: verdict.reason,
+      providerHttpStatus: verdict.httpStatus,
+      providerCode: verdict.providerCode,
+      providerStatusRaw: verdict.providerStatus,
+      providerReference: verdict.providerReference,
+      errorMessage: verdict.providerMessage,
+      ambiguous: verdict.ambiguous,
+      ...(verdict.ambiguous ? { needsReview: true } : {}),
+      failedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await logAudit({
+      userId: uid, userType, action: 'payment_initiation_failed',
+      targetId: txId, amount, status: verdict.txStatus,
+    });
+
+    if (verdict.ambiguous) {
+      // Ne jamais annoncer un échec définitif sur un état incertain.
+      throw new HttpsError(
+        'unavailable',
+        'Le service de paiement est momentanément indisponible. '
+        + 'Vérifiez votre téléphone : si une demande de paiement y apparaît, elle reste valable.',
+        { provider: 'FeexPay', httpStatus: verdict.httpStatus, retryable: true },
+      );
+    }
+    throw new HttpsError(
+      'failed-precondition',
+      "La demande de paiement n'a pas pu être créée. Vérifiez le numéro et l'opérateur, puis réessayez.",
+      { provider: 'FeexPay', httpStatus: verdict.httpStatus, retryable: false },
+    );
   }
 
   await txRef.update({
@@ -293,151 +417,55 @@ exports.initiateFeexPayPayment = onCall({
 //    https://europe-west1-az-express-b0469.cloudfunctions.net/feexPayWebhook
 // ═══════════════════════════════════════════════════════════════════════════
 exports.feexPayWebhook = onRequest({
-  secrets: [FEEXPAY_WEBHOOK_SECRET],
+  // FEEXPAY_TOKEN est requis pour la vérification serveur obligatoire du
+  // paiement : sans cette déclaration, `token()` échouerait à l'exécution.
+  secrets: [FEEXPAY_WEBHOOK_SECRET, FEEXPAY_TOKEN_SECRET],
 }, async (req, res) => {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
   // ── Vérification du token secret dans l'URL ──────────────────────────────
   // FeexPay renvoie l'URL telle quelle → le secret est dans ?wh_secret=
-  const webhookSecret = FEEXPAY_WEBHOOK_SECRET.value();
-  if (!webhookSecret) {
-    console.error('FEEXPAY_WEBHOOK_SECRET manquant — webhook désactivé par sécurité');
-    return res.status(503).json({ error: 'Service temporairement indisponible' });
-  }
-  const receivedSecret = req.query.wh_secret;
-  if (!receivedSecret || receivedSecret !== webhookSecret) {
-    console.error('Webhook : token secret invalide ou manquant');
-    await logSecurityEvent('system', 'webhook_invalid_secret', 'high',
-      `Tentative webhook avec secret invalide depuis ${req.ip}`);
-    return res.status(401).json({ error: 'Non autorisé' });
-  }
-
-  const body   = req.body;
-  // FeexPay envoie le txId dans "order_id" (= le champ "id" qu'on a passé à l'API)
-  const txId   = body.order_id || body.id || body.custom_id || body.reference;
-  const status = (body.status || '').toUpperCase();
-  const reseau = body.reseau || body.phoneNumber || '';
-
-  console.log(`Webhook FeexPay → txId=${txId} status=${status} reseau=${reseau}`);
-
-  if (!txId) {
-    return res.status(400).json({ error: 'ID transaction manquant' });
-  }
-
-  const txRef  = db.collection('wallet_transactions').doc(txId);
-  const txSnap = await txRef.get();
-
-  if (!txSnap.exists) {
-    console.error(`Transaction ${txId} introuvable`);
-    return res.status(404).json({ error: 'Transaction introuvable' });
-  }
-
-  const tx = txSnap.data();
-
-  // Vérifier l'âge de la transaction (protection anti-replay)
-  const txCreatedAt = tx.createdAt?.toDate ? tx.createdAt.toDate() : null;
-  if (txCreatedAt) {
-    const ageMs = Date.now() - txCreatedAt.getTime();
-    if (ageMs > 24 * 60 * 60 * 1000) {
-      console.warn(`Transaction ${txId} trop ancienne (${Math.floor(ageMs/3600000)}h) — possible replay`);
-      await logSecurityEvent(tx.userId, 'webhook_replay_attempt', 'high',
-        `Webhook pour transaction ${txId} vieille de ${Math.floor(ageMs/3600000)}h`);
-      return res.status(400).json({ error: 'Transaction expirée' });
+  const auth = isAuthorizedWebhookCall({
+    method: req.method,
+    receivedSecret: req.query.wh_secret,
+    expectedSecret: FEEXPAY_WEBHOOK_SECRET.value(),
+  });
+  if (!auth.ok) {
+    // Ne jamais journaliser le secret ni l'URL complète qui le contient.
+    if (auth.reason === 'secret_not_configured') {
+      console.error('FEEXPAY_WEBHOOK_SECRET manquant — webhook désactivé par sécurité');
+      return res.status(503).json({ error: 'Service temporairement indisponible' });
     }
-  }
-
-  // ── Idempotence ───────────────────────────────────────────────────────────
-  if (tx.credited === true || tx.status === 'completed') {
-    console.log(`Transaction ${txId} déjà traitée — ignorée`);
-    return res.status(200).json({ message: 'Déjà traité' });
-  }
-
-  // ── Paiement réussi → crédit atomique du wallet ───────────────────────────
-  if (['SUCCESSFUL', 'SUCCESS', 'COMPLETED', 'PAID'].includes(status)) {
-    try {
-      const creditedNow = await db.runTransaction(async (firestoreTx) => {
-        // Re-read the payment record in this transaction. Concurrent webhooks
-        // must retry after the first credit and then observe it as completed.
-        const currentTxSnap = await firestoreTx.get(txRef);
-        if (!currentTxSnap.exists) throw new Error(`Transaction ${txId} introuvable`);
-        const currentTx = currentTxSnap.data();
-        if (currentTx.credited === true || currentTx.status === 'completed') {
-          return false;
-        }
-
-        const colName    = collectionFor(currentTx.userType);
-        const clientRef  = db.collection(colName).doc(currentTx.userId);
-        const clientSnap = await firestoreTx.get(clientRef);
-
-        if (!clientSnap.exists) {
-          throw new Error(`Utilisateur ${currentTx.userId} introuvable`);
-        }
-
-        const currentWallet = clientSnap.data().wallet || 0;
-
-        // Crédit wallet
-        firestoreTx.update(clientRef, {
-          wallet:         currentWallet + currentTx.amount,
-          lastRechargeAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        // Transaction complétée
-        firestoreTx.update(txRef, {
-          status:            'completed',
-          credited:          true,
-          validatedAt:       admin.firestore.FieldValue.serverTimestamp(),
-          feexpayOperator:   body.reseau          || body.operator || null,
-          feexpayPhone:      body.phoneNumber     || null,
-          feexpayRef:        body.ref_operator    || body.reference || null,
-        });
-
-        // Historique wallet (sous-collection existante)
-        const histRef = db.collection(colName).doc(currentTx.userId)
-          .collection('wallet_transactions').doc();
-        firestoreTx.set(histRef, {
-          type:        'recharge',
-          amount:      currentTx.amount,
-          description: `Recharge FeexPay ${(tx.paymentMethod || '').toUpperCase()} — ${tx.amount} FCFA`,
-          provider:    'FeexPay',
-          txId:        txId,
-          createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-        });
-        return true;
-      });
-
-      if (!creditedNow) {
-        return res.status(200).json({ message: 'Déjà traité' });
-      }
-
-      console.log(`✅ Wallet crédité : user=${tx.userId} +${tx.amount} FCFA`);
-      await logAudit({ userId: tx.userId, userType: tx.userType, action: 'wallet_credited', targetId: txId, amount: tx.amount, status: 'success' });
-    } catch (err) {
-      console.error('Erreur crédit wallet :', err);
-      await txRef.update({ status: 'error', errorMessage: err.message });
-      return res.status(500).json({ error: 'Erreur crédit wallet' });
+    if (auth.reason === 'invalid_secret') {
+      console.error('Webhook : token secret invalide ou manquant');
+      await logSecurityEvent('system', 'webhook_invalid_secret', 'high',
+        `Tentative webhook avec secret invalide depuis ${req.ip}`);
+      return res.status(401).json({ error: 'Non autorisé' });
     }
-
-  // ── Paiement échoué ou annulé ─────────────────────────────────────────────
-  } else if (['FAILED', 'CANCELLED', 'CANCELED', 'REJECTED'].includes(status)) {
-    const finalStatus = ['CANCELLED', 'CANCELED'].includes(status) ? 'cancelled' : 'failed';
-    await db.runTransaction(async (firestoreTx) => {
-      const currentTxSnap = await firestoreTx.get(txRef);
-      if (!currentTxSnap.exists) return;
-      const currentTx = currentTxSnap.data();
-      if (currentTx.credited === true || currentTx.status === 'completed') return;
-      firestoreTx.update(txRef, {
-        status:        finalStatus,
-        validatedAt:   admin.firestore.FieldValue.serverTimestamp(),
-        failureReason: body.reason     || null,
-        feexpayPhone:  body.phoneNumber || null,
-      });
-    });
-    console.log(`Transaction ${txId} → ${finalStatus} (reason: ${body.reason})`);
+    return res.status(auth.httpStatus).json({ error: 'Method not allowed' });
   }
 
-  return res.status(200).json({ message: 'OK' });
+  // Le traitement de l'événement (référence, expiration, idempotence, montant,
+  // statut inconnu, crédit atomique) vit dans functions/feexpayPayments.js,
+  // testable hors ligne — voir functions/test/feexpayPayments.test.js.
+  const result = await processFeexPayWebhookEvent({
+    db,
+    admin,
+    body: req.body,
+    collectionFor,
+    logAudit,
+    logSecurityEvent,
+    // Vérification serveur OBLIGATOIRE auprès de FeexPay (endpoint officiel
+    // /api/transactions/public/single/status/{reference}). Si ce vérificateur
+    // venait à manquer, aucun crédit ne serait effectué : le traitement est
+    // fail-closed, jamais permissif.
+    verifier: createStatusVerifier({
+      axios,
+      token: () => FEEXPAY_TOKEN_SECRET.value(),
+    }),
+  });
+
+  // Journalisation sans secret, sans URL complète, sans donnée personnelle.
+  console.log(`Webhook FeexPay → outcome=${result.outcome}${result.reason ? ` reason=${result.reason}` : ''}`);
+  return res.status(result.httpStatus).json(result.payload);
 });
 
 
@@ -468,6 +496,24 @@ exports.initiateWithdrawal = onCall({
   if (!phoneStr2 || !/^\+?\d{8,15}$/.test(phoneStr2)) {
     throw new HttpsError('invalid-argument', 'Numéro de téléphone invalide');
   }
+
+  // ── Contrôles préalables AU DÉBIT ─────────────────────────────────────────
+  // Tout ce qui peut empêcher l'initiation doit être vérifié avant de toucher
+  // au solde : un débit suivi d'une initiation impossible laisserait l'argent
+  // bloqué dans un état ambigu.
+  const preconditions = assertWithdrawalCanStart({ operator, shopId: FEEXPAY_SHOP_ID() });
+  if (!preconditions.ok) {
+    // Allowlist stricte pour l'opérateur ; `shop` obligatoire côté FeexPay V2
+    // et sans valeur par défaut légitime : on échoue proprement, avant tout
+    // débit, plutôt que d'en inventer une. La valeur n'est jamais journalisée.
+    throw new HttpsError(
+      preconditions.code,
+      preconditions.reason === 'unknown_operator'
+        ? 'Opérateur de retrait non pris en charge'
+        : 'Retraits momentanément indisponibles (configuration incomplète)',
+    );
+  }
+  const endpoint = preconditions.endpoint;
 
   // ── Rate limiting ─────────────────────────────────────────────────────────
   await checkRateLimit(uid, 'withdrawal', 3, 60);
@@ -526,17 +572,26 @@ exports.initiateWithdrawal = onCall({
     throw new HttpsError('internal', 'Erreur interne. Veuillez réessayer.');
   }
 
-  // ── Appel API FeexPay Payout ───────────────────────────────────────────────
+  // ── Initiation Payout FeexPay V2 ──────────────────────────────────────────
+  // Le solde est déjà débité. Une réponse "PENDING / Payout request accepted"
+  // ne prouve PAS que l'argent est arrivé : elle ouvre seulement un suivi par
+  // référence (checkWithdrawalStatus). Trois issues, jamais confondues :
+  //   accepted             → référence obtenue, état NON final à vérifier.
+  //   rejected_no_reference→ aucune référence créée : rien n'a pu partir,
+  //                          compensation sûre et unique.
+  //   ambiguous            → référence présente malgré l'erreur, réseau, 5xx
+  //                          ou acceptation sans référence : NE JAMAIS
+  //                          rembourser ni relancer, le transfert a pu partir.
+  let response = null;
+  let error = null;
   try {
-    const response = await axios.post(
-      `${FEEXPAY_API_URL}/api/v1/payout`,
+    response = await axios.post(
+      endpoint.url,
       {
+        phoneNumber: phoneStr2,
         amount:      amount,
-        phone:       String(phone).trim(),
-        type:        feexpayOperatorCode(operator),
-        id:          withdrawId,
-        description: `Retrait AZ Express ${withdrawId}`,
-        currency:    'XOF',
+        shop:        FEEXPAY_SHOP_ID(),
+        motif:       sanitizePayoutMotif(`Retrait AZ Express ${withdrawId}`),
       },
       {
         headers: {
@@ -546,23 +601,120 @@ exports.initiateWithdrawal = onCall({
         timeout: 20000,
       }
     );
-
-    const newStatus = response.data?.status === 'SUCCESS' ? 'sent' : 'pending_manual';
-    await db.collection('withdrawal_requests').doc(withdrawId).update({
-      status:          newStatus,
-      feexpayResponse: response.data?.status || null,
-    });
-
-    return { withdrawId, status: newStatus, auto: true };
   } catch (err) {
-    // Auto échoué → traitement manuel (solde déjà déduit)
-    console.warn('FeexPay payout failed, traitement manuel :', err.message);
-    await db.collection('withdrawal_requests').doc(withdrawId).update({
-      status:    'pending_manual',
-      autoError: err.message,
-    });
-    return { withdrawId, status: 'pending_manual', auto: false };
+    error = err;
   }
+
+  const verdict = classifyPayoutInitiation({ response, error });
+  const wdRef = db.collection('withdrawal_requests').doc(withdrawId);
+
+  if (verdict.outcome === 'rejected_no_reference') {
+    // Aucune référence n'existe : FeexPay a refusé avant de créer le payout,
+    // donc aucun transfert ne peut aboutir — la compensation est sûre.
+    const compensation = await compensateFailedWithdrawal({
+      db, admin, withdrawId, collectionFor, logAudit, reason: verdict.reason,
+    });
+    console.warn(`Payout ${withdrawId} refusé sans référence — compensé=${compensation.compensated}`);
+    return { withdrawId, status: 'failed_refunded', auto: false, refunded: compensation.compensated };
+  }
+
+  if (verdict.outcome === 'ambiguous') {
+    await wdRef.update({
+      status:              'pending_manual',
+      provider:            'feexpay',
+      providerReference:   verdict.reference || null,
+      providerStatus:      verdict.providerStatus || null,
+      settlementConfirmed: false,
+      ambiguous:           true,
+      autoRetryBlocked:    true,
+      autoError:           verdict.reason,
+    });
+    await logAudit({
+      userId: uid, userType: userType, action: 'withdrawal_ambiguous',
+      targetId: withdrawId, amount: amount, status: 'pending_manual',
+    });
+    console.warn(`Payout ${withdrawId} ambigu (${verdict.reason}) — rapprochement manuel requis`);
+    return { withdrawId, status: 'pending_manual', auto: false, ambiguous: true };
+  }
+
+  // accepted : référence obtenue, transfert EN COURS — surtout pas final.
+  // `nextStatusCheckAt` arme la vérification automatique côté serveur : le
+  // retrait se résout même si l'utilisateur ferme l'application.
+  await wdRef.update({
+    status:              'provider_pending',
+    provider:            'feexpay',
+    providerReference:   verdict.reference,
+    providerStatus:      verdict.providerStatus || 'PENDING',
+    settlementConfirmed: false,
+    autoRetryBlocked:    true,
+    statusCheckCount:    0,
+    statusCheckStopped:  false,
+    nextStatusCheckAt:   admin.firestore.Timestamp.fromMillis(Date.now() + delayMsForCheck(0)),
+  });
+  return {
+    withdrawId, status: 'provider_pending', auto: true,
+    settlementConfirmed: false, providerStatus: verdict.providerStatus || 'PENDING',
+  };
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3 bis. VÉRIFIER LE STATUT D'UN RETRAIT (Callable — propriétaire ou admin)
+//   GET /api/payouts/status/public/{reference} — vérification imposée par la
+//   documentation FeexPay après une initiation PENDING. Toute mutation
+//   financière reste ici, côté serveur.
+// ═══════════════════════════════════════════════════════════════════════════
+exports.checkWithdrawalStatus = onCall({
+  secrets: [FEEXPAY_TOKEN_SECRET],
+}, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Vous devez être connecté');
+  }
+  const uid = request.auth.uid;
+  const withdrawId = String(request.data?.withdrawId || '').trim();
+  if (!withdrawId || withdrawId.includes('/') || withdrawId.length > 200) {
+    throw new HttpsError('invalid-argument', 'Identifiant de retrait invalide');
+  }
+
+  const wdSnap = await db.collection('withdrawal_requests').doc(withdrawId).get();
+  if (!wdSnap.exists) throw new HttpsError('not-found', 'Retrait introuvable');
+  const wd = wdSnap.data();
+
+  // Autorisation : le propriétaire du retrait, ou un administrateur actif.
+  // Un client ne peut jamais vérifier ni faire évoluer le retrait d'autrui.
+  if (wd.userId !== uid) {
+    const adminSnap = await db.collection('admins').doc(uid).get();
+    if (!adminSnap.exists || adminSnap.data().isActive !== true) {
+      throw new HttpsError('permission-denied', 'Accès refusé');
+    }
+  }
+  await checkRateLimit(uid, 'withdrawal_status', 10, 60);
+
+  if (!wd.providerReference) {
+    return { withdrawId, status: wd.status, settlementConfirmed: wd.settlementConfirmed === true,
+      checked: false, reason: 'no_provider_reference' };
+  }
+
+  // Exactement la même logique financière que la vérification automatique :
+  // une seule machine d'états, jamais deux implémentations divergentes.
+  const result = await verifyAndApplyWithdrawal({
+    db, admin, withdrawId, data: wd, collectionFor, logAudit, logSecurityEvent,
+    verifier: createPayoutStatusVerifier({
+      axios, token: () => FEEXPAY_TOKEN_SECRET.value(),
+    }),
+  });
+
+  // Jamais de référence, de jeton ni d'URL dans les journaux.
+  console.log(`Statut retrait ${withdrawId} → ${result.outcome || result.reason} (${result.state || '—'})`);
+  return {
+    withdrawId,
+    outcome: result.outcome || null,
+    state: result.state || null,
+    settled: result.state === 'settled',
+    refunded: result.state === 'compensated',
+    checked: result.checked,
+    ...(result.checked ? {} : { reason: result.reason }),
+  };
 });
 
 
@@ -707,8 +859,19 @@ const CLIENT_STATUS_MESSAGES = {
 // ─────────────────────────────────────────────────────────────────────────────
 // CLIENT — Confirmation immédiate à la création de commande
 // Tous services confondus (livraison, courses, restaurant, pharmacie…)
+//
+// QUOTA CLOUD RUN (2026-10-02) : les déclencheurs Firestore de notification
+// passent de maxInstances 2 à 1. Le quota régional « total allowable CPU »
+// était saturé (178,5 unités pour 83 fonctions), ce qui empêchait TOUTE mise
+// à jour : une mise à jour fait coexister l'ancienne et la nouvelle révision,
+// et il ne restait plus la marge nécessaire. Sans incidence pratique ici :
+// chaque instance sert jusqu'à 80 événements simultanés (concurrence = 80),
+// très au-delà du volume réel. Les notifications de chat restent à 3
+// (latence ressentie directement par l'utilisateur), et aucune fonction
+// appelée par l'app (onCall) n'est réduite. La correction de fond reste une
+// augmentation du quota côté console GCP.
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyClientOnOrderCreated = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyClientOnOrderCreated = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   try {
     const order = event.data.data();
     if (!order || !order.clientId) return;
@@ -733,7 +896,7 @@ exports.notifyClientOnOrderCreated = onDocumentCreated({ document: 'orders/{orde
 // CLIENT — Suivi complet par statut, messages adaptés au service
 // Couvre : assigned, broadcast, accepted, picked_up, delivered, cancelled
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -776,7 +939,7 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
 // LIVREURS (broadcast) — FCM push à tous les livreurs ciblés simultanément
 // Déclenché quand status → 'broadcast' (transition uniquement)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyBroadcastDrivers = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyBroadcastDrivers = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -813,7 +976,7 @@ exports.notifyBroadcastDrivers = onDocumentUpdated({ document: 'orders/{orderId}
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR (assignation directe) — FCM push quand un seul livreur est désigné
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnAssigned = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriverOnAssigned = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -846,7 +1009,7 @@ exports.notifyDriverOnAssigned = onDocumentUpdated({ document: 'orders/{orderId}
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Alerte solde bas (< 500 FCFA)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverLowBalance = onDocumentUpdated({ document: 'livreurs/{driverId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriverLowBalance = onDocumentUpdated({ document: 'livreurs/{driverId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -863,7 +1026,7 @@ exports.notifyDriverLowBalance = onDocumentUpdated({ document: 'livreurs/{driver
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Mission terminée (livraison confirmée)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnMissionEnd = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriverOnMissionEnd = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -890,7 +1053,7 @@ exports.notifyDriverOnMissionEnd = onDocumentUpdated({ document: 'orders/{orderI
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Annulation d'une commande (broadcast, assigné ou accepté)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnOrderCancelled = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriverOnOrderCancelled = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -940,7 +1103,7 @@ exports.notifyDriverOnOrderCancelled = onDocumentUpdated({ document: 'orders/{or
 // PARTENAIRES — Notification à la création de commande
 // Restaurant, pharmacie, boulangerie, marketplace — inchangés
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyRestaurantOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyRestaurantOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'restaurant' || !order.sellerId) return;
 
@@ -966,7 +1129,7 @@ exports.notifyRestaurantOnOrder = onDocumentCreated({ document: 'orders/{orderId
   );
 });
 
-exports.notifyPharmacieOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyPharmacieOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.type !== 'pharmacie' || !order.pharmacieId) return;
 
@@ -981,7 +1144,7 @@ exports.notifyPharmacieOnOrder = onDocumentCreated({ document: 'orders/{orderId}
   );
 });
 
-exports.notifyBoulangerieOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyBoulangerieOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'boulangerie' || !order.sellerId) return;
 
@@ -1001,7 +1164,7 @@ exports.notifyBoulangerieOnNewOrder = onDocumentCreated({ document: 'orders/{ord
 
 // Client — suivi de préparation des commandes boulangerie. Ces transitions
 // utilisent sellerStatus sans modifier le statut logistique de la commande.
-exports.notifyClientOnBoulangeriePreparation = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyClientOnBoulangeriePreparation = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after = event.data.after.data();
   if (!before || !after || after.sellerType !== 'boulangerie') return;
@@ -1023,7 +1186,7 @@ exports.notifyClientOnBoulangeriePreparation = onDocumentUpdated({ document: 'or
   });
 });
 
-exports.notifySellerOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifySellerOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'seller' || !order.sellerId) return;
 
@@ -1049,7 +1212,7 @@ exports.notifySellerOnOrder = onDocumentCreated({ document: 'orders/{orderId}', 
 // Exclut les commandes partenaires (restaurant/boulangerie/pharmacie/marketplace)
 // car celles-ci passent par notifyDriverOnAssigned / notifyBroadcastDrivers
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || (order.status && order.status !== 'pending')) return;
 
@@ -1094,7 +1257,7 @@ const EK_CLIENT_MESSAGES = {
 };
 
 // ─── Client — Confirmation à la création ────────────────────────────────────
-exports.notifyEkClientOnOrderCreated = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkClientOnOrderCreated = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || !order.clientId) return;
 
@@ -1111,7 +1274,7 @@ exports.notifyEkClientOnOrderCreated = onDocumentCreated({ document: 'ekbine_ord
 });
 
 // ─── Client — Suivi par statut ───────────────────────────────────────────────
-exports.notifyEkClientOnStatusChange = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkClientOnStatusChange = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after || before.status === after.status) return;
@@ -1132,7 +1295,7 @@ exports.notifyEkClientOnStatusChange = onDocumentUpdated({ document: 'ekbine_ord
 });
 
 // ─── Agents disponibles — Nouvelle demande E-Kbine ──────────────────────────
-exports.notifyEkAgentsOnNewOrder = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkAgentsOnNewOrder = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.status !== 'pending') return;
 
@@ -1165,7 +1328,7 @@ exports.notifyEkAgentsOnNewOrder = onDocumentCreated({ document: 'ekbine_orders/
 });
 
 // ─── Agent — Confirmation d'assignation ─────────────────────────────────────
-exports.notifyEkAgentOnAssigned = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkAgentOnAssigned = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -1187,7 +1350,7 @@ exports.notifyEkAgentOnAssigned = onDocumentUpdated({ document: 'ekbine_orders/{
 });
 
 // ─── Agent — Mission Ekbine terminée ────────────────────────────────────────
-exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -1223,7 +1386,8 @@ exports.resetAccountPassword = onCall({ maxInstances: 2 }, buildResetAccountPass
   hashSecret,
   checkRateLimit,
 }));
-exports.manageProfessionalSubscription = onCall({ maxInstances: 5 },
+// maxInstances 5 → 2 : même raison de quota Cloud Run que ci-dessus.
+exports.manageProfessionalSubscription = onCall({ maxInstances: 2 },
   buildManageProfessionalSubscription({
     db,
     auth: admin.auth(),
@@ -1600,7 +1764,7 @@ exports.deleteSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
 });
 
 // ─── Notify admins on new driver registration ────────────────────────────────
-exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{driverId}', maxInstances: 2 }, async (event) => {
+exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{driverId}', maxInstances: 1 }, async (event) => {
   const driver = event.data.data();
   if (!driver) return;
   const snap = await db.collection('admins').where('isActive', '==', true).get();
@@ -1614,7 +1778,7 @@ exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{drive
 });
 
 // ─── Notify admins on new service provider pending request ───────────────────
-exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'service_providers/{id}', maxInstances: 2 }, async (event) => {
+exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'service_providers/{id}', maxInstances: 1 }, async (event) => {
   const provider = event.data.data();
   if (!provider || provider.status !== 'pending') return;
   const snap = await db.collection('admins').where('isActive', '==', true).get();
@@ -1629,7 +1793,7 @@ exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'servic
 
 // ═══════════════════════════════════════════════════════════════════════════
 
-exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_requests/{reqId}', maxInstances: 2 }, async (event) => {
+exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_requests/{reqId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after || before.status === after.status || after.status !== 'approved') return;
@@ -1700,7 +1864,7 @@ exports.ekClientConfirmOrder = onCall(async (request) => {
   return { success: true };
 });
 
-exports.notifyEkAgentOnDepositProof = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkAgentOnDepositProof = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after = event.data.after.data();
   if (!before || !after || before.status === 'deposit_proof_sent' || after.status !== 'deposit_proof_sent') return;
@@ -2295,6 +2459,30 @@ exports.staleDriverCleanupCheck = buildStaleDriverCleanup({ db, admin, onSchedul
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SUPERVISION ADMIN DES EXÉCUTIONS D'OUTILS AZ IA — LECTURE SEULE
+// `ai_tool_executions` reste fermée aux clients dans firestore.rules ; cet
+// endpoint lit via l'Admin SDK après contrôle serveur de l'identité et de la
+// permission admin. Aucune mutation n'est exposée (ni relance, ni suppression).
+// ═══════════════════════════════════════════════════════════════════════════
+const { buildListAiToolExecutions } = require('./aiToolExecutions');
+exports.listAiToolExecutions = buildListAiToolExecutions({ db, onCall, HttpsError });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VÉRIFICATION AUTOMATIQUE DES RETRAITS FEEXPAY EN ATTENTE
+// Consulte uniquement l'endpoint de STATUT avec une référence déjà obtenue —
+// jamais une ré-initiation de payout. Ne dépend pas de l'application mobile.
+// ═══════════════════════════════════════════════════════════════════════════
+exports.checkPendingWithdrawals = buildPendingWithdrawalChecker({
+  db, admin, onSchedule, collectionFor, logAudit, logSecurityEvent,
+  secrets: [FEEXPAY_TOKEN_SECRET],
+  createVerifier: () => createPayoutStatusVerifier({
+    axios, token: () => FEEXPAY_TOKEN_SECRET.value(),
+  }),
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // AZ IA — Assistant conversationnel (Claude)
 // Configurer ANTHROPIC_API_KEY dans Secret Manager.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2305,11 +2493,26 @@ const azIa       = createAzIa({
   FEEXPAY_TOKEN: FEEXPAY_TOKEN_SECRET,
   FEEXPAY_API_URL,
   WEBHOOK_URL: feexpayWebhookUrl,
+  // Moindre privilège, vérifié par lecture des appelants réels :
+  // `azIaChat` est la SEULE fonction qui appelle un modèle (aiGateway →
+  // AIProviderService → providers), donc la seule à recevoir les clés IA.
+  // Elle ne reçoit en revanche AUCUN secret FeexPay : dans `tools/wallet.js`,
+  // `FEEXPAY_TOKEN.value()` et `WEBHOOK_URL()` sont appelés uniquement depuis
+  // `afterConfirm`, exécuté par `aiConfirmAction` — jamais par le tour de
+  // conversation. Le `handler` ne fait que créer une action en attente.
+  // Cible actée : Claude principal + Gemini en repli. Les quatre autres
+  // fournisseurs restent implémentés et sélectionnables par configuration,
+  // mais leurs clés ne sont PAS montées ici : non requises au déploiement, et
+  // un fournisseur sans clé est sauté sans aucun appel réseau
+  // (`isConfigured()` → ProviderNotConfiguredError, jamais de requête).
+  // Pour en activer un plus tard : créer son secret, l'ajouter à cette liste
+  // ET l'ajouter à `fallbackProviders` (settings/ai ou AI_FALLBACK_PROVIDERS).
   azIaChatSecrets: [
     ANTHROPIC_API_KEY_SECRET,
-    FEEXPAY_TOKEN_SECRET,
-    FEEXPAY_WEBHOOK_SECRET,
+    GEMINI_API_KEY_SECRET,
   ],
+  // `aiConfirmAction` exécute les `afterConfirm` : elle a besoin de FeexPay
+  // (recharge wallet) et d'aucune clé IA — elle n'appelle jamais de modèle.
   aiConfirmActionSecrets: [FEEXPAY_TOKEN_SECRET, FEEXPAY_WEBHOOK_SECRET],
   sendToToken,
 });

@@ -7,7 +7,7 @@ function createEventNotificationFunctions({
   sendToToken,
 }) {
   const notifyAdminsOnEventProviderApplication = onDocumentCreated(
-    { document: 'event_providers/{providerId}', maxInstances: 2 },
+    { document: 'event_providers/{providerId}', maxInstances: 1 },
     async (event) => {
       const provider = event.data?.data();
       if (!provider || provider.status !== 'pending') return;
@@ -29,7 +29,7 @@ function createEventNotificationFunctions({
   );
 
   const notifyProvidersOnEventReservation = onDocumentCreated(
-    { document: 'event_reservations/{reservationId}', maxInstances: 2 },
+    { document: 'event_reservations/{reservationId}', maxInstances: 1 },
     async (event) => {
       const reservation = event.data?.data();
       const providerIds = [...new Set(reservation?.providerIds || [])];
@@ -52,7 +52,7 @@ function createEventNotificationFunctions({
   );
 
   const notifyClientOnEventReservationUpdate = onDocumentUpdated(
-    { document: 'event_reservations/{reservationId}', maxInstances: 2 },
+    { document: 'event_reservations/{reservationId}', maxInstances: 1 },
     async (event) => {
       const before = event.data?.before.data();
       const after = event.data?.after.data();
@@ -106,7 +106,7 @@ function createEventNotificationFunctions({
   );
 
   const updateEventProviderRating = onDocumentCreated(
-    { document: 'event_reviews/{reviewId}', maxInstances: 2 },
+    { document: 'event_reviews/{reviewId}', maxInstances: 1 },
     async (event) => {
       const review = event.data?.data();
       if (!review?.providerId || !Number.isFinite(review.rating)) return;

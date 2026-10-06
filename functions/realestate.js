@@ -189,7 +189,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
   });
 
   const notifyAgentOnVisitRequest = onDocumentCreated(
-    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 2 },
+    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 1 },
     async (event) => {
       const data = event.data.data();
       if (!data?.agentId) return;
@@ -205,7 +205,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
   );
 
   const notifyClientOnVisitUpdate = onDocumentUpdated(
-    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 2 },
+    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 1 },
     async (event) => {
       const before = event.data.before.data();
       const after  = event.data.after.data();
