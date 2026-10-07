@@ -10,10 +10,10 @@
 // plus large de la version installée est nécessaire ailleurs dans l'app,
 // migrer vers `package_info_plus` (lecture dynamique, jamais désynchronisée)
 // plutôt que multiplier les constantes manuelles.
-// 2026-10-05 : remis en cohérence avec pubspec.yaml (`1.0.4+5`). Il était
+// 2026-10-07 : remis en cohérence avec pubspec.yaml (`1.0.8+9`). Il était
 // resté à 1 pendant les bumps 1.0.1+2 → 1.0.2+3 → 1.0.3+4, ce qu'un test
 // dédié (test/services/wallet_payment_compatibility_test.dart) a détecté.
 // Conséquence de cette dérive : `WalletPaymentCompatibilityService` comparait
 // un build 1 à `config/app_version.minRequiredBuild` et pouvait donc bloquer
 // à tort un paiement wallet sur une app pourtant à jour.
-const int kAppBuildNumber = 6;
+const int kAppBuildNumber = 9;

@@ -59,6 +59,7 @@ void main() async {
   // explicitement et exposé à l'interface, mais il ne peut plus empêcher le
   // démarrage.
   final startupDiagnostic = await _initializeFirebase();
+  final firebaseInitialized = startupDiagnostic == null;
   if (startupDiagnostic != null) {
     debugPrint('DÉMARRAGE AZ EXPRESS — Firebase indisponible : '
         '$startupDiagnostic');
@@ -77,12 +78,20 @@ void main() async {
   if (!kIsWeb) {
     FlutterError.onError = (details) {
       FlutterError.presentError(details);
-      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+      if (firebaseInitialized) {
+        FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+      } else {
+        debugPrint('Crashlytics indisponible avant initialisation Firebase.');
+      }
     };
     PlatformDispatcher.instance.onError = (error, stack) {
       debugPrint('ERREUR ASYNCHRONE NON CAPTURÉE : $error');
       debugPrintStack(stackTrace: stack);
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      if (firebaseInitialized) {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      } else {
+        debugPrint('Crashlytics indisponible avant initialisation Firebase.');
+      }
       return true;
     };
   }
