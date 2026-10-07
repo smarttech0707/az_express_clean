@@ -1,7 +1,7 @@
 name: az_express
 description: AZ Express - Livraison express et services de proximité à Abengourou
 publish_to: 'none'
-version: 1.0.5+6
+version: 1.0.6+7
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
