@@ -1,0 +1,32 @@
+﻿workflows:
+  az-express-ios:
+    name: AZ Express iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+
+    environment:
+      flutter: stable
+      xcode: 26.0
+      cocoapods: default
+
+    scripts:
+      - name: Check build environment
+        script: |
+          flutter --version
+          xcodebuild -version
+
+      - name: Install Flutter dependencies
+        script: |
+          flutter pub get
+
+      - name: Verify Firebase configuration
+        script: |
+          test -f lib/firebase_options.dart || { echo "Missing Firebase Dart configuration"; exit 1; }
+          test -f ios/Runner/GoogleService-Info.plist || { echo "Missing Firebase iOS configuration"; exit 1; }
+
+      - name: Build iOS without signing
+        script: |
+          flutter build ios --release --no-codesign
+
+    artifacts:
+      - build/ios/iphoneos/*.app
