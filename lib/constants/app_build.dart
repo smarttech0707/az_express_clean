@@ -16,4 +16,4 @@
 // Conséquence de cette dérive : `WalletPaymentCompatibilityService` comparait
 // un build 1 à `config/app_version.minRequiredBuild` et pouvait donc bloquer
 // à tort un paiement wallet sur une app pourtant à jour.
-const int kAppBuildNumber = 9;
+const int kAppBuildNumber = 11;
