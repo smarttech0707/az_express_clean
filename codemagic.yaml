@@ -1,31 +1,124 @@
 ﻿workflows:
   az-express-ios:
-    name: AZ Express iOS
+    name: AZ Express iOS - unsigned compatibility build
     instance_type: mac_mini_m2
     max_build_duration: 120
 
     environment:
-      flutter: stable
-      xcode: 26.0
-      cocoapods: default
+      groups:
+        - firebase
+      # Official Flutter tag; do not use the local [user-branch] channel.
+      # Tag verified; Codemagic resolution is not build-tested. The macOS
+      # ARM64 archive URL returned 404 during the 2026-10-14 preflight.
+      flutter: "3.44.5"
+      # Codemagic's 26.0 image selects Xcode 26.0.1 on mac_mini_m2.
+      xcode: "26.0"
+      # Match ios/Podfile.lock instead of the image default (1.16.2).
+      cocoapods: "1.17.0"
 
     scripts:
       - name: Check build environment
         script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
           flutter --version
+          dart --version
           xcodebuild -version
+          pod --version
+
+      - name: Restore Firebase configuration securely
+        script: |
+          #!/usr/bin/env bash
+          set +x
+          set -euo pipefail
+          umask 077
+          python3 - <<'PY'
+          import base64
+          import binascii
+          import os
+          from pathlib import Path
+
+          files = {
+              "FIREBASE_IOS_PLIST_B64": Path("ios/Runner/GoogleService-Info.plist"),
+              "FIREBASE_DART_OPTIONS_B64": Path("lib/firebase_options.dart"),
+          }
+          decoded = {}
+          # Validate both values before writing either file. Never log payloads.
+          for variable, target in files.items():
+              value = os.environ.get(variable, "")
+              if not value.strip():
+                  raise SystemExit(f"Missing or empty variable: {variable}")
+              try:
+                  data = base64.b64decode("".join(value.split()), validate=True)
+              except (ValueError, binascii.Error):
+                  raise SystemExit(f"Invalid Base64: {variable}") from None
+              if not data.strip():
+                  raise SystemExit(f"Decoded file is empty: {variable}")
+              if target.is_symlink() or (target.exists() and target.read_bytes() != data):
+                  raise SystemExit(f"Refusing to overwrite existing configuration: {target}")
+              decoded[target] = data
+          for target, data in decoded.items():
+              target.parent.mkdir(parents=True, exist_ok=True)
+              if not target.exists():
+                  with target.open("xb") as output:
+                      output.write(data)
+          PY
+          test -s ios/Runner/GoogleService-Info.plist
+          test -s lib/firebase_options.dart
+          if ! plutil -lint ios/Runner/GoogleService-Info.plist >/dev/null 2>&1; then
+            echo "Invalid Firebase iOS plist."
+            exit 1
+          fi
+          # Verify the app identity without printing plist contents.
+          python3 - <<'PY'
+          import plistlib
+          with open("ios/Runner/GoogleService-Info.plist", "rb") as stream:
+              config = plistlib.load(stream)
+          if config.get("BUNDLE_ID") != "com.azexpress.app":
+              raise SystemExit("Firebase plist bundle ID mismatch.")
+          if config.get("PROJECT_ID") != "az-express-b0469":
+              raise SystemExit("Firebase plist project ID mismatch.")
+          PY
+          unset FIREBASE_IOS_PLIST_B64 FIREBASE_DART_OPTIONS_B64
+          echo "Firebase configuration restored and plist validated."
 
       - name: Install Flutter dependencies
         script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # Preserve the project's existing CocoaPods integration.
+          flutter config --no-enable-swift-package-manager
           flutter pub get
 
-      - name: Verify Firebase configuration
+      - name: Prepare iOS dependencies
         script: |
-          test -f lib/firebase_options.dart || { echo "Missing Firebase Dart configuration"; exit 1; }
-          test -f ios/Runner/GoogleService-Info.plist || { echo "Missing Firebase iOS configuration"; exit 1; }
+          #!/usr/bin/env bash
+          set -euo pipefail
+          flutter precache --ios
+          cd ios
+          pod install --repo-update
 
       - name: Build iOS without signing
         script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # The existing Xcode phase calls FlutterFire to upload dSYMs.
+          # For this compile-only workflow, intercept ONLY that subcommand.
+          # No firebase.json or project.pbxproj edits, no Firebase uploads.
+          ci_tools=$(mktemp -d "${TMPDIR:-/tmp}/az-ios-unsigned.XXXXXX")
+          trap 'rm -f "$ci_tools/flutterfire"; rmdir "$ci_tools"' EXIT
+          cat > "$ci_tools/flutterfire" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" == "upload-crashlytics-symbols" ]]; then
+            echo "Crashlytics dSYM upload skipped for unsigned compatibility build."
+            exit 0
+          fi
+          echo "Unexpected FlutterFire command in compile-only workflow." >&2
+          exit 1
+          SH
+          chmod 700 "$ci_tools/flutterfire"
+          export PATH="$ci_tools:$PATH"
           flutter build ios --release --no-codesign
 
     artifacts:
