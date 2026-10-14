@@ -4,6 +4,9 @@
     instance_type: mac_mini_m2
     max_build_duration: 120
 
+    integrations:
+      app_store_connect: "AZ Express Codemagic"
+
     environment:
       groups:
         - firebase
@@ -157,3 +160,11 @@
     artifacts:
       - build/ios/ipa/*.ipa
       - build/ios/archive/*.xcarchive/dSYMs/*.dSYM
+
+    # Upload only after a successful build; no beta review or public submission.
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
+        release_type: MANUAL
