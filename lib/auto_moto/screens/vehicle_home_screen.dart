@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/delivery_zone.dart';
+import '../../screens/home/home_screen.dart';
 import '../../services/notification_service.dart';
 import '../market_city_catalog_service.dart';
 import '../models/vehicle_listing.dart';
@@ -100,6 +101,18 @@ class _VehicleHomeScreenState extends State<VehicleHomeScreen> {
                 children: [
                   Row(
                     children: [
+                      IconButton(
+                        key: const Key('vehicle_home_back'),
+                        tooltip: 'Retour',
+                        onPressed: _handleBack,
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        color: colors.onPrimaryContainer,
+                        style: IconButton.styleFrom(
+                          backgroundColor:
+                              colors.onPrimaryContainer.withValues(alpha: 0.08),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
@@ -273,6 +286,19 @@ class _VehicleHomeScreenState extends State<VehicleHomeScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _handleBack() async {
+    final navigator = Navigator.of(context);
+    if (ModalRoute.of(context)?.isFirst == false) {
+      await navigator.maybePop();
+      return;
+    }
+    if (mounted) {
+      await navigator.pushReplacement<void, void>(
+        MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
+      );
+    }
   }
 
   void _openListings(String? cityId, VehicleType vehicleType) {

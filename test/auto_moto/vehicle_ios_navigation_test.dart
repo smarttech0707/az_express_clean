@@ -15,6 +15,8 @@ import 'package:az_express/auto_moto/vehicle_conversation_repository.dart';
 import 'package:az_express/auto_moto/vehicle_favorite_repository.dart';
 import 'package:az_express/auto_moto/vehicle_listing_form_data.dart';
 import 'package:az_express/auto_moto/vehicle_listing_repository.dart';
+import 'package:az_express/l10n/app_text.dart';
+import 'package:az_express/screens/home/home_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -136,6 +138,49 @@ Future<void> _expectMaybePop<T extends Widget>(
 
 void main() {
   group('retour Navigator des routes Auto & Moto', () {
+    testWidgets('le bouton Retour visible dépile Auto & Moto sans perdre la pile',
+        (tester) async {
+      final child = VehicleHomeScreen(
+        currentUserId: () => null,
+        marketCitiesLoader: () async => const [],
+      );
+      await tester.pumpWidget(_app(_RouteParent(child: child)));
+      await tester.tap(find.byKey(const Key('open_route')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('vehicle_home_back')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('vehicle_home_back')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('open_route')), findsOneWidget);
+      expect(find.byType(VehicleHomeScreen), findsNothing);
+    });
+
+    testWidgets('à la racine, le bouton Retour revient à l’accueil AZ Express',
+        (tester) async {
+      await tester.pumpWidget(
+        AppLanguage(
+          locale: const Locale('fr'),
+          onLocaleChanged: (_) {},
+          child: _app(
+            VehicleHomeScreen(
+              currentUserId: () => null,
+              marketCitiesLoader: () async => const [],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('vehicle_home_back')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(find.byType(VehicleHomeScreen), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('Marketplace vers Auto & Moto est dépilable', (tester) async {
       await _expectMaybePop<VehicleHomeScreen>(
         tester,

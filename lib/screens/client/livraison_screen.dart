@@ -69,16 +69,22 @@ bool shouldUseLightLivraisonPremiumFieldFill({
 }) =>
     platform == TargetPlatform.iOS && brightness == Brightness.dark;
 
-/// L'overlay des suggestions reste blanc. En thème sombre iOS, le titre d'un
-/// [ListTile] sans couleur explicite hérite au contraire de `textDark`.
+/// Les lieux populaires sont affichés sur une surface dépendante du thème.
+/// Leurs couleurs doivent donc être explicites, sans hériter d'un thème natif
+/// différent selon la plateforme.
 @visibleForTesting
 Color? livraisonPopularPlaceTitleColor({
   required TargetPlatform platform,
   required Brightness brightness,
 }) =>
-    platform == TargetPlatform.iOS && brightness == Brightness.dark
-        ? AppColors.text
-        : null;
+    AppColors.premiumTextPrimary(brightness);
+
+@visibleForTesting
+Color livraisonPopularPlaceSubtitleColor({
+  required TargetPlatform platform,
+  required Brightness brightness,
+}) =>
+    AppColors.premiumTextSecondary(brightness);
 
 typedef LivraisonReverseGeocoder = Future<String?> Function(
   double latitude,
@@ -2094,8 +2100,13 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                       fontWeight: FontWeight.w600,
                       color: titleColor)),
               subtitle: Text(place.address,
-                  style:
-                      GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted)),
+                  style: GoogleFonts.urbanist(
+                    fontSize: 12,
+                    color: livraisonPopularPlaceSubtitleColor(
+                      platform: Theme.of(context).platform,
+                      brightness: Theme.of(context).brightness,
+                    ),
+                  )),
               onTap: () => _selectPlace(place),
             )),
       ],

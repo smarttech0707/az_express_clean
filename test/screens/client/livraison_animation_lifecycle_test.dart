@@ -176,27 +176,41 @@ void main() {
     expect(searchField.decoration?.hintStyle?.color, AppColors.textLight);
   });
 
-  test('le titre des lieux populaires reste opaque sur iOS sombre', () {
+  test('les lieux populaires ont un texte contrasté dans les deux thèmes', () {
     expect(
       livraisonPopularPlaceTitleColor(
         platform: TargetPlatform.iOS,
         brightness: Brightness.dark,
       ),
-      AppColors.text,
+      AppColors.premiumTextPrimaryDark,
     );
     expect(
       livraisonPopularPlaceTitleColor(
         platform: TargetPlatform.iOS,
         brightness: Brightness.light,
       ),
-      isNull,
+      AppColors.premiumTextPrimaryLight,
     );
     expect(
       livraisonPopularPlaceTitleColor(
         platform: TargetPlatform.android,
         brightness: Brightness.dark,
       ),
-      isNull,
+      AppColors.premiumTextPrimaryDark,
+    );
+    expect(
+      livraisonPopularPlaceSubtitleColor(
+        platform: TargetPlatform.android,
+        brightness: Brightness.dark,
+      ),
+      AppColors.premiumTextSecondaryDark,
+    );
+    expect(
+      livraisonPopularPlaceSubtitleColor(
+        platform: TargetPlatform.iOS,
+        brightness: Brightness.light,
+      ),
+      AppColors.premiumTextSecondaryLight,
     );
   });
 }

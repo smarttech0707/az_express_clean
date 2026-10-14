@@ -39,6 +39,48 @@ bool adminDevelopmentRoleAllowed(Map<String, dynamic> adminData) {
       (role == 'super' || (role == 'sub' && adminData['permissions'] is List));
 }
 
+@visibleForTesting
+TextStyle adminLoginFieldTextStyle() =>
+    const TextStyle(color: AppColors.text, fontSize: 16);
+
+@visibleForTesting
+InputDecoration adminLoginFieldDecoration({
+  required String labelText,
+  required IconData prefixIcon,
+  Widget? suffixIcon,
+}) {
+  final shape = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(12),
+    borderSide: const BorderSide(color: AppColors.border),
+  );
+  return InputDecoration(
+    labelText: labelText,
+    labelStyle: const TextStyle(color: AppColors.textMuted),
+    floatingLabelStyle: const TextStyle(color: AppColors.primary),
+    hintStyle: const TextStyle(color: AppColors.textLight),
+    prefixIcon: Icon(prefixIcon),
+    prefixIconColor: AppColors.textMuted,
+    suffixIcon: suffixIcon,
+    suffixIconColor: AppColors.textMuted,
+    border: shape,
+    enabledBorder: shape,
+    focusedBorder: shape.copyWith(
+      borderSide: const BorderSide(color: AppColors.primary, width: 2),
+    ),
+    errorBorder: shape.copyWith(
+      borderSide: const BorderSide(color: AppColors.error),
+    ),
+    focusedErrorBorder: shape.copyWith(
+      borderSide: const BorderSide(color: AppColors.error, width: 2),
+    ),
+    disabledBorder: shape.copyWith(
+      borderSide: const BorderSide(color: AppColors.divider),
+    ),
+    filled: true,
+    fillColor: Colors.white,
+  );
+}
+
 class AdminLogin extends StatefulWidget {
   const AdminLogin({super.key});
 
@@ -340,13 +382,11 @@ class _AdminLoginState extends State<AdminLogin> {
             const SizedBox(height: 36),
             TextField(
               controller: _idCtrl,
-              decoration: InputDecoration(
-                labelText: "Identifiant",
-                prefixIcon: const Icon(Icons.person),
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                filled: true,
-                fillColor: Colors.white,
+              style: adminLoginFieldTextStyle(),
+              cursorColor: AppColors.primary,
+              decoration: adminLoginFieldDecoration(
+                labelText: 'Identifiant',
+                prefixIcon: Icons.person,
               ),
             ),
             const SizedBox(height: 16),
@@ -354,18 +394,16 @@ class _AdminLoginState extends State<AdminLogin> {
               controller: _passCtrl,
               obscureText: !_showPass,
               onSubmitted: (_) => _login(),
-              decoration: InputDecoration(
-                labelText: "Mot de passe",
-                prefixIcon: const Icon(Icons.lock),
+              style: adminLoginFieldTextStyle(),
+              cursorColor: AppColors.primary,
+              decoration: adminLoginFieldDecoration(
+                labelText: 'Mot de passe',
+                prefixIcon: Icons.lock,
                 suffixIcon: IconButton(
                   icon:
                       Icon(_showPass ? Icons.visibility_off : Icons.visibility),
                   onPressed: () => setState(() => _showPass = !_showPass),
                 ),
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                filled: true,
-                fillColor: Colors.white,
               ),
             ),
             const SizedBox(height: 8),
