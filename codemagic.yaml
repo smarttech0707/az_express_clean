@@ -1,12 +1,15 @@
 ﻿workflows:
   az-express-ios:
-    name: AZ Express iOS - unsigned compatibility build
+    name: AZ Express iOS - signed App Store IPA
     instance_type: mac_mini_m2
     max_build_duration: 120
 
     environment:
       groups:
         - firebase
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.azexpress.app
       # Official Flutter tag; do not use the local [user-branch] channel.
       # Tag verified; Codemagic resolution is not build-tested. The macOS
       # ARM64 archive URL returned 404 during the 2026-10-14 preflight.
@@ -98,28 +101,59 @@
           cd ios
           pod install --repo-update
 
-      - name: Build iOS without signing
+      - name: Apply existing App Store signing profiles
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # Codemagic installs the uploaded certificates and matching profiles.
+          # Only the ephemeral CI checkout receives these signing settings.
+          xcode-project use-profiles --project ios/Runner.xcodeproj
+          test -s "$HOME/export_options.plist"
+          plutil -lint "$HOME/export_options.plist"
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          with (Path.home() / "export_options.plist").open("rb") as stream:
+              options = plistlib.load(stream)
+          if options.get("teamID") != "F6XWK2W7XG":
+              raise SystemExit("Signing profile must belong to Apple team F6XWK2W7XG.")
+          if options.get("method") not in ("app-store", "app-store-connect"):
+              raise SystemExit("An App Store distribution profile is required.")
+          if not options.get("provisioningProfiles", {}).get("com.azexpress.app"):
+              raise SystemExit("Missing App Store profile for com.azexpress.app.")
+          if options.get("destination", "export") != "export":
+              raise SystemExit("Export only: automatic upload is not permitted.")
+          PY
+
+      - name: Build signed App Store IPA without publishing
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
           # The existing Xcode phase calls FlutterFire to upload dSYMs.
-          # For this compile-only workflow, intercept ONLY that subcommand.
-          # No firebase.json or project.pbxproj edits, no Firebase uploads.
-          ci_tools=$(mktemp -d "${TMPDIR:-/tmp}/az-ios-unsigned.XXXXXX")
+          # Keep this artifact-only workflow free of automatic symbol uploads.
+          # Intercept ONLY that subcommand; keep Crashlytics in the application.
+          ci_tools=$(mktemp -d "${TMPDIR:-/tmp}/az-ios-export.XXXXXX")
           trap 'rm -f "$ci_tools/flutterfire"; rmdir "$ci_tools"' EXIT
           cat > "$ci_tools/flutterfire" <<'SH'
           #!/usr/bin/env bash
           set -euo pipefail
           if [[ "${1:-}" == "upload-crashlytics-symbols" ]]; then
-            echo "Crashlytics dSYM upload skipped for unsigned compatibility build."
+            echo "Crashlytics dSYM upload skipped for artifact-only build."
             exit 0
           fi
-          echo "Unexpected FlutterFire command in compile-only workflow." >&2
+          echo "Unexpected FlutterFire command in artifact-only workflow." >&2
           exit 1
           SH
           chmod 700 "$ci_tools/flutterfire"
           export PATH="$ci_tools:$PATH"
-          flutter build ios --release --no-codesign
+          flutter build ipa --release \
+            --export-options-plist="$HOME/export_options.plist"
+          compgen -G 'build/ios/ipa/*.ipa' >/dev/null || {
+            echo "IPA export failed: no IPA artifact was generated."
+            exit 1
+          }
 
     artifacts:
-      - build/ios/iphoneos/*.app
+      - build/ios/ipa/*.ipa
+      - build/ios/archive/*.xcarchive/dSYMs/*.dSYM
