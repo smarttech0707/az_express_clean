@@ -28,6 +28,7 @@ import 'providers/az_ia_provider.dart';
 import 'providers/active_city_provider.dart';
 import 'event/providers/event_provider.dart';
 import 'widgets/az_ia/az_ia_floating_assistant.dart';
+import 'widgets/firebase_startup_failure.dart';
 
 // ignore: unused_element
 final _analytics = FirebaseAnalytics.instance;
@@ -112,19 +113,22 @@ void main() async {
 
   runApp(kIsWeb
       ? WebApp(startupDiagnostic: startupDiagnostic)
-      : MultiProvider(
-          providers: [
-            ChangeNotifierProvider(create: (_) => MpProvider()),
-            ChangeNotifierProvider(create: (_) => MpFavoritesProvider()),
-            ChangeNotifierProvider(create: (_) => EkProvider()),
-            ChangeNotifierProvider(
-              create: (_) => AzIaProvider(initializationReady: appCheckReady),
-            ),
-            ChangeNotifierProvider(create: (_) => EventProvider()),
-            ChangeNotifierProvider(create: (_) => ActiveCityProvider()),
-          ],
-          child: const AZExpressApp(),
-        ));
+      : !firebaseInitialized
+          ? const FirebaseStartupFailure()
+          : MultiProvider(
+              providers: [
+                ChangeNotifierProvider(create: (_) => MpProvider()),
+                ChangeNotifierProvider(create: (_) => MpFavoritesProvider()),
+                ChangeNotifierProvider(create: (_) => EkProvider()),
+                ChangeNotifierProvider(
+                  create: (_) =>
+                      AzIaProvider(initializationReady: appCheckReady),
+                ),
+                ChangeNotifierProvider(create: (_) => EventProvider()),
+                ChangeNotifierProvider(create: (_) => ActiveCityProvider()),
+              ],
+              child: const AZExpressApp(),
+            ));
 
   if (!kIsWeb && startupDiagnostic == null) {
     unawaited(_initializeDeferred(appCheckReady));
@@ -146,7 +150,10 @@ Future<String?> _initializeFirebase() async {
   // Détection explicite d'un build sans `--dart-define-from-file=.env` :
   // inutile d'appeler initializeApp avec des options vides, l'échec est
   // certain et le diagnostic serait moins clair.
-  if (options.apiKey.isEmpty || options.projectId.isEmpty) {
+  if (options.apiKey.isEmpty ||
+      options.projectId.isEmpty ||
+      options.appId.isEmpty ||
+      options.messagingSenderId.isEmpty) {
     return 'configuration absente — relancer le build avec '
         '--dart-define-from-file=.env';
   }

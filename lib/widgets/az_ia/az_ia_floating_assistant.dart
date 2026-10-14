@@ -212,7 +212,7 @@ class _AzIaFloatingAssistantState extends State<AzIaFloatingAssistant>
     final media = MediaQuery.of(context);
     final keyboardOpen = media.viewInsets.bottom > 0;
     final bubbleSize = _minimized ? 44.0 : _size;
-    final horizontalPadding = 12.0;
+    const horizontalPadding = 12.0;
     final top = media.padding.top + 12;
     final reservedBottom =
         math.max(media.padding.bottom + 92, media.viewInsets.bottom + 16);
@@ -227,32 +227,23 @@ class _AzIaFloatingAssistantState extends State<AzIaFloatingAssistant>
       children: [
         widget.child,
         if (showBubble)
-          Selector<AzIaProvider, bool>(
-            selector: (_, provider) {
-              final messages = provider.messages;
-              return provider.pendingAction != null ||
-                  (messages.isNotEmpty &&
-                      (messages.last.response?.actions.isNotEmpty ?? false));
-            },
-            builder: (_, hasSuggestion, __) => AnimatedPositioned(
-              duration:
-                  _dragging ? Duration.zero : const Duration(milliseconds: 250),
-              curve: Curves.easeOutBack,
-              left: left,
-              top: keyboardOpen ? math.min(topPosition, maxY) : topPosition,
-              // Largeur/hauteur explicites (Phase 3 — durcissement défensif) :
-              // sans elles, un `Positioned` avec seulement left/top laisse
-              // l'enfant se dimensionner lui-même — si jamais son contenu
-              // devait un jour échouer à se construire, Flutter substituerait
-              // un ErrorWidget qui, non contraint, s'étend pour occuper tout
-              // l'espace restant du Stack (jusqu'au bord de l'écran) au lieu
-              // de rester à la taille réelle de la bulle. Contraindre à
-              // `bubbleSize` ne masque aucune erreur (toujours remontée à
-              // FlutterError.onError/Crashlytics) — ça borne juste son rayon
-              // d'impact visuel à la taille réellement prévue pour la bulle.
-              width: bubbleSize,
-              height: bubbleSize,
-              child: _bubble(
+          AnimatedPositioned(
+            duration:
+                _dragging ? Duration.zero : const Duration(milliseconds: 250),
+            curve: Curves.easeOutBack,
+            left: left,
+            top: keyboardOpen ? math.min(topPosition, maxY) : topPosition,
+            width: bubbleSize,
+            height: bubbleSize,
+            // Constrain the provider lookup too, including its ErrorWidget.
+            child: Selector<AzIaProvider, bool>(
+              selector: (_, provider) {
+                final messages = provider.messages;
+                return provider.pendingAction != null ||
+                    (messages.isNotEmpty &&
+                        (messages.last.response?.actions.isNotEmpty ?? false));
+              },
+              builder: (_, hasSuggestion, __) => _bubble(
                 size: bubbleSize,
                 maxX: maxX,
                 top: top,

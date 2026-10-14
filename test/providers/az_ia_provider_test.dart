@@ -39,6 +39,16 @@ class _FakeAzIaService extends AzIaService {
 Future<void> _settle() => Future<void>.delayed(Duration.zero);
 
 void main() {
+  test('does not access native Auth before readiness or after disposal',
+      () async {
+    final ready = Completer<void>();
+    final provider = AzIaProvider(initializationReady: ready.future);
+    expect(provider.error, isNull);
+    provider.dispose();
+    ready.complete();
+    await _settle();
+  });
+
   test('attend l’initialisation sécurisée avant de souscrire à Auth', () async {
     SharedPreferences.setMockInitialValues({});
     final ready = Completer<void>();

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
@@ -52,7 +53,7 @@ class AzIaProvider extends ChangeNotifier {
 
   static bool isImageTooLarge(int byteLength) => byteLength > maxImageBytes;
   final AzIaService _service;
-  final Stream<String?> _authUidChanges;
+  final Stream<String?>? _authUidChanges;
 
   final List<AzIaMessage> _messages = [];
   late final UnmodifiableListView<AzIaMessage> _messagesView =
@@ -84,19 +85,47 @@ class AzIaProvider extends ChangeNotifier {
     Stream<String?>? authUidChanges,
     Future<void>? initializationReady,
   })  : _service = service ?? AzIaService(),
-        _authUidChanges = authUidChanges ??
-            FirebaseAuth.instance.authStateChanges().map((user) => user?.uid) {
+        _authUidChanges = authUidChanges {
     if (initializationReady == null) {
-      _authSub = _authUidChanges.listen(_onAuthChanged);
+      _listenToAuth();
     } else {
       unawaited(_subscribeToAuth(initializationReady));
     }
   }
 
   Future<void> _subscribeToAuth(Future<void> initializationReady) async {
-    await initializationReady;
+    try {
+      await initializationReady;
+      if (_disposed) return;
+      _listenToAuth();
+    } catch (error, stack) {
+      _reportInitializationError(error, stack);
+    }
+  }
+
+  void _listenToAuth() {
+    try {
+      if (_authUidChanges == null &&
+          !Firebase.apps.any((app) => app.name == '[DEFAULT]')) {
+        throw StateError('Firebase initialization is required before AZ IA.');
+      }
+      final stream = _authUidChanges ??
+          FirebaseAuth.instance.authStateChanges().map((user) => user?.uid);
+      _authSub = stream.listen(_onAuthChanged);
+    } catch (error, stack) {
+      _reportInitializationError(error, stack);
+    }
+  }
+
+  void _reportInitializationError(Object error, StackTrace stack) {
     if (_disposed) return;
-    _authSub = _authUidChanges.listen(_onAuthChanged);
+    _error = 'AZ IA indisponible : initialisation impossible.';
+    FlutterError.reportError(FlutterErrorDetails(
+      exception: error,
+      stack: stack,
+      library: 'AZ IA initialization',
+    ));
+    _safeNotify();
   }
 
   @override

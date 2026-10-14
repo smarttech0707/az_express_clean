@@ -85,6 +85,7 @@
           if config.get("PROJECT_ID") != "az-express-b0469":
               raise SystemExit("Firebase plist project ID mismatch.")
           PY
+          python3 scripts/build_mobile.py ipa --check-only
           unset FIREBASE_IOS_PLIST_B64 FIREBASE_DART_OPTIONS_B64
           echo "Firebase configuration restored and plist validated."
 
@@ -150,8 +151,9 @@
           SH
           chmod 700 "$ci_tools/flutterfire"
           export PATH="$ci_tools:$PATH"
-          flutter build ipa --release \
-            --export-options-plist="$HOME/export_options.plist"
+          python3 scripts/build_mobile.py ipa \
+            --build-number 12 \
+            --export-options "$HOME/export_options.plist"
           compgen -G 'build/ios/ipa/*.ipa' >/dev/null || {
             echo "IPA export failed: no IPA artifact was generated."
             exit 1
