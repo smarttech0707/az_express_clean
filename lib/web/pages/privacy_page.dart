@@ -121,7 +121,7 @@ class WebPrivacyPage extends StatelessWidget {
                   '• Supprimer votre compte et vos données\n'
                   '• Vous opposer au traitement de vos données\n'
                   '• Retirer votre consentement\n\n'
-                  'Pour exercer ces droits, contactez-nous à : privacy@az-express.ci\n\n'
+                  'Pour exercer ces droits, contactez-nous à : znm0905@gmail.com\n\n'
                   'Pour demander la suppression de votre compte, utilisez le menu de l\'application '
                   '(Profil > Supprimer mon compte) ou notre page dédiée : az-express-b0469.web.app/delete-account.'),
           _Section(
@@ -168,7 +168,7 @@ class WebPrivacyPage extends StatelessWidget {
           _Section(
               '13. Contact',
               'Pour toute question relative à cette politique de confidentialité :\n\n'
-                  'Email : privacy@az-express.ci\n'
+                  'Email : znm0905@gmail.com\n'
                   'Adresse : Abidjan, Côte d\'Ivoire\n'
                   'WhatsApp : +225 07 98 05 13 97'),
         ]),

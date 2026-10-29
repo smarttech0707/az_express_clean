@@ -60,7 +60,7 @@ class WebTermsPage extends StatelessWidget {
           _Section(
               '1. Acceptation des conditions',
               'En téléchargeant, installant ou utilisant l\'application AZ Express ou en accédant à '
-                  'notre site web az-express.ci, vous acceptez d\'être lié par les présentes Conditions '
+                  'notre site web az-express-b0469.web.app, vous acceptez d\'être lié par les présentes Conditions '
                   'Générales d\'Utilisation. Si vous n\'acceptez pas ces conditions, veuillez ne pas '
                   'utiliser nos services.'),
           _Section(
@@ -140,7 +140,7 @@ class WebTermsPage extends StatelessWidget {
           _Section(
               '12. Contact',
               'Pour toute question relative à ces conditions :\n\n'
-                  'Email : legal@az-express.ci\n'
+                  'Email : znm0905@gmail.com\n'
                   'Adresse : Abidjan, Côte d\'Ivoire\n'
                   'WhatsApp : +225 07 98 05 13 97'),
         ]),

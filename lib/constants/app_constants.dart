@@ -152,7 +152,7 @@ class AppConfig {
   static const currency = 'FCFA';
   static const supportPhone = '+2250798051397';
   static const supportWhatsApp = '+2250798051397';
-  static const supportEmail = 'support@azexpress.ci';
+  static const supportEmail = 'znm0905@gmail.com';
 
   /// Recharge / retrait électroniques (FeexPay) : désactivés au lancement, en attendant les formalités. Le code
   /// reste en place ; passer à true (puis publier) pour réactiver. Les commandes en espèces n'en dépendent pas.
