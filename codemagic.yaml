@@ -159,7 +159,6 @@
           fi
           python3 scripts/build_mobile.py ipa \
             --build-number "$IOS_BUILD_NUMBER" \
-
             --export-options "$HOME/export_options.plist"
           compgen -G 'build/ios/ipa/*.ipa' >/dev/null || {
             echo "IPA export failed: no IPA artifact was generated."
