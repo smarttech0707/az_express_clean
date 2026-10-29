@@ -176,3 +176,180 @@
         auth: integration
         submit_to_testflight: false
         submit_to_app_store: false
+
+  # ── Compilation de contrôle ──────────────────────────────────────────────
+  # Même chaîne que az-express-ios (Firebase, signature, IPA) mais SANS bloc
+  # `publishing` : rien n'est envoyé à App Store Connect, TestFlight ni App Store.
+  # L'IPA signé « app-store » n'est qu'un artefact : il prouve la compilation et la
+  # cohérence de la signature (profil, Associated Domains), pas la conformité Apple.
+  # Aucune étape ne déploie Firebase ni Hosting.
+  az-express-ios-compile-check:
+    name: AZ Express iOS - compile check (no publishing)
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+
+    integrations:
+      app_store_connect: "AZ Express Codemagic"
+
+    environment:
+      groups:
+        - firebase
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.azexpress.app
+      # Official Flutter tag; do not use the local [user-branch] channel.
+      # Tag verified; Codemagic resolution is not build-tested. The macOS
+      # ARM64 archive URL returned 404 during the 2026-10-14 preflight.
+      flutter: "3.44.5"
+      # Codemagic's 26.0 image selects Xcode 26.0.1 on mac_mini_m2.
+      xcode: "26.0"
+      # Match ios/Podfile.lock instead of the image default (1.16.2).
+      cocoapods: "1.17.0"
+
+    scripts:
+      - name: Check build environment
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          flutter --version
+          dart --version
+          xcodebuild -version
+          pod --version
+
+      - name: Restore Firebase configuration securely
+        script: |
+          #!/usr/bin/env bash
+          set +x
+          set -euo pipefail
+          umask 077
+          python3 - <<'PY'
+          import base64
+          import binascii
+          import os
+          from pathlib import Path
+
+          files = {
+              "FIREBASE_IOS_PLIST_B64": Path("ios/Runner/GoogleService-Info.plist"),
+              "FIREBASE_DART_OPTIONS_B64": Path("lib/firebase_options.dart"),
+          }
+          decoded = {}
+          # Validate both values before writing either file. Never log payloads.
+          for variable, target in files.items():
+              value = os.environ.get(variable, "")
+              if not value.strip():
+                  raise SystemExit(f"Missing or empty variable: {variable}")
+              try:
+                  data = base64.b64decode("".join(value.split()), validate=True)
+              except (ValueError, binascii.Error):
+                  raise SystemExit(f"Invalid Base64: {variable}") from None
+              if not data.strip():
+                  raise SystemExit(f"Decoded file is empty: {variable}")
+              if target.is_symlink() or (target.exists() and target.read_bytes() != data):
+                  raise SystemExit(f"Refusing to overwrite existing configuration: {target}")
+              decoded[target] = data
+          for target, data in decoded.items():
+              target.parent.mkdir(parents=True, exist_ok=True)
+              if not target.exists():
+                  with target.open("xb") as output:
+                      output.write(data)
+          PY
+          test -s ios/Runner/GoogleService-Info.plist
+          test -s lib/firebase_options.dart
+          if ! plutil -lint ios/Runner/GoogleService-Info.plist >/dev/null 2>&1; then
+            echo "Invalid Firebase iOS plist."
+            exit 1
+          fi
+          # Verify the app identity without printing plist contents.
+          python3 - <<'PY'
+          import plistlib
+          with open("ios/Runner/GoogleService-Info.plist", "rb") as stream:
+              config = plistlib.load(stream)
+          if config.get("BUNDLE_ID") != "com.azexpress.app":
+              raise SystemExit("Firebase plist bundle ID mismatch.")
+          if config.get("PROJECT_ID") != "az-express-b0469":
+              raise SystemExit("Firebase plist project ID mismatch.")
+          PY
+          python3 scripts/build_mobile.py ipa --check-only
+          unset FIREBASE_IOS_PLIST_B64 FIREBASE_DART_OPTIONS_B64
+          echo "Firebase configuration restored and plist validated."
+
+      - name: Install Flutter dependencies
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # Preserve the project's existing CocoaPods integration.
+          flutter config --no-enable-swift-package-manager
+          flutter pub get
+
+      - name: Prepare iOS dependencies
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          flutter precache --ios
+          cd ios
+          pod install --repo-update
+
+      - name: Apply existing App Store signing profiles
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # Codemagic installs the uploaded certificates and matching profiles.
+          # Only the ephemeral CI checkout receives these signing settings.
+          xcode-project use-profiles --project ios/Runner.xcodeproj
+          test -s "$HOME/export_options.plist"
+          plutil -lint "$HOME/export_options.plist"
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          with (Path.home() / "export_options.plist").open("rb") as stream:
+              options = plistlib.load(stream)
+          if options.get("teamID") != "F6XWK2W7XG":
+              raise SystemExit("Signing profile must belong to Apple team F6XWK2W7XG.")
+          if options.get("method") not in ("app-store", "app-store-connect"):
+              raise SystemExit("An App Store distribution profile is required.")
+          if not options.get("provisioningProfiles", {}).get("com.azexpress.app"):
+              raise SystemExit("Missing App Store profile for com.azexpress.app.")
+          if options.get("destination", "export") != "export":
+              raise SystemExit("Export only: automatic upload is not permitted.")
+          PY
+
+      - name: Build signed IPA artifact (compile check, no upload)
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # The existing Xcode phase calls FlutterFire to upload dSYMs.
+          # Keep this artifact-only workflow free of automatic symbol uploads.
+          # Intercept ONLY that subcommand; keep Crashlytics in the application.
+          ci_tools=$(mktemp -d "${TMPDIR:-/tmp}/az-ios-export.XXXXXX")
+          trap 'rm -f "$ci_tools/flutterfire"; rmdir "$ci_tools"' EXIT
+          cat > "$ci_tools/flutterfire" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" == "upload-crashlytics-symbols" ]]; then
+            echo "Crashlytics dSYM upload skipped for artifact-only build."
+            exit 0
+          fi
+          echo "Unexpected FlutterFire command in artifact-only workflow." >&2
+          exit 1
+          SH
+          chmod 700 "$ci_tools/flutterfire"
+          export PATH="$ci_tools:$PATH"
+          # Le dernier build réellement envoyé à App Store Connect n'est pas connu du dépôt :
+          # IOS_BUILD_NUMBER (variable Codemagic) doit être strictement supérieur à lui.
+          if ! [[ "${IOS_BUILD_NUMBER:-}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "IOS_BUILD_NUMBER manquant ou invalide : définir un entier supérieur au dernier build App Store Connect." >&2
+            exit 1
+          fi
+          python3 scripts/build_mobile.py ipa \
+            --build-number "$IOS_BUILD_NUMBER" \
+
+            --export-options "$HOME/export_options.plist"
+          compgen -G 'build/ios/ipa/*.ipa' >/dev/null || {
+            echo "IPA export failed: no IPA artifact was generated."
+            exit 1
+          }
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/ios/archive/*.xcarchive/dSYMs/*.dSYM
