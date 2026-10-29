@@ -81,11 +81,11 @@ const accountDeletion=buildAccountDeletion({db,auth:admin.auth(),admin,HttpsErro
   eraseAssets:async(uid,role)=>{
     await require('./accountPersonalAssets').erasePersonalAssets(admin.storage().bucket(),uid,role);
   }});
-exports.requestAccountDeletionCF=rawOnCall({region:'europe-west1',maxInstances:1,timeoutSeconds:120,memory:'256MiB'},accountDeletion.request);
-exports.getAccountDeletionStatusCF=rawOnCall({region:'europe-west1',maxInstances:1,timeoutSeconds:30,memory:'256MiB'},accountDeletion.status);
-exports.retryAccountDeletions=onSchedule({schedule:'every 15 minutes',region:'europe-west1',maxInstances:1,concurrency:1,timeoutSeconds:120,memory:'256MiB'},accountDeletion.drain);
+exports.requestAccountDeletionCF=rawOnCall({region:'europe-west1',maxInstances:1,cpu:0.5,concurrency:1,timeoutSeconds:120,memory:'256MiB'},accountDeletion.request);
+exports.getAccountDeletionStatusCF=rawOnCall({region:'europe-west1',maxInstances:1,cpu:0.25,concurrency:1,timeoutSeconds:30,memory:'256MiB'},accountDeletion.status);
+exports.retryAccountDeletions=onSchedule({schedule:'every 15 minutes',region:'europe-west1',maxInstances:1,cpu:0.25,concurrency:1,timeoutSeconds:120,memory:'256MiB'},accountDeletion.drain);
 const {buildAccountDeletionSupport}=require('./accountDeletionSupport');
-exports.manageAccountDeletionCF=onCall({region:'europe-west1',maxInstances:1,timeoutSeconds:120,memory:'256MiB'},
+exports.manageAccountDeletionCF=onCall({region:'europe-west1',maxInstances:1,cpu:0.25,concurrency:1,timeoutSeconds:120,memory:'256MiB'},
   buildAccountDeletionSupport({db,admin,HttpsError,process:accountDeletion.process}));
 const {buildPharmacyOwnerIdentity}=require('./pharmacyOwnerIdentity');
 exports.managePharmacyOwnerIdentityCF=onCall({region:'europe-west1',maxInstances:1,timeoutSeconds:60,memory:'256MiB'},

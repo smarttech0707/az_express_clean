@@ -80,6 +80,10 @@ module.exports = function createAzIa({
     region:         'europe-west1',
     timeoutSeconds: 120,
     memory:         '512MiB',
+    // Explicites : un redéploiement remet à zéro les options non déclarées, et un
+    // maxInstances par défaut ferait exploser le quota CPU Cloud Run (valeurs = prod).
+    cpu:            1,
+    maxInstances:   3,
     secrets:        azIaChatSecrets,
   }, async (request) => {
     if (!request.auth) {
