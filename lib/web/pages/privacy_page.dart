@@ -122,8 +122,9 @@ class WebPrivacyPage extends StatelessWidget {
                   '• Vous opposer au traitement de vos données\n'
                   '• Retirer votre consentement\n\n'
                   'Pour exercer ces droits, contactez-nous à : znm0905@gmail.com\n\n'
-                  'Pour demander la suppression de votre compte, utilisez le menu de l\'application '
-                  '(Profil > Supprimer mon compte) ou notre page dédiée : az-express-b0469.web.app/delete-account.'),
+                  'Pour demander la suppression de votre compte, écrivez-nous en suivant les indications '
+                  'de la page az-express-b0469.web.app/delete-account (e-mail ou WhatsApp, avec le numéro '
+                  'et le rôle du compte).'),
           _Section(
               '9. Assistant intelligent AZ IA',
               'AZ Express propose un assistant conversationnel intelligent (« AZ IA ») pour vous aider '
