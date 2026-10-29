@@ -210,8 +210,11 @@ async function dispatchOrder(db, admin, {
   cityResolutionStatus,
   budget = 0,
   radiusKm = DEFAULT_RADIUS_KM,
+  // Livreurs ayant déjà libéré cette commande : jamais re-proposée à eux.
+  excludedDriverIds = [],
 }) {
   assertValidDispatchPoint(Number(lat), Number(lng), 'collecte');
+  const excludedSet = new Set(Array.isArray(excludedDriverIds) ? excludedDriverIds : []);
   if (cityResolutionStatus === 'outside_service' || cityResolutionStatus === 'unknown') {
     throw new DispatchError(
       'unresolved-city',
@@ -254,10 +257,11 @@ async function dispatchOrder(db, admin, {
   const nearby = [];
   snap.docs.forEach((doc) => {
     const d = doc.data();
+    if (d.deletionRequested === true) { excluded.unavailable++; return; }
     if (d.isOnDelivery === true)  { excluded.onDelivery++; return; }
     if (d.isAvailable === false)  { excluded.unavailable++; return; }
     if (d.isSuspended === true)   { excluded.suspended++; return; }
-    if (d.pendingOrderId === orderId) { excluded.alreadyNotified++; return; }
+    if (d.pendingOrderId === orderId || excludedSet.has(doc.id)) { excluded.alreadyNotified++; return; }
     const wallet = Number(d.wallet || 0);
     if (wallet < commission) { excluded.walletLow++; return; }
     const ua = d.updatedAt;
@@ -322,16 +326,24 @@ async function dispatchOrder(db, admin, {
       return { dispatched: false, mode: 'already_assigned' };
     }
 
-    if (ids.length === 1) {
-      tx.update(orderRef, { driverId: ids[0], status: 'assigned' });
+    // Read deletion receipts in the same transaction as assignment. A request
+    // created concurrently forces a retry; an active mission is never changed.
+    const eligibleIds=[];
+    for (const id of ids) {
+      const deletion=await tx.get(db.collection('account_deletions').doc(id));
+      if (!deletion.exists || deletion.data().consentVerified !== true) eligibleIds.push(id);
+    }
+    if (!eligibleIds.length) return { dispatched:false, mode:'none' };
+    if (eligibleIds.length === 1) {
+      tx.update(orderRef, { driverId: eligibleIds[0], status: 'assigned' });
       return { dispatched: true, mode: 'assigned' };
     }
 
     tx.update(orderRef, {
       status:            'broadcast',
-      notifiedDriverIds: admin.firestore.FieldValue.arrayUnion(...ids),
+      notifiedDriverIds: admin.firestore.FieldValue.arrayUnion(...eligibleIds),
     });
-    return { dispatched: true, mode: 'broadcast', ids };
+    return { dispatched: true, mode: 'broadcast', ids:eligibleIds };
   });
 
   // Le marquage pendingOrderId sur chaque livreur reste hors transaction :

@@ -10,6 +10,7 @@ const { createSupportTicket } = require('./tools/support');
 const { trackEkbineOrder, createEkbineOrder } = require('./tools/ekbine');
 const { rememberUserInfo, rememberNamedAddress } = require('./tools/memory');
 const { createReminder } = require('./tools/reminders');
+const { getUserContext } = require('./tools/userContext');
 
 // Construit la liste des outils disponibles pour AZ IA. Chaque outil expose
 // {name, description, input_schema, handler(uid, input, ctx)} — le handler
@@ -39,6 +40,7 @@ function buildRegistry({ db, admin, logAudit, checkRateLimit, HttpsError, axios,
     rememberUserInfo({ db, admin }),
     rememberNamedAddress({ db, admin }),
     createReminder({ db, admin }),
+    getUserContext({ db }),
   ];
 }
 

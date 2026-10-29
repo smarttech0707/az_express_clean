@@ -1,0 +1,6 @@
+## RBAC
+
+Le contrôle d'accès actuel fonctionne par appartenance à une collection plutôt que par un champ `role` unique + custom claims Firebase Auth (aucun `setCustomUserClaims` n'est utilisé dans le code aujourd'hui) : `clients`, `livreurs`, `sellers`, `restaurants`, `pharmacies`, `boulangeries`, `ekbine_agents`, `admins` (avec sous-rôle `super`/`sub`). Ça couvre déjà l'essentiel de la demande (Client/Livreur/Vendeur/Restaurant/Pharmacie/Agent E-Kbine/Admin/Super Admin). Les rôles "Support" (agent humain) et "Modérateur" ne sont pas encore modélisés — à créer seulement quand une fonctionnalité concrète en a besoin, pas par anticipation.
+
+Précision (vérifiée lors de l'audit Administration) : les sous-admins ont en réalité un contrôle d'accès **par section**, pas juste un binaire super/sub — `admins/{uid}.permissions` est un tableau de clés de section (`livreurs`, `commandes`, `gains`, `restaurants`, etc., voir `admin_sub_admins_page.dart`). Ce n'est pas des rôles nommés hiérarchiques ("Responsable Livraison", "Comptable"...) comme demandé dans le prompt Administration, mais c'est un système de permissions granulaires déjà fonctionnel — plus proche de la demande qu'il n'y paraît. Ajouter des libellés de rôle par-dessus ce tableau de permissions existant serait un habillage léger, pas une refonte.
+

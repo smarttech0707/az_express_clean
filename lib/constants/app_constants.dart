@@ -1,3 +1,5 @@
+import 'maps_key.dart' if (USE_FIREBASE_EMULATORS == 'true') 'maps_key_test.dart';
+
 // AppColors est défini dans lib/theme/app_theme.dart — source unique
 // import '../theme/app_theme.dart' pour accéder à AppColors
 
@@ -151,6 +153,15 @@ class AppConfig {
   static const supportPhone = '+2250798051397';
   static const supportWhatsApp = '+2250798051397';
   static const supportEmail = 'support@azexpress.ci';
+
+  /// Recharge / retrait électroniques (FeexPay) : désactivés au lancement, en attendant les formalités. Le code
+  /// reste en place ; passer à true (puis publier) pour réactiver. Les commandes en espèces n'en dépendent pas.
+  static const electronicPaymentsEnabled = false;
+
+  /// Remplacement de livreur en cours de course (`deliveryTransferCF`). Désactivé tant que la fonction et son
+  /// secret `DELIVERY_PROOF_PEPPER` ne sont pas déployés : sans cela l'écran échouerait. Passer à true APRÈS le
+  /// déploiement de `deliveryTransferCF`, puis publier. Libérer une course avant récupération n'en dépend pas.
+  static const deliveryTransferEnabled = false;
   static const whatsAppUrl = 'https://wa.me/2250798051397';
   static const minOrderAmount = 500;
   static const minWalletRecharge = 100;
@@ -173,7 +184,9 @@ class AppConfig {
 class MapsConfig {
   MapsConfig._();
 
-  static const apiKey = 'AIzaSyCjWt989YSIBblhRE9WNVOWXvOsXHIQ1DE';
+  // La clé vient de maps_key.dart ; un build de test (--dart-define=USE_FIREBASE_EMULATORS=true)
+  // importe maps_key_test.dart À LA PLACE : la clé de production n'est alors pas compilée dans l'APK.
+  static const apiKey = kMapsApiKey;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

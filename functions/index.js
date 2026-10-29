@@ -1,13 +1,15 @@
 'use strict';
 
-const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
-const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onCall: rawOnCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { defineSecret } = require('firebase-functions/params');
 const admin  = require('firebase-admin');
 const axios  = require('axios');
 const crypto = require('crypto');
+const { expireOrderTx, rateLimitCancelTx } = require('./orderRefunds');
+const { buildAdminBilling } = require('./adminBilling');
 const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
 const {
   isAuthorizedWebhookCall,
@@ -34,6 +36,8 @@ const {
 const { buildResetAccountPassword } = require('./passwordReset');
 const { buildManageProfessionalSubscription } = require('./professionalSubscriptions');
 const { buildManageAdminPartnerAccount } = require('./adminPartnerAccounts');
+const { buildCompletePartnerFirstPasswordChange } = require('./partnerFirstLogin');
+const { assertPartnerActivated } = require('./partnerActivationGuard');
 const { requireAdminPermission, requireSuperAdmin } = require('./adminGuards');
 const {
   buildPublishMarketplaceProduct,
@@ -49,6 +53,84 @@ admin.initializeApp();
 setGlobalOptions({ region: 'europe-west1' });
 
 const db = admin.firestore();
+const {buildPartnerQr,available:qrAvailable,COLLECTIONS:QR_COLLECTIONS}=require('./partnerQr');
+const partnerQr=buildPartnerQr({db,auth:admin.auth(),HttpsError});
+exports.getPartnerQr=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.manage);
+exports.resolvePartnerQr=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.resolve);
+exports.listPartnerQrEstablishments=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.list);
+exports.setPartnerQrManager=onCall({region:'europe-west1',maxInstances:1},partnerQr.grant);
+for(const [kind,collection] of Object.entries(QR_COLLECTIONS)){
+  exports['syncPartnerQr_'+kind]=onDocumentWritten({document:collection+'/{id}',region:'europe-west1',maxInstances:1,retry:true},event=>{
+    const before=event.data?.before.data(),after=event.data?.after.data();
+    if(!qrAvailable(after)||qrAvailable(before))return;
+    return partnerQr.sync(kind,event.params.id);
+  });
+}
+
+// Refuse stale authenticated sessions once a verified deletion enters quarantine.
+// Financial webhooks/schedulers are deliberately not wrapped.
+const { buildAccountDeletion, assertAccountEnabled } = require('./accountDeletion');
+function onCall(options, handler) {
+  if(typeof options==='function'){handler=options;options={};}
+  return rawOnCall(options,async(request,...rest)=>{
+    await assertAccountEnabled(db,request.auth?.uid,HttpsError);
+    return handler(request,...rest);
+  });
+}
+const accountDeletion=buildAccountDeletion({db,auth:admin.auth(),admin,HttpsError,
+  eraseAssets:async(uid,role)=>{
+    await require('./accountPersonalAssets').erasePersonalAssets(admin.storage().bucket(),uid,role);
+  }});
+exports.requestAccountDeletionCF=rawOnCall({region:'europe-west1',maxInstances:1,timeoutSeconds:120,memory:'256MiB'},accountDeletion.request);
+exports.getAccountDeletionStatusCF=rawOnCall({region:'europe-west1',maxInstances:1,timeoutSeconds:30,memory:'256MiB'},accountDeletion.status);
+exports.retryAccountDeletions=onSchedule({schedule:'every 15 minutes',region:'europe-west1',maxInstances:1,concurrency:1,timeoutSeconds:120,memory:'256MiB'},accountDeletion.drain);
+const {buildAccountDeletionSupport}=require('./accountDeletionSupport');
+exports.manageAccountDeletionCF=onCall({region:'europe-west1',maxInstances:1,timeoutSeconds:120,memory:'256MiB'},
+  buildAccountDeletionSupport({db,admin,HttpsError,process:accountDeletion.process}));
+const {buildPharmacyOwnerIdentity}=require('./pharmacyOwnerIdentity');
+exports.managePharmacyOwnerIdentityCF=onCall({region:'europe-west1',maxInstances:1,timeoutSeconds:60,memory:'256MiB'},
+  buildPharmacyOwnerIdentity({db,auth:admin.auth(),admin,HttpsError}));
+
+
+const { settleTerminalOrder, diagnoseDriver, clearAcceptedOffers } = require('./driverLifecycle');
+const { assertDriverRechargeAllowed } = require('./driverWalletPolicy');
+const { buildAcceptOrder } = require('./driverAcceptance');
+const { buildAdminDriverRecharge } = require('./adminDriverRecharge');
+const { buildCreateFleetDriver } = require('./fleetDriverCreation');
+const { buildManageArtisanPhotos } = require('./artisanPhotos');
+const { buildManualAccountDeletion } = require('./manualAccountDeletion');
+const { buildReleaseOrderBeforePickup } = require('./driverRelease');
+const { buildDeclineLegacyOrder } = require('./driverDecline');
+const { buildDeliveryTransfer, expireDueTransfers } = require('./driverTransfer');
+const { buildSettleTransferEarnings } = require('./transferSettlement');
+
+// Forward-only lifecycle repair: never handles deletions or scans old drivers.
+exports.syncDriverOrderLifecycle = onDocumentUpdated({
+  document: 'orders/{orderId}', maxInstances: 1, retry: true,
+}, async event => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (before.status === after.status) return;
+  if (['cancelled', 'delivered'].includes(after.status)) {
+    await settleTerminalOrder(db, admin, event.params.orderId, before);
+  } else if (after.status === 'accepted') {
+    await clearAcceptedOffers(db, admin, event.params.orderId, before);
+  }
+});
+
+// Explicit Admin invocation only. No Firestore writes or corrective mode.
+exports.diagnoseDriverOccupancy = onCall({ maxInstances: 1 }, async request => {
+  await requireSuperAdmin({ request, db });
+  const { driverId, mode } = request.data || {};
+  if (typeof driverId !== 'string' || !driverId || driverId.includes('/') ||
+      (mode != null && mode !== 'diagnostic')) {
+    throw new HttpsError('invalid-argument', 'Driver ID required; diagnostic mode only.');
+  }
+  const result = await diagnoseDriver(db, driverId);
+  console.info('[driverOccupancyDiagnostic]', result);
+  return result;
+});
+
 
 exports.manageAdminPartnerAccount = onCall(
   { maxInstances: 2 },
@@ -59,6 +141,20 @@ exports.manageAdminPartnerAccount = onCall(
     checkRateLimit,
     logAudit,
     logSecurityEvent,
+  }),
+);
+
+// Première connexion des partenaires créés par l'administration (restaurant,
+// vendeur, boulangerie) : changement OBLIGATOIRE du mot de passe temporaire,
+// effectué par le serveur. maxInstances 1 (quota Cloud Run régional).
+exports.completePartnerFirstPasswordChange = onCall(
+  { maxInstances: 1, cpu: 0.5 },
+  buildCompletePartnerFirstPasswordChange({
+    db,
+    auth: admin.auth(),
+    fieldValue: admin.firestore.FieldValue,
+    checkRateLimit,
+    logAudit,
   }),
 );
 
@@ -103,6 +199,7 @@ exports.syncPharmacyGuards = onSchedule(
 const FEEXPAY_TOKEN_SECRET = defineSecret('FEEXPAY_TOKEN');
 const FEEXPAY_WEBHOOK_SECRET = defineSecret('FEEXPAY_WEBHOOK_SECRET');
 const ANTHROPIC_API_KEY_SECRET = defineSecret('ANTHROPIC_API_KEY');
+const DELIVERY_PROOF_PEPPER_SECRET = defineSecret('DELIVERY_PROOF_PEPPER');
 
 // ── Clés des fournisseurs IA — Secret Manager, jamais functions/.env ────────
 // Elles étaient jusqu'ici de simples variables d'environnement issues de
@@ -136,7 +233,9 @@ const FEEXPAY_API_URL        = 'https://api.feexpay.me';
 // pas un secret : valeur de configuration lue depuis l'environnement des
 // fonctions. Absente, les retraits echouent proprement AVANT tout debit.
 const FEEXPAY_SHOP_ID        = () => String(process.env.FEEXPAY_SHOP_ID || '').trim();
-const PROJECT_ID             = 'az-express-b0469';
+// GCLOUD_PROJECT est défini par Cloud Functions : un projet de test ne doit jamais
+// pointer le webhook de paiement vers la production.
+const PROJECT_ID             = process.env.GCLOUD_PROJECT || 'az-express-b0469';
 
 // Le secret est inclus dans l'URL du webhook → FeexPay le renvoie
 // sans avoir à vérifier une signature HMAC (que FeexPay ne supporte pas)
@@ -255,6 +354,10 @@ exports.initiateFeexPayPayment = onCall({
   }
 
   const uid = request.auth.uid;
+  // Partenaire créé par l'administration : aucune recharge avant le changement du
+  // mot de passe temporaire. Contrôle placé AVANT toute validation, limitation
+  // de débit ou création de transaction ; aucun effet pour les autres rôles.
+  await assertPartnerActivated({ db, request });
   const { amount, phone, operator, userType } = request.data;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -275,6 +378,12 @@ exports.initiateFeexPayPayment = onCall({
 
   // ── Rate limiting ─────────────────────────────────────────────────────────
   await checkRateLimit(uid, 'payment', 5, 60);
+
+  // Livreur : portefeuille initial 0 FCFA, première recharge d'au moins 1 000 FCFA
+  // (solde utilisable, pas des frais). Contrôle serveur, avant toute transaction.
+  if (userType === 'driver') {
+    await assertDriverRechargeAllowed({ db, uid, amount, HttpsError });
+  }
 
   // ── Vérifier qu'il n'y a pas déjà une transaction pending pour cet utilisateur ──
   const pendingSnap = await db.collection('wallet_transactions')
@@ -480,6 +589,9 @@ exports.initiateWithdrawal = onCall({
   }
 
   const uid = request.auth.uid;
+  // Partenaire créé par l'administration : aucun retrait avant le changement du
+  // mot de passe temporaire (contrôle serveur, indépendant de l'application).
+  await assertPartnerActivated({ db, request });
   const { amount, phone, operator, userType, userName } = request.data;
 
   const VALID_USER_TYPES = ['client', 'driver', 'seller', 'restaurant', 'boulangerie', 'pharmacie', 'fleet'];
@@ -900,7 +1012,28 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
-    if (!before || !after || before.status === after.status) return;
+    if (!before || !after) return;
+
+    // Changement de livreur sans changement de statut (transfert après
+    // récupération) ou remise en file après abandon : le client est prévenu,
+    // le suivi pointe sur le nouveau livreur via order.driverId.
+    const driverSwapped = before.status === after.status && after.status === 'picked_up' &&
+      before.driverId && after.driverId && before.driverId !== after.driverId;
+    const requeued = ['accepted', 'assigned'].includes(before.status) && after.status === 'pending' &&
+      !!before.driverId && !after.driverId;
+    if (driverSwapped || requeued) {
+      const cDoc = await db.collection('clients').doc(after.clientId).get();
+      const cToken = cDoc.data()?.fcmToken;
+      if (!cToken) return;
+      await sendToToken(cToken,
+        driverSwapped ? '🔁 Nouveau livreur' : '🔎 Nouveau livreur en recherche',
+        driverSwapped
+          ? 'Votre colis a été confié à un autre livreur. Suivez-le en direct : un nouveau code de livraison sera demandé.'
+          : 'Votre livreur ne peut pas poursuivre. Nous cherchons un autre livreur pour votre commande.',
+        { type: driverSwapped ? 'driver_changed' : 'driver_reassigned', orderId: event.params.orderId, status: after.status });
+      return;
+    }
+    if (before.status === after.status) return;
 
     const clientDoc = await db.collection('clients').doc(after.clientId).get();
     const token     = clientDoc.data()?.fcmToken;
@@ -1616,6 +1749,8 @@ exports.pharmacieLogin = onCall({ maxInstances: 2 }, async (request) => {
   if (!pharmacieSnap.exists) return { success: false };
   const data = pharmacieSnap.data();
 
+  if (data.isDeleted === true) return { success: false };
+
   const credRef  = db.collection('pharmacie_credentials').doc(pharmacieId);
   const credSnap = await credRef.get();
 
@@ -2060,113 +2195,14 @@ exports.autoExpireOrders = onSchedule({
     const order   = doc.data();
 
     try {
-      // Transaction atomique — protège contre la race condition avec acceptOrder()
-      await db.runTransaction(async (tx) => {
-        const fresh = await tx.get(doc.ref);
-        if (!fresh.exists) return;
-        const freshData = fresh.data();
+      // Transaction atomique — protège contre la race condition avec acceptOrder().
+      // Logique (annulation, remboursement client, reprise vendeur, métriques)
+      // dans orderRefunds.js pour être testée.
+      await db.runTransaction((tx) => expireOrderTx(tx, { db, admin, orderRef: doc.ref, orderId }));
 
-        // Vérifier que le statut est encore annulable (un livreur a peut-être accepté)
-        if (!['pending', 'broadcast', 'assigned'].includes(freshData.status)) return;
-
-        const willRefund = freshData.paymentMethod === 'wallet' && freshData.isPaid === true;
-        // Marketplace ('seller') est crédité en entier à la création de la
-        // commande (voir PREPAID_PARTNER_TYPES, Master Prompt 46) — sans ce
-        // débit en retour, l'expiration automatique créerait de l'argent à
-        // partir de rien (client remboursé + vendeur déjà payé), exactement
-        // comme pour cancelOrderCF (Master Prompt 47). Même limitation
-        // volontaire qu'orderActions.js:buildCancelOrder — n'inclut pas
-        // 'boutique', dont le document `orders` ici ne représente que le
-        // trajet de livraison (montant différent du paiement réel, qui vit
-        // sur `boutique_orders` séparément) : débiter `budget` ici serait
-        // incorrect pour ce type, documenté comme trouvaille distincte.
-        const needsSellerDebit = willRefund && freshData.sellerId && freshData.sellerType === 'seller';
-        // Toutes les lectures doivent précéder toute écriture dans une
-        // transaction Firestore — lire le vendeur ici, avant tx.update(doc.ref)
-        // ci-dessous, pour pouvoir plafonner le débit à 0 (pas de solde négatif).
-        const sellerRef  = needsSellerDebit ? db.collection('sellers').doc(freshData.sellerId) : null;
-        const sellerSnap = needsSellerDebit ? await tx.get(sellerRef) : null;
-
-        // Annuler la commande
-        tx.update(doc.ref, {
-          status:       'cancelled',
-          cancelReason: 'no_driver_found',
-          cancelledAt:  admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        // Remboursement wallet si paiement par wallet
-        if (willRefund) {
-          const amount    = freshData.budget || 0;
-          const clientRef = db.collection('clients').doc(freshData.clientId);
-          tx.update(clientRef, {
-            wallet: admin.firestore.FieldValue.increment(amount),
-          });
-          const histRef = clientRef.collection('wallet_transactions').doc();
-          tx.set(histRef, {
-            type:        'refund',
-            amount:      amount,
-            description: 'Remboursement — aucun livreur disponible',
-            orderId:     orderId,
-            createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-          });
-
-          if (needsSellerDebit && sellerSnap.exists) {
-            const w = Number(sellerSnap.data().wallet || 0);
-            // Plafonné à 0 : si le vendeur a déjà retiré une partie de ce
-            // crédit avant l'expiration, on reprend ce qu'il reste plutôt que
-            // de créer un solde négatif (même logique que cancelOrderCF).
-            const sellerDebit = Math.min(amount, w);
-            if (sellerDebit > 0) {
-              tx.update(sellerRef, {
-                wallet: w - sellerDebit,
-              });
-              const sellerHistRef = sellerRef.collection('wallet_transactions').doc();
-              tx.set(sellerHistRef, {
-                type:        'debit',
-                amount:      sellerDebit,
-                description: 'Commande expirée (aucun livreur) — reprise du paiement',
-                orderId:     orderId,
-                createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-              });
-            }
-          }
-        }
-
-        // Métriques dispatching — incrémente le compteur de la tranche horaire/zone
-        const today  = new Date().toISOString().split('T')[0];
-        const hour   = new Date().getHours();
-        const slot   = Math.floor(hour / 3) * 3; // tranches de 3h
-        const zone   = freshData.pickupZone || freshData.deliveryZone || 'unknown';
-        const svc    = freshData.type || 'livraison';
-        const metricRef = db.collection('dispatch_metrics')
-          .doc(`${today}_${zone}_${slot}h`);
-        tx.set(metricRef, {
-          date:               today,
-          zone,
-          serviceType:        svc,
-          hourSlot:           slot,
-          noDriverFoundCount: admin.firestore.FieldValue.increment(1),
-          lastUpdated:        admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-      });
-
-      // Nettoyage pendingOrderId chez les livreurs notifiés (hors transaction)
-      const notifiedIds = order.notifiedDriverIds;
-      if (Array.isArray(notifiedIds) && notifiedIds.length > 0) {
-        const batch = db.batch();
-        notifiedIds.forEach(driverId => {
-          batch.update(db.collection('livreurs').doc(driverId), {
-            pendingOrderId: admin.firestore.FieldValue.delete(),
-          });
-        });
-        await batch.commit().catch(err =>
-          console.warn(`Cleanup pendingOrderId batch (${orderId}):`, err.message));
-      }
-      if (order.driverId) {
-        await db.collection('livreurs').doc(order.driverId)
-          .update({ pendingOrderId: admin.firestore.FieldValue.delete() })
-          .catch(() => {});
-      }
+      // Re-read terminal state and compare each reference transactionally.
+      // If acceptance won the race, this does nothing.
+      await settleTerminalOrder(db, admin, orderId, order);
 
       // Audit log
       const searchSecs = order.createdAt
@@ -2202,7 +2238,7 @@ exports.autoExpireOrders = onSchedule({
 // 10 commandes en 1 heure. Aucune modification Flutter nécessaire.
 // Le remboursement wallet est automatique si la commande était payée.
 // ═══════════════════════════════════════════════════════════════════════════
-exports.enforceOrderRateLimit = onDocumentCreated('orders/{orderId}', async (event) => {
+exports.enforceOrderRateLimit = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 3 }, async (event) => {
   try {
     const order   = event.data.data();
     const orderId = event.params.orderId;
@@ -2233,31 +2269,7 @@ exports.enforceOrderRateLimit = onDocumentCreated('orders/{orderId}', async (eve
 
     // Trop de commandes — annuler immédiatement
     const orderRef = db.collection('orders').doc(orderId);
-    await db.runTransaction(async (tx) => {
-      const fresh = await tx.get(orderRef);
-      if (!fresh.exists || fresh.data().status !== 'pending') return;
-
-      tx.update(orderRef, {
-        status:       'cancelled',
-        cancelReason: 'rate_limit_exceeded',
-        cancelledAt:  admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      // Remboursement automatique si payé par wallet
-      if (order.paymentMethod === 'wallet' && order.isPaid === true) {
-        const amount    = order.budget || 0;
-        const clientRef = db.collection('clients').doc(clientId);
-        tx.update(clientRef, { wallet: admin.firestore.FieldValue.increment(amount) });
-        const histRef = clientRef.collection('wallet_transactions').doc();
-        tx.set(histRef, {
-          type:        'refund',
-          amount,
-          description: 'Remboursement — limite de commandes dépassée',
-          orderId,
-          createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-    });
+    await db.runTransaction((tx) => rateLimitCancelTx(tx, { db, admin, orderRef, orderId, order, clientId }));
 
     await logSecurityEvent(clientId, 'order_rate_limit_exceeded', 'medium',
       `Client ${clientId} a dépassé la limite de 10 commandes/heure`);
@@ -2284,7 +2296,7 @@ const {
   assertValidDispatchPoint,
 } = require('./dispatch');
 
-exports.dispatchOrderToDriver = onCall(async (request) => {
+exports.dispatchOrderToDriver = onCall({ maxInstances: 3 }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
   }
@@ -2365,14 +2377,109 @@ exports.dispatchOrderToDriver = onCall(async (request) => {
 // dans orderActions.js (testables sans Firebase Admin, même pattern que
 // azia/pendingActions.js:buildConfirmAction).
 // ═══════════════════════════════════════════════════════════════════════════
-const { buildPayOrderFromWallet, buildCancelOrder, buildDeliverOrder, buildPayBoutiqueOrder, buildPayBoutiqueOrderCash, buildRefundExpiredBoutiqueOrder } = require('./orderActions');
+const {
+  buildPayOrderFromWallet,
+  buildCancelOrder,
+  buildDeliverOrder,
+  buildDeliverOrderWithProof,
+  buildPayBoutiqueOrder,
+  buildPayBoutiqueOrderCash,
+  buildRefundExpiredBoutiqueOrder,
+} = require('./orderActions');
+const {
+  buildPrepareOrderProof,
+  buildConfirmPickupWithProof,
+} = require('./deliveryProofs');
 
-exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
-exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission });
-exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
-exports.payBoutiqueOrderCF   = buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
-exports.payBoutiqueOrderCashCF = buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
-exports.refundExpiredBoutiqueOrderCF = buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
+exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
+exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission });
+exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
+exports.acceptOrderCF        = buildAcceptOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: 5 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission,
+  selfieExists: async (path) => (await admin.storage().bucket().file(path).exists())[0],
+});
+exports.adminDriverRechargeCF = buildAdminDriverRecharge({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit, requireAdminPermission,
+});
+exports.completeManualAccountDeletionCF = buildManualAccountDeletion({
+  db, auth: admin.auth(), admin, bucket: { deleteFiles: (options) => admin.storage().bucket().deleteFiles(options) },
+  onCall: (h) => onCall({ maxInstances: 1, cpu: 1, timeoutSeconds: 300, memory: '512MiB' }, h), HttpsError, checkRateLimit, logAudit, requireSuperAdmin,
+});
+exports.manageArtisanPhotosCF = buildManageArtisanPhotos({
+  db, admin, bucket: { get name() { return admin.storage().bucket().name; }, file: (path) => admin.storage().bucket().file(path) }, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, memory: '512MiB' }, h), HttpsError, checkRateLimit, logAudit,
+});
+exports.createFleetDriverCF = buildCreateFleetDriver({
+  db, auth: admin.auth(), admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+});
+exports.declineLegacyOrderCF = buildDeclineLegacyOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit, dispatchOrder, DispatchError,
+});
+exports.deliveryTransferCF = buildDeliveryTransfer({
+  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+  // Push FCM aux livreurs candidats ; le client est prévenu par notifyClientOnOrderUpdate.
+  notify: async ({ collection, ids, event, orderId }) => {
+    if (event !== 'transfer_requested' || !Array.isArray(ids)) return;
+    for (const id of ids) {
+      const token = (await db.collection(collection).doc(id).get()).data()?.fcmToken;
+      if (token) await sendToToken(token, '🔁 Remplacement demandé',
+        'Un livreur de votre ville cherche un remplaçant. Ouvrez l’application pour accepter.',
+        { type: 'transfer_requested', orderId });
+    }
+  },
+});
+exports.settleTransferEarningsCF = buildSettleTransferEarnings({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit, requireSuperAdmin,
+});
+// Examen administratif Marketplace / Boutique (livraison bloquée, frais retenus
+// après récupération, remboursement boutique) — super-admin uniquement.
+exports.adminBillingCF = buildAdminBilling({
+  db, admin, onCall, HttpsError, checkRateLimit, logAudit, requireSuperAdmin, calculateCommission,
+});
+exports.releaseOrderBeforePickupCF = buildReleaseOrderBeforePickup({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit,
+  calculateCommission, dispatchOrder, DispatchError,
+});
+exports.prepareOrderProof    = buildPrepareOrderProof({
+  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+exports.confirmOrderPickupWithProof = buildConfirmPickupWithProof({
+  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+exports.confirmOrderDeliveryWithProof = buildDeliverOrderWithProof({
+  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+const recipientProofAccess = require('./deliveryProofGuests').buildRecipientProofAccess({
+  db, admin, onCall, HttpsError, checkRateLimit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+exports.createRecipientProofAccess = recipientProofAccess.create;
+exports.redeemRecipientProofAccess = recipientProofAccess.redeem;
+const deliveryProofSms = require('./deliveryProofSms').buildDeliveryProofSms({
+  db, admin, onCall, HttpsError, checkRateLimit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+exports.configureDeliverySms = deliveryProofSms.configure;
+exports.markDeliverySmsArrival = deliveryProofSms.arrival;
+exports.getDeliverySmsStatus = deliveryProofSms.status;
+exports.retryDeliverySms = deliveryProofSms.retry;
+exports.dispatchDeliverySms = onDocumentUpdated({
+  document: 'delivery_proofs/{sessionId}', maxInstances: 1, retry: true,
+  secrets: [DELIVERY_PROOF_PEPPER_SECRET],
+}, async event => {
+  if (process.env.DELIVERY_SMS_ENABLED !== 'true' || process.env.DELIVERY_PROOFS_ENABLED !== 'true') return;
+  const state = event.data?.after.data();
+  if (event.params.sessionId.startsWith('sms_') && state?.status === 'queued' && typeof state.orderId === 'string') {
+    await deliveryProofSms.dispatch(state.orderId);
+  }
+});
+
+exports.payBoutiqueOrderCF   = buildPayBoutiqueOrder({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit, dispatchOrder });
+exports.payBoutiqueOrderCashCF = buildPayBoutiqueOrderCash({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit, dispatchOrder });
+exports.refundExpiredBoutiqueOrderCF = buildRefundExpiredBoutiqueOrder({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
 
 // LOT 6.3 SECURITY — voir functions/eventReservations.js : totalAmount
 // désormais recalculé côté serveur à partir des vrais prix event_offers,
@@ -2456,6 +2563,20 @@ exports.fcmTokenCleanupCheck = buildFcmTokenCleanup({ db, admin, onSchedule });
 // ═══════════════════════════════════════════════════════════════════════════
 const { buildStaleDriverCleanup } = require('./staleDriverCleanup');
 exports.staleDriverCleanupCheck = buildStaleDriverCleanup({ db, admin, onSchedule });
+
+// Libère le livreur remplaçant (et le verrou de la commande) quand une remise
+// n'est pas confirmée à temps. Même discipline de quota que les autres crons.
+exports.expireDeliveryTransfers = onSchedule({
+  schedule: 'every 5 minutes', timeZone: 'Africa/Abidjan', region: 'europe-west1',
+  timeoutSeconds: 120, memory: '256MiB', maxInstances: 1, cpu: 0.5,
+}, async () => {
+  try {
+    const r = await expireDueTransfers(db, admin);
+    if (r.expired > 0) console.log(`[expireDeliveryTransfers] ${r.expired} transfert(s) expiré(s)`);
+  } catch (e) {
+    console.error('[expireDeliveryTransfers]', e.message);
+  }
+});
 
 
 // ═══════════════════════════════════════════════════════════════════════════

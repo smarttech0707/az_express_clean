@@ -17,7 +17,7 @@ let testEnv;
 
 test.before(async () => {
   testEnv = await initializeTestEnvironment({
-    projectId: 'az-express-b0469',
+    projectId: process.env.GCLOUD_PROJECT || 'az-express-b0469',
     storage: {
       rules: fs.readFileSync(path.join(__dirname, '..', 'storage.rules'), 'utf8'),
     },

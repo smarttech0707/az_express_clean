@@ -186,7 +186,10 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
         "id": id,
         "description":
             "Eau & Boissons :\n${descParts.join('\n')}\nAdresse : ${_addressCtrl.text.trim()}",
-        "budget": 500,
+        // Montant de livraison réel (même valeur que celle ajoutée à
+        // _totalToPay) : la règle Firestore walletDebitMatchesPaidOrder exige
+        // budget + shoppingBudget == montant débité du wallet.
+        "budget": _deliveryFee,
         "shoppingBudget": _totalPrice,
         "status": "pending",
         "type": "eau_boissons",

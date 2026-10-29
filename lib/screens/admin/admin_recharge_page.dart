@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../services/firestore_service.dart';
+import 'driver_recharge_flow.dart';
 import '../../theme/app_theme.dart';
 
 class AdminRechargePage extends StatefulWidget {
@@ -323,30 +324,17 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
               final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
               if (amount <= 0) return;
               Navigator.pop(context);
+              if (!mounted || _loading) return;
               setState(() => _loading = true);
               try {
-                final note = noteCtrl.text.trim().isNotEmpty
-                    ? noteCtrl.text.trim()
-                    : "Rechargé par l'admin";
-                await FirestoreService().rechargeDriverWallet(
-                    widget.docId, amount,
-                    adminNote: note);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content:
-                        Text('${_fmt(amount)} ajoutés au wallet de $name ✓'),
-                    backgroundColor: const Color(0xFF2E7D32),
-                  ));
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('Erreur : $e'),
-                    backgroundColor: Colors.red,
-                  ));
-                }
+                await confirmAndRechargeDriver(context,
+                    driverId: widget.docId,
+                    driverName: name,
+                    amount: amount,
+                    note: noteCtrl.text.trim());
+              } finally {
+                if (mounted) setState(() => _loading = false);
               }
-              if (mounted) setState(() => _loading = false);
             },
             icon: const Icon(Icons.check_circle_rounded,
                 color: Colors.white, size: 16),

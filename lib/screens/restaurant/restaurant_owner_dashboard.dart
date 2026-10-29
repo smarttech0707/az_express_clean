@@ -1,3 +1,4 @@
+import '../../delivery_proofs/proof_presentation.dart';
 import 'dart:async';
 import 'dart:io';
 import '../../widgets/scale_button.dart';
@@ -187,6 +188,7 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
             onPressed: () => showPartnerAccountSheet(
               context,
               role: 'restaurant',
+              establishmentId: widget.restaurantId,
               roleLabel: 'Restaurant',
               name: _name,
               phone: widget.restaurantData['phone'] as String?,
@@ -910,9 +912,12 @@ class _OrdersTab extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                subtitle: Text(time,
-                    style: GoogleFonts.urbanist(
-                        fontSize: 11, color: Colors.grey.shade400)),
+                subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(time),
+                      ProofActions(orderId: docs[i].id, partner: true),
+                    ]),
                 trailing: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,

@@ -62,6 +62,7 @@ const failure = () => Object.assign(new Error('simulated provider timeout'), { c
 
 function harness({ primary = 'gemini', scripts, config = {}, seed = {} } = {}) {
   const data = database({ 'clients/u': { wallet: 10000 },
+    'ai_consents/u': { granted: true, version: 1 },
     'settings/ai': { defaultProvider: primary, allowedProviders: ['gemini', 'claude'],
       fallbackEnabled: true, ...config }, ...seed });
   const requests = [], turns = [], counts = { gemini: 0, claude: 0, openai: 0, payment: 0, recharge: 0 };
@@ -128,7 +129,7 @@ test('Gemini primary: real wallet tool once, canonical response, no financial wr
   const result = await h.chat();
   assert.equal(result.reply, 'Solde : 10000 FCFA');
   assert.deepEqual(h.requests.map(r => r.provider), ['gemini', 'gemini']);
-  assert.equal(h.reads.get('clients/u'), 2); // context + exactly one tool
+  assert.equal(h.reads.get('clients/u'), 1); // exactly one tool; no automatic profile read (minimisation)
   assert.equal(h.pending().length, 0);
   assert.ok(!h.writes.some(p => p.startsWith('clients/') || p.startsWith('wallet_transactions/')));
   assert.equal(h.requests[1].body.contents[1].parts[0].thoughtSignature, 'fixture-signature');
@@ -149,7 +150,7 @@ for (const primary of ['gemini', 'claude']) {
       [other]: [[call('get_wallet_balance', {}, 'different-native-id')], 'fallback final'],
     } });
     assert.equal((await h.chat()).reply, 'fallback final');
-    assert.equal(h.reads.get('clients/u'), 2);
+    assert.equal(h.reads.get('clients/u'), 1);
     for (const { turn } of h.turns) {
       assert.equal(turn.canonicalHistory, true);
       for (const message of turn.messages) for (const block of message.content) {
@@ -225,14 +226,14 @@ test('image survives Gemini tool round trip; multiple tools execute sequentially
   for (const request of h.requests) assert.equal(request.body.contents[0].parts[0].inline_data.mime_type, 'image/png');
   const results = h.requests[1].body.contents.at(-1).parts;
   assert.deepEqual(results.map(p => p.functionResponse.name), ['get_wallet_balance', 'get_wallet_transactions']);
-  assert.equal(h.reads.get('clients/u'), 2);
+  assert.equal(h.reads.get('clients/u'), 1);
 });
 test('continuous tools hit six-turn cap; closing call executes no tools', async () => {
   const h = harness({ scripts: { gemini: n => n < 6 ? [call('get_wallet_balance', {}, `id-${n}`)] : 'Fin controlee' } });
   const result = await h.chat();
   assert.equal(result.hitTurnCap, true); assert.equal(h.counts.gemini, 7);
   assert.equal(h.requests.at(-1).body.tools, undefined);
-  assert.equal(h.reads.get('clients/u'), 2);
+  assert.equal(h.reads.get('clients/u'), 1);
 });
 test('provider-specific models never transfer to fallback', async () => {
   const h = harness({ config: { models: { gemini: 'gemini-3.8-flash', claude: 'claude-fixture' } },
@@ -306,7 +307,7 @@ test('provider outside allowlist fails before any transport call', async () => {
 });
 test('replay ledger is invocation-local: a new user message may intentionally repeat', async () => {
   const h = harness({ scripts: { gemini: [[call('get_wallet_balance')], 'Premier', [call('get_wallet_balance')], 'Second'] } });
-  await h.chat(); await h.chat(); assert.equal(h.reads.get('clients/u'), 4);
+  await h.chat(); await h.chat(); assert.equal(h.reads.get('clients/u'), 2);
 });
 test('OpenAI tool flag alone cannot authorize an incompatible canonical adapter', async () => {
   const previous = process.env.AI_OPENAI_TOOL_CALLING_ENABLED;

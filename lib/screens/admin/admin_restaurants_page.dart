@@ -1,8 +1,11 @@
 import 'dart:io';
+import 'admin_partner_account_service.dart';
+import '../../widgets/partner_temp_credentials_dialog.dart';
 import '../../widgets/scale_button.dart';
 import '../../widgets/admin_restaurant_cards.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/subscription_service.dart';
@@ -14,6 +17,9 @@ class AdminRestaurantsPage extends StatelessWidget {
   const AdminRestaurantsPage({super.key});
 
   void _showAddRestaurant(BuildContext context) {
+    final ownerNameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    bool saving = false;
     final nameCtrl = TextEditingController();
     final addressCtrl = TextEditingController();
     final categoryCtrl = TextEditingController();
@@ -35,6 +41,18 @@ class AdminRestaurantsPage extends StatelessWidget {
               children: [
                 _dialogField(nameCtrl, "Nom du restaurant", Icons.store),
                 const SizedBox(height: 10),
+                _dialogField(ownerNameCtrl, "Nom du responsable", Icons.person),
+                const SizedBox(height: 10),
+                _dialogField(phoneCtrl, "Téléphone du responsable (identifiant)",
+                    Icons.phone,
+                    type: TextInputType.phone),
+                const SizedBox(height: 10),
+                const Text(
+                  "Un mot de passe temporaire sera généré et affiché une seule "
+                  "fois. Le responsable choisira le sien à sa première connexion.",
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+                const SizedBox(height: 6),
                 _dialogField(addressCtrl, "Adresse", Icons.location_on),
                 const SizedBox(height: 10),
                 _dialogField(categoryCtrl,
@@ -69,31 +87,172 @@ class AdminRestaurantsPage extends StatelessWidget {
                 backgroundColor: const Color(0xFF1565C0),
                 foregroundColor: Colors.white,
               ),
-              onPressed: () async {
-                final name = nameCtrl.text.trim();
-                if (name.isEmpty) return;
-                final locationError = PartnerLocationValidator.validateText(
-                    latCtrl.text, lngCtrl.text);
-                if (locationError != null) {
-                  ScaffoldMessenger.of(ctx)
-                      .showSnackBar(SnackBar(content: Text(locationError)));
-                  return;
-                }
-                await FirebaseFirestore.instance.collection("restaurants").add({
-                  "name": name,
-                  "address": addressCtrl.text.trim(),
-                  "category": categoryCtrl.text.trim().isEmpty
-                      ? "Cuisine locale"
-                      : categoryCtrl.text.trim(),
-                  "minDelivery": int.tryParse(minCtrl.text.trim()) ?? 500,
-                  "isOpen": isOpen,
-                  "lat": double.parse(latCtrl.text.trim()),
-                  "lng": double.parse(lngCtrl.text.trim()),
-                  "createdAt": Timestamp.now(),
-                });
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final name = nameCtrl.text.trim();
+                      final ownerName = ownerNameCtrl.text.trim();
+                      final phone = phoneCtrl.text.trim().replaceAll(' ', '');
+                      final address = addressCtrl.text.trim();
+                      void warn(String message) => ScaffoldMessenger.of(ctx)
+                          .showSnackBar(SnackBar(content: Text(message)));
+                      if (name.isEmpty ||
+                          ownerName.isEmpty ||
+                          phone.isEmpty ||
+                          address.isEmpty) {
+                        warn("Nom, adresse, responsable et téléphone obligatoires");
+                        return;
+                      }
+                      final locationError =
+                          PartnerLocationValidator.validateText(
+                              latCtrl.text, lngCtrl.text);
+                      if (locationError != null) {
+                        warn(locationError);
+                        return;
+                      }
+                      setS(() => saving = true);
+                      try {
+                        // Compte Auth + restaurants + restaurant_owners créés
+                        // côté serveur, de façon reprenable.
+                        final created =
+                            await AdminPartnerAccountService.createRestaurant(
+                          email: '$phone@az-restaurant.ci',
+                          isOpen: isOpen,
+                          profile: {
+                            'name': name,
+                            'ownerName': ownerName,
+                            'phone': phone,
+                            'address': address,
+                            'category': categoryCtrl.text.trim().isEmpty
+                                ? 'Cuisine locale'
+                                : categoryCtrl.text.trim(),
+                            'minDelivery':
+                                int.tryParse(minCtrl.text.trim()) ?? 500,
+                            'lat': double.parse(latCtrl.text.trim()),
+                            'lng': double.parse(lngCtrl.text.trim()),
+                          },
+                        );
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (context.mounted) {
+                          await showPartnerTempCredentialsDialog(
+                            context,
+                            title: 'Restaurant créé',
+                            identifier: phone,
+                            tempPassword: created.tempPassword,
+                          );
+                        }
+                      } catch (e) {
+                        setS(() => saving = false);
+                        warn(e is FirebaseFunctionsException &&
+                                e.code == 'already-exists'
+                            ? 'Ce numéro a déjà un compte restaurateur.'
+                            : 'Création impossible : ${e is FirebaseFunctionsException ? (e.message ?? e.code) : e}');
+                      }
+                    },
               child: const Text("Ajouter"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Attribution MANUELLE d'un responsable à un restaurant existant (historique).
+  // Jamais automatique : l'admin sélectionne l'établissement (carte), saisit le
+  // responsable et confirme. Le serveur (super-admin uniquement) refuse si
+  // l'établissement a déjà un responsable ; il ne crée ni ne modifie
+  // l'établissement et conserve son restaurantId.
+  void _showAssignOwner(BuildContext context, DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+    final restaurantName = (data['name'] as String?) ?? doc.id;
+    final ownerNameCtrl = TextEditingController(
+        text: (data['ownerName'] as String?) ?? '');
+    final phoneCtrl = TextEditingController();
+    bool saving = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text("Attribuer un responsable"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  "Établissement : $restaurantName\nIdentifiant : ${doc.id}\n\n"
+                  "Un NOUVEAU compte responsable sera lié à cet établissement "
+                  "existant. L'établissement n'est ni créé ni modifié.",
+                  style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 10),
+                _dialogField(ownerNameCtrl, "Nom du responsable", Icons.person),
+                const SizedBox(height: 10),
+                _dialogField(phoneCtrl, "Téléphone du responsable (identifiant)",
+                    Icons.phone,
+                    type: TextInputType.phone),
+                const SizedBox(height: 10),
+                const SizedBox(height: 6),
+                const Text(
+                  "Un mot de passe temporaire sera généré et affiché une seule fois.",
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Annuler"),
+            ),
+            ScaleButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final ownerName = ownerNameCtrl.text.trim();
+                      final phone = phoneCtrl.text.trim().replaceAll(' ', '');
+                      void warn(String message) => ScaffoldMessenger.of(ctx)
+                          .showSnackBar(SnackBar(content: Text(message)));
+                      if (ownerName.isEmpty || phone.isEmpty) {
+                        warn("Nom et téléphone du responsable obligatoires");
+                        return;
+                      }
+                      setS(() => saving = true);
+                      try {
+                        final assigned =
+                            await AdminPartnerAccountService.assignRestaurantOwner(
+                          restaurantId: doc.id,
+                          ownerName: ownerName,
+                          phone: phone,
+                          email: '$phone@az-restaurant.ci',
+                        );
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (context.mounted) {
+                          await showPartnerTempCredentialsDialog(
+                            context,
+                            title: 'Responsable attribué',
+                            identifier: phone,
+                            tempPassword: assigned.tempPassword,
+                          );
+                        }
+                      } catch (e) {
+                        setS(() => saving = false);
+                        final code =
+                            e is FirebaseFunctionsException ? e.code : '';
+                        warn(code == 'already-exists'
+                            ? 'Établissement déjà lié à un responsable, ou numéro déjà utilisé.'
+                            : code == 'permission-denied'
+                                ? 'Réservé à l\'administrateur principal.'
+                                : 'Attribution impossible.');
+                      }
+                    },
+              child: const Text("Attribuer"),
             ),
           ],
         ),
@@ -279,6 +438,7 @@ class AdminRestaurantsPage extends StatelessWidget {
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16),
                     AdminRestaurantActions(
+                      onAssignOwner: () => _showAssignOwner(context, doc),
                       onMenu: () => Navigator.push(
                         context,
                         MaterialPageRoute(

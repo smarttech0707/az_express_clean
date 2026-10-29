@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/firestore_service.dart';
+import 'driver_recharge_flow.dart';
 import '../../theme/app_theme.dart';
 
 class DriversPage extends StatelessWidget {
@@ -194,13 +195,9 @@ class DriversPage extends StatelessWidget {
               final amount = int.tryParse(amountCtrl.text.trim());
               if (amount == null || amount <= 0) return;
               Navigator.pop(context);
-              await FirestoreService().rechargeDriverWallet(driverId, amount);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text("$amount FCFA ajoutés à $driverName"),
-                  backgroundColor: Colors.green,
-                ));
-              }
+              if (!context.mounted) return;
+              await confirmAndRechargeDriver(context,
+                  driverId: driverId, driverName: driverName, amount: amount);
             },
             child: const Text("Confirmer"),
           ),

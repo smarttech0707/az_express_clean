@@ -140,6 +140,7 @@ function createEkbineOrder({ db, admin, HttpsError }) {
       const clientRef  = db.collection('clients').doc(uid);
       const clientSnap = await tx.get(clientRef);
       const clientData = clientSnap.exists ? clientSnap.data() : {};
+      if(clientData.deletionRequested===true||clientData.isDeleted===true)throw new HttpsError('failed-precondition','Compte en cours de suppression');
 
       if (paymentMethod === 'wallet') {
         const balance = clientData.wallet || 0;

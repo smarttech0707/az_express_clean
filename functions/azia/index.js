@@ -15,6 +15,7 @@ const { createAiGateway } = require('./aiGateway');
 const { buildUserContext } = require('./contextBuilder');
 const { buildTurnResponse } = require('./responseBuilder');
 const { buildReminderScheduler } = require('./reminderScheduler');
+const { CONSENT_VERSION, getConsent, isConsentValid, setConsent } = require('./consent');
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_TOOL_TURNS     = 6; // plafond d'aller-retours outils par message utilisateur
@@ -43,7 +44,7 @@ module.exports = function createAzIa({
   const aiGateway = createAiGateway({ providerService: aiProviderService, policyEngine });
   const toolsByName = new Map(tools.map(t => [t.name, t]));
   const toolSchemas = policyEngine.getToolSchemas();
-  async function executeTool(uid, name, input, conversationId) {
+  async function executeTool(uid, name, input, conversationId, location = null) {
     const config = await aiProviderService.getConfig();
     if (!policyEngine.canExecute(name, config)) {
       return { error: `Outil non autorise : ${name}` };
@@ -53,7 +54,7 @@ module.exports = function createAzIa({
       return { error: `Outil inconnu : ${name}` };
     }
     try {
-      return await tool.handler(uid, input || {}, { conversationId });
+      return await tool.handler(uid, input || {}, { conversationId, location });
     } catch (err) {
       return { error: err.message || 'Erreur inconnue' };
     }
@@ -86,6 +87,35 @@ module.exports = function createAzIa({
     }
     const uid = request.auth.uid;
     const startTime = Date.now();
+
+    // Consentement au partage avec Anthropic / Google (App Store 5.1.1(i)).
+    // Actions dédiées : aucune donnée n'est envoyée à un modèle ici.
+    const consentAction = request.data?.consentAction;
+    if (consentAction !== undefined) {
+      if (!['status', 'grant', 'revoke'].includes(consentAction)) {
+        throw new HttpsError('invalid-argument', 'Action de consentement inconnue');
+      }
+      await checkRateLimit(uid, 'ai_consent', 20, 3600);
+      if (consentAction === 'status') {
+        const c = await getConsent(db, uid);
+        return { success: true, consent: { granted: isConsentValid(c), version: CONSENT_VERSION } };
+      }
+      const outcome = await setConsent({
+        db, admin, logAudit, uid, granted: consentAction === 'grant',
+        version: Number(request.data?.consentVersion),
+      });
+      if (!outcome.ok) {
+        throw new HttpsError('failed-precondition', 'APP_UPDATE_REQUIRED');
+      }
+      return { success: true, consent: { granted: consentAction === 'grant', version: CONSENT_VERSION } };
+    }
+
+    // Garde serveur : sans consentement valide (absent, refusé, retiré, version
+    // périmée, ancienne app), ni historique, ni contexte, ni fournisseur n'est
+    // touché. Seule AZ IA est bloquée.
+    if (!isConsentValid(await getConsent(db, uid))) {
+      throw new HttpsError('failed-precondition', 'CONSENT_REQUIRED');
+    }
 
     const message = String(request.data?.message || '').trim();
     if (!message) {
@@ -207,11 +237,11 @@ module.exports = function createAzIa({
               toolsUsed.push(block.name);
               const tool = toolsByName.get(block.name);
               if (!isPersistentTool(tool)) {
-                return executeTool(uid, block.name, block.input, conversationId);
+                return executeTool(uid, block.name, block.input, conversationId, safeLocation);
               }
               return persistentLedger.execute(
                 { uid, conversationId, name: block.name, input: block.input },
-                () => executeTool(uid, block.name, block.input, conversationId),
+                () => executeTool(uid, block.name, block.input, conversationId, safeLocation),
               ).then((outcome) => outcome.result);
             });
           toolCalls.push({ name: block.name, input: block.input, result });

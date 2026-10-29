@@ -1,3 +1,4 @@
+import '../../delivery_proofs/proof_presentation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -113,6 +114,7 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
             onPressed: () => showPartnerAccountSheet(
               context,
               role: 'pharmacie',
+              establishmentId: widget.pharmacieId,
               roleLabel: 'Pharmacie',
               name: name as String?,
               phone: widget.pharmacieData['phone'] as String?,
@@ -764,7 +766,7 @@ class _OrderList extends StatelessWidget {
           itemCount: docs.length,
           itemBuilder: (context, i) {
             final data = docs[i].data() as Map<String, dynamic>;
-            return _PharmacieOrderCard(data: data);
+            return _PharmacieOrderCard(orderId: docs[i].id, data: data);
           },
         );
       },
@@ -776,7 +778,8 @@ class _OrderList extends StatelessWidget {
 
 class _PharmacieOrderCard extends StatelessWidget {
   final Map<String, dynamic> data;
-  const _PharmacieOrderCard({required this.data});
+  final String orderId;
+  const _PharmacieOrderCard({required this.orderId, required this.data});
 
   static const _statusLabels = {
     'pending': 'En attente d\'un livreur',
@@ -822,6 +825,7 @@ class _PharmacieOrderCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          ProofActions(orderId: orderId, partner: true),
           // Status banner
           Container(
             width: double.infinity,

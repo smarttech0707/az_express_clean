@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../../services/firestore_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/driver_earnings_summary.dart';
@@ -666,35 +667,11 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
     setState(() => _loading = true);
 
     try {
-      final credential =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: "$id@az-driver.ci",
-        password: pass,
-      );
-      final driverUid = credential.user!.uid;
-
-      // Créer le doc livreur avec ownerId du patron
-      await FirebaseFirestore.instance
-          .collection("livreurs")
-          .doc(driverUid)
-          .set({
-        "name": name,
-        "phone": phone,
-        "identifiant": id,
-        "ownerId": widget.ownerId,
-        "ownerName": widget.ownerName,
-        "wallet": 500,
-        "isOnline": false,
-        "createdAt": Timestamp.now(),
-      });
-
-      // Firebase Auth signe automatiquement le nouveau livreur à la création.
-      // On déconnecte ce compte et on restaure une session anonyme pour que
-      // les règles Firestore (isAuth()) continuent de fonctionner sur ce device.
-      await FirebaseAuth.instance.signOut();
-      try {
-        await FirebaseAuth.instance.signInAnonymously();
-      } catch (_) {}
+      // Création côté serveur (compte Auth + document livreur, rattaché à CETTE flotte) : la session du patron
+      // n'est pas touchée et aucun compte Auth orphelin ne reste en cas d'échec.
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('createFleetDriverCF')
+          .call({'name': name, 'phone': phone, 'identifiant': id, 'password': pass});
 
       if (!mounted) return;
       setState(() => _loading = false);
@@ -742,13 +719,10 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
           ],
         ),
       );
-    } on FirebaseAuthException catch (e) {
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
       setState(() => _loading = false);
-      if (e.code == 'email-already-in-use') {
-        _snack("Cet identifiant est déjà utilisé", Colors.red);
-      } else {
-        _snack("Erreur : ${e.message}", Colors.red);
-      }
+      _snack(e.message ?? "Création impossible", Colors.red);
     } catch (e) {
       setState(() => _loading = false);
       _snack("Erreur inattendue", Colors.red);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'partner_first_password_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
@@ -184,7 +185,22 @@ class _ClientAuthPageState extends State<ClientAuthPage>
         setState(() => _loading = false);
         return;
       }
+      // Première connexion : changement obligatoire du mot de passe temporaire.
+      if (!await PartnerFirstPasswordPage.ensureActivated(
+          context, FirebaseAuth.instance.currentUser!)) {
+        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+        if (!mounted) return;
+        _snack(
+            "Activation requise : définissez votre mot de passe personnel pour accéder à votre espace.",
+            Colors.orange);
+        setState(() => _loading = false);
+        return;
+      }
       AuthService().logAuthEvent('login', 'seller');
+      if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
             builder: (_) =>

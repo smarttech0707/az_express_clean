@@ -1,0 +1,10 @@
+# AZ Express — Project Charter
+
+Audit de production daté et priorisé (Critique/Élevée/Moyenne/Faible) : voir `AUDIT_FINAL.md` à la racine — snapshot au 2026-07-03 (Master Prompt 60, « Release Candidate 2 Final Decision », couvre désormais les Prompts 01→60 et les jalons AZ IA M0→M7 ; **verdict final : READY PILOT EXTENDED** — 9 bugs financiers critiques trouvés et corrigés et testés (155 tests), tarification et annulation unifiées (Prompts 51-52), App Check préparé + KYC Storage restreint (Prompt 53), Boutique cash corrigée (Prompt 54), 5 `confirmHandler` AZ IA de création testés sans divergence (Prompt 55), 3 systèmes Immobilier et 2 back-offices audités et confirmés légitimes avec bugs réels corrigés au passage (Prompts 56-57), surveillance production auditée (Prompt 58), aucun risque Firebase 🔴 trouvé au dernier audit performance (Prompt 59) — voir section 13 pour le détail complet, y compris la checklist de déploiement production restante (règles/functions locales en avance sur la prod, travail des Prompts 51-60 non encore commité)), à ne pas confondre avec ce fichier (qui reste la doc technique vivante, mise à jour en continu).
+
+Dictionnaire de données Firestore complet (toutes les collections réelles, champs, règles, index) : voir `FIRESTORE_SCHEMA.md` à la racine — extrait directement de `firestore.rules`/`firestore.indexes.json`, sous les noms de collections **réels**, jamais renommés.
+
+Documentation complète des règles de sécurité Firestore (matrice de permissions par rôle, patterns de sécurité réutilisés, trouvailles zero-trust) : voir `FIRESTORE_RULES.md` à la racine.
+
+Super-app ivoirien : Flutter (mobile + web) + Firebase. Modules : Livraison, Courses libres, Marketplace (Djassa), Immobilier, Restaurants, Pharmacies, Boulangeries, Ekbine (moto-taxi/services), Wallet, Notifications, Support, Administration, Business Intelligence/Analytics, et **AZ IA** — l'assistant conversationnel qui devient progressivement le point d'entrée principal de la plateforme.
+

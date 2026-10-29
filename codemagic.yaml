@@ -151,8 +151,15 @@
           SH
           chmod 700 "$ci_tools/flutterfire"
           export PATH="$ci_tools:$PATH"
+          # Le dernier build réellement envoyé à App Store Connect n'est pas connu du dépôt :
+          # IOS_BUILD_NUMBER (variable Codemagic) doit être strictement supérieur à lui.
+          if ! [[ "${IOS_BUILD_NUMBER:-}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "IOS_BUILD_NUMBER manquant ou invalide : définir un entier supérieur au dernier build App Store Connect." >&2
+            exit 1
+          fi
           python3 scripts/build_mobile.py ipa \
-            --build-number 13 \
+            --build-number "$IOS_BUILD_NUMBER" \
+
             --export-options "$HOME/export_options.plist"
           compgen -G 'build/ios/ipa/*.ipa' >/dev/null || {
             echo "IPA export failed: no IPA artifact was generated."

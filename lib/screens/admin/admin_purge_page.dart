@@ -11,7 +11,7 @@ class AdminPurgePage extends StatefulWidget {
 }
 
 class _AdminPurgePageState extends State<AdminPurgePage> {
-  bool _purgeOrders = true;
+  final bool _purgeOrders = false;
   bool _purgeChats = true;
   bool _purgeRecharges = false;
 
@@ -20,6 +20,10 @@ class _AdminPurgePageState extends State<AdminPurgePage> {
   int _totalDeleted = 0;
 
   Future<int> _deleteCollection(String collection) async {
+    // Preserve order history and financial references, including terminal orders.
+    if (collection == 'orders') {
+      throw StateError('La suppression des commandes est désactivée.');
+    }
     int deleted = 0;
     QuerySnapshot snap;
     do {
@@ -32,9 +36,9 @@ class _AdminPurgePageState extends State<AdminPurgePage> {
       final batch = FirebaseFirestore.instance.batch();
       for (final doc in snap.docs) {
         batch.delete(doc.reference);
-        deleted++;
       }
       await batch.commit();
+      deleted += snap.docs.length;
 
       if (mounted) {
         setState(() {
@@ -208,12 +212,10 @@ class _AdminPurgePageState extends State<AdminPurgePage> {
             _CollectionTile(
               icon: Icons.receipt_long_rounded,
               title: "Commandes",
-              subtitle: "Toutes les commandes clients (orders)",
+              subtitle: "Suppression désactivée : historique et traçabilité préservés",
               color: AppColors.primary,
               value: _purgeOrders,
-              onChanged: _loading
-                  ? null
-                  : (v) => setState(() => _purgeOrders = v ?? false),
+              onChanged: null,
             ),
             const SizedBox(height: 10),
             _CollectionTile(

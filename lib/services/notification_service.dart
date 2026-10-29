@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import 'firebase_emulator_config.dart';
 import 'notification_tap_coordinator.dart';
 
 // ── Handler background — doit être top-level (hors classe) ───────────
@@ -128,6 +129,9 @@ class NotificationService {
   /// token. L'attente est volontairement bornée à dix secondes et ne concerne
   /// pas Android. Aucun token n'est journalisé.
   Future<String?> getTokenWhenReady() async {
+    // APK de test : FCM dialoguerait avec les serveurs Google (jeton, Installations), ce que le mode
+    // émulateurs interdit ; hors réseau, ces demandes bouclent et épuisent les threads du processus.
+    if (FirebaseEmulatorConfig.enabled) return null;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       for (var attempt = 0; attempt < _apnsTokenWaitAttempts; attempt++) {
         final apnsToken = await _fcm.getAPNSToken();

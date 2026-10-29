@@ -13,7 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { rememberUserInfo, getUserMemory } = require('../azia/tools/memory');
-const { buildUserContext } = require('../azia/contextBuilder');
+const { buildUserContext, collectUserContext, BASE_CONTEXT } = require('../azia/contextBuilder');
 const { getWalletTransactions } = require('../azia/tools/wallet');
 const { trackEkbineOrder, createEkbineOrder } = require('../azia/tools/ekbine');
 
@@ -187,31 +187,46 @@ test('getUserMemory: returns the stored memory when it exists', async () => {
 
 // ── buildUserContext ─────────────────────────────────────────────────────
 
-test('buildUserContext: returns null when nothing is known about the user', async () => {
-  const { db } = makeFakeDb();
-  assert.equal(await buildUserContext(db, 'u1', null), null);
+test('buildUserContext: is constant and carries no personal data', async () => {
+  assert.equal(await buildUserContext(), BASE_CONTEXT);
+  assert.ok(BASE_CONTEXT.includes('get_user_context'));
 });
 
-test('buildUserContext: includes client profile, memory fields and GPS location, never re-asking known info', async () => {
+test('collectUserContext: only the requested rubrics are returned, never the rest of the profile', async () => {
   const { db } = makeFakeDb({
-    'clients/u1':       { name: 'Awa Koné', phone: '+2250700000000' },
+    'clients/u1':       { name: 'Awa Koné', phone: '+2250700000000', wallet: 7777 },
     'ai_user_memory/u1': { quartier: 'Cafétou', preferredPaymentMethod: 'wallet' },
   });
-
-  const text = await buildUserContext(db, 'u1', { latitude: 6.73, longitude: -3.49, address: 'Cafétou' });
-
-  assert.ok(text.includes('Awa Koné'));
-  assert.ok(text.includes('+2250700000000'));
-  assert.ok(text.includes('Cafétou'));
-  assert.ok(text.includes('wallet'));
-  assert.ok(text.includes('6.73'));
-  assert.ok(text.includes('ne jamais les redemander'));
+  const r = await collectUserContext(db, 'u1', ['phone'], { latitude: 6.73, longitude: -3.49 });
+  assert.equal(r.phone, '+2250700000000');
+  const flat = JSON.stringify(r);
+  for (const leaked of ['Awa', 'Cafétou', 'wallet', '6.73', '7777']) assert.ok(!flat.includes(leaked), leaked);
 });
 
-test('buildUserContext: degrades gracefully (no crash) when the client document does not exist', async () => {
-  const { db } = makeFakeDb({ 'ai_user_memory/u1': { ville: 'Abengourou' } });
-  const text = await buildUserContext(db, 'u1', null);
-  assert.ok(text.includes('Abengourou'));
+test('collectUserContext: invalid or empty rubric list reads nothing', async () => {
+  let reads = 0;
+  const db = { collection: () => { reads++; throw new Error('must not read'); } };
+  const r = await collectUserContext(db, 'u1', ['wallet', 'everything'], null);
+  assert.ok(r.error);
+  assert.equal(reads, 0);
+  assert.ok((await collectUserContext(db, 'u1', undefined, null)).error);
+});
+
+test('collectUserContext: location rubric returns GPS only when the client provided it', async () => {
+  const { db } = makeFakeDb();
+  const withGps = await collectUserContext(db, 'u1', ['location'], { latitude: 6.73, longitude: -3.49, address: 'Cafétou' });
+  assert.equal(withGps.location.latitude, 6.73);
+  const without = await collectUserContext(db, 'u1', ['location'], null);
+  assert.equal(without.location, null);
+  assert.ok(without.locationNote);
+});
+
+test('collectUserContext: preferences and addresses come from memory, name rubric degrades without client doc', async () => {
+  const { db } = makeFakeDb({ 'ai_user_memory/u1': { ville: 'Abengourou', preferredPaymentMethod: 'cash' } });
+  const r = await collectUserContext(db, 'u1', ['name', 'addresses', 'preferences'], null);
+  assert.equal(r.ville, 'Abengourou');
+  assert.equal(r.preferredPaymentMethod, 'cash');
+  assert.equal(r.name, null);
 });
 
 // ── get_wallet_transactions ──────────────────────────────────────────────

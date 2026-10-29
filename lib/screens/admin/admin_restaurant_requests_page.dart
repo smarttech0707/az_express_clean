@@ -1,3 +1,4 @@
+import '../../services/partner_approval_service.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -44,14 +45,8 @@ class _AdminRestaurantRequestsPageState
     }
     final db = FirebaseFirestore.instance;
 
-    // Create restaurant document
-    final restoRef = db.collection('restaurants').doc();
-    final restoId = restoRef.id;
-
-    final batch = db.batch();
-
-    batch.set(restoRef, {
-      'id': restoId,
+    try {
+      await approvePartnerOnce(db:db,requestCollection:'restaurant_requests',requestId:uid,collection:'restaurants',idField:'restaurantId',profile:{
       'name': data['restaurantName'] ?? '',
       'ownerName': data['ownerName'] ?? '',
       'phone': data['phone'] ?? '',
@@ -62,25 +57,16 @@ class _AdminRestaurantRequestsPageState
       'isOpen': false,
       'isActive': true,
       'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    // Create owner record
-    batch.set(db.collection('restaurant_owners').doc(uid), {
+      },ownerProfile:{
       'uid': uid,
-      'restaurantId': restoId,
       'phone': data['phone'] ?? '',
       'ownerName': data['ownerName'] ?? '',
       'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    // Update request status
-    batch.update(db.collection('restaurant_requests').doc(uid), {
-      'status': 'approved',
-      'approvedAt': FieldValue.serverTimestamp(),
-      'restaurantId': restoId,
-    });
-
-    await batch.commit();
+      });
+    } catch (_) {
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Approbation non confirmee. Verifiez la liaison existante.')));
+      return;
+    }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

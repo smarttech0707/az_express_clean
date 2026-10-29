@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../l10n/app_text.dart';
-import '../../services/account_deletion_service.dart';
+import '../../widgets/account_deletion_dialog.dart';
 import '../../services/auth_service.dart';
 import '../auth/client_auth_page.dart';
 import '../support/support_screen.dart';
@@ -132,11 +132,26 @@ class _ProfilClientState extends State<ProfilClient> {
     setState(() => _saving = true);
 
     try {
-      await FirebaseFirestore.instance.collection("clients").doc(uid).set({
-        "name": name,
-        "phone": phone,
-        "updatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final ref = FirebaseFirestore.instance.collection("clients").doc(uid);
+      // Un client anonyme n'a pas encore de document : la 1re sauvegarde est une CRÉATION, que les règles
+      // n'acceptent qu'avec la liste exacte de champs (wallet 0, sans updatedAt). Les mises à jour suivantes
+      // ne touchent jamais au wallet.
+      if ((await ref.get()).exists) {
+        await ref.set({
+          "name": name,
+          "phone": phone,
+          "updatedAt": FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } else {
+        await ref.set({
+          "name": name,
+          "phone": phone,
+          "wallet": 0,
+          "cashOnDeliveryEnabled": true,
+          "fakeOrderCount": 0,
+          "createdAt": FieldValue.serverTimestamp(),
+        });
+      }
 
       if (!mounted) return;
       setState(() {
@@ -913,98 +928,7 @@ class _ProfilClientState extends State<ProfilClient> {
   }
 
   void _showDeleteAccount(BuildContext context) {
-    final passCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(children: [
-          Icon(Icons.warning_rounded, color: Colors.red, size: 22),
-          SizedBox(width: 8),
-          Text('Supprimer mon compte', style: TextStyle(fontSize: 16)),
-        ]),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Cette action est irréversible. Toutes tes données seront supprimées.',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            const Text('Confirme avec ton mot de passe :',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: passCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(
-                hintText: 'Mot de passe',
-                prefixIcon: Icon(Icons.lock_outline, size: 18),
-                isDense: true,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () {
-                passCtrl.dispose();
-                Navigator.pop(ctx);
-              },
-              child: const Text('Annuler')),
-          ScaleButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () async {
-              final password = passCtrl.text.trim();
-              if (password.isEmpty) return;
-              Navigator.pop(ctx);
-              await _deleteAccount(context, password);
-              passCtrl.dispose();
-            },
-            child: const Text('Supprimer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _deleteAccount(BuildContext context, String password) async {
-    try {
-      if (FirebaseAuth.instance.currentUser == null) return;
-
-      // Ré-authentification + suppression Firestore/Auth déléguées au flux
-      // unique partagé par les 9 rôles (voir AccountDeletionService) —
-      // comportement inchangé pour le client, seulement extrait pour être
-      // réutilisable.
-      await AccountDeletionService.deleteClientAccountNow(password: password);
-
-      // Reconnecter en anonyme
-      await FirebaseAuth.instance.signInAnonymously();
-
-      if (!context.mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const ClientAuthPage()),
-        (route) => false,
-      );
-    } on FirebaseAuthException catch (e) {
-      if (!context.mounted) return;
-      String msg = 'Erreur lors de la suppression';
-      if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
-        msg = 'Mot de passe incorrect';
-      }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg),
-        backgroundColor: Colors.red,
-      ));
-    } on StateError catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(e.message),
-        backgroundColor: Colors.red,
-      ));
-    }
+    showAccountDeletionRequestDialog(context, role: 'client', initialPhone: _phoneCtrl.text);
   }
 
   static const String _privacy = """POLITIQUE DE CONFIDENTIALITÉ — AZ Express

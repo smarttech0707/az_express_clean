@@ -123,7 +123,13 @@ class AdminCashSettlementPage extends StatelessWidget {
                     final merchant = (data['sellerName'] as String?) ??
                         (data['pharmacieName'] as String?) ??
                         'Marchand';
-                    final amount = (data['budget'] as num?)?.toInt() ?? 0;
+                    // Commandes à montants explicites : le livreur doit reverser
+                    // les produits (cashBreakdown.dueToSeller), pas les frais de
+                    // livraison (budget).
+                    final due = (data['cashBreakdown'] as Map?)?['dueToSeller'] ??
+                        data['productAmount'] ??
+                        data['budget'];
+                    final amount = (due as num?)?.toInt() ?? 0;
                     final driverId = (data['driverId'] as String?) ?? '—';
                     final deliveredAt =
                         (data['deliveredAt'] as Timestamp?)?.toDate();

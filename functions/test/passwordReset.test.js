@@ -68,6 +68,11 @@ test('normalise le format national ivoirien sans supprimer le zero', () => {
   assert.equal(normalizePhone('01 02 03 04'), '+22501020304');
 });
 
+test('deleted profile cannot regain access through phone password recovery',async()=>{
+ const {handler,updates}=makeHandler({'clients/email-uid':{phone:'+2250701020304',isDeleted:true}});
+ await assert.rejects(handler(request()),{code:'failed-precondition'});assert.equal(updates.length,0);
+});
+
 test('met a jour exactement UID du document cible, jamais UID de la session telephone', async () => {
   const { handler, updates } = makeHandler();
   const result = await handler(request());

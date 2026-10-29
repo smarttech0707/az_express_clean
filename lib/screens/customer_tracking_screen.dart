@@ -1,3 +1,5 @@
+import '../delivery_proofs/proof_presentation.dart';
+import '../delivery_proofs/delivery_proof_service.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -184,6 +186,11 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
           destination: _destPos,
         );
         _tracking.addListener(_onTrackingUpdate);
+        // Transfert après récupération : le nouveau livreur porte déjà le colis,
+        // le suivi doit viser la destination et non le point de retrait.
+        if (_orderStatus == 'picked_up' && _destPos != null) {
+          _tracking.switchToDelivery(_destPos!);
+        }
         _loadDriverInfoById(driverId);
         if (mounted) setState(() {});
       }
@@ -427,6 +434,9 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
         extendBodyBehindAppBar: true,
+        appBar: deliveryProofUiEnabled
+            ? AppBar(title: ProofActions(orderId: widget.order.id))
+            : null,
         body: Stack(children: [
           // ── Carte plein écran ────────────────────────────────────────────
           GoogleMap(

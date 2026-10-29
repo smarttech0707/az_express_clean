@@ -40,6 +40,24 @@ class _AzKeepAliveHandler extends TaskHandler {
 /// - Écrit dans Firestore avec double throttle : 5 s ET 15 m minimum entre deux saves.
 /// - Lance un [ForegroundService] Android pour survivre au verrouillage écran / OEM killers.
 class DriverLocationService {
+  // iOS suspend l'app en arrière-plan sauf si les mises à jour de position sont explicitement autorisées
+  // (UIBackgroundModes `location` seul ne suffit pas) ; la pastille bleue est exigée par Apple.
+  static LocationSettings _streamSettings() {
+    // mètres — throttle Firestore 15m, hausse 10→50m pour réduire écrits GPS
+    const distanceFilter = 50;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      return AppleSettings(
+        accuracy: LocationAccuracy.high,
+        activityType: ActivityType.automotiveNavigation,
+        distanceFilter: distanceFilter,
+        pauseLocationUpdatesAutomatically: false,
+        showBackgroundLocationIndicator: true,
+        allowBackgroundLocationUpdates: true,
+      );
+    }
+    return const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: distanceFilter);
+  }
+
   static DriverLocationService? _instance;
   static DriverLocationService get instance =>
       _instance ??= DriverLocationService._();
@@ -177,11 +195,7 @@ class DriverLocationService {
 
     // ── Stream continu ───────────────────────────────────────────────────────
     _positionSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter:
-            50, // mètres — throttle Firestore 15m, hausse 10→50m pour réduire écrits GPS
-      ),
+      locationSettings: _streamSettings(),
     ).listen(
       (pos) {
         _emit(pos);

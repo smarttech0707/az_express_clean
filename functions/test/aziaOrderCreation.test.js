@@ -292,7 +292,7 @@ test('AZ IA create_marketplace_order: confirmHandler debits the client AND credi
   const tool = createMarketplaceOrder({ db, admin: fakeAdmin, HttpsError });
 
   const result = await db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', {
-    productId: 'p1', quantity: 1, budget: 15000, title: 'iPhone 11',
+    productId: 'p1', quantity: 1, productAmount: 15000, deliveryFee: 500, totalAmount: 15500, title: 'iPhone 11',
     sellerId: 's1', sellerName: 'Vendeur X',
     pickupLat: 6.71, pickupLng: -3.51,
     deliveryLat: 6.7, deliveryLng: -3.5,
@@ -303,10 +303,15 @@ test('AZ IA create_marketplace_order: confirmHandler debits the client AND credi
     paymentMethod: 'wallet',
   }));
 
-  assert.equal(result.budget, 15000);
-  assert.equal(store.get('clients/c1').wallet, 5000);
-  assert.equal(store.get('sellers/s1').wallet, 15000); // crédité en entier, 0% commission (politique déjà actée)
+  // Le client règle produits + livraison ; budget = frais de livraison (base de la
+  // commission livreur) ; le vendeur reçoit les produits seuls, 0 % commission.
+  assert.equal(result.budget, 500);
+  assert.equal(store.get('clients/c1').wallet, 4500);
+  assert.equal(store.get('sellers/s1').wallet, 15000);
   const order = findOrder(store);
+  assert.deepEqual(
+    [order[1].productAmount, order[1].deliveryFee, order[1].totalAmount, order[1].budget, order[1].deliveryFeePaid],
+    [15000, 500, 15500, 500, true]);
   assert.equal(order[1].sellerType, 'seller');
   assert.equal(order[1].isPaid, true);
   assert.equal(order[1].latitude, 6.71);
@@ -326,7 +331,7 @@ test('AZ IA create_marketplace_order: confirmHandler rejects a product that is n
 
   await assert.rejects(
     () => db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', {
-      productId: 'p1', quantity: 1, budget: 15000, title: 'iPhone 11',
+      productId: 'p1', quantity: 1, productAmount: 15000, deliveryFee: 500, totalAmount: 15500, title: 'iPhone 11',
       sellerId: 's1', sellerName: 'Vendeur X', deliveryLat: 6.7, deliveryLng: -3.5,
       paymentMethod: 'wallet',
     })),
@@ -344,7 +349,7 @@ test('AZ IA create_marketplace_order: rejects wallet payment with insufficient b
 
   await assert.rejects(
     () => db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', {
-      productId: 'p1', quantity: 1, budget: 15000, title: 'iPhone 11',
+      productId: 'p1', quantity: 1, productAmount: 15000, deliveryFee: 500, totalAmount: 15500, title: 'iPhone 11',
       sellerId: 's1', sellerName: 'Vendeur X', deliveryLat: 6.7, deliveryLng: -3.5,
       paymentMethod: 'wallet',
     })),

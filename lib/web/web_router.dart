@@ -1,3 +1,5 @@
+import '../delivery_proofs/proof_presentation.dart';
+import '../partner_qr/partner_qr_page.dart';
 import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'admin_auth_service.dart';
@@ -75,6 +77,11 @@ final webRouter = GoRouter(
   },
   errorBuilder: (_, state) => const WebHomePage(),
   routes: [
+    GoRoute(path:'/partenaire/:token',builder:(_,state)=>PublicPartnerPage(token:state.pathParameters['token']!)),
+    GoRoute(
+        path: '/reception/:grantId',
+        builder: (_, state) =>
+            RecipientProofPage(grantId: state.pathParameters['grantId']!)),
     // ── Pages publiques ───────────────────────────────────────────────────────
     GoRoute(path: '/', builder: (_, __) => const WebHomePage()),
     GoRoute(path: '/services', builder: (_, __) => const WebServicesPage()),
@@ -90,6 +97,11 @@ final webRouter = GoRouter(
     GoRoute(path: '/conditions', builder: (_, __) => const WebTermsPage()),
     GoRoute(
         path: '/delete-account',
+        builder: (_, __) => const WebDeleteAccountPage()),
+    // `/delete-account` est servi par une page HTML statique (firebase.json, lisible sans JavaScript, exigée par
+    // Google Play) : le formulaire de demande reste joignable ici.
+    GoRoute(
+        path: '/suppression-compte',
         builder: (_, __) => const WebDeleteAccountPage()),
 
     // ── Auth client ───────────────────────────────────────────────────────────

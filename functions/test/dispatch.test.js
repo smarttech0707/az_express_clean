@@ -57,6 +57,7 @@ function makeFakeDb({
   drivers = [],
   cities = [ABENGOUROU],
   orders = {},
+  deletions = {},
 } = {}) {
   const orderStore = new Map(
     Object.entries(Object.keys(orders).length ? orders : { o1: { status: 'pending' } })
@@ -71,6 +72,7 @@ function makeFakeDb({
 
   const db = {
     collection(name) {
+      if(name==='account_deletions')return {doc:id=>({__deletion:id})};
       if (name === 'config') {
         return {
           doc: () => ({
@@ -145,7 +147,7 @@ function makeFakeDb({
     },
     runTransaction: async (fn) => {
       const tx = {
-        get: async (ref) => ({
+        get: async (ref) => ref.__deletion ? ({exists:!!deletions[ref.__deletion],data:()=>deletions[ref.__deletion]}) : ({
           exists: orderStore.has(ref.__path),
           data: () => orderStore.get(ref.__path),
         }),
@@ -269,6 +271,23 @@ test('dispatchOrder reports none when no driver is online nearby', async () => {
   const result = await dispatchOrder(db, fakeAdmin, { orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500 });
   assert.deepEqual(result, { dispatched: false, mode: 'none' });
   assert.equal(orderUpdates.length, 0);
+});
+
+test('deletion receipt prevents assignment even with a stale eligible driver snapshot', async()=>{
+ const {db,orderUpdates,driverBatchUpdates}=makeFakeDb({drivers:[{id:'d1',isOnline:true,wallet:500,...nearby(0.001)}],deletions:{d1:{consentVerified:true}}});
+ assert.deepEqual(await dispatchOrder(db,fakeAdmin,{orderId:'o1',...CENTER,budget:500}),{dispatched:false,mode:'none'});
+ assert.equal(orderUpdates.length,0);assert.equal(driverBatchUpdates.length,0);
+});
+test('deletion request removes only that candidate from a broadcast selection',async()=>{
+ const drivers=['d1','d2'].map(id=>({id,isOnline:true,wallet:500,...nearby(0.001)}));
+ const {db,orderUpdates}=makeFakeDb({drivers,deletions:{d1:{consentVerified:true}}});
+ assert.deepEqual(await dispatchOrder(db,fakeAdmin,{orderId:'o1',...CENTER,budget:500}),{dispatched:true,mode:'assigned'});
+ assert.equal(orderUpdates[0].data.driverId,'d2');
+});
+test('deletionRequested profile is excluded before selecting candidates',async()=>{
+ const {db,orderUpdates}=makeFakeDb({drivers:[{id:'d1',isOnline:true,wallet:500,deletionRequested:true,...nearby(0.001)}]});
+ assert.equal((await dispatchOrder(db,fakeAdmin,{orderId:'o1',...CENTER,budget:500})).dispatched,false);
+ assert.equal(orderUpdates.length,0);
 });
 
 test('dispatchOrder excludes drivers that are on delivery, suspended, unavailable, or under-funded', async () => {
@@ -520,4 +539,35 @@ test('à distance égale currentCity puis registeredCity départagent', async ()
     orderUpdates[0].data.notifiedDriverIds.__arrayUnion,
     ['current-match', 'registered-only'],
   );
+});
+
+test('dispatchOrder never re-proposes an order to a driver who released it', async () => {
+  const p = nearby(0.001);
+  const { db, orderUpdates } = makeFakeDb({
+    drivers: [
+      { id: 'dA', isOnline: true, isOnDelivery: false, wallet: 500, lat: p.lat, lng: p.lng },
+      { id: 'dB', isOnline: true, isOnDelivery: false, wallet: 500, lat: p.lat, lng: p.lng },
+    ],
+  });
+
+  const result = await dispatchOrder(db, fakeAdmin, {
+    orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500, excludedDriverIds: ['dA'],
+  });
+
+  assert.deepEqual(result, { dispatched: true, mode: 'assigned' });
+  assert.equal(orderUpdates[0].data.driverId, 'dB');
+});
+
+test('dispatchOrder leaves the order pending when the only eligible driver released it', async () => {
+  const p = nearby(0.001);
+  const { db, orderUpdates } = makeFakeDb({
+    drivers: [{ id: 'dA', isOnline: true, isOnDelivery: false, wallet: 500, lat: p.lat, lng: p.lng }],
+  });
+
+  const result = await dispatchOrder(db, fakeAdmin, {
+    orderId: 'o1', lat: CENTER.lat, lng: CENTER.lng, budget: 500, excludedDriverIds: ['dA'],
+  });
+
+  assert.deepEqual(result, { dispatched: false, mode: 'none' });
+  assert.equal(orderUpdates.length, 0);
 });

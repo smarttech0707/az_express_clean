@@ -42,12 +42,25 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.azexpress.app"
+        // Build de test isolé (test-env/) : -PazTestSuffix=.test installe l'app
+        // à côté de la production au lieu de la remplacer. Sans la propriété,
+        // l'identifiant reste com.azexpress.app (aucun changement pour les releases).
+        applicationId = "com.azexpress.app" + (project.findProperty("azTestSuffix") as String? ?: "")
         minSdk        = flutter.minSdkVersion
         targetSdk     = flutter.targetSdkVersion
         versionCode   = flutter.versionCode
         versionName   = flutter.versionName
-        manifestPlaceholders["MAPS_API_KEY"] = localProperties.getProperty("MAPS_API_KEY", "")
+        // Build de test : JAMAIS la clé Google Maps de production (cartes désactivées, ou clé de test
+        // explicitement fournie par -PazTestMapsKey).
+        manifestPlaceholders["MAPS_API_KEY"] =
+            if (project.hasProperty("azTestSuffix")) (project.findProperty("azTestMapsKey") as String? ?: "")
+            else localProperties.getProperty("MAPS_API_KEY", "")
+    }
+
+    // Build de test sur émulateurs (test-env/) : manifeste de debug dédié (HTTP clair local,
+    // télémétrie coupée). Sans -PazTestSuffix, aucun changement.
+    if (project.hasProperty("azTestSuffix")) {
+        sourceSets.getByName("debug").manifest.srcFile("src/azTest/AndroidManifest.xml")
     }
 
     buildTypes {

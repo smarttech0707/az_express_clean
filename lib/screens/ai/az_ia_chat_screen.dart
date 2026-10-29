@@ -9,7 +9,10 @@ import 'package:speech_to_text/speech_to_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../providers/az_ia_provider.dart';
+import '../../services/az_ia_consent.dart';
 import '../../services/az_ia_service.dart'
     show AzIaPendingAction, AzIaResponseAction, AzIaStructuredResponse;
 import '../../services/voice/voice_manager.dart';
@@ -418,9 +421,75 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
     });
   }
 
+  /// Consentement explicite avant tout partage avec un fournisseur d'IA
+  /// externe (App Store 5.1.1(i) / 5.1.2(i)). Un refus n'envoie rien.
+  Future<bool> _ensureConsent(AzIaProvider provider) async {
+    if (await provider.hasConsent()) return true;
+    if (!mounted) return false;
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Partage de données avec l\'IA'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'AZ IA envoie vos messages à un service d\'intelligence artificielle '
+            'externe pour y répondre :\n\n'
+            '• Anthropic (fournisseur principal) ;\n'
+            '• Google (Gemini), uniquement en secours si le premier est indisponible.\n\n'
+            'Toujours transmis : votre message (texte ou transcription de votre voix) et le début de la conversation en cours.\n\n'
+            'Transmis seulement si vous les utilisez ou si votre demande en a besoin :\n'
+            '• les photos que vous joignez ;\n'
+            '• votre nom, téléphone, adresses ou préférences enregistrées ;\n'
+            '• votre dernière commande, le suivi d\'une commande, votre solde ou vos mouvements de portefeuille ;\n'
+            '• votre position GPS, si la localisation est autorisée.\n\n'
+            'Une question générale n\'envoie aucune de ces informations personnelles.\n\n'
+            'Ces données ne sont ni vendues ni utilisées pour la publicité. '
+            'Si vous refusez, AZ IA ne sera pas utilisé et rien ne sera envoyé ; '
+            'le reste d\'AZ Express fonctionne normalement. '
+            'Vous pouvez retirer votre accord à tout moment depuis le menu ⋮ du chat.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => launchUrl(Uri.parse(AzIaConsent.privacyUrl),
+                mode: LaunchMode.externalApplication),
+            child: const Text('Politique de confidentialité'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Refuser'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Accepter'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true) return false;
+    final saved = await provider.grantConsent();
+    if (!saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Votre accord n\'a pas pu être enregistré. Vérifiez votre connexion et réessayez.')));
+    }
+    return saved;
+  }
+
+  Future<void> _revokeConsent() async {
+    final synced = await context.read<AzIaProvider>().revokeConsent();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(synced
+            ? 'Accord retiré : AZ IA n\'enverra plus aucune donnée.'
+            : 'Accord retiré sur cet appareil. Reconnectez-vous à internet pour finaliser le retrait.')));
+  }
+
   Future<void> _send(AzIaProvider provider, {XFile? image}) async {
     final text = _textCtrl.text;
     if (text.trim().isEmpty && image == null) return;
+    if (!await _ensureConsent(provider)) return;
     _textCtrl.clear();
     _voiceConfirmHint = null;
     _scrollToBottom(force: true);
@@ -441,6 +510,7 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
   /// dépendre du contenu du champ de texte.
   Future<void> _sendQuickReply(AzIaProvider provider, String text) async {
     if (provider.isSending) return;
+    if (!await _ensureConsent(provider)) return;
     _lastMessageWasVoice = false;
     _scrollToBottom(force: true);
     final reply = await provider.sendMessage(text);
@@ -551,9 +621,20 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
                   ],
                 ),
               ),
+              const PopupMenuItem(
+                value: 'revoke_consent',
+                child: Row(
+                  children: [
+                    Icon(Icons.privacy_tip_outlined, size: 20),
+                    SizedBox(width: 10),
+                    Text('Retirer mon accord IA'),
+                  ],
+                ),
+              ),
             ],
             onSelected: (value) {
               if (value == 'clear_history') _confirmClearHistory();
+              if (value == 'revoke_consent') _revokeConsent();
             },
           ),
         ],

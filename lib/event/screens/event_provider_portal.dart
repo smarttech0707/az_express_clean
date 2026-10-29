@@ -10,6 +10,7 @@ import '../services/event_service.dart';
 import 'event_chat_screen.dart';
 import 'event_provider_registration.dart';
 import '../../widgets/stream_error_state.dart';
+import '../../widgets/account_deletion_dialog.dart';
 
 class EventProviderPortal extends StatefulWidget {
   const EventProviderPortal({super.key});
@@ -146,6 +147,14 @@ class _EventProviderDashboardState extends State<EventProviderDashboard> {
           child: Scaffold(
             appBar: AppBar(
               title: Text(profile.shopName),
+              actions: [
+                IconButton(
+                  tooltip: 'Supprimer mon compte',
+                  icon: const Icon(Icons.delete_forever_rounded),
+                  onPressed: () => showAccountDeletionRequestDialog(context,
+                      role: 'event_provider', initialPhone: profile.phone),
+                ),
+              ],
               bottom: const TabBar(tabs: [
                 Tab(text: 'Prestations'),
                 Tab(text: 'Réservations'),
@@ -196,6 +205,12 @@ class _ProviderApprovalStatus extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Suivi de ma demande'),
         actions: [
+          IconButton(
+            tooltip: 'Supprimer mon compte',
+            onPressed: () => showAccountDeletionRequestDialog(context,
+                role: 'event_provider', initialPhone: profile.phone),
+            icon: const Icon(Icons.delete_forever_rounded),
+          ),
           IconButton(
             tooltip: 'Déconnexion',
             onPressed: FirebaseAuth.instance.signOut,

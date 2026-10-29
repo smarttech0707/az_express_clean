@@ -5,10 +5,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'restaurant_owner_dashboard.dart';
+import 'restaurant_register.dart';
 import '../../services/notification_service.dart';
 import '../../services/subscription_service.dart';
 import '../../services/auth_service.dart';
 import '../auth/generic_forgot_password_page.dart';
+import '../auth/partner_first_password_page.dart';
 
 class RestaurantOwnerLogin extends StatefulWidget {
   const RestaurantOwnerLogin({super.key});
@@ -61,6 +63,16 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
       if (!mounted) return;
       if (!restoDoc.exists) {
         setState(() => _autoResuming = false);
+        return;
+      }
+      // Mot de passe temporaire non remplacé : jamais d'accès au tableau de
+      // bord par reprise de session (le serveur est l'autorité).
+      if (!await PartnerFirstPasswordPage.ensureActivated(context, user)) {
+        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+        if (mounted) setState(() => _autoResuming = false);
         return;
       }
       // Même chemin exact que `_login()` en cas de succès.
@@ -174,6 +186,20 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
         return;
       }
 
+      // Première connexion : changement obligatoire du mot de passe temporaire.
+      if (!mounted) return;
+      if (!await PartnerFirstPasswordPage.ensureActivated(
+          context, cred.user!)) {
+        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+        if (!mounted) return;
+        _snack(
+            "Activation requise : définissez votre mot de passe personnel pour accéder à votre espace.",
+            Colors.orange);
+        return;
+      }
       NotificationService().saveToken(restaurantId, 'restaurants');
       AuthService().logAuthEvent('login', 'restaurant');
       if (!mounted) return;
@@ -328,6 +354,23 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
             ),
 
             const SizedBox(height: 8),
+            // Inscription autonome existante (RestaurantRegister →
+            // restaurant_requests → approbation admin) : jusqu'ici aucun écran
+            // n'y menait.
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const RestaurantRegister()),
+                ),
+                child: Text(
+                  'Pas encore inscrit ?',
+                  style: GoogleFonts.urbanist(
+                      color: const Color(0xFF1565C0), fontSize: 13),
+                ),
+              ),
+            ),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(

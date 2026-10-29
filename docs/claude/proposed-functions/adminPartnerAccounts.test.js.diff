@@ -1,0 +1,113 @@
+--- functions/test/adminPartnerAccounts.test.js	2026-10-27 04:14:26.557086500 +0000
++++ C:/Users/User/AppData/Local/Temp/claude/d--az-express-clean/78634419-1e56-4e46-9f16-17d14c8e3b49/scratchpad/b5work/functions/test/adminPartnerAccounts.test.js	2026-10-27 05:25:55.251816800 +0000
+@@ -497,6 +497,7 @@
+   });
+   assert.deepEqual(h.store.get('restaurant_owners/partner-1'), {
+     uid: 'partner-1', phone: '0700000001', ownerName: 'Awa K', createdAt: 'timestamp', restaurantId,
++    mustChangePassword: true,
+   });
+   assert.deepEqual(h.store.get(`restaurant_owner_locks/${restaurantId}`), { ownerUid: 'partner-1', createdAt: 'timestamp' });
+   assert.equal(h.store.get('partner_provisioning/partner-1').status, 'completed');
+@@ -647,6 +648,7 @@
+   assert.deepEqual(restaurantDocs(h), ['restaurants/rest-1']);
+   assert.deepEqual(h.store.get('restaurant_owners/partner-1'), {
+     uid: 'partner-1', phone: '0700000001', ownerName: 'Awa K', createdAt: 'timestamp', restaurantId: 'rest-1',
++    mustChangePassword: true,
+   });
+   assert.equal(h.store.get('restaurant_owner_locks/rest-1').ownerUid, 'partner-1');
+   assert.deepEqual(h.limits, [['admin-1', 'admin_partner_assign', 10, 3600]]);
+@@ -986,6 +988,18 @@
+         path: key(name, id),
+       }),
+     }),
++    batch: () => {
++      const ops = [];
++      return {
++        set: (ref, data) => { ops.push([ref.path, data]); },
++        commit: async () => {
++          const journal = ops.find(([path]) => path.startsWith('partner_provisioning/'));
++          calls.push(['journal', journal?.[1]]);
++          if (options.journalError && journal?.[1]?.mustChangePassword === false) throw options.journalError; // tout ou rien
++          for (const [path, data] of ops) merge(path, data);
++        },
++      };
++    },
+     runTransaction: async (fn) => {
+       calls.push(['lock']);
+       const writes = [];
+@@ -1203,3 +1217,75 @@
+   assert.equal(/match\s+\/partner_provisioning/.test(rules), false);
+   assert.equal(/match \/\{document=\*\*\}/.test(rules), false, 'aucune règle générique ne l\'expose');
+ });
++
++// ═════════════════════════════════════════════════════════════════════════════
++// B5 : projection restaurant_owners.mustChangePassword (lecture seule du journal)
++// ═════════════════════════════════════════════════════════════════════════════
++const restaurantJournal = (extra = {}) => ({
++  kind: 'restaurant', mustChangePassword: true,
++  tempPasswordHash: require('../passwordHash').hashSecret(TEMP), ...extra,
++});
++const ownerOf = (h) => h.store.get('restaurant_owners/s-new');
++
++test('B5 : l\'activation d\'un restaurateur met à jour journal ET projection dans le MÊME lot atomique', async () => {
++  const h = firstLoginHarness({
++    'partner_provisioning/s-new': restaurantJournal(),
++    'restaurant_owners/s-new': { restaurantId: 'rest-1', mustChangePassword: true },
++  });
++  h.store.delete('sellers/s-new');
++  assert.deepEqual(await h.run(h.req({ newPassword: 'MonNouveau9' })), { success: true });
++  assert.equal(journalOf(h).mustChangePassword, false);
++  assert.equal(ownerOf(h).mustChangePassword, false);
++  assert.equal(ownerOf(h).restaurantId, 'rest-1', 'la propriété du restaurant est intacte');
++  assert.equal(h.calls.filter(c => c[0] === 'journal').length, 1, 'un seul lot');
++});
++
++test('B5 : lot atomique — si l\'écriture échoue, NI le journal NI la projection ne sont levés (aucune divergence)', async () => {
++  const h = firstLoginHarness({
++    'partner_provisioning/s-new': restaurantJournal(),
++    'restaurant_owners/s-new': { restaurantId: 'rest-1', mustChangePassword: true },
++  }, { journalError: new Error('firestore down') });
++  h.store.delete('sellers/s-new');
++  await assert.rejects(h.run(h.req({ newPassword: 'MonNouveau9' })), e => e.code === 'internal');
++  assert.equal(journalOf(h).mustChangePassword, true);
++  assert.equal(ownerOf(h).mustChangePassword, true);
++});
++
++test('B5 : vendeur et boulangerie — aucune projection créée (le journal suffit)', async () => {
++  const h = firstLoginHarness();
++  await h.run(h.req({ newPassword: 'MonNouveau9' }));
++  assert.equal(h.store.has('restaurant_owners/s-new'), false);
++});
++
++test('B5 : mode statut — la projection est réalignée sur le journal (autorité unique) dans les deux sens', async () => {
++  for (const [journal, projection, expected] of [[false, true, false], [true, false, true], [true, true, true], [false, false, false]]) {
++    const h = firstLoginHarness({
++      'partner_provisioning/s-new': restaurantJournal({ mustChangePassword: journal }),
++      'restaurant_owners/s-new': { restaurantId: 'rest-1', mustChangePassword: projection },
++    });
++    h.store.delete('sellers/s-new');
++    await h.run(h.req({ statusOnly: true }));
++    assert.equal(ownerOf(h).mustChangePassword, expected, `journal=${journal} projection=${projection}`);
++    assert.equal(journalOf(h).mustChangePassword, journal, 'le journal n\'est jamais modifié par le statut');
++  }
++});
++
++test('B5 : mode statut — jamais de création d\'un document propriétaire absent ni de projection pour un autre type', async () => {
++  const missing = firstLoginHarness({ 'partner_provisioning/s-new': restaurantJournal() });
++  missing.store.delete('sellers/s-new');
++  await missing.run(missing.req({ statusOnly: true }));
++  assert.equal(missing.store.has('restaurant_owners/s-new'), false);
++  const seller = firstLoginHarness();
++  await seller.run(seller.req({ statusOnly: true }));
++  assert.equal(seller.store.has('restaurant_owners/s-new'), false);
++});
++
++test('B5 : après création, journal et projection concordent ; compte historique sans projection inchangé', async () => {
++  const h = harness(restaurantSub);
++  const { uid } = await h.run(createRestaurant());
++  assert.equal(h.store.get(`partner_provisioning/${uid}`).mustChangePassword, h.store.get(`restaurant_owners/${uid}`).mustChangePassword);
++  const historic = firstLoginHarness({ 'restaurant_owners/s-new': { restaurantId: 'rest-1' } });
++  historic.store.delete('partner_provisioning/s-new');
++  await assert.rejects(historic.run(historic.req({ newPassword: 'MonNouveau9' })), e => e.code === 'failed-precondition');
++  assert.deepEqual(historic.store.get('restaurant_owners/s-new'), { restaurantId: 'rest-1' }, 'aucune migration : champ absent');
++});

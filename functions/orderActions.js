@@ -1,6 +1,12 @@
 'use strict';
 
-const { resolveDispatchGeography } = require('./dispatch');
+const { resolveDispatchGeography, calculateCommission: tieredCommission } = require('./dispatch');
+const { readDriverState, terminalDriverPatch, runLifecycleTransaction } = require('./driverLifecycle');
+const { verifyProofInTransaction, getProofRefs } = require('./deliveryProofs');
+const { settlementDocument } = require('./earningsSettlement');
+const { buildAmounts, readAmounts, cashBreakdown } = require('./orderAmounts');
+const { getBillingMode, decideBilling, assertAcceptedTotal } = require('./billingPolicy');
+const { isLegacyPartnerOrder, getLegacyPartnerPolicy } = require('./legacyPartnerPolicy');
 
 // Fabriques pour payOrderFromWalletCF / cancelOrderCF / deliverOrderCF —
 // séparées de index.js pour rester testables sans initialiser Firebase Admin
@@ -48,6 +54,8 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
     const orderRef  = db.collection('orders').doc(String(orderId));
 
     let driverId, pharmacieId, deliveryAmount, total;
+    let driverHeld = false;
+    let orderForSettlement = null;
 
     await db.runTransaction(async (tx) => {
       const orderSnap = await tx.get(orderRef);
@@ -92,8 +100,14 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
       }
       tx.update(clientRef, { wallet: clientWallet - total });
 
-      const driverWallet = Number(driverSnap.data()?.wallet || 0);
-      tx.update(driverRef, { wallet: driverWallet + deliveryAmount });
+      // Course transférée entre livreurs : la part livreur est retenue (partage
+      // non réglé) — le client est bien débité, aucun livreur n'est crédité.
+      driverHeld = order.settlementHold === true;
+      orderForSettlement = order.status === 'delivered' ? order : null;
+      if (!driverHeld) {
+        const driverWallet = Number(driverSnap.data()?.wallet || 0);
+        tx.update(driverRef, { wallet: driverWallet + deliveryAmount });
+      }
 
       if (pharmRef) {
         const pharmWallet = Number(pharmSnap.data()?.wallet || 0);
@@ -104,7 +118,15 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
         isPaid: true,
         paymentMethod: 'wallet',
         ...(medAmount > 0 ? { medicineAmount: medAmount } : {}),
+        ...(driverHeld ? { heldDriverEarning: deliveryAmount, settlementStatus: 'pending_admin_review' } : {}),
       });
+      // Livraison déjà effectuée (paiement différé, ex. pharmacie) : le règlement
+      // administratif est ouvert maintenant que le client a réellement payé.
+      if (driverHeld && orderForSettlement) {
+        const nowMs = Date.now();
+        tx.set(db.collection('transfer_settlements').doc(String(orderId)), settlementDocument(
+          String(orderId), { ...orderForSettlement, budget: deliveryAmount }, 'wallet', nowMs));
+      }
     });
 
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -114,11 +136,13 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
         (medAmount > 0 ? ` + médicaments ${medAmount} FCFA` : ''),
       orderId, createdAt: now,
     });
-    await db.collection('livreurs').doc(driverId).collection('wallet_transactions').add({
-      type: 'earning', amount: deliveryAmount,
-      description: 'Paiement client (wallet) — livraison',
-      orderId, createdAt: now,
-    });
+    if (!driverHeld) {
+      await db.collection('livreurs').doc(driverId).collection('wallet_transactions').add({
+        type: 'earning', amount: deliveryAmount,
+        description: 'Paiement client (wallet) — livraison',
+        orderId, createdAt: now,
+      });
+    }
     if (pharmacieId && medAmount > 0) {
       await db.collection('pharmacies').doc(pharmacieId).collection('wallet_transactions').add({
         type: 'earning', amount: medAmount,
@@ -150,7 +174,7 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
 // le déclencheur pour l'audit/le support (ex. 'client_cancel', 'ai_client_cancel')
 // — même champ que celui déjà écrit par autoExpireOrders ('no_driver_found'),
 // désormais cohérent sur les 3 chemins d'annulation.
-async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason }) {
+async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason, adminDecision }) {
   if (['delivered', 'cancelled'].includes(order.status)) {
     throw new Error('ORDER_NOT_CANCELLABLE');
   }
@@ -166,8 +190,38 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
   // l'argent à partir de rien pour un montant jamais payé — confirmé et
   // corrigé (Master Prompt 48 bis), après l'avoir laissé en trouvaille
   // documentée seule au Prompt 47.
-  const needsClientRefund = order.paymentMethod === 'wallet' && order.type !== 'boutique';
-  const needsDriverRefund = ['accepted', 'picked_up'].includes(order.status) && !!order.driverId;
+  // isPaid === false explicite : commande wallet réglée APRÈS livraison (ex.
+  // pharmacie) et jamais payée — rien n'a été débité, rien à rembourser (sinon
+  // l'annulation créerait de l'argent). Champ absent (anciennes commandes) :
+  // comportement historique inchangé.
+  const needsClientRefund = order.paymentMethod === 'wallet' && order.type !== 'boutique' &&
+    order.isPaid !== false;
+  // Commande à montants explicites (Marketplace / Boutique). Règle commerciale :
+  //  - avant récupération : aucune prestation réalisée, remboursement intégral ;
+  //  - après récupération : les frais de livraison ne sont PAS remboursés
+  //    automatiquement. Ils restent en attente d'examen administratif
+  //    (deliveryFeeHold) : faute du livreur ou d'AZ → remboursement possible, sinon
+  //    rémunération du livreur. Aucun paiement fictif : c'est l'argent déjà payé
+  //    par le client, simplement non redistribué tant que la décision manque.
+  const amounts = readAmounts(order);
+  const pickedUp = order.status === 'picked_up' || order.pickedUpAt != null;
+  const adminRefundsFee = adminDecision && adminDecision.refundFee === true;
+  const feeNotRefundable = !!amounts && pickedUp && !adminRefundsFee;
+
+  // Boutique wallet : le paiement réel vit sur `boutique_orders` (document lié).
+  const boutiqueFlow = order.type === 'boutique' && !!amounts && order.deliveryFeePaid === true &&
+    order.paymentMethod === 'wallet' && typeof order.linkedBoutiqueOrderId === 'string' &&
+    order.linkedBoutiqueOrderId && !order.linkedBoutiqueOrderId.includes('/') && !!order.sellerId;
+  const boRef = boutiqueFlow ? db.collection('boutique_orders').doc(order.linkedBoutiqueOrderId) : null;
+  const boSnap = boRef ? await tx.get(boRef) : null;
+  const boutiqueRefund = !!boSnap && boSnap.exists && boSnap.data().status === 'paid' &&
+    boSnap.data().clientId === uid;
+
+  const marketplaceHold = feeNotRefundable && order.paymentMethod === 'wallet' &&
+    order.type !== 'boutique' && order.isPaid !== false;
+  const holdFee = marketplaceHold || (feeNotRefundable && boutiqueRefund);
+  const needsDriverRefund = ['accepted', 'picked_up'].includes(order.status) && !!order.driverId
+    && order.commissionStatus !== 'refunded' && !holdFee;
   // Marketplace ('seller') est crédité en entier à la CRÉATION de la
   // commande (voir PREPAID_PARTNER_TYPES, Master Prompt 46) — s'il gardait
   // cet argent après un remboursement client, l'annulation créerait de
@@ -177,32 +231,114 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
   // limité à 'seller' — 'boutique' n'atteint plus jamais needsClientRefund
   // ci-dessus, donc jamais ce débit non plus.
   const orderSellerId = order.sellerId || null;
-  const needsSellerDebit = needsClientRefund && !!orderSellerId &&
-    order.sellerType === 'seller';
+  const needsSellerDebit = (needsClientRefund && !!orderSellerId &&
+    order.sellerType === 'seller') || boutiqueRefund;
 
   let sellerId = null, sellerCol = null;
   if (needsSellerDebit) {
     sellerId  = orderSellerId;
-    sellerCol = partnerCollection(order.sellerType || 'seller');
+    sellerCol = boutiqueRefund ? 'sellers' : partnerCollection(order.sellerType || 'seller');
   }
 
   const clientRef = db.collection('clients').doc(uid);
-  const driverRef = needsDriverRefund ? db.collection('livreurs').doc(order.driverId) : null;
+  const driverRef = order.driverId ? db.collection('livreurs').doc(order.driverId) : null;
   const sellerRef = needsSellerDebit ? db.collection(sellerCol).doc(sellerId) : null;
 
-  const clientSnap = needsClientRefund ? await tx.get(clientRef) : null;
-  const driverSnap = needsDriverRefund ? await tx.get(driverRef) : null;
+  const clientSnap = (needsClientRefund || boutiqueRefund) ? await tx.get(clientRef) : null;
+  const driverState = driverRef ? await readDriverState(tx, db, order.driverId, orderRef.id) : null;
+  const driverSnap = driverState ? { exists: driverState.exists, data: () => driverState.data } : null;
   const sellerSnap = needsSellerDebit   ? await tx.get(sellerRef) : null;
+
+  // Commission tracée à l'acceptation (acceptOrderCF) : le remboursement vise le
+  // PAYEUR d'origine, avec le montant réellement prélevé — jamais le livreur
+  // courant par hypothèse (après un transfert ce ne sont plus les mêmes) ni un
+  // recalcul avec une configuration qui a pu changer. Anciennes commandes (sans
+  // ces champs) : comportement historique inchangé.
+  const tracedCommission = order.commissionStatus === 'charged' &&
+    typeof order.commissionPayerId === 'string' && order.commissionPayerId &&
+    !order.commissionPayerId.includes('/') &&
+    Number.isSafeInteger(order.commissionAmount) && order.commissionAmount >= 0;
+  const payerId = tracedCommission ? order.commissionPayerId : order.driverId;
+  const payerRef = payerId && payerId !== order.driverId
+    ? db.collection('livreurs').doc(payerId) : driverRef;
+  const payerSnap = payerRef && payerRef !== driverRef && needsDriverRefund
+    ? await tx.get(payerRef) : driverSnap;
+
+  // Transfert entre livreurs en cours (demande ou remplaçant réservé) : l'annulation
+  // le clôt dans la MÊME transaction — le remplaçant B est libéré tout de suite,
+  // le transfert est annulé (historique conservé) et la preuve de remise est
+  // révoquée. Toutes les lectures précèdent les écritures.
+  let transferClose = null;
+  const activeId = order.activeTransferId;
+  if (typeof activeId === 'string' && activeId && !activeId.includes('/')) {
+    const tRef = db.collection('delivery_transfers').doc(activeId);
+    const tSnap = await tx.get(tRef);
+    if (tSnap.exists && ['requested', 'accepted'].includes(tSnap.data().status)) {
+      const t = tSnap.data();
+      const reserved = t.status === 'accepted' && typeof t.toDriverId === 'string' &&
+        t.toDriverId && !t.toDriverId.includes('/')
+        ? await readDriverState(tx, db, t.toDriverId, orderRef.id) : null;
+      const { sessionRef } = getProofRefs(db, orderRef.id, 'handover');
+      const sessSnap = await tx.get(sessionRef);
+      let proofRef = null;
+      if (sessSnap.exists && sessSnap.data().currentProofId) {
+        const ref = getProofRefs(db, orderRef.id, 'handover', sessSnap.data().currentProofId).proofRef;
+        const pSnap = await tx.get(ref);
+        if (pSnap.exists && pSnap.data().status === 'active') proofRef = ref;
+      }
+      transferClose = { tRef, reserved, proofRef };
+    }
+  }
+
+  if (driverState) {
+    const patch = terminalDriverPatch(driverState, orderRef.id, admin);
+    if (Object.keys(patch).length) tx.update(driverRef, patch);
+  }
+
+  if (transferClose) {
+    const nowMs = Date.now();
+    tx.update(transferClose.tRef, { status: 'cancelled', closedAtMs: nowMs, closeReason: 'order_cancelled' });
+    if (transferClose.reserved) {
+      const bPatch = terminalDriverPatch(transferClose.reserved, orderRef.id, admin);
+      if (Object.keys(bPatch).length) tx.update(transferClose.reserved.ref, bPatch);
+    }
+    if (transferClose.proofRef) {
+      const stamp = admin.firestore.Timestamp.fromMillis(nowMs);
+      tx.update(transferClose.proofRef, { status: 'revoked', revokedAt: stamp, updatedAt: stamp });
+    }
+  }
 
   tx.update(orderRef, {
     status: 'cancelled',
+    ...(transferClose ? { activeTransferId: admin.firestore.FieldValue.delete() } : {}),
     ...(reason ? { cancelReason: reason, cancelledAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
   });
 
   let clientRefund = 0, driverId = null, driverRefund = 0, sellerDebit = 0;
 
-  if (needsClientRefund) {
-    clientRefund = budget + shoppingBudget;
+  // Commande à montants explicites (Marketplace) : le client a payé produits +
+  // livraison, le vendeur n'a reçu que les produits, le livreur n'a rien reçu
+  // tant que la livraison n'est pas terminée (statut 'delivered' non annulable).
+  // Politique appliquée = remboursement intégral de ce qui a été payé (comme
+  // avant pour le marketplace) ; le remboursement des frais après récupération
+  // du colis est une décision métier à confirmer (voir rapport).
+  if (boutiqueRefund) {
+    // Produits toujours rendus ; frais rendus seulement avant récupération
+    // (ou sur décision administrative).
+    clientRefund = amounts.productAmount + (feeNotRefundable ? 0 : amounts.deliveryFee);
+    if (clientSnap.exists) {
+      tx.update(clientRef, { wallet: Number(clientSnap.data().wallet || 0) + clientRefund });
+    }
+    tx.update(boRef, {
+      status: 'refunded',
+      refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+      refundReason: adminRefundsFee ? 'admin_cancel_fee_refunded' : (pickedUp ? 'cancelled_after_pickup' : 'cancelled_before_pickup'),
+      feeRefunded: !feeNotRefundable,
+    });
+  } else if (needsClientRefund) {
+    clientRefund = (amounts
+      ? (feeNotRefundable ? amounts.productAmount : amounts.totalAmount)
+      : budget) + shoppingBudget;
     if (clientRefund > 0 && clientSnap.exists) {
       const w = Number(clientSnap.data().wallet || 0);
       tx.update(clientRef, { wallet: w + clientRefund });
@@ -210,11 +346,16 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
   }
 
   if (needsDriverRefund) {
-    driverId     = order.driverId;
-    driverRefund = await calculateCommission(db, budget);
-    if (driverSnap.exists) {
-      const w = Number(driverSnap.data().wallet || 0);
-      tx.update(driverRef, { wallet: w + driverRefund });
+    driverId     = payerId;
+    driverRefund = tracedCommission
+      ? order.commissionAmount
+      : await calculateCommission(db, budget);
+    if (payerSnap && payerSnap.exists) {
+      const w = Number(payerSnap.data().wallet || 0);
+      tx.update(payerRef, { wallet: w + driverRefund });
+    }
+    if (tracedCommission) {
+      tx.update(orderRef, { commissionStatus: 'refunded' });
     }
   }
 
@@ -224,13 +365,23 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
     // avant l'annulation, on reprend ce qu'il reste plutôt que de créer un
     // solde négatif — le client est de toute façon remboursé en entier
     // ci-dessus, cette reprise ne fait qu'atténuer la perte (Master Prompt 48).
-    sellerDebit = Math.min(budget, w);
+    sellerDebit = Math.min(amounts ? amounts.productAmount : budget, w);
     if (sellerDebit > 0) {
       tx.update(sellerRef, { wallet: w - sellerDebit });
     }
   }
 
-  return { clientRefund, driverId, driverRefund, sellerId, sellerCol, sellerDebit };
+  if (holdFee) {
+    tx.update(orderRef, {
+      deliveryFeeHold: {
+        amount: amounts.deliveryFee, status: 'pending_admin_review',
+        reason: 'cancelled_after_pickup', cancelledStatus: order.status,
+        driverId: order.driverId || null, createdAtMs: Date.now(),
+      },
+    });
+  }
+
+  return { clientRefund, driverId, driverRefund, sellerId, sellerCol, sellerDebit, feeHeld: holdFee ? amounts.deliveryFee : 0 };
 }
 
 // Journalisation post-transaction (wallet_transactions) — à appeler une fois
@@ -277,7 +428,7 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
     const orderRef = db.collection('orders').doc(String(orderId));
     let refundInfo;
 
-    await db.runTransaction(async (tx) => {
+    await runLifecycleTransaction(db, async (tx) => {
       const orderSnap = await tx.get(orderRef);
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
       const order = orderSnap.data();
@@ -313,11 +464,18 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
 // aucune autre source de vérité côté serveur), comme avant. price n'est plus
 // un paramètre : relu depuis la commande elle-même (order.budget) pour ne
 // jamais faire confiance à un montant fourni par le client.
-function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit }) {
-  return onCall(async (request) => {
+function buildDeliverOrder({
+  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  requireProof = false, deliveryProofPepper,
+}) {
+  const options = deliveryProofPepper ? { secrets: [deliveryProofPepper] } : {};
+  return onCall(options, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
-    const { orderId, markCashPaid, deliveredLat, deliveredLng, deliveryPhotoUrl } = request.data || {};
+    const {
+      orderId, markCashPaid, deliveredLat, deliveredLng, deliveryPhotoUrl,
+      proofToken, proofPin,
+    } = request.data || {};
     if (!orderId) throw new HttpsError('invalid-argument', 'orderId manquant');
 
     await checkRateLimit(uid, 'deliver_order', 30, 60);
@@ -327,8 +485,14 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
 
     let walletTarget = null, partnerId = null, partnerCol = null;
     let creditAmount = 0, deliveryFee = 0, payMethod = '';
+    let proofFailure = null;
+    let proofValidated = false;
+    let held = false;
+    let commissionInfo = null;
+    let neutralized = null; // commission rendue : course historique sans rémunération
 
-    await db.runTransaction(async (tx) => {
+    await runLifecycleTransaction(db, async (tx) => {
+      neutralized = null;
       const orderSnap = await tx.get(orderRef);
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
       const order = orderSnap.data();
@@ -336,8 +500,20 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
       if (order.driverId !== uid) {
         throw new HttpsError('permission-denied', "Cette commande ne vous est pas assignée");
       }
+      if (requireProof && order.deliveryProofMode === 'qr_v1' && order.status === 'delivered') {
+        throw new HttpsError('failed-precondition', 'Code déjà utilisé');
+      }
       if (!['accepted', 'picked_up'].includes(order.status)) {
         throw new HttpsError('failed-precondition', 'Cette commande ne peut pas être marquée livrée');
+      }
+      if (order.deliveryProofMode === 'qr_v1' && !requireProof) {
+        throw new HttpsError('failed-precondition', 'Une preuve de réception est requise');
+      }
+      if (requireProof && order.deliveryProofMode !== 'qr_v1') {
+        throw new HttpsError('failed-precondition', 'Cette commande utilise le parcours de livraison classique');
+      }
+      if (requireProof && order.status !== 'picked_up') {
+        throw new HttpsError('failed-precondition', 'La récupération doit être confirmée avant la remise');
       }
 
       const linkedBoutiqueOrderId = order.linkedBoutiqueOrderId || null;
@@ -356,6 +532,17 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
       const shoppingBudget = Number(order.shoppingBudget || 0);
       deliveryFee = budget;
       payMethod   = order.paymentMethod || '';
+      // Course transférée après récupération : le partage des gains entre
+      // livreurs n'est pas encore réglé (décision métier + distance validée).
+      // La part livreur n'est donc JAMAIS créditée ici — ni à B seul, ni à A —
+      // elle est mise en attente sur la commande pour validation administrative.
+      held = order.settlementHold === true;
+      // Commission réellement prélevée à l'acceptation (acceptOrderCF) : c'est
+      // elle qui est journalisée, au nom du payeur d'origine.
+      commissionInfo = (order.commissionStatus === 'charged' &&
+        Number.isSafeInteger(order.commissionAmount) && order.commissionAmount >= 0 &&
+        typeof order.commissionPayerId === 'string' && order.commissionPayerId)
+        ? { amount: order.commissionAmount, payerId: order.commissionPayerId } : null;
 
       // Marketplace ('seller') et Boutique ('boutique') sont déjà payés
       // intégralement au vendeur à la création de la commande (0% commission
@@ -365,14 +552,73 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
       // avec une commission de 100 FCFA que ces deux types ne devraient
       // jamais subir — double-crédit confirmé et corrigé (Master Prompt 46).
       const isPrepaidPartner = PREPAID_PARTNER_TYPES.has(sType);
+      // Montants explicites (produits / livraison / total) des nouvelles
+      // commandes Marketplace et Boutique ; null = commande historique.
+      const amounts = readAmounts(order);
 
-      const driverSnap = await tx.get(driverRef);
+      const driverState = await readDriverState(tx, db, uid, String(orderId));
+      const driverSnap = { exists: driverState.exists, data: () => driverState.data };
+      const driverPatch = terminalDriverPatch(driverState, String(orderId), admin);
 
       let partnerRef = null, partnerSnap = null;
       if (payMethod === 'wallet' && sid && !isPrepaidPartner) {
         partnerCol  = partnerCollection(sType);
         partnerRef  = db.collection(partnerCol).doc(sid);
         partnerSnap = await tx.get(partnerRef);
+      }
+
+      // Course Marketplace/Boutique historique DÉJÀ acceptée (commission déjà
+      // prélevée) : aucun frais de livraison n'a été encaissé, le livreur ne sera
+      // pas rémunéré. AZ ne conserve pas une commission sans contrepartie : la
+      // commission TRACÉE est rendue à son payeur dans cette même transaction.
+      // Commission non tracée (ancienne acceptation directe) : rien n'est rendu
+      // automatiquement (on ne peut pas prouver qu'elle a été payée) — signalée
+      // pour résolution administrative.
+      let neutralize = null;
+      if (isLegacyPartnerOrder(order) && commissionInfo && commissionInfo.amount > 0) {
+        const payerIsSelf = commissionInfo.payerId === uid;
+        const payerRef = payerIsSelf ? driverRef : db.collection('livreurs').doc(commissionInfo.payerId);
+        const payerSnap = payerIsSelf ? driverSnap : await tx.get(payerRef);
+        neutralize = { amount: commissionInfo.amount, payerId: commissionInfo.payerId, payerIsSelf, payerRef, payerSnap };
+      }
+
+      let checkedProof = null;
+      if (requireProof) {
+        const pepper = process.env.DELIVERY_PROOF_PEPPER;
+        if (!pepper) {
+          throw new HttpsError('failed-precondition', 'Validation sécurisée indisponible');
+        }
+        checkedProof = await verifyProofInTransaction({
+          tx, db, orderId: String(orderId), type: 'delivery',
+          driverId: uid,
+          assignmentVersion: Number(order.driverAssignmentVersion || 1),
+          token: proofToken,
+          pin: proofPin,
+          pepper,
+          now: Date.now(),
+          admin,
+        });
+        if (!checkedProof.ok) {
+          if (checkedProof.failureUpdate && checkedProof.proofRef) {
+            tx.update(checkedProof.proofRef, checkedProof.failureUpdate);
+          }
+          proofFailure = checkedProof;
+          return;
+        }
+      }
+
+      if (checkedProof) {
+        tx.update(checkedProof.proofRef, checkedProof.consumeUpdate);
+        tx.update(checkedProof.sessionRef, {
+          currentProofId: null,
+          completedAt: checkedProof.consumeUpdate.validatedAt,
+          updatedAt: checkedProof.consumeUpdate.validatedAt,
+        });
+        tx.update(orderRef, {
+          deliveryProofValidatedAt: checkedProof.consumeUpdate.validatedAt,
+          deliveryProofValidatedBy: uid,
+        });
+        proofValidated = true;
       }
 
       tx.update(orderRef, {
@@ -399,12 +645,51 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
 
       const driverWallet = Number(driverSnap.data()?.wallet || 0);
 
+      if (neutralize) {
+        const payerWallet = Number(neutralize.payerSnap?.data()?.wallet || 0);
+        if (neutralize.payerSnap?.exists) {
+          if (neutralize.payerIsSelf) {
+            // Fusionné dans le patch livreur appliqué par la branche ci-dessous.
+            driverPatch.wallet = payerWallet + neutralize.amount;
+          } else {
+            tx.update(neutralize.payerRef, { wallet: payerWallet + neutralize.amount });
+          }
+          tx.update(orderRef, {
+            commissionStatus: 'refunded',
+            commissionRefundReason: 'legacy_partner_unremunerated',
+          });
+          neutralized = { payerId: neutralize.payerId, amount: neutralize.amount };
+        }
+      } else if (isLegacyPartnerOrder(order) && !commissionInfo) {
+        tx.update(orderRef, { legacyBillingReview: { status: 'pending_admin_review', reason: 'commission_untraced' } });
+      }
+
       if (payMethod === 'wallet') {
-        if (sid && isPrepaidPartner) {
-          // Déjà crédité en entier à la création — rien à faire ici, juste
-          // libérer le livreur.
+        if (sid && isPrepaidPartner && amounts && order.deliveryFeePaid === true) {
+          // Le vendeur a reçu les produits à la création ; les frais de
+          // livraison ont été encaissés auprès du client en même temps et
+          // reviennent au livreur ici (sa commission a été prélevée à
+          // l'acceptation). Le statut 'delivered' (relu plus haut) empêche tout
+          // second crédit. Le vendeur n'est jamais recrédité.
+          if (held) {
+            // Les transferts sont refusés pour ces commandes ; garde-fou : pas
+            // de crédit à un seul livreur sans règlement validé.
+            walletTarget = 'partner_prepaid_held';
+            tx.update(orderRef, {
+              heldDriverEarning: amounts.deliveryFee,
+              settlementStatus: 'pending_admin_review',
+            });
+            if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
+          } else {
+            walletTarget = 'driver_prepaid_fee';
+            creditAmount = amounts.deliveryFee;
+            tx.update(driverRef, { wallet: driverWallet + creditAmount, ...driverPatch });
+          }
+        } else if (sid && isPrepaidPartner) {
+          // Commande historique : déjà crédité en entier à la création — rien
+          // à faire ici, juste libérer le livreur.
           walletTarget = 'partner_prepaid';
-          tx.update(driverRef, { isOnDelivery: false });
+          if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
         } else if (sid && order.isPaid === true) {
           partnerId    = sid;
           walletTarget = 'partner';
@@ -419,7 +704,7 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
             const w = Number(partnerSnap.data().wallet || 0);
             tx.update(partnerRef, { wallet: w + creditAmount });
           }
-          tx.update(driverRef, { isOnDelivery: false });
+          if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
         } else if (sid) {
           // Commande wallet avec marchand, mais isPaid encore false : aucun
           // paiement réel n'a jamais été validé côté serveur pour cette
@@ -430,7 +715,15 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
           // 2026-07-09). Le marchand n'est crédité que si isPaid est déjà
           // passé à true via un chemin serveur validé (payOrderFromWalletCF).
           walletTarget = 'partner_unpaid';
-          tx.update(driverRef, { isOnDelivery: false });
+          if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
+        } else if (order.isPaid === true && held) {
+          // Gain livreur retenu : aucun crédit fictif, aucun crédit au seul livreur final.
+          walletTarget = 'driver_held';
+          tx.update(orderRef, {
+            heldDriverEarning: Math.max(0, budget + shoppingBudget),
+            settlementStatus: 'pending_admin_review',
+          });
+          if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
         } else if (order.isPaid === true) {
           walletTarget = 'driver';
           // Même raisonnement que ci-dessus : la commission a déjà été
@@ -439,7 +732,7 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
           creditAmount = Math.max(0, budget + shoppingBudget);
           tx.update(driverRef, {
             wallet:       driverWallet + creditAmount,
-            isOnDelivery: false,
+            ...driverPatch,
           });
         } else {
           // Commande wallet dont le paiement final (livraison + éventuel
@@ -451,7 +744,7 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
           // double crédit — confirmé et corrigé (2026-07-09), même famille
           // que les doubles-crédits Marketplace/Boutique du Master Prompt 46.
           walletTarget = 'driver_pending_payment';
-          tx.update(driverRef, { isOnDelivery: false });
+          if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
         }
       } else {
         // Paiement cash : le client règle le livreur directement, en
@@ -463,7 +756,7 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
         // livreur garde désormais l'intégralité des espèces collectées,
         // son wallet n'est plus touché à la livraison.
         walletTarget = 'cash';
-        tx.update(driverRef, { isOnDelivery: false });
+        if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
 
         // Commande cash avec un marchand (restaurant/pharmacie) : le livreur
         // collecte aussi la part "produit" en espèces, qu'il doit remettre au
@@ -477,14 +770,56 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
         if (sid && sType !== 'boutique') {
           tx.update(orderRef, { merchantCashSettled: false });
         }
+        // Commandes à montants explicites : le client règle le total en
+        // espèces, le livreur reverse les produits au vendeur et garde les
+        // frais. Détail tracé séparément (aucun mouvement de wallet ici).
+        if (amounts) {
+          tx.update(orderRef, {
+            cashBreakdown: cashBreakdown(amounts, commissionInfo ? commissionInfo.amount : undefined),
+          });
+        }
+      }
+
+      // Course transférée : la part de chaque livreur est proposée au règlement
+      // administratif (distance utile validée) — rien n'est crédité ici.
+      if (held && (walletTarget === 'driver_held' || walletTarget === 'cash')) {
+        const nowMs = Date.now();
+        tx.set(db.collection('transfer_settlements').doc(String(orderId)), settlementDocument(
+          String(orderId),
+          { ...order, deliveryPhoto: deliveryPhotoUrl || null,
+            deliveryProofValidatedAt: proofValidated ? nowMs : null },
+          walletTarget === 'cash' ? 'cash' : 'wallet', nowMs));
+        tx.update(orderRef, { settlementStatus: 'pending_admin_review' });
       }
     });
+
+    if (proofFailure) {
+      await logAudit({
+        userId: uid,
+        userType: 'driver',
+        action: 'delivery_proof_validation',
+        targetId: String(orderId),
+        status: 'error',
+        metadata: { proofType: 'delivery', errorCode: proofFailure.code },
+      });
+      throw new HttpsError(proofFailure.code, proofFailure.message);
+    }
+
+    // Commission journalisée = celle RÉELLEMENT prélevée à l'acceptation (tracée par
+    // acceptOrderCF). Courses acceptées avant le suivi serveur (aucune trace) : le
+    // barème à paliers 100/200 appliqué à l'ancienne acceptation Dart, jamais une
+    // valeur fixe. Aucun prélèvement ici : cette valeur ne sert qu'au journal.
+    const loggedCommission = neutralized
+      ? 0 // rendue au livreur : aucune commission conservée par AZ
+      : commissionInfo
+        ? commissionInfo.amount
+        : Math.max(0, Math.floor(Number(await tieredCommission(db, Number(deliveryFee || 0)))));
 
     // Hors transaction : compteurs + journaux (même comportement que côté Dart)
     await driverRef.update({ deliveries: admin.firestore.FieldValue.increment(1) });
 
     await db.collection('config').doc('az_wallet').set({
-      totalCommissions: admin.firestore.FieldValue.increment(AZ_COMMISSION_FIXED),
+      totalCommissions: admin.firestore.FieldValue.increment(loggedCommission),
       totalDeliveries:  admin.firestore.FieldValue.increment(1),
       updatedAt:        admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
@@ -496,10 +831,13 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
     } catch (_) { /* non-bloquant */ }
 
     await db.collection('commissions').add({
-      orderId, driverId: uid, driverName,
-      amount:        AZ_COMMISSION_FIXED,
+      orderId, driverId: commissionInfo ? commissionInfo.payerId : uid, driverName,
+      amount:        loggedCommission,
+      commissionSource: neutralized ? 'refunded_legacy_partner' : (commissionInfo ? 'traced' : 'legacy_tiered'),
       deliveryFee,
-      driverGain:    deliveryFee - AZ_COMMISSION_FIXED,
+      // Course transférée : gain à répartir, jamais attribué ici.
+      driverGain:    held ? null : deliveryFee - loggedCommission,
+      ...(held ? { settlementStatus: 'pending_admin_review', deliveredBy: uid } : {}),
       paymentMethod: payMethod,
       createdAt:     admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -511,7 +849,14 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
     // solde réel correspondant, faussant l'historique et la conciliation
     // hebdomadaire (2026-07-09).
     const now = admin.firestore.FieldValue.serverTimestamp();
-    if (walletTarget === 'driver' && creditAmount > 0) {
+    if (neutralized) {
+      await db.collection('livreurs').doc(neutralized.payerId).collection('wallet_transactions').add({
+        type: 'refund', amount: neutralized.amount,
+        description: 'Commission rendue — commande Marketplace/Boutique sans frais de livraison encaissés',
+        orderId, createdAt: now,
+      });
+    }
+    if ((walletTarget === 'driver' || walletTarget === 'driver_prepaid_fee') && creditAmount > 0) {
       await driverRef.collection('wallet_transactions').add({
         type: 'earning', amount: creditAmount,
         description: `Gain livraison — ${deliveryFee} FCFA (commission AZ déjà prélevée à l'acceptation)`,
@@ -527,11 +872,24 @@ function buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logA
 
     await logAudit({
       userId: uid, userType: 'driver', action: 'deliver_order', targetId: orderId,
-      amount: creditAmount || null, metadata: { walletTarget, deliveryFee, payMethod },
+      amount: creditAmount || null,
+      metadata: { walletTarget, deliveryFee, payMethod, proofValidated, settlementHold: held },
     });
+
+    if (proofValidated) {
+      await logAudit({
+        userId: uid, userType: 'driver', action: 'delivery_proof_validation',
+        targetId: String(orderId), status: 'success',
+        metadata: { proofType: 'delivery' },
+      });
+    }
 
     return { success: true };
   });
+}
+
+function buildDeliverOrderWithProof(options) {
+  return buildDeliverOrder({ ...options, requireProof: true });
 }
 
 const BOUTIQUE_DELIVERY_FEE = 500; // même constante que boutique_page.dart côté Dart
@@ -558,7 +916,7 @@ async function readProductBoutiqueSeller(tx, db, product, HttpsError) {
   }
 
   const seller = sellerSnap.data();
-  if (seller.type !== 'boutique' || seller.isSuspended === true ||
+  if (seller.deletionRequested === true || seller.isDeleted === true || seller.type !== 'boutique' || seller.isSuspended === true ||
       seller.isActive === false || seller.status === 'suspended') {
     throw new HttpsError('failed-precondition', 'Vendeur boutique indisponible');
   }
@@ -660,11 +1018,20 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
   return onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
-    const { productId, qty, deliveryLat, deliveryLng } = request.data || {};
+    const { productId, qty, deliveryLat, deliveryLng, acceptedTotal } = request.data || {};
     if (!productId) throw new HttpsError('invalid-argument', 'productId manquant');
     const quantity = Math.max(1, Math.round(Number(qty) || 1));
 
     await checkRateLimit(uid, 'pay_boutique_order', 20, 60);
+    // Facturation explicite uniquement si l'application déclare le total qu'elle
+    // a affiché ; une ancienne application reste facturée comme avant.
+    const billing = decideBilling({ mode: await getBillingMode(db), acceptedTotal, HttpsError });
+    // Ancienne application : la course créée ne pourrait être acceptée qu'au prix
+    // d'une commission sans rémunération du livreur. On ne débite donc rien tant
+    // que l'exploitant n'a pas choisi la politique 'no_commission'.
+    if (billing === 'legacy' && (await getLegacyPartnerPolicy(db)) === 'block') {
+      throw new HttpsError('failed-precondition', 'APP_UPDATE_REQUIRED');
+    }
 
     const geography = await resolveBoutiqueOrderGeography(
       db, HttpsError, productId, deliveryLat, deliveryLng,
@@ -677,6 +1044,8 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
 
     let totalPrice, productName, productCategory, sellerId, sellerName;
     let pickupLat, pickupLng;
+    let amounts = null;
+    let chargeTotal, sellerCredit;
 
     await db.runTransaction(async (tx) => {
       const productRef = db.collection('boutique_products').doc(String(productId));
@@ -700,20 +1069,28 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
       productCategory = product.category || null;
       if (totalPrice <= 0) throw new HttpsError('failed-precondition', 'Prix produit invalide');
 
+      // Le client règle produits + livraison ; le vendeur ne reçoit que les produits.
+      // Le total facturé doit être exactement celui que le client a accepté.
+      amounts = billing === 'explicit' ? buildAmounts(totalPrice, BOUTIQUE_DELIVERY_FEE) : null;
+      if (amounts) assertAcceptedTotal({ acceptedTotal, totalAmount: amounts.totalAmount, HttpsError });
+      chargeTotal = amounts ? amounts.totalAmount : totalPrice;
+      sellerCredit = amounts ? amounts.productAmount : totalPrice;
+
       const clientSnap    = await tx.get(clientRef);
       const clientWallet  = Number(clientSnap.data()?.wallet || 0);
-      if (clientWallet < totalPrice) {
+      if (clientWallet < chargeTotal) {
         // Format conservé pour compatibilité avec le parsing existant côté
-        // Flutter (boutique_page.dart cherche la sous-chaîne SOLDE_INSUFFISANT).
-        throw new HttpsError('failed-precondition', `SOLDE_INSUFFISANT:${clientWallet}:${totalPrice}`);
+        // Flutter (boutique_page.dart cherche la sous-chaîne SOLDE_INSUFFISANT) ;
+        // le second nombre est désormais le TOTAL à payer (produits + livraison).
+        throw new HttpsError('failed-precondition', `SOLDE_INSUFFISANT:${clientWallet}:${chargeTotal}`);
       }
 
       const sellerRef = sellerInfo.sellerRef;
       const sellerSnapTx = sellerInfo.seller;
       const sellerWallet = Number(sellerSnapTx.wallet || 0);
 
-      tx.update(clientRef, { wallet: clientWallet - totalPrice });
-      tx.update(sellerRef, { wallet: sellerWallet + totalPrice });
+      tx.update(clientRef, { wallet: clientWallet - chargeTotal });
+      tx.update(sellerRef, { wallet: sellerWallet + sellerCredit });
       tx.update(productRef, { stock: currentStock - quantity });
 
       tx.set(orderRef, {
@@ -726,6 +1103,7 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
         qty:           quantity,
         unitPrice,
         totalPrice,
+        ...(amounts || {}),
         paymentMethod: 'wallet',
         status:        'paid',
         deliveryOrderId,
@@ -741,7 +1119,9 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
       pickupLng = lng;
       tx.set(deliveryOrderRef, {
         description:   `🛍️ Boutique AZ : ${productName} ×${quantity}`,
-        budget:         BOUTIQUE_DELIVERY_FEE,
+        ...(amounts
+          ? { ...amounts, itemsAmount: amounts.productAmount, deliveryFeePaid: true }
+          : { budget: BOUTIQUE_DELIVERY_FEE }),
         shoppingBudget: 0,
         status:         'pending',
         latitude:       lat,
@@ -764,19 +1144,23 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
 
     const now = admin.firestore.FieldValue.serverTimestamp();
     await db.collection('clients').doc(uid).collection('wallet_transactions').add({
-      type: 'purchase', amount: totalPrice,
-      description: `Achat : ${productName} ×${quantity}`,
+      type: 'purchase', amount: chargeTotal,
+      description: amounts
+        ? `Achat : ${productName} ×${quantity} — produits ${amounts.productAmount} + livraison ${amounts.deliveryFee}`
+        : `Achat : ${productName} ×${quantity}`,
       orderId, createdAt: now,
     });
     await db.collection('sellers').doc(sellerId).collection('wallet_transactions').add({
-      type: 'sale', amount: totalPrice,
+      type: 'sale', amount: sellerCredit,
       description: `Vente boutique : ${productName} ×${quantity}`,
       orderId, createdAt: now,
     });
 
     await logAudit({
       userId: uid, userType: 'client', action: 'pay_boutique_order', targetId: orderId,
-      amount: totalPrice, metadata: { productId, quantity, sellerId },
+      amount: chargeTotal,
+      metadata: { productId, quantity, sellerId, billing,
+        ...(amounts ? { productAmount: amounts.productAmount, deliveryFee: amounts.deliveryFee } : {}) },
     });
 
     // Course de livraison — best-effort : un échec ici n'invalide pas
@@ -807,7 +1191,10 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
       });
     }
 
-    return { orderId, totalPrice, dispatched: dispatchResult?.dispatched || false };
+    return {
+      orderId, totalPrice, deliveryFee: amounts ? amounts.deliveryFee : 0,
+      totalAmount: chargeTotal, dispatched: dispatchResult?.dispatched || false,
+    };
   });
 }
 
@@ -832,11 +1219,18 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
   return onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
-    const { productId, qty, deliveryLat, deliveryLng } = request.data || {};
+    const { productId, qty, deliveryLat, deliveryLng, acceptedTotal } = request.data || {};
     if (!productId) throw new HttpsError('invalid-argument', 'productId manquant');
     const quantity = Math.max(1, Math.round(Number(qty) || 1));
 
     await checkRateLimit(uid, 'pay_boutique_order_cash', 20, 60);
+    const billing = decideBilling({ mode: await getBillingMode(db), acceptedTotal, HttpsError });
+    // Ancienne application : la course créée ne pourrait être acceptée qu'au prix
+    // d'une commission sans rémunération du livreur. On ne débite donc rien tant
+    // que l'exploitant n'a pas choisi la politique 'no_commission'.
+    if (billing === 'legacy' && (await getLegacyPartnerPolicy(db)) === 'block') {
+      throw new HttpsError('failed-precondition', 'APP_UPDATE_REQUIRED');
+    }
 
     const geography = await resolveBoutiqueOrderGeography(
       db, HttpsError, productId, deliveryLat, deliveryLng,
@@ -854,6 +1248,7 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
     const deliveryOrderId = deliveryOrderRef.id;
 
     let totalPrice, productName, productCategory;
+    let amounts = null;
 
     await db.runTransaction(async (tx) => {
       // Lecture avant écriture (obligatoire dans une transaction Firestore) —
@@ -880,6 +1275,8 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
       productCategory = product.category || null;
       if (totalPrice <= 0) throw new HttpsError('failed-precondition', 'Prix produit invalide');
 
+      amounts = billing === 'explicit' ? buildAmounts(totalPrice, BOUTIQUE_DELIVERY_FEE) : null;
+      if (amounts) assertAcceptedTotal({ acceptedTotal, totalAmount: amounts.totalAmount, HttpsError });
       tx.update(productRef, { stock: currentStock - quantity });
 
       tx.set(orderRef, {
@@ -892,6 +1289,7 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
         qty:           quantity,
         unitPrice,
         totalPrice,
+        ...(amounts || {}),
         paymentMethod: 'cash',
         status:        'pending_dispatch',
         deliveryOrderId,
@@ -906,7 +1304,9 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
       pickupLng = lng;
       tx.set(deliveryOrderRef, {
         description: `Boutique AZ : ${productName} x${quantity}`,
-        budget: BOUTIQUE_DELIVERY_FEE,
+        ...(amounts
+          ? { ...amounts, itemsAmount: amounts.productAmount, deliveryFeePaid: false }
+          : { budget: BOUTIQUE_DELIVERY_FEE }),
         shoppingBudget: 0,
         status: 'pending',
         latitude: lat,
@@ -929,7 +1329,9 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
 
     await logAudit({
       userId: uid, userType: 'client', action: 'pay_boutique_order_cash', targetId: orderId,
-      amount: totalPrice, metadata: { productId, quantity, sellerId },
+      amount: amounts ? amounts.totalAmount : totalPrice,
+      metadata: { productId, quantity, sellerId, billing,
+        ...(amounts ? { productAmount: amounts.productAmount, deliveryFee: amounts.deliveryFee } : {}) },
     });
 
     // Course de livraison — best-effort, même pattern que
@@ -948,7 +1350,11 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
         status: 'pending_payment',
         dispatchStatus: dispatchResult.dispatched ? 'dispatched' : 'pending',
       });
-      return { orderId, totalPrice, dispatched: dispatchResult.dispatched || false };
+      return {
+        orderId, totalPrice, deliveryFee: amounts ? amounts.deliveryFee : 0,
+        totalAmount: amounts ? amounts.totalAmount : totalPrice,
+        dispatched: dispatchResult.dispatched || false,
+      };
     } catch (err) {
       const restored = await compensateFailedCashBoutiqueDispatch({
         db, admin, orderId, deliveryOrderId, productId, quantity, reason: err.message,
@@ -1046,6 +1452,19 @@ function buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkR
       if (deliverySnap?.exists && isCompletedBoutiqueDelivery(deliverySnap.data())) {
         throw new HttpsError('failed-precondition', 'La livraison liée est déjà accomplie');
       }
+      // Commande à montants explicites : un livreur a déjà accepté la course
+      // (commission prélevée) et touchera les frais à la livraison. Rembourser
+      // maintenant laisserait une course orpheline : le remboursement attend
+      // la fin ou l'annulation de la course.
+      const amounts = readAmounts(order);
+      if (amounts && deliverySnap?.exists &&
+          ['accepted', 'picked_up'].includes(deliverySnap.data().status)) {
+        throw new HttpsError('failed-precondition', 'La livraison est en cours : remboursement impossible pour le moment');
+      }
+      // Remboursé = ce qui a réellement été payé (produits + livraison) ; le
+      // vendeur ne rend que les produits qu'il a reçus.
+      amount = amounts ? amounts.totalAmount : amount;
+      const sellerShare = amounts ? amounts.productAmount : amount;
 
       tx.update(orderRef, {
         status:       'refunded',
@@ -1062,7 +1481,7 @@ function buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkR
           // Plafonné à 0 : si le vendeur a déjà retiré une partie de ce
           // crédit, on reprend ce qu'il reste plutôt que de créer un solde
           // négatif (même logique que cancelOrderCF, Master Prompt 48).
-          sellerDebit = Math.min(amount, sellerWallet);
+          sellerDebit = Math.min(sellerShare, sellerWallet);
           if (sellerDebit > 0) {
             tx.update(sellerRef, { wallet: sellerWallet - sellerDebit });
           }
@@ -1099,6 +1518,7 @@ module.exports = {
   buildPayOrderFromWallet,
   buildCancelOrder,
   buildDeliverOrder,
+  buildDeliverOrderWithProof,
   buildPayBoutiqueOrder,
   buildPayBoutiqueOrderCash,
   buildRefundExpiredBoutiqueOrder,

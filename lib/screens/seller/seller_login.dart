@@ -3,6 +3,7 @@ import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../auth/generic_forgot_password_page.dart';
+import '../auth/partner_first_password_page.dart';
 
 import 'seller_dashboard.dart';
 import 'seller_register.dart';
@@ -48,6 +49,16 @@ class _SellerLoginState extends State<SellerLogin> {
       if (!mounted) return;
       if (doc.exists && (doc.data()?['isActive'] ?? false)) {
         final sellerData = doc.data()!;
+        // Mot de passe temporaire non remplacé : jamais d'accès au tableau de
+        // bord par reprise de session (le serveur est l'autorité).
+        if (!await PartnerFirstPasswordPage.ensureActivated(context, user)) {
+          await FirebaseAuth.instance.signOut();
+          try {
+            await FirebaseAuth.instance.signInAnonymously();
+          } catch (_) {}
+          if (mounted) setState(() => _autoResuming = false);
+          return;
+        }
         NotificationService().saveToken(user.uid, 'sellers');
         await SubscriptionService.checkAndRenew('sellers', user.uid);
         if (!mounted) return;
@@ -130,6 +141,20 @@ class _SellerLoginState extends State<SellerLogin> {
       }
 
       final sellerData = doc.data()!;
+      // Première connexion : changement obligatoire du mot de passe temporaire.
+      if (!await PartnerFirstPasswordPage.ensureActivated(
+          context, credential.user!)) {
+        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+        if (!mounted) return;
+        setState(() => _loading = false);
+        _snack(
+            "Activation requise : définissez votre mot de passe personnel pour accéder à votre espace.",
+            Colors.orange);
+        return;
+      }
       NotificationService().saveToken(uid, 'sellers');
       AuthService().logAuthEvent('login', 'seller');
       if (!mounted) return;

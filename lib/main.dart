@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'web/configure_url_strategy.dart';
+import 'partner_qr/partner_qr_page.dart';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
@@ -20,6 +22,7 @@ import 'theme/app_theme.dart';
 import 'screens/home/home_screen.dart';
 import 'services/notification_service.dart';
 import 'services/firestore_service.dart';
+import 'services/firebase_emulator_config.dart';
 import 'web/web_app.dart';
 import 'marketplace/providers/mp_provider.dart';
 import 'marketplace/providers/mp_favorites_provider.dart';
@@ -35,6 +38,7 @@ final _analytics = FirebaseAnalytics.instance;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  configureWebUrlStrategy();
   // C2 — Canal de communication avec le ForegroundService (doit être avant runApp)
   if (!kIsWeb) FlutterForegroundTask.initCommunicationPort();
 
@@ -71,7 +75,9 @@ void main() async {
   // Future avant d'émettre leur première requête.
   // App Check n'est jamais activé sur Web (aucune clé reCAPTCHA configurée),
   // ni quand Firebase n'a pas pu s'initialiser (l'appel échouerait).
-  final appCheckReady = (kIsWeb || startupDiagnostic != null)
+  final appCheckReady = (kIsWeb ||
+          startupDiagnostic != null ||
+          FirebaseEmulatorConfig.enabled)
       ? Future<void>.value()
       : _activateAppCheck();
 
@@ -79,7 +85,7 @@ void main() async {
   if (!kIsWeb) {
     FlutterError.onError = (details) {
       FlutterError.presentError(details);
-      if (firebaseInitialized) {
+      if (firebaseInitialized && !FirebaseEmulatorConfig.enabled) {
         FirebaseCrashlytics.instance.recordFlutterFatalError(details);
       } else {
         debugPrint('Crashlytics indisponible avant initialisation Firebase.');
@@ -88,7 +94,7 @@ void main() async {
     PlatformDispatcher.instance.onError = (error, stack) {
       debugPrint('ERREUR ASYNCHRONE NON CAPTURÉE : $error');
       debugPrintStack(stackTrace: stack);
-      if (firebaseInitialized) {
+      if (firebaseInitialized && !FirebaseEmulatorConfig.enabled) {
         FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
       } else {
         debugPrint('Crashlytics indisponible avant initialisation Firebase.');
@@ -100,7 +106,8 @@ void main() async {
   // ── Persistence offline ───────────────────────────────────────────
   // Jamais tentée si Firebase n'est pas initialisé : `instance` lèverait et
   // tuerait à nouveau le démarrage avant runApp().
-  if (startupDiagnostic == null) {
+  // (Mode émulateurs : useFirestoreEmulator a déjà fixé les réglages.)
+  if (startupDiagnostic == null && !FirebaseEmulatorConfig.enabled) {
     try {
       FirebaseFirestore.instance.settings = const Settings(
         persistenceEnabled: true,
@@ -140,6 +147,10 @@ void main() async {
 /// @return `null` si Firebase est prêt, sinon une description courte et non
 /// sensible du problème (aucune clé, aucune valeur de configuration).
 Future<String?> _initializeFirebase() async {
+  // APK de test : émulateurs locaux uniquement, options factices (voir
+  // FirebaseEmulatorConfig). Jamais de repli sur la production.
+  if (FirebaseEmulatorConfig.enabled) return FirebaseEmulatorConfig.initialize();
+
   late final FirebaseOptions options;
   try {
     options = DefaultFirebaseOptions.currentPlatform;
@@ -175,7 +186,9 @@ Future<void> _initializeDeferred(Future<void> appCheckReady) async {
   await appCheckReady;
   // La permission notification ne doit bloquer ni le rendu ni les autres
   // initialisations réseau.
-  unawaited(NotificationService().init());
+  // Mode émulateurs : pas de FCM ni d'enregistrement de jeton (aucun émulateur
+  // FCM, et aucun appel vers des serveurs Google avec une configuration factice).
+  if (!FirebaseEmulatorConfig.enabled) unawaited(NotificationService().init());
 
   final authFuture = _ensureAnonymousAuth();
 
@@ -248,6 +261,13 @@ class _AZExpressAppState extends State<AZExpressApp> {
         child: MaterialApp(
           debugShowCheckedModeBanner: false,
           navigatorKey: NotificationService.navigatorKey,
+          onGenerateRoute:(settings){
+            final uri=Uri.tryParse(settings.name??'');
+            if(uri!=null&&uri.pathSegments.length==2&&uri.pathSegments.first=='partenaire'){
+              return MaterialPageRoute(builder:(_)=>PublicPartnerPage(token:uri.pathSegments[1]),settings:settings);
+            }
+            return null;
+          },
           locale: _locale,
           supportedLocales: AppText.supportedLocales,
           localizationsDelegates: const [

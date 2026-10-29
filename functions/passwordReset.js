@@ -61,6 +61,9 @@ function buildResetAccountPassword({ db, auth, fieldValue, hashSecret, checkRate
     }[userType];
     if (!collectionName) throw new HttpsError('invalid-argument', `Type invalide : ${userType}`);
     const accountDoc = await findUniqueAccountByPhone(db, collectionName, phone, normalizedInput);
+    if(accountDoc.data().isDeleted===true){
+      throw new HttpsError('failed-precondition','Compte supprime; reactivation interdite');
+    }
 
     if (userType === 'artisan') {
       const pin = String(newValue);

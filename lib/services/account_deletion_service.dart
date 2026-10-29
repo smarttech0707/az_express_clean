@@ -1,26 +1,48 @@
+import 'dart:convert';
+import 'dart:math';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-/// Flux unique de suppression de compte, couvrant les 9 rôles réels de l'app.
-///
-/// Deux mécanismes distincts, choisis selon ce que chaque rôle permet réellement :
-/// - `deleteClientAccountNow()` : suppression immédiate, réservée au rôle client
-///   (seul rôle avec un compte Firebase Auth email/mot de passe + une règle
-///   Firestore `allow delete` déjà accordée au propriétaire) — réutilise le
-///   flux déjà en production dans `profil_client.dart`, comportement inchangé.
-/// - `submitRequest()` : pour les 9 rôles (y compris client), enregistre une
-///   demande dans `account_deletion_requests` (Cloud-Function-free, traitée
-///   manuellement par un admin) — le seul mécanisme possible pour les 8 autres
-///   rôles, dont plusieurs n'ont pas de compte Firebase Auth propre (ex. les
-///   pharmacies utilisent une authentification Firestore custom, voir
-///   `pharmacie_login.dart`) et dont aucun n'a de règle Firestore autorisant
-///   une auto-suppression de leur document (élargir ces règles serait un
-///   changement de posture de sécurité à part entière, hors du périmètre de
-///   ce correctif de conformité Play Store).
-///
-/// Utilisé à la fois depuis l'app (authentifié, `role`/`contactPhone` déjà
-/// connus) et depuis la page web publique `/delete-account` (non authentifié,
-/// l'utilisateur saisit lui-même son rôle et son contact).
+/// Accuse de reception d'une demande manuelle, pas une suppression Auth.
+class AccountDeletionRequestResult {
+  final String requestId;
+  final String status;
+  final String? reason;
+  final bool authDeleted;
+  final bool profileAnonymized;
+  const AccountDeletionRequestResult(this.requestId, {this.status = 'pending', this.reason,
+    this.authDeleted = false, this.profileAnonymized = false});
+  bool get completed => status == 'completed' && authDeleted && profileAnonymized;
+  bool get accessClosed => completed || status == 'quarantined' || status == 'cleanup_pending';
+  factory AccountDeletionRequestResult.fromData(dynamic data) {
+    if (data is! Map || data['requestId'] is! String ||
+        !['pending','blocked','quarantined','cleanup_pending','completed'].contains(data['status']) ||
+        (data['status'] == 'completed' && (data['authDeleted'] != true || data['profileAnonymized'] != true))) {
+      throw const FormatException('Confirmation serveur invalide');
+    }
+    return AccountDeletionRequestResult(data['requestId'] as String,
+      status: data['status'] as String, reason: data['reason'] as String?,
+      authDeleted: data['authDeleted'] == true, profileAnonymized: data['profileAnonymized'] == true);
+  }
+  String get message => completed ? 'Compte supprimé' :
+      'Demande de suppression enregistrée. Suppression non terminée.';
+  String get details {
+    switch(reason) {
+      case 'reauthentication_required': return 'Reconnectez-vous ou confirmez votre mot de passe pour autoriser la suppression.';
+      case 'balance_regularization_required':
+      case 'financial_regularization_required': return 'Un solde doit etre regularise. Votre demande reste enregistree. Contactez le support.';
+      case 'active_mission_or_reference':
+      case 'active_or_unresolved_operation': return 'Une mission ou une operation est encore en cours. Terminez-la puis demandez une reprise.';
+      case 'waiting_for_inflight_operations': return 'Les nouvelles operations sont bloquees. Le serveur attend la fin des operations deja engagees.';
+      case 'server_rollout_not_enabled': return 'Le traitement serveur n est pas encore active. Votre demande est conservee.';
+      case 'server_retry_required': return 'Un traitement serveur a echoue. Reprise prevue ; aucune suppression complete n est confirmee.';
+      default: return completed ? 'Les donnees personnelles du profil ont ete anonymisees. Les pieces transactionnelles necessaires restent soumises a une revue de conservation.' : 'La demande reste en attente. Le support peut consulter son etat et les blocages.';
+    }
+  }
+}
+
 class AccountDeletionService {
   AccountDeletionService._();
 
@@ -48,68 +70,99 @@ class AccountDeletionService {
     'ekbine_agent': 'Agent Ekbine',
     'real_estate_agent': 'Agent immobilier',
     'fleet_owner': 'Patron de flotte',
+    'artisan': 'Artisan / prestataire de services',
+    'event_provider': "Prestataire d'événements",
   };
 
-  /// Enregistre une demande de suppression de compte — étape 1 (« demande
-  /// suppression ») pour tout rôle. Traitée manuellement par un admin, qui
-  /// désactive le compte puis efface les données personnelles selon le délai
-  /// légal déjà annoncé dans la politique de confidentialité (30 jours, sauf
-  /// obligation de conservation — ex. historique financier).
-  static Future<void> submitRequest({
-    required String role,
-    required String contactPhone,
-    String? contactEmail,
-    String? reason,
-    String requestedVia = 'app',
+  /// Rôles sans moteur de suppression automatique : la demande arrive dans la file manuelle
+  /// (`account_deletion_requests`), traitée par un administrateur. L'artisan n'a pas de compte Firebase
+  /// personnel (session anonyme), le prestataire d'événements n'est pas inventorié par le moteur serveur.
+  static const Set<String> manualOnlyRoles = {'artisan', 'event_provider'};
+
+  static Future<AccountDeletionRequestResult> submitRequest({
+    required String role, required String contactPhone, String? contactEmail,
+    String? reason, String requestedVia = 'app', String? password,
   }) async {
-    if (!roleCollections.containsKey(role)) {
-      throw ArgumentError('Rôle de compte inconnu : $role');
+    final user = FirebaseAuth.instance.currentUser;
+    if (requestedVia == 'app' && roleCollections.containsKey(role) && user != null && !user.isAnonymous) {
+      if (password != null && password.isNotEmpty) {
+        if (!user.providerData.any((p) => p.providerId == 'password') || user.email == null) {
+          throw StateError('Reconnectez-vous avec votre fournisseur de connexion avant de reessayer.');
+        }
+        await user.reauthenticateWithCredential(EmailAuthProvider.credential(email: user.email!, password: password));
+        await user.getIdToken(true);
+      }
+      final prefs = await SharedPreferences.getInstance();
+      final prior = prefs.getString('accountDeletionRecovery');
+      Map<String,dynamic>? recovery;
+      if (prior != null) { recovery = jsonDecode(prior) as Map<String,dynamic>; }
+      if (recovery?['uid'] != user.uid) {
+        final random = Random.secure();
+        recovery = {'uid': user.uid, 'token': List.generate(32, (_) => random.nextInt(256).toRadixString(16).padLeft(2,'0')).join()};
+        if (!await prefs.setString('accountDeletionRecovery',jsonEncode(recovery))) {
+          throw StateError('Impossible de conserver le suivi de la demande. Aucune demande envoyee.');
+        }
+      }
+      AccountDeletionRequestResult result;
+      try {
+        final response = await FirebaseFunctions.instanceFor(region:'europe-west1')
+          .httpsCallable('requestAccountDeletionCF').call({'role':role,'recoveryToken':recovery!['token'],'allProfilesConsent':true});
+        result = AccountDeletionRequestResult.fromData(response.data);
+      } on FirebaseFunctionsException {
+        // A response can be lost after deletion. Only the server receipt confirms it.
+        result = await checkLastRequest();
+      }
+      if (result.accessClosed) await FirebaseAuth.instance.signOut();
+      return result;
     }
-    final phone = contactPhone.trim();
-    if (phone.isEmpty) {
-      throw ArgumentError(
-          'Un numéro de téléphone est requis pour identifier la demande.');
-    }
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    await FirebaseFirestore.instance
-        .collection('account_deletion_requests')
-        .add({
-      'role': role,
-      'docId': uid,
-      'uid': uid,
-      'contactPhone': phone,
-      if (contactEmail != null && contactEmail.trim().isNotEmpty)
-        'contactEmail': contactEmail.trim(),
-      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
-      'status': 'pending',
-      'requestedVia': requestedVia,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    return submitRequestUsing(role: role, contactPhone: contactPhone,
+      contactEmail: contactEmail, reason: reason, requestedVia: requestedVia,
+      authenticatedUid: user != null && !user.isAnonymous ? user.uid : null,
+      write: (data) async {
+        final ref = FirebaseFirestore.instance.collection('account_deletion_requests').doc();
+        await ref.set({...data, 'createdAt': FieldValue.serverTimestamp()});
+        return ref.id;
+      });
   }
 
-  /// Suppression immédiate — client uniquement. Même comportement exact que
-  /// l'implémentation historique de `profil_client.dart` (ré-authentification
-  /// obligatoire, suppression du document Firestore puis du compte Firebase
-  /// Auth) — extrait ici pour être réutilisable, pas réécrit.
+  static Future<AccountDeletionRequestResult> checkLastRequest() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString('accountDeletionRecovery');
+    if (value == null) throw StateError('Aucune demande suivie sur cet appareil.');
+    final recovery = jsonDecode(value) as Map<String,dynamic>;
+    final response = await FirebaseFunctions.instanceFor(region:'europe-west1')
+      .httpsCallable('getAccountDeletionStatusCF').call({'uid':recovery['uid'],'recoveryToken':recovery['token']});
+    return AccountDeletionRequestResult.fromData(response.data);
+  }
+
+  /// Point d'injection pour tests sans compte reel. Ne supprime aucune donnee.
+  static Future<AccountDeletionRequestResult> submitRequestUsing({
+    required String role, required String contactPhone,
+    required Future<String> Function(Map<String, dynamic>) write,
+    String? authenticatedUid, String? contactEmail, String? reason,
+    String requestedVia = 'app',
+  }) async {
+    if (!roleCollections.containsKey(role) && !manualOnlyRoles.contains(role)) throw ArgumentError('Role inconnu');
+    final phone = contactPhone.trim();
+    if (phone.isEmpty || phone.length > 30) throw ArgumentError('Telephone invalide');
+    if (!['app', 'web'].contains(requestedVia)) throw ArgumentError('Origine invalide');
+    final id = await write({
+      'role': role, 'uid': authenticatedUid,
+      // Un UID de session n'est pas une preuve du document partenaire a supprimer.
+      'docId': null, 'contactPhone': phone,
+      if (contactEmail != null && contactEmail.trim().isNotEmpty) 'contactEmail': contactEmail.trim(),
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      'status': 'pending', 'requestedVia': requestedVia,
+    });
+    if (id.isEmpty) throw StateError('Enregistrement non confirme.');
+    return AccountDeletionRequestResult(id);
+  }
+
+  /// L'ancien enchainement Firestore puis Auth n'est pas atomique et peut perdre
+  /// le profil/wallet tout en laissant Auth actif. Bloque sans mutation.
+  @Deprecated('Utiliser submitRequest en attendant un traitement serveur securise')
   static Future<void> deleteClientAccountNow({required String password}) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      throw StateError('Aucun utilisateur connecté.');
-    }
-    final email = user.email;
-    if (email == null || email.isEmpty) {
-      throw StateError(
-          'Ce compte n\'a pas de mot de passe défini — utilisez plutôt la demande '
-          'de suppression standard (submitRequest).');
-    }
-
-    final cred = EmailAuthProvider.credential(email: email, password: password);
-    await user.reauthenticateWithCredential(cred);
-
-    await FirebaseFirestore.instance
-        .collection('clients')
-        .doc(user.uid)
-        .delete();
-    await user.delete();
+    throw StateError('Suppression immediate indisponible. Envoyez une demande de suppression. '
+        'Aucun compte ni aucune donnee n ont ete supprimes.');
   }
 }

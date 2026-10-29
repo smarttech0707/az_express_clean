@@ -223,3 +223,16 @@ test('session anonyme refusee avant toute lecture ou ecriture sensible', async (
   await assert.rejects(h.handler(request), (error) => error.code === 'unauthenticated');
   assert.equal(h.db.store.get('sellers/seller-1').wallet, 5000);
 });
+
+test('suppression en cours ou compte supprimé : aucun débit ni renouvellement, solde inchangé', async (t) => {
+  for (const flag of [{ deletionRequested: true }, { isDeleted: true }]) {
+    const h = harness({
+      'sellers/seller-1': { wallet: 5000, subscriptionStatus: 'active', subscriptionExpiresAt: null, ...flag },
+    });
+    t.after(h.restore);
+    await assert.rejects(() => h.handler(ownerRequest()), (e) => e.code === 'failed-precondition');
+    assert.equal(h.db.store.get('sellers/seller-1').wallet, 5000);
+    assert.equal(h.db.store.get('sellers/seller-1').subscriptionStatus, 'active');
+    assert.equal([...h.db.store.keys()].some((k) => k.startsWith('subscription_operations/')), false);
+  }
+});

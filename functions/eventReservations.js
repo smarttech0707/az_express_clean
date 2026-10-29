@@ -25,6 +25,8 @@ const MAX_ITEMS = 50;
 const MAX_QUANTITY_PER_ITEM = 1000;
 const WALLET_MIN_AMOUNT = 500; // même plancher que orders.budget
 
+const { assertNewAccountActivity } = require('./accountAdmission');
+
 function buildCreateEventReservation({ db, admin, onCall, HttpsError, checkRateLimit }) {
   // maxInstances explicite : sans plafond, cette fonction se réserve à elle
   // seule l'intégralité du quota Cloud Run de la région et bloque alors toute
@@ -96,6 +98,9 @@ function buildCreateEventReservation({ db, admin, onCall, HttpsError, checkRateL
       const receipt = await tx.get(receiptRef);
       if (receipt.exists) return previousResult(receipt);
 
+      // Le client débité ne doit pas être en cours de suppression (relu dans la transaction financière).
+      await assertNewAccountActivity(tx, db, HttpsError, uid, []);
+
       // Relit chaque offre RÉELLE côté serveur — jamais le prix, le titre ou
       // la quantité fournis par le client. Seuls `offerId`/`quantity` sont
       // lus depuis l'entrée cliente ; tout le reste (unitPrice, providerId,
@@ -119,7 +124,8 @@ function buildCreateEventReservation({ db, admin, onCall, HttpsError, checkRateL
           throw new HttpsError('failed-precondition', 'Prestataire introuvable');
         }
         const provider = providerSnap.data();
-        if (provider.status !== 'approved' || provider.isSuspended === true) {
+        if (provider.status !== 'approved' || provider.isSuspended === true ||
+            provider.deletionRequested === true || provider.isDeleted === true) {
           throw new HttpsError('failed-precondition', 'Prestataire indisponible');
         }
 

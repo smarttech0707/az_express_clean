@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../screens/ai/az_ia_offline_engine.dart';
+import '../services/az_ia_consent.dart';
 import '../services/az_ia_service.dart';
 
 enum AzIaSender { user, assistant }
@@ -294,6 +295,45 @@ class AzIaProvider extends ChangeNotifier {
     return null;
   }
 
+  Future<bool> hasConsent() async {
+    final uid = _activeUid;
+    return uid != null && await AzIaConsent.isGranted(uid);
+  }
+
+  /// Enregistre l'accord côté serveur (source de vérité) puis localement.
+  /// Retourne false si le serveur ne l'a pas enregistré : rien n'est alors
+  /// activé et aucun message ne partira.
+  Future<bool> grantConsent() async {
+    final uid = _activeUid;
+    if (uid == null) return false;
+    try {
+      final ok = await _service.setAiConsent(
+          granted: true, version: AzIaConsent.version);
+      if (!ok) return false;
+      await AzIaConsent.grant(uid);
+      return true;
+    } catch (e) {
+      debugPrint('[AZ_IA_CONSENT] grant impossible : $e');
+      return false;
+    }
+  }
+
+  /// Retrait immédiat côté appareil (plus aucun envoi), puis côté serveur.
+  /// Retourne false si le serveur n'a pas pu être joint : il refusera de
+  /// toute façon de réutiliser un accord périmé tant qu'il n'est pas retiré.
+  Future<bool> revokeConsent() async {
+    final uid = _activeUid;
+    if (uid == null) return false;
+    await AzIaConsent.revoke(uid);
+    try {
+      await _service.setAiConsent(granted: false, version: AzIaConsent.version);
+      return true;
+    } catch (e) {
+      debugPrint('[AZ_IA_CONSENT] revoke serveur impossible : $e');
+      return false;
+    }
+  }
+
   /// Retourne le texte de la réponse d'AZ IA (succès ou message d'erreur) —
   /// utilisé par l'écran pour, entre autres, le lire à voix haute (M7).
   /// [image] est optionnelle (Master Prompt 113, section 13) : ordonnance,
@@ -308,6 +348,9 @@ class AzIaProvider extends ChangeNotifier {
         _disposed) {
       return null;
     }
+    // Dernier garde-fou : sans consentement explicite, rien n'est transmis au
+    // serveur (donc aux fournisseurs d'IA), quel que soit l'appelant.
+    if (!await AzIaConsent.isGranted(uid)) return null;
     // Un message purement image doit quand même porter un texte non vide
     // côté serveur (azIaChat exige `message`) — légende neutre par défaut.
     final effectiveText =
@@ -419,7 +462,15 @@ class AzIaProvider extends ChangeNotifier {
       debugPrint(
           '[AZ_IA_ERROR] sendMessage uid=$_activeUid conversationId=$_conversationId exception=$e');
       debugPrintStack(stackTrace: st);
-      if (e is TimeoutException) {
+      if (e is FirebaseFunctionsException &&
+          e.code == 'failed-precondition' &&
+          (e.message ?? '').contains('CONSENT_REQUIRED')) {
+        // Le serveur ne reconnaît pas l'accord (retiré, ancienne version) :
+        // on oublie l'accord local pour redemander au prochain envoi.
+        await AzIaConsent.revoke(uid);
+        _error =
+            "Votre accord pour AZ IA doit être renouvelé. Renvoyez votre message pour le confirmer.";
+      } else if (e is TimeoutException) {
         _error =
             "AZ IA met plus de temps que prévu à répondre. Réessayez dans un instant.";
       } else if (e is FirebaseFunctionsException &&

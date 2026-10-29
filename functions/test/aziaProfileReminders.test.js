@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 const { rememberNamedAddress } = require('../azia/tools/memory');
 const { createReminder } = require('../azia/tools/reminders');
 const { buildReminderScheduler } = require('../azia/reminderScheduler');
-const { buildUserContext } = require('../azia/contextBuilder');
+const { collectUserContext } = require('../azia/contextBuilder');
 
 function fakeTimestamp(ms) {
   return { __ts: ms, toDate: () => new Date(ms), toMillis: () => ms };
@@ -226,48 +226,33 @@ test('reminderScheduler: marks as sent even without a known fcmToken (never cras
 
 // ── contextBuilder insights (Master Prompt 118) ──────────────────────────
 
-test('buildUserContext: surfaces named addresses so "chez moi"/"au bureau" never need to be re-asked', async () => {
+test('collectUserContext: addresses rubric returns named addresses and nothing else', async () => {
   const { db } = makeFakeDb({
+    'clients/u1': { name: 'Awa', phone: '+2250700000000', wallet: 100 },
     'ai_user_memory/u1': { addresses: [{ label: 'maison', address: 'Cafétou' }, { label: 'bureau', address: 'Plateau' }] },
   });
-  const text = await buildUserContext(db, 'u1', null);
-  assert.ok(text.includes('maison → Cafétou'));
-  assert.ok(text.includes('bureau → Plateau'));
+  const r = await collectUserContext(db, 'u1', ['addresses'], null);
+  assert.deepEqual(r.namedAddresses, [{ label: 'maison', address: 'Cafétou' }, { label: 'bureau', address: 'Plateau' }]);
+  const flat = JSON.stringify(r);
+  assert.ok(!flat.includes('+2250700000000') && !flat.includes('Awa') && !flat.includes('100'));
 });
 
-test('buildUserContext: surfaces the last real order and a genuinely frequent seller, never invented', async () => {
+test('collectUserContext: last_order rubric returns the last real order and a genuinely frequent seller', async () => {
   const { db } = makeFakeDb({
     'orders/o1': { clientId: 'u1', sellerName: 'Chez Awa', budget: 2000, createdAt: fakeTimestamp(5) },
     'orders/o2': { clientId: 'u1', sellerName: 'Chez Awa', budget: 1800, createdAt: fakeTimestamp(4) },
     'orders/o3': { clientId: 'u1', sellerName: 'Chez Awa', budget: 1900, createdAt: fakeTimestamp(3) },
     'orders/o4': { clientId: 'u1', sellerName: 'Autre Vendeur', budget: 500, createdAt: fakeTimestamp(2) },
   });
-  const text = await buildUserContext(db, 'u1', null);
-  assert.ok(text.includes('Dernière commande connue'));
-  assert.ok(text.includes('Chez Awa'));
-  assert.ok(text.includes('Vendeur/restaurant fréquent'));
+  const r = await collectUserContext(db, 'u1', ['last_order'], null);
+  assert.equal(r.lastOrder.label, 'Chez Awa');
+  assert.equal(r.frequentSeller.name, 'Chez Awa');
 });
 
-test('buildUserContext: does NOT report a "frequent seller" below the real threshold (no false positive)', async () => {
+test('collectUserContext: no "frequent seller" below the real threshold (no false positive)', async () => {
   const { db } = makeFakeDb({
     'orders/o1': { clientId: 'u1', sellerName: 'Chez Awa', budget: 2000, createdAt: fakeTimestamp(2) },
     'orders/o2': { clientId: 'u1', sellerName: 'Autre Vendeur', budget: 500, createdAt: fakeTimestamp(1) },
   });
-  const text = await buildUserContext(db, 'u1', null);
-  assert.ok(!text.includes('Vendeur/restaurant fréquent'));
-});
-
-test('buildUserContext: flags a genuinely low wallet balance using the real clients/{uid}.wallet field', async () => {
-  const { db } = makeFakeDb({ 'clients/u1': { wallet: 100 } });
-  const text = await buildUserContext(db, 'u1', null);
-  assert.ok(text.includes('100 FCFA'));
-  assert.ok(text.includes('faible'));
-});
-
-test('buildUserContext: does NOT flag a healthy wallet balance', async () => {
-  // `name` seedé pour que le contexte ne soit pas entièrement vide (sinon
-  // buildUserContext retourne `null`, sans rapport avec ce qu'on teste ici).
-  const { db } = makeFakeDb({ 'clients/u1': { name: 'Awa', wallet: 50000 } });
-  const text = await buildUserContext(db, 'u1', null);
-  assert.ok(!text.includes('faible'));
+  assert.equal((await collectUserContext(db, 'u1', ['last_order'], null)).frequentSeller, null);
 });

@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireAdminPermission } = require('./adminGuards');
+const { assertPartnerActivated } = require('./partnerActivationGuard');
 
 const COLLECTIONS = new Set([
   'sellers', 'restaurants', 'boulangeries', 'ekbine_agents', 'fleet_owners',
@@ -45,6 +46,9 @@ function buildManageProfessionalSubscription({ db, auth, timestamp, fieldValue }
     if (!request.auth || request.auth.token.firebase?.sign_in_provider === 'anonymous') {
       throw new HttpsError('unauthenticated', 'Compte authentifie requis');
     }
+    // Partenaire créé par l'administration : aucune opération sur l'abonnement
+    // (débit du wallet compris) avant le changement du mot de passe temporaire.
+    await assertPartnerActivated({ db, request });
     const data = request.data || {};
     const collection = String(data.collection || '');
     const docId = String(data.docId || '');
@@ -87,6 +91,11 @@ function buildManageProfessionalSubscription({ db, auth, timestamp, fieldValue }
       if (!accountSnap.exists) throw new HttpsError('not-found', 'Compte introuvable');
       const account = accountSnap.data();
       const walletField = WALLET_FIELDS[collection] || 'wallet';
+      // Compte en cours de suppression : aucun débit ni activation (seules les actions de protection restent permises).
+      if ((account.deletionRequested === true || account.isDeleted === true) &&
+          !['suspend', 'deactivateVip'].includes(action)) {
+        throw new HttpsError('failed-precondition', 'Compte en cours de suppression; operation suspendue');
+      }
 
       if (action === 'renew') {
         const standardDue = millis(account.subscriptionExpiresAt) == null ||

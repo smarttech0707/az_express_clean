@@ -1,6 +1,7 @@
 'use strict';
 
 const { HttpsError } = require('firebase-functions/v2/https');
+const { assertPartnerActivated } = require('./partnerActivationGuard');
 
 const PRIVATE_ACTIVE_LIMIT = 3;
 const PRIVATE_LIFETIME_MS = 15 * 24 * 60 * 60 * 1000;
@@ -58,6 +59,10 @@ function buildPublishMarketplaceProduct({ db, admin }) {
     if (!request.auth || request.auth.token.firebase?.sign_in_provider === 'anonymous') {
       throw new HttpsError('unauthenticated', 'Compte authentifié requis.');
     }
+    // Vendeur créé par l'administration : aucune publication ni republication
+    // avant le changement du mot de passe temporaire (aucun effet pour les
+    // acheteurs, comptes historiques ou administrateurs).
+    await assertPartnerActivated({ db, request });
     const uid = request.auth.uid;
     const product = request.data?.product;
     validateProduct(product);
@@ -70,6 +75,7 @@ function buildPublishMarketplaceProduct({ db, admin }) {
     await db.runTransaction(async (tx) => {
       const sellerSnap = await tx.get(sellerRef);
       const seller = sellerSnap.exists ? sellerSnap.data() : null;
+      if(seller?.deletionRequested===true||seller?.isDeleted===true)throw new HttpsError('failed-precondition','Compte en cours de suppression');
       console.log(`[marketplace-publish] seller-loaded uid=${uid} productId=${productRef.id}`);
       const professional = isActiveProfessionalSeller(seller, now.toMillis());
       if (!professional) {
@@ -100,6 +106,10 @@ function buildRepublishMarketplaceProduct({ db, admin }) {
     if (!request.auth || request.auth.token.firebase?.sign_in_provider === 'anonymous') {
       throw new HttpsError('unauthenticated', 'Compte authentifié requis.');
     }
+    // Vendeur créé par l'administration : aucune publication ni republication
+    // avant le changement du mot de passe temporaire (aucun effet pour les
+    // acheteurs, comptes historiques ou administrateurs).
+    await assertPartnerActivated({ db, request });
     const uid = request.auth.uid;
     const productId = String(request.data?.productId || '').trim();
     if (!productId) throw new HttpsError('invalid-argument', 'Annonce requise.');
@@ -116,6 +126,7 @@ function buildRepublishMarketplaceProduct({ db, admin }) {
         throw new HttpsError('failed-precondition', 'Seule une annonce inactive peut être republiée.');
       }
       const seller = sellerSnap.exists ? sellerSnap.data() : null;
+      if(seller?.deletionRequested===true||seller?.isDeleted===true)throw new HttpsError('failed-precondition','Compte en cours de suppression');
       const professional = isActiveProfessionalSeller(seller, now.toMillis());
       if (!professional) {
         const activeQuery = db.collection('marketplace_products')

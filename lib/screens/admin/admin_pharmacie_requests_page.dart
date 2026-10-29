@@ -1,3 +1,4 @@
+import '../../services/partner_approval_service.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -90,48 +91,9 @@ class _AdminPharmacieRequestsPageState extends State<AdminPharmacieRequestsPage>
       return;
     }
     final db = FirebaseFirestore.instance;
-    final batch = db.batch();
-
-    // Create pharmacie doc (auto-id)
-    //
-    // `password` / `accessCode` sont VOLONTAIREMENT absents : `firestore.rules`
-    // interdit à un admin d'écrire ces clés sur `pharmacies`
-    // (`!request.resource.data.keys().hasAny(['password','accessCode'])`), et
-    // la simple PRÉSENCE de la clé suffisait à faire rejeter tout le batch —
-    // donc aucune pharmacie ne pouvait être approuvée. Le secret vit désormais
-    // haché dans `pharmacie_credentials`, alimenté uniquement par les Cloud
-    // Functions `setPharmaciePassword()` / `pharmacieLogin()`. Après
-    // approbation, l'admin définit le mot de passe depuis l'écran Pharmacies
-    // (bouton dédié → `setPharmaciePassword`). La demande ne transportait de
-    // toute façon aucun mot de passe : `pharmacie_register.dart` n'en envoie
-    // pas, la valeur écrite ici était donc toujours la chaîne vide.
-    final pharmRef = db.collection('pharmacies').doc();
-    batch.set(
-      pharmRef,
-      buildApprovedPharmacieDoc(
-        data,
-        // Non-null garanti : `PartnerLocationValidator.validate` ci-dessus
-        // retourne un message dès que l'une des deux coordonnées est nulle.
-        latitude: latitude!,
-        longitude: longitude!,
-        createdAt: FieldValue.serverTimestamp(),
-      ),
-    );
-
-    batch.update(db.collection('pharmacie_requests').doc(docId), {
-      'status': 'approved',
-      'approvedAt': FieldValue.serverTimestamp(),
-      'pharmacieId': pharmRef.id,
-    });
-
-    // Le batch reste atomique : création de la pharmacie et passage de la
-    // demande en `approved` réussissent ou échouent ensemble. Le message de
-    // succès n'est affiché QU'APRÈS confirmation du commit — auparavant, un
-    // rejet Firestore laissait l'écran totalement muet (l'exception remontait
-    // dans un `VoidCallback` non attendu, donc perdue en erreur asynchrone).
     Object? commitError;
     try {
-      await batch.commit();
+      await approvePartnerOnce(db:db,requestCollection:'pharmacie_requests',requestId:docId,collection:'pharmacies',idField:'pharmacieId',profile:buildApprovedPharmacieDoc(data,latitude:latitude!,longitude:longitude!,createdAt:FieldValue.serverTimestamp()));
     } catch (e) {
       commitError = e;
       debugPrint('[ADMIN_PHARMACIE] approbation échouée '

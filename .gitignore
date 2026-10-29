@@ -77,3 +77,11 @@ functions/.env.*
 functions/scripts/reports/cleanup_production_test_data_*.json
 
 .dart_appdata/
+
+# Projet Firebase de test (test-env/)
+test-env/dart-defines.test.json
+test-env/runtime/
+test-env/.emulator-data/
+functions/.secret.local
+
+test-env/.snapshots/

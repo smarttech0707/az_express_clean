@@ -1,3 +1,4 @@
+import '../../delivery_proofs/proof_presentation.dart';
 import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
@@ -321,6 +322,7 @@ class _SellerDashboardState extends State<SellerDashboard>
             onPressed: () => showPartnerAccountSheet(
               context,
               role: 'seller',
+              establishmentId: widget.sellerId,
               roleLabel: 'Vendeur Marketplace',
               name: _sellerName,
               phone: widget.sellerData['phone'] as String?,
@@ -1194,6 +1196,7 @@ class _OrderCard extends StatelessWidget {
       ),
       child: Column(
         children: [
+          ProofActions(orderId: order.id, partner: true),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
@@ -1245,7 +1248,7 @@ class _OrderCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  "${order.budget} FCFA — ${order.paymentMethod == 'wallet' ? '💳 Wallet' : '💵 Espèces'}",
+                  "${order.productAmount ?? order.budget} FCFA — ${order.paymentMethod == 'wallet' ? '💳 Wallet' : '💵 Espèces'}",
                   style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                 ),
                 const Divider(height: 20),

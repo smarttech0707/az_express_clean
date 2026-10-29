@@ -1,0 +1,7 @@
+{
+  "FIREBASE_PROJECT_ID": "<id-projet-test, ex. az-express-test>",
+  "FIREBASE_ANDROID_APP_ID": "<appId de l'app Android com.azexpress.app.test enregistree dans le projet de test>",
+  "FIREBASE_ANDROID_API_KEY": "<cle API Android du projet de test>",
+  "FIREBASE_MESSAGING_SENDER_ID": "<numero du projet de test>",
+  "FIREBASE_STORAGE_BUCKET": "<id-projet-test>.firebasestorage.app"
+}

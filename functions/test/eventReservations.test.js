@@ -340,3 +340,33 @@ test('createEventReservationCF: receipt replay bypasses rate limiting and return
   assert.equal(ledger.length, 1);
   assert.equal(ledger[0][1].orderId, first.reservationId);
 });
+
+function reservationData(overrides = {}) {
+  return {
+    attemptId: 'test-attempt-0002', items: [{ offerId: 'o1', quantity: 1 }],
+    eventDateMs: Date.now(), eventTime: '18:00', address: 'Abengourou', description: 'Fête', paymentMethod: 'wallet',
+    delivery: false, installation: false, dismantling: false, ...overrides,
+  };
+}
+
+test('createEventReservationCF: prestataire en cours de suppression ou supprimé : réservation refusée, client non débité', async () => {
+  for (const flag of [{ deletionRequested: true }, { isDeleted: true }]) {
+    const { db, store } = makeFakeDb({
+      'event_offers/o1': seedOffer(), 'event_providers/p1': seedProvider(flag), 'clients/c1': { wallet: 100000 },
+    });
+    await assert.rejects(() => build(db).run({ auth: { uid: 'c1' }, data: reservationData() }), (e) => e.code === 'failed-precondition');
+    assert.equal(store.get('clients/c1').wallet, 100000);
+    assert.equal([...store.keys()].some((k) => k.startsWith('event_reservations/')), false);
+  }
+});
+
+test('createEventReservationCF: client en cours de suppression ou avec tombstone : réservation refusée, aucun débit', async () => {
+  for (const extra of [{ 'clients/c1': { wallet: 100000, deletionRequested: true } }, { 'account_tombstones/c1': { state: 'deleting' } }]) {
+    const { db, store } = makeFakeDb({
+      'event_offers/o1': seedOffer(), 'event_providers/p1': seedProvider(), 'clients/c1': { wallet: 100000 }, ...extra,
+    });
+    await assert.rejects(() => build(db).run({ auth: { uid: 'c1' }, data: reservationData() }), (e) => e.code === 'failed-precondition');
+    assert.equal(store.get('clients/c1').wallet, 100000);
+    assert.equal([...store.keys()].some((k) => k.startsWith('event_reservations/')), false);
+  }
+});

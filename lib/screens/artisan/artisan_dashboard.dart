@@ -1,12 +1,12 @@
-import 'dart:io';
+import 'dart:convert';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/account_deletion_dialog.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import 'artisan_login.dart' show kArtisanLastDocIdPrefKey;
 
@@ -47,16 +47,17 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
 
     setState(() => _uploading = true);
     try {
-      final file = File(picked.path);
-      final ref = FirebaseStorage.instance.ref(
-          'service_providers/${widget.docId}/photo_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await ref.putFile(file);
-      final url = await ref.getDownloadURL();
+      // Écriture faite par le serveur : la session artisan est anonyme (les règles Storage/Firestore refusent
+      // l'écriture directe), et le serveur vérifie que cette session est bien celle liée à CE profil.
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('manageArtisanPhotosCF')
+          .call({
+        'action': 'add',
+        'docId': widget.docId,
+        'imageBase64': base64Encode(await picked.readAsBytes()),
+      });
+      final url = (result.data as Map)['data']['url'] as String;
       final updated = [..._photos, url];
-      await FirebaseFirestore.instance
-          .collection('service_providers')
-          .doc(widget.docId)
-          .update({'photos': updated});
       setState(() => _photos = updated);
       _snack("Photo ajoutée avec succès !", Colors.green);
     } catch (e) {
@@ -90,15 +91,10 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
 
     setState(() => _uploading = true);
     try {
-      // Delete from Storage
-      try {
-        await FirebaseStorage.instance.refFromURL(_photos[index]).delete();
-      } catch (_) {}
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('manageArtisanPhotosCF')
+          .call({'action': 'delete', 'docId': widget.docId, 'url': _photos[index]});
       final updated = [..._photos]..removeAt(index);
-      await FirebaseFirestore.instance
-          .collection('service_providers')
-          .doc(widget.docId)
-          .update({'photos': updated});
       setState(() => _photos = updated);
       _snack("Photo supprimée", Colors.green);
     } catch (e) {
@@ -255,6 +251,13 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_forever_rounded),
+            tooltip: "Supprimer mon compte",
+            onPressed: () => showAccountDeletionRequestDialog(context,
+                role: 'artisan',
+                initialPhone: widget.initialData['phone'] as String?),
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,

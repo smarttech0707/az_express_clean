@@ -1,3 +1,7 @@
+import 'package:cloud_functions/cloud_functions.dart';
+import '../../delivery_proofs/delivery_proof_service.dart';
+import '../../delivery_proofs/proof_scanner_page.dart';
+import '../../delivery_proofs/delivery_sms_panel.dart';
 import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'dart:io';
@@ -21,6 +25,10 @@ import '../../models/order_model.dart';
 import '../../services/notification_service.dart';
 import '../driver_tracking_screen.dart';
 import 'driver_wallet.dart';
+import 'driver_transfer_page.dart';
+import '../../constants/app_constants.dart';
+import '../../services/min_version_service.dart';
+import '../../delivery_proofs/delivery_transfer_service.dart';
 import 'driver_profil.dart';
 
 class DriverDashboard extends StatefulWidget {
@@ -65,6 +73,7 @@ class _DriverDashboardState extends State<DriverDashboard>
     _setOnline(true);
     DriverLocationService.instance.startTracking(widget.driverId);
     _listenDriverDoc();
+    _checkMinVersion();
     // Quand le livreur tape une notification FCM, le listener Firestore
     // _listenPendingRequest() affiche automatiquement le dialog d'acceptation.
     // On n'a rien de plus à faire ici, mais on enregistre le callback pour
@@ -327,8 +336,8 @@ class _DriverDashboardState extends State<DriverDashboard>
   }
 
   // ── Flux de livraison avec preuve obligatoire ────────────────────────────
-  Future<void> _showDeliveryProofSheet(
-      OrderModel order, bool clientPaid) async {
+  Future<void> _showDeliveryProofSheet(OrderModel order, bool clientPaid,
+      {ProofCredential? qrProof}) async {
     String? photoUrl;
     double? gpsLat;
     double? gpsLng;
@@ -419,7 +428,8 @@ class _DriverDashboardState extends State<DriverDashboard>
                               try {
                                 final ref = FirebaseStorage.instance.ref().child(
                                     'delivery_photos/${widget.driverId}/${order.id}.jpg');
-                                await ref.putFile(File(file.path));
+                                await ref.putFile(File(file.path),
+                                    SettableMetadata(contentType: 'image/jpeg'));
                                 photoUrl = await ref.getDownloadURL();
                               } catch (_) {
                                 setS(() => photoUploading = false);
@@ -517,16 +527,29 @@ class _DriverDashboardState extends State<DriverDashboard>
                         : () async {
                             setS(() => confirming = true);
                             try {
-                              await _firestore.deliverOrder(
-                                order.id,
-                                widget.driverId,
-                                order.budget,
-                                markCashPaid:
-                                    order.paymentMethod == 'cash' && clientPaid,
-                                deliveredLat: gpsLat,
-                                deliveredLng: gpsLng,
-                                deliveryPhotoUrl: photoUrl,
-                              );
+                              if (qrProof != null) {
+                                await DeliveryProofService().confirm(
+                                    order.id, 'delivery', qrProof,
+                                    delivery: {
+                                      'markCashPaid':
+                                          order.paymentMethod == 'cash' &&
+                                              clientPaid,
+                                      'deliveredLat': gpsLat,
+                                      'deliveredLng': gpsLng,
+                                      'deliveryPhotoUrl': photoUrl,
+                                    });
+                              } else {
+                                await _firestore.deliverOrder(
+                                  order.id,
+                                  widget.driverId,
+                                  order.budget,
+                                  markCashPaid: order.paymentMethod == 'cash' &&
+                                      clientPaid,
+                                  deliveredLat: gpsLat,
+                                  deliveredLng: gpsLng,
+                                  deliveryPhotoUrl: photoUrl,
+                                );
+                              }
                               if ((order.clientId?.isNotEmpty ?? false) &&
                                   !clientPaid) {
                                 await _firestore
@@ -549,9 +572,10 @@ class _DriverDashboardState extends State<DriverDashboard>
                               setS(() => confirming = false);
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      "Échec de la confirmation. Vérifiez votre connexion et réessayez."),
+                                SnackBar(
+                                  content: Text(qrProof != null
+                                      ? proofError(e)
+                                      : "Échec de la confirmation. Vérifiez votre connexion et réessayez."),
                                   backgroundColor: Colors.red,
                                 ),
                               );
@@ -592,7 +616,7 @@ class _DriverDashboardState extends State<DriverDashboard>
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _OrderRequestDialog(
+      builder: (_) => OrderRequestDialog(
         order: order,
         driverId: widget.driverId,
         driverLat: _driverLat,
@@ -641,6 +665,17 @@ class _DriverDashboardState extends State<DriverDashboard>
             ),
           ),
           actions: [
+            if (AppConfig.deliveryTransferEnabled)
+            IconButton(
+              tooltip: 'Remplacements de livreur',
+              icon: const Icon(Icons.swap_horiz_rounded, color: Colors.white),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DriverTransferPage(driverId: widget.driverId),
+                ),
+              ),
+            ),
             GestureDetector(
               onTap: () => Navigator.push(
                 context,
@@ -1179,6 +1214,8 @@ class _DriverDashboardState extends State<DriverDashboard>
                     const SizedBox(height: 10),
 
                     // Main action button
+                    if (isPickedUp && deliveryProofUiEnabled && deliverySmsUiEnabled)
+                      DeliverySmsPanel(orderId: order.id, driver: true),
                     SizedBox(
                       width: double.infinity,
                       height: 52,
@@ -1192,6 +1229,34 @@ class _DriverDashboardState extends State<DriverDashboard>
                           elevation: 0,
                         ),
                         onPressed: () async {
+                          ProofCredential? qrProof;
+                          if (deliveryProofUiEnabled) {
+                            try {
+                              final snap = await FirebaseFirestore.instance
+                                  .collection('orders')
+                                  .doc(order.id)
+                                  .get();
+                              if (!mounted) return;
+                              if (snap.data()?['deliveryProofMode'] ==
+                                  'qr_v1') {
+                                qrProof = await Navigator.push<ProofCredential>(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => ProofScannerPage(
+                                            orderId: order.id,
+                                            type: isPickedUp
+                                                ? 'delivery'
+                                                : 'pickup')));
+                                if (qrProof == null || !mounted) return;
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(proofError(e))));
+                              }
+                              return;
+                            }
+                          }
                           if (isPickedUp) {
                             bool clientPaid = true;
                             if (order.paymentMethod == 'cash' &&
@@ -1200,21 +1265,64 @@ class _DriverDashboardState extends State<DriverDashboard>
                               if (result == null) return;
                               clientPaid = result;
                             }
-                            await _showDeliveryProofSheet(order, clientPaid);
+                            await _showDeliveryProofSheet(order, clientPaid,
+                                qrProof: qrProof);
                           } else {
-                            await _firestore.pickUpOrder(order.id);
+                            if (qrProof != null) {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (dialogContext) => AlertDialog(
+                                  title:
+                                      const Text('Confirmer la récupération'),
+                                  content: const Text(
+                                      'Avez-vous reçu la commande de l’expéditeur ou du partenaire ?'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialogContext, false),
+                                        child: const Text('Annuler')),
+                                    FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialogContext, true),
+                                        child: const Text('Confirmer')),
+                                  ],
+                                ),
+                              );
+                              if (confirmed != true || !mounted) return;
+                              try {
+                                await DeliveryProofService()
+                                    .confirm(order.id, 'pickup', qrProof);
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(proofError(e))));
+                                }
+                              }
+                            } else {
+                              await _firestore.pickUpOrder(order.id);
+                            }
                           }
                         },
                         child: Text(
                           isPickedUp
                               ? "Confirmer la livraison"
-                              : "Colis récupéré",
+                              : deliveryProofUiEnabled
+                                  ? "Scanner le QR code / récupérer"
+                                  : "Colis récupéré",
                           style: const TextStyle(
                               fontSize: 16,
                               color: Colors.white,
                               fontWeight: FontWeight.bold),
                         ),
                       ),
+                    ),
+
+                    const SizedBox(height: 4),
+                    TextButton.icon(
+                      icon: const Icon(Icons.report_problem_rounded,
+                          color: AppColors.primary),
+                      label: const Text('Signaler un problème'),
+                      onPressed: () => _reportProblem(order),
                     ),
 
                     if (order.voiceMessage != null) ...[
@@ -1246,6 +1354,91 @@ class _DriverDashboardState extends State<DriverDashboard>
         ),
       ),
     );
+  }
+
+  bool _reportBusy = false;
+
+  /// Version minimale (préparation de la fermeture de l'acceptation directe) :
+  /// sans document `config/app_versions` ou sans `enforce: true`, aucun blocage.
+  Future<void> _checkMinVersion() async {
+    final r = await MinVersionService().check('driver');
+    if (!mounted || r.status == MinVersionStatus.ok) return;
+    final required = r.status == MinVersionStatus.updateRequired;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !required,
+      builder: (ctx) => PopScope(
+        canPop: !required,
+        child: AlertDialog(
+          title: const Text('Mise à jour disponible'),
+          content: Text(r.message ??
+              (required
+                  ? 'Installez la dernière version pour continuer à accepter des courses.'
+                  : 'Une nouvelle version est disponible.')),
+          actions: [
+            if (!required)
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx), child: const Text('Plus tard')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// « Signaler un problème » : avant récupération la course est libérée
+  /// (commission remboursée une fois, remise en file) ; après récupération un
+  /// remplaçant est demandé et le livreur reste responsable jusqu'à la remise.
+  Future<void> _reportProblem(OrderModel order) async {
+    if (_reportBusy) return;
+    final picked = order.status == 'picked_up';
+    if (picked && !AppConfig.deliveryTransferEnabled) {
+      // `deliveryTransferCF` n'est pas encore déployée : ne pas proposer un parcours qui échouerait.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Le remplacement de livreur n’est pas encore disponible. Contactez le support.')));
+      return;
+    }
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              picked
+                  ? 'Demander un remplaçant (vous gardez le colis jusqu’à la remise)'
+                  : 'Libérer cette course (le colis n’est pas encore récupéré)',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          for (final e in transferReasons.entries)
+            ListTile(title: Text(e.value), onTap: () => Navigator.pop(ctx, e.key)),
+        ]),
+      ),
+    );
+    if (reason == null || !mounted) return;
+    setState(() => _reportBusy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      if (picked) {
+        await DeliveryTransferService().request(order.id, reason);
+        messenger.showSnackBar(const SnackBar(
+            content: Text('Demande envoyée aux livreurs de votre ville.')));
+        if (mounted) {
+          Navigator.push(context, MaterialPageRoute(
+              builder: (_) => DriverTransferPage(driverId: widget.driverId)));
+        }
+      } else {
+        await _firestore.releaseOrderBeforePickup(
+            order.id, reason == 'fatigue' ? 'other' : reason);
+        messenger.showSnackBar(const SnackBar(
+            content: Text('Course libérée. Votre commission est remboursée.')));
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', ''))));
+    } finally {
+      if (mounted) setState(() => _reportBusy = false);
+    }
   }
 
   Widget _infoRow(IconData icon, String text) {
@@ -1305,36 +1498,44 @@ Widget _buildModeBadge(String deliveryMode) {
 // DIALOG STYLE YANGO — POPUP DE DEMANDE DE COURSE
 // ============================================================
 
-class _OrderRequestDialog extends StatefulWidget {
+class OrderRequestDialog extends StatefulWidget {
   final OrderModel order;
   final String driverId;
   final double? driverLat;
   final double? driverLng;
   final FirestoreService firestore;
   final VoidCallback onDone;
+  final Stream<Map<String, dynamic>?>? orderUpdates;
 
-  const _OrderRequestDialog({
+  const OrderRequestDialog({
+    super.key,
     required this.order,
     required this.driverId,
     required this.driverLat,
     required this.driverLng,
     required this.firestore,
     required this.onDone,
+    this.orderUpdates,
   });
 
   @override
-  State<_OrderRequestDialog> createState() => _OrderRequestDialogState();
+  State<OrderRequestDialog> createState() => OrderRequestDialogState();
 }
 
-class _OrderRequestDialogState extends State<_OrderRequestDialog> {
+class OrderRequestDialogState extends State<OrderRequestDialog> {
   late int _secondsLeft;
   Timer? _timer;
-  final AudioPlayer _dialogPlayer = AudioPlayer();
+  AudioPlayer? _audioPlayer;
+  AudioPlayer get _dialogPlayer => _audioPlayer ??= AudioPlayer();
   bool _playingVoice = false;
   bool _acceptingWithSelfie = false;
+  bool _declining = false;
+  bool _closed = false;
+  bool _invalidated = false;
+  bool get _busy => _acceptingWithSelfie || _declining;
   double? _resolvedLat;
   double? _resolvedLng;
-  StreamSubscription<DocumentSnapshot>? _orderStatusSub;
+  StreamSubscription<Map<String, dynamic>?>? _orderStatusSub;
 
   @override
   void initState() {
@@ -1346,24 +1547,35 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
   }
 
   // Ferme le dialog automatiquement si un autre livreur accepte en mode broadcast
+  void _finish() {
+    if (!mounted || _closed) return;
+    _closed = true;
+    _timer?.cancel();
+    widget.onDone();
+    Navigator.of(context).pop();
+  }
+
+  void _message(String text) {
+    if (!mounted || _closed) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
   void _watchOrderStatusForBroadcast() {
-    if (widget.order.status != 'broadcast') return;
-    _orderStatusSub = FirebaseFirestore.instance
-        .collection('orders')
-        .doc(widget.order.id)
-        .snapshots()
-        .listen((snap) {
-      if (!snap.exists || !mounted) return;
-      final status = snap.data()?['status'] as String? ?? '';
-      if (status != 'broadcast') {
-        _timer?.cancel();
-        widget.onDone();
-        if (mounted) Navigator.of(context).pop();
-      }
+    final updates = widget.orderUpdates ?? FirebaseFirestore.instance
+        .collection('orders').doc(widget.order.id).snapshots()
+        .map((snap) => snap.data());
+    _orderStatusSub = updates.listen((data) {
+      if (!mounted || _closed) return;
+      final valid = widget.order.status == 'broadcast'
+          ? (data?['status'] == 'broadcast')
+          : (data?['status'] == 'assigned' && data?['driverId'] == widget.driverId);
+      _invalidated = !valid;
+      if (!valid && !_busy) _finish();
+    }, onError: (Object error) {
+      _message('Synchronisation indisponible. Verifiez votre connexion.');
     });
   }
 
-  // Résoudre la position du livreur : GPS local d'abord, sinon Firestore
   Future<void> _resolveDriverPosition() async {
     if (widget.driverLat != null && widget.driverLat != 0) {
       setState(() {
@@ -1393,7 +1605,7 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
   void dispose() {
     _timer?.cancel();
     _orderStatusSub?.cancel();
-    _dialogPlayer.dispose();
+    _audioPlayer?.dispose();
     super.dispose();
   }
 
@@ -1422,6 +1634,7 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
   }
 
   Future<void> _accept() async {
+    if (_busy || _closed || !mounted) return;
     _timer?.cancel();
     setState(() => _acceptingWithSelfie = true);
 
@@ -1434,6 +1647,8 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
         imageQuality: 70,
       );
 
+      if (!mounted || _closed) return;
+      if (_invalidated) { _finish(); return; }
       if (img == null) {
         // Annulé — relancer le timer
         setState(() {
@@ -1447,7 +1662,10 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
       // 2. Upload selfie
       final selfieRef = FirebaseStorage.instance.ref().child(
           "acceptance_selfies/${widget.order.id}/${widget.driverId}.jpg");
-      await selfieRef.putFile(File(img.path));
+      // Type MIME explicite : storage.rules exige image/* et, sans métadonnées, certains fichiers temporaires de
+      // la caméra partent en application/octet-stream (refus 403).
+      await selfieRef.putFile(File(img.path),
+          SettableMetadata(contentType: 'image/jpeg'));
       final selfieUrl = await selfieRef.getDownloadURL();
 
       // 3. Récupérer photo de profil du livreur
@@ -1457,9 +1675,13 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
           .doc(widget.driverId)
           .get();
       if (driverDoc.exists) {
-        driverPhotoUrl = driverDoc["photoUrl"];
+        // Photo de profil facultative : un livreur peut l'avoir supprimée ou ne jamais en avoir eu
+        // (compte créé par un patron de flotte). `doc["champ"]` lève une exception si le champ manque.
+        driverPhotoUrl = driverDoc.data()?['photoUrl'] as String?;
       }
 
+      if (!mounted || _closed) return;
+      if (_invalidated) { _finish(); return; }
       // 4. Accepter la course
       await widget.firestore.acceptOrder(
         widget.order.id,
@@ -1468,10 +1690,11 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
         driverPhotoUrl: driverPhotoUrl,
       );
 
-      widget.onDone();
-      if (mounted) Navigator.of(context).pop();
+      _finish();
     } catch (e) {
+      if (!mounted || _closed) return;
       setState(() => _acceptingWithSelfie = false);
+      if (_invalidated) { _finish(); return; }
       if (mounted) {
         final msg = e.toString();
         if (msg.contains("CREDIT_INSUFFISANT")) {
@@ -1479,6 +1702,16 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
           final wallet = parts.length > 1 ? parts[1] : "0";
           final needed = parts.length > 2 ? parts[2] : "100";
           _showCreditDialog(wallet, needed);
+        } else if (msg.contains("LEGACY_PARTNER_ORDER")) {
+          // Course d'une ancienne version de l'app client : aucun frais de
+          // livraison n'a été encaissé, elle est traitée par l'administration.
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  "Cette course ne peut pas être acceptée pour le moment. "
+                  "Elle est en cours de traitement par AZ Express."),
+            ),
+          );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1557,10 +1790,33 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
   }
 
   Future<void> _decline() async {
+    if (_busy || _closed || !mounted) return;
     _timer?.cancel();
-    await widget.firestore.declineOrder(widget.order.id, widget.driverId);
-    widget.onDone();
-    if (mounted) Navigator.of(context).pop();
+    setState(() => _declining = true);
+    try {
+      final result = await widget.firestore.declineOrder(widget.order.id, widget.driverId);
+      if (!mounted || _closed) return;
+      _message(result.recoveryPending
+          ? 'Refus enregistre. Reprise de la recherche en attente.'
+          : 'Refus enregistre.');
+      _finish();
+    } on FirebaseFunctionsException catch (error) {
+      const messages = {
+        'unauthenticated': 'Reconnectez-vous pour refuser cette mission.',
+        'permission-denied': 'Cette mission ne vous est plus affectee.',
+        'failed-precondition': 'Cette mission ne peut plus etre refusee.',
+        'not-found': 'Cette mission est introuvable.',
+        'resource-exhausted': 'Trop de tentatives. Reessayez dans un instant.',
+      };
+      _message(messages[error.code] ?? 'Refus non confirme. Verifiez votre connexion et reessayez.');
+    } catch (_) {
+      _message('Refus non confirme. Reessayez ; un refus deja enregistre ne sera pas repete.');
+    } finally {
+      if (mounted && !_closed) {
+        setState(() => _declining = false);
+        if (_invalidated) _finish();
+      }
+    }
   }
 
   @override
@@ -1737,9 +1993,9 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
                     ),
-                    onPressed: _decline,
+                    onPressed: _busy ? null : _decline,
                     child:
-                        const Text("Refuser", style: TextStyle(fontSize: 16)),
+                        Text(_declining ? "Refus en cours..." : "Refuser", style: const TextStyle(fontSize: 16)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1751,7 +2007,7 @@ class _OrderRequestDialogState extends State<_OrderRequestDialog> {
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
                     ),
-                    onPressed: _acceptingWithSelfie ? null : _accept,
+                    onPressed: _busy ? null : _accept,
                     child: _acceptingWithSelfie
                         ? const SizedBox(
                             width: 22,

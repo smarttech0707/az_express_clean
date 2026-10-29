@@ -40,7 +40,7 @@ class WebPrivacyPage extends StatelessWidget {
         Text('Politique de Confidentialité',
             style: kH1Style(ctx), textAlign: TextAlign.center),
         const SizedBox(height: 12),
-        Text('Dernière mise à jour : 9 juillet 2026',
+        Text('Dernière mise à jour : 29 octobre 2026',
             style: GoogleFonts.inter(fontSize: 14, color: kTextMuted)),
       ]),
     );
@@ -59,7 +59,7 @@ class WebPrivacyPage extends StatelessWidget {
               'AZ Express ("nous", "notre", "nos") s\'engage à protéger la vie privée de ses utilisateurs. '
                   'La présente Politique de Confidentialité explique comment nous collectons, utilisons, '
                   'divulguons et protégeons vos informations personnelles lorsque vous utilisez notre '
-                  'application mobile AZ Express et notre site web az-express.ci.'),
+                  'application mobile AZ Express et notre site web az-express-b0469.web.app.'),
           _Section(
               '2. Informations collectées',
               'Nous collectons les informations suivantes :\n\n'
@@ -68,7 +68,7 @@ class WebPrivacyPage extends StatelessWidget {
                   '• Informations de commande : adresses de livraison, historique des commandes\n'
                   '• Informations de paiement : données de transaction (non stockées localement)\n'
                   '• Données techniques : identifiant d\'appareil, tokens de notification push\n'
-                  '• Communications : messages avec le support client'),
+                  '• Communications : messages avec le support client et messages vocaux échangés dans le suivi d\'une commande'),
           _Section(
               '3. Utilisation des données',
               'Vos données sont utilisées pour :\n\n'
@@ -123,21 +123,30 @@ class WebPrivacyPage extends StatelessWidget {
                   '• Retirer votre consentement\n\n'
                   'Pour exercer ces droits, contactez-nous à : privacy@az-express.ci\n\n'
                   'Pour demander la suppression de votre compte, utilisez le menu de l\'application '
-                  '(Profil > Supprimer mon compte) ou notre page dédiée : az-express.ci/delete-account.'),
+                  '(Profil > Supprimer mon compte) ou notre page dédiée : az-express-b0469.web.app/delete-account.'),
           _Section(
               '9. Assistant intelligent AZ IA',
               'AZ Express propose un assistant conversationnel intelligent (« AZ IA ») pour vous aider '
                   'à effectuer vos commandes et répondre à vos questions.\n\n'
-                  '• AZ IA fait appel à un fournisseur d\'intelligence artificielle externe, Anthropic '
-                  '(modèle Claude), pour comprendre et répondre à vos demandes\n'
-                  '• Seul le texte nécessaire au traitement de votre demande (votre message, et si vous '
-                  'utilisez la fonction vocale, sa transcription) est transmis à ce fournisseur\n'
+                  '• AZ IA fait appel à des fournisseurs d\'intelligence artificielle externes : Anthropic '
+                  '(modèle Claude, fournisseur principal) et, uniquement s\'il est indisponible, Google (Gemini)\n'
+                  '• Aucune donnée n\'est envoyée sans votre accord explicite, demandé avant votre premier '
+                  'message ; en cas de refus, AZ IA n\'est pas utilisé. Vous pouvez retirer votre accord '
+                  'depuis le menu ⋮ de la conversation\n'
+                  '• Toujours transmis : votre message (ou la transcription de votre voix) et le début de la '
+                  'conversation en cours. Transmis seulement si vous les utilisez ou si votre demande en a besoin : '
+                  'les photos jointes ; votre nom, téléphone, adresses et préférences enregistrées ; votre dernière '
+                  'commande, le suivi d\'une commande, votre solde ou vos mouvements de portefeuille ; votre position '
+                  'GPS si la localisation est autorisée. Une question générale n\'en envoie aucun\n'
                   '• Ces données ne sont jamais vendues, ni utilisées à des fins publicitaires\n'
                   '• L\'objectif unique de ce traitement est de vous assister dans l\'utilisation de '
                   'l\'application (suivi de commande, aide à la commande, réponses à vos questions)\n'
                   '• Aucune action financière ou destructrice (paiement, retrait, remboursement, suppression) '
                   'n\'est jamais exécutée par AZ IA sans votre confirmation explicite\n'
-                  '• Vous pouvez à tout moment consulter, exporter ou effacer votre historique de conversation '
+                  '• Saisie vocale : la dictée utilise la reconnaissance vocale de votre téléphone (Apple sur '
+                  'iPhone, Google sur Android). L\'audio peut être traité par ce service selon ses propres '
+                  'conditions ; AZ Express et AZ IA ne reçoivent que le texte transcrit, jamais l\'enregistrement\n'
+                  '• Vous pouvez à tout moment consulter ou effacer votre historique de conversation '
                   'avec AZ IA depuis le menu de la conversation dans l\'application'),
           _Section(
               '10. Notifications Push',

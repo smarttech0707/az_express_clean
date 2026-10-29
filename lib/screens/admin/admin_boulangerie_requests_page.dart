@@ -1,3 +1,4 @@
+import '../../services/partner_approval_service.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -43,9 +44,8 @@ class _AdminBoulangerieRequestsPageState
       return;
     }
     final db = FirebaseFirestore.instance;
-    final batch = db.batch();
-
-    batch.set(db.collection('boulangeries').doc(uid), {
+    try {
+      await approvePartnerOnce(db:db,requestCollection:'boulangerie_requests',requestId:uid,collection:'boulangeries',idField:'boulangerieId',stableId:uid,profile:{
       'uid': uid,
       'ownerName': data['ownerName'] ?? '',
       'name': data['boulangerieName'] ?? '',
@@ -56,14 +56,11 @@ class _AdminBoulangerieRequestsPageState
       'isActive': true,
       'isOpen': false,
       'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    batch.update(db.collection('boulangerie_requests').doc(uid), {
-      'status': 'approved',
-      'approvedAt': FieldValue.serverTimestamp(),
-    });
-
-    await batch.commit();
+      });
+    } catch (_) {
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Approbation non confirmee. Verifiez la liaison existante.')));
+      return;
+    }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(

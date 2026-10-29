@@ -6,6 +6,7 @@ import 'admin_partner_account_service.dart';
 import '../../services/subscription_service.dart';
 import '../../utils/partner_location_validator.dart';
 import '../../widgets/partner_location_input.dart';
+import '../../widgets/partner_temp_credentials_dialog.dart';
 
 /// Payload du formulaire : l'édition ne réécrit jamais un solde, même lu avant
 /// une transaction concurrente. Les valeurs initiales sont réservées à CREATE.
@@ -311,7 +312,6 @@ class _SellerFormPage extends StatefulWidget {
 class _SellerFormPageState extends State<_SellerFormPage> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
   final _latCtrl = TextEditingController();
   final _lngCtrl = TextEditingController();
 
@@ -327,7 +327,6 @@ class _SellerFormPageState extends State<_SellerFormPage> {
 
   bool _isActive = true;
   bool _saving = false;
-  bool _showPass = false;
   bool get _isEditing => widget.docId != null;
 
   @override
@@ -348,7 +347,6 @@ class _SellerFormPageState extends State<_SellerFormPage> {
   void dispose() {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
-    _passCtrl.dispose();
     _latCtrl.dispose();
     _lngCtrl.dispose();
     super.dispose();
@@ -357,14 +355,9 @@ class _SellerFormPageState extends State<_SellerFormPage> {
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
     final phone = _phoneCtrl.text.trim().replaceAll(' ', '');
-    final pass = _passCtrl.text;
 
     if (name.isEmpty || phone.isEmpty) {
       _snack("Nom et téléphone obligatoires");
-      return;
-    }
-    if (!_isEditing && pass.length < 6) {
-      _snack("Mot de passe minimum 6 caractères");
       return;
     }
     final locationError =
@@ -377,43 +370,61 @@ class _SellerFormPageState extends State<_SellerFormPage> {
     setState(() => _saving = true);
 
     try {
-      String uid;
+      final latitude = double.parse(_latCtrl.text.trim());
+      final longitude = double.parse(_lngCtrl.text.trim());
 
       if (_isEditing) {
-        uid = widget.docId!;
+        await FirebaseFirestore.instance
+            .collection('sellers')
+            .doc(widget.docId!)
+            .set(
+              buildSellerProfileData(
+                isCreating: false,
+                name: name,
+                phone: phone,
+                type: _type,
+                isActive: _isActive,
+                latitude: latitude,
+                longitude: longitude,
+              ),
+              SetOptions(merge: true),
+            );
       } else {
-        // Créer compte Firebase Auth
-        uid = await AdminPartnerAccountService.create(
+        // Compte Auth ET profil complet créés côté serveur, de façon
+        // reprenable : plus de seconde écriture Flutter qui pourrait laisser
+        // un vendeur sans `isActive` (connexion refusée, recréation bloquée).
+        final created = await AdminPartnerAccountService.create(
           kind: 'seller',
           email: "$phone@az-seller.ci",
-          password: pass,
+          isActive: _isActive,
+          profile: {
+            'name': name,
+            'phone': phone,
+            'type': _type,
+            'lat': latitude,
+            'lng': longitude,
+          },
+        );
+        // Le mot de passe temporaire n'est lisible qu'ici, une seule fois.
+        if (!mounted) return;
+        await showPartnerTempCredentialsDialog(
+          context,
+          title: 'Compte vendeur créé',
+          identifier: phone,
+          tempPassword: created.tempPassword,
         );
       }
 
-      await FirebaseFirestore.instance.collection('sellers').doc(uid).set(
-            buildSellerProfileData(
-              isCreating: !_isEditing,
-              name: name,
-              phone: phone,
-              type: _type,
-              isActive: _isActive,
-              latitude: double.parse(_latCtrl.text.trim()),
-              longitude: double.parse(_lngCtrl.text.trim()),
-            ),
-            SetOptions(merge: true),
-          );
-
       if (!mounted) return;
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_isEditing
-              ? "Vendeur modifié"
-              : "Compte vendeur créé — ID: $phone / MDP: $pass"),
-          backgroundColor: const Color(0xFF1565C0),
-          duration: const Duration(seconds: 6),
-        ),
-      );
+      if (_isEditing) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Vendeur modifié"),
+            backgroundColor: Color(0xFF1565C0),
+          ),
+        );
+      }
     } on FirebaseAuthException catch (e) {
       _snack(e.code == 'email-already-in-use'
           ? "Ce numéro a déjà un compte"
@@ -466,27 +477,10 @@ class _SellerFormPageState extends State<_SellerFormPage> {
           ),
           const SizedBox(height: 12),
           if (!_isEditing)
-            TextField(
-              controller: _passCtrl,
-              obscureText: !_showPass,
-              decoration: InputDecoration(
-                labelText: "Mot de passe *",
-                hintText: "Min. 6 caractères",
-                prefixIcon:
-                    const Icon(Icons.lock_rounded, color: Color(0xFF1565C0)),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                      _showPass ? Icons.visibility_off : Icons.visibility,
-                      color: Colors.grey),
-                  onPressed: () => setState(() => _showPass = !_showPass),
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+            const Text(
+              "Un mot de passe temporaire sera généré à la création. Le "
+              "vendeur choisira son propre mot de passe à sa première connexion.",
+              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
 
           const SizedBox(height: 20),

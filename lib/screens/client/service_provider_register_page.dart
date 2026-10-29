@@ -215,7 +215,8 @@ class _ServiceProviderRegisterPageState
         try {
           final ref = FirebaseStorage.instance.ref(
               'service_providers/$docId/photo_${DateTime.now().millisecondsSinceEpoch}_$i.jpg');
-          await ref.putFile(_photos[i]);
+          await ref.putFile(
+              _photos[i], SettableMetadata(contentType: 'image/jpeg'));
           photoUrls.add(await ref.getDownloadURL());
         } catch (_) {}
       }

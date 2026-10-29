@@ -430,6 +430,72 @@ test('orders: le livreur assigné peut faire avancer assigned→accepted', async
   await assertSucceeds(asClient('d1').doc('orders/o1').update({ status: 'accepted' }));
 });
 
+test('orders: les transitions legacy restent possibles, mais le mode QR exige le serveur', async () => {
+  await seed(async (db) => {
+    await db.doc('orders/legacy').set({
+      clientId: 'c1', driverId: 'd1', budget: 1000, isPaid: false,
+      paymentMethod: 'cash', status: 'accepted',
+    });
+    await db.doc('orders/qr').set({
+      clientId: 'c1', driverId: 'd1', budget: 1000, isPaid: false,
+      paymentMethod: 'cash', status: 'accepted', deliveryProofMode: 'qr_v1',
+    });
+  });
+
+  await assertSucceeds(asClient('d1').doc('orders/legacy').update({ status: 'picked_up' }));
+  await assertFails(asClient('d1').doc('orders/qr').update({ status: 'picked_up' }));
+});
+
+test('delivery_proofs SMS: private jobs and attempts denied to clients', async () => {
+  const paths = ['delivery_proofs/sms_bzE', 'delivery_proofs/sms_bzE/attempts/p1', 'delivery_proofs/sms_budget_day_global'];
+  await seed(async db => {
+    for (const path of paths) await db.doc(path).set({ status: 'queued', phone: '+2250700000000' });
+  });
+  for (const uid of ['c1', 'd1', 'guest1']) {
+    for (const path of paths) {
+      await assertFails(asClient(uid).doc(path).get());
+      await assertFails(asClient(uid).doc(path).update({ status: 'queued' }));
+      await assertFails(asClient(uid).doc(path).delete());
+    }
+  }
+});
+
+test('delivery_proofs SMS: driver and seller cannot redirect recipient; GPS still allowed', async () => {
+  await seed(db => db.doc('orders/sms1').set({
+    clientId: 'c1', driverId: 'd1', sellerId: 's1', sellerType: 'seller',
+    status: 'picked_up', deliveryProofMode: 'qr_v1', budget: 1000,
+    recipientName: 'Proche', recipientPhone: '+2250700000000', isPaid: false, paymentMethod: 'cash',
+  }));
+  for (const uid of ['d1', 's1']) {
+    await assertFails(asClient(uid).doc('orders/sms1').update({ recipientPhone: '+2250500000000' }));
+    await assertFails(asClient(uid).doc('orders/sms1').update({ recipientName: 'Autre' }));
+  }
+  await assertSucceeds(asClient('d1').doc('orders/sms1').update({ driverLat: 5.3, driverLng: -4.0 }));
+});
+
+test('delivery_proofs: aucune lecture directe des secrets depuis un compte utilisateur', async () => {
+  await seed((db) => db.doc('delivery_proofs/o1_pickup/versions/p1').set({
+    tokenHash: 'hash-only', pinHash: 'hash-only', status: 'active',
+  }));
+  await assertFails(
+    asClient('d1').doc('delivery_proofs/o1_pickup/versions/p1').get(),
+  );
+  await assertFails(
+    asClient('d1').collection('delivery_proofs/o1_pickup/versions').get(),
+  );
+});
+
+test('delivery_proofs: recipient grants are never readable or writable by clients', async () => {
+  await seed(db => db.doc('delivery_proofs/guest_publicLocator').set({
+    recoveryHash: 'hash-only', attempts: 0, used: false,
+  }));
+  for (const uid of ['c1', 'd1', 'guest1']) {
+    await assertFails(asClient(uid).doc('delivery_proofs/guest_publicLocator').get());
+    await assertFails(asClient(uid).doc('delivery_proofs/guest_publicLocator').update({ used: false }));
+  }
+  await assertFails(testEnv.unauthenticatedContext().firestore().doc('delivery_proofs/guest_publicLocator').get());
+});
+
 test('orders: le livreur assigné ne peut PAS sauter directement à "delivered" depuis "assigned"', async () => {
   await seed((db) => db.doc('orders/o1').set({
     clientId: 'c1', driverId: 'd1', budget: 1000, isPaid: false, paymentMethod: 'cash', status: 'assigned',

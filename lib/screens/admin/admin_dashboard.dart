@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../../partner_qr/partner_qr_page.dart';
+import 'account_deletion_support_page.dart';
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -37,6 +39,8 @@ import 'admin_boulangerie_requests_page.dart';
 import 'admin_pharmacie_requests_page.dart';
 import 'admin_cod_page.dart';
 import 'admin_cash_settlement_page.dart';
+import 'admin_billing_reviews_page.dart';
+import 'admin_transfer_settlements_page.dart';
 import 'admin_support_page.dart';
 import 'admin_reviews_page.dart';
 import 'admin_boulangeries_page.dart';
@@ -392,6 +396,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     return [
       if (_isSuper)
+        go('Suppressions de comptes', 'Suivi et regularisation', Icons.person_remove,
+          const [Color(0xFF455A64), Color(0xFF607D8B)], const AccountDeletionSupportPage()),
+        go('QR des etablissements', 'Identification publique', Icons.qr_code,
+          const [Color(0xFF455A64), Color(0xFF607D8B)], const AdminPartnerQrPage()),
+      if (_isSuper)
         go(
           'Auto & Moto',
           'Annonces, vendeurs et signalements',
@@ -561,6 +570,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (_has('anti_fraude'))
         go('Anti-fraude', 'Clients bloqués COD', Icons.gpp_bad_rounded,
             const [Color(0xFFBF360C), AppColors.primary], const AdminCodPage()),
+      if (_isSuper)
+        go(
+            'Gains transferts',
+            'Partage des gains entre livreurs',
+            Icons.compare_arrows_rounded,
+            const [Color(0xFF1B5E20), Color(0xFF43A047)],
+            const AdminTransferSettlementsPage()),
+      if (_isSuper)
+        go(
+            'Facturation Marketplace',
+            'Frais retenus, livraisons bloquées',
+            Icons.receipt_long_rounded,
+            const [Color(0xFF4527A0), Color(0xFF7E57C2)],
+            const AdminBillingReviewsPage()),
       if (_has('cash_marchand'))
         go(
             'Cash à régler',

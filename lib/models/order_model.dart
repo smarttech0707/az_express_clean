@@ -67,6 +67,9 @@ class OrderModel {
   final double? deliveredLat; // GPS final au moment de la livraison
   final double? deliveredLng;
   final DateTime? deliveredAt; // horodatage de livraison effective
+  /// Prix des produits (Marketplace/Boutique, montants explicites) : `budget`
+  /// y vaut alors les frais de livraison. Lecture seule, jamais réécrit (toMap).
+  final int? productAmount;
   final List<ShoppingItem>?
       items; // liste d'articles courses (ex. AZ IA) — nullable, additif
 
@@ -127,6 +130,7 @@ class OrderModel {
     this.deliveredLng,
     this.deliveredAt,
     this.items,
+    this.productAmount,
   });
 
   factory OrderModel.fromMap(String id, Map<String, dynamic> data) {
@@ -134,6 +138,9 @@ class OrderModel {
       id: id,
       description: data['description'] ?? '',
       budget: (data['budget'] as num? ?? 0).toInt(),
+      productAmount: data['amountsVersion'] == 1
+          ? (data['productAmount'] as num?)?.toInt()
+          : null,
       status: data['status'] ?? 'pending',
       latitude: (data['latitude'] ?? data['deliveryLatitude'] ?? 0).toDouble(),
       longitude:
@@ -328,6 +335,7 @@ class OrderModel {
     double? deliveredLng,
     DateTime? deliveredAt,
     List<ShoppingItem>? items,
+    int? productAmount,
   }) {
     return OrderModel(
       id: id ?? this.id,
@@ -390,6 +398,7 @@ class OrderModel {
       deliveredLng: deliveredLng ?? this.deliveredLng,
       deliveredAt: deliveredAt ?? this.deliveredAt,
       items: items ?? this.items,
+      productAmount: productAmount ?? this.productAmount,
     );
   }
 

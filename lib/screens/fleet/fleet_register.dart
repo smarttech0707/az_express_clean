@@ -114,7 +114,8 @@ class _FleetRegisterState extends State<FleetRegister> {
       // Upload selfie
       final selfieRef =
           FirebaseStorage.instance.ref("fleet_selfies/$uid/selfie.jpg");
-      await selfieRef.putFile(_selfieFile!);
+      await selfieRef.putFile(
+          _selfieFile!, SettableMetadata(contentType: 'image/jpeg'));
       final selfieUrl = await selfieRef.getDownloadURL();
 
       // Upload pièce d'identité (si fournie)
@@ -122,7 +123,8 @@ class _FleetRegisterState extends State<FleetRegister> {
       if (_idPhotoFile != null) {
         final idRef =
             FirebaseStorage.instance.ref("fleet_id_photos/$uid/id.jpg");
-        await idRef.putFile(_idPhotoFile!);
+        await idRef.putFile(
+            _idPhotoFile!, SettableMetadata(contentType: 'image/jpeg'));
         idPhotoUrl = await idRef.getDownloadURL();
       }
 

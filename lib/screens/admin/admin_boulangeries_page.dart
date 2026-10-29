@@ -1,11 +1,10 @@
 import 'dart:io';
-import 'dart:math';
 import '../../widgets/scale_button.dart';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'admin_partner_account_service.dart';
+import '../../widgets/partner_temp_credentials_dialog.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/subscription_service.dart';
@@ -15,13 +14,6 @@ import '../../widgets/partner_location_input.dart';
 
 class AdminBoulangeriesPage extends StatelessWidget {
   const AdminBoulangeriesPage({super.key});
-
-  // ── Génère un mot de passe temporaire sécurisé ────────────────────
-  static String _generatePassword() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    final rand = Random.secure();
-    return List.generate(8, (_) => chars[rand.nextInt(chars.length)]).join();
-  }
 
   static Widget _field(
     TextEditingController c,
@@ -52,9 +44,9 @@ class AdminBoulangeriesPage extends StatelessWidget {
         TextEditingController(text: data?['closeTime'] ?? '13:00');
     final latCtrl = TextEditingController(text: data?['lat']?.toString() ?? '');
     final lngCtrl = TextEditingController(text: data?['lng']?.toString() ?? '');
-    final passCtrl = TextEditingController(
-        text: existing == null ? _generatePassword() : '');
-    bool showPass = existing == null;
+    // Création : mot de passe temporaire généré par le serveur. Édition :
+    // réinitialisation optionnelle (nouveau mot de passe temporaire serveur).
+    bool resetPassword = false;
     bool saving = false;
 
     showDialog(
@@ -95,56 +87,10 @@ class AdminBoulangeriesPage extends StatelessWidget {
                 const SizedBox(height: 10),
 
                 // ── Mot de passe ─────────────────────────────────────
-                TextField(
-                  controller: passCtrl,
-                  obscureText: !showPass,
-                  decoration: InputDecoration(
-                    labelText: existing == null
-                        ? 'Mot de passe temporaire'
-                        : 'Nouveau mot de passe (laisser vide = inchangé)',
-                    prefixIcon: const Icon(Icons.lock_outline, size: 20),
-                    suffixIcon: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: Icon(showPass
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined),
-                          tooltip: showPass
-                              ? 'Masquer le mot de passe'
-                              : 'Afficher le mot de passe',
-                          onPressed: () => setS(() => showPass = !showPass),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.copy_outlined),
-                          tooltip: 'Copier',
-                          onPressed: () {
-                            Clipboard.setData(
-                                ClipboardData(text: passCtrl.text));
-                            ScaffoldMessenger.of(ctx).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Mot de passe copié'),
-                                  duration: Duration(seconds: 2)),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                  ),
-                ),
-                if (existing == null) ...[
-                  const SizedBox(height: 6),
-                  TextButton.icon(
-                    icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label:
-                        const Text('Régénérer', style: TextStyle(fontSize: 12)),
-                    onPressed: () =>
-                        setS(() => passCtrl.text = _generatePassword()),
-                  ),
+                // Jamais choisi par l'administrateur : généré par le serveur
+                // (temporaire), changé par la boulangerie à sa première
+                // connexion.
+                if (existing == null)
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -158,14 +104,25 @@ class AdminBoulangeriesPage extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Copiez ce mot de passe et partagez-le avec la boulangerie.',
+                          'Un mot de passe temporaire sera généré à la création '
+                          'et affiché une seule fois.',
                           style: TextStyle(
                               fontSize: 11, color: Colors.amber.shade800),
                         ),
                       ),
                     ]),
+                  )
+                else
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Réinitialiser le mot de passe',
+                        style: TextStyle(fontSize: 13)),
+                    subtitle: const Text(
+                        'Génère un nouveau mot de passe temporaire ; l\'ancien cesse de fonctionner.',
+                        style: TextStyle(fontSize: 11)),
+                    value: resetPassword,
+                    onChanged: (v) => setS(() => resetPassword = v),
                   ),
-                ],
               ],
             ),
           ),
@@ -192,6 +149,17 @@ class AdminBoulangeriesPage extends StatelessWidget {
                             content: Text('Nom et téléphone obligatoires')));
                         return;
                       }
+                      // Le profil est finalisé côté serveur à la création :
+                      // il doit être complet (sinon refus avant tout compte).
+                      if (existing == null &&
+                          (address.isEmpty ||
+                              openCtrl.text.trim().isEmpty ||
+                              closeCtrl.text.trim().isEmpty)) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                            content: Text(
+                                'Adresse et horaires obligatoires pour créer une boulangerie')));
+                        return;
+                      }
                       final locationError =
                           PartnerLocationValidator.validateText(
                               latCtrl.text, lngCtrl.text);
@@ -203,30 +171,34 @@ class AdminBoulangeriesPage extends StatelessWidget {
                       setS(() => saving = true);
                       try {
                         final db = FirebaseFirestore.instance;
-                        final pass = passCtrl.text.trim();
 
                         if (existing == null) {
                           // Créer compte Firebase Auth
                           final email = '$phone@az-boulangerie.ci';
-                          final uid = await AdminPartnerAccountService.create(
+                          // Compte Auth ET profil complet (isOpen, wallet,
+                          // isActive...) posés côté serveur, de façon
+                          // reprenable : plus de seconde écriture Flutter.
+                          final created = await AdminPartnerAccountService.create(
                             kind: 'boulangerie',
                             email: email,
-                            password: pass,
+                            profile: {
+                              'name': name,
+                              'address': address,
+                              'phone': phone,
+                              'openTime': openCtrl.text.trim(),
+                              'closeTime': closeCtrl.text.trim(),
+                              'lat': double.parse(latCtrl.text.trim()),
+                              'lng': double.parse(lngCtrl.text.trim()),
+                            },
                           );
-
-                          await db.collection('boulangeries').doc(uid).set({
-                            'name': name,
-                            'address': address,
-                            'phone': phone,
-                            'openTime': openCtrl.text.trim(),
-                            'closeTime': closeCtrl.text.trim(),
-                            'isOpen': false,
-                            'wallet': 0,
-                            'isActive': true,
-                            'lat': double.parse(latCtrl.text.trim()),
-                            'lng': double.parse(lngCtrl.text.trim()),
-                            'createdAt': FieldValue.serverTimestamp(),
-                          });
+                          if (ctx.mounted) {
+                            await showPartnerTempCredentialsDialog(
+                              ctx,
+                              title: 'Boulangerie créée',
+                              identifier: phone,
+                              tempPassword: created.tempPassword,
+                            );
+                          }
                         } else {
                           final Map<String, dynamic> updates = {
                             'name': name,
@@ -237,17 +209,25 @@ class AdminBoulangeriesPage extends StatelessWidget {
                             'lat': double.parse(latCtrl.text.trim()),
                             'lng': double.parse(lngCtrl.text.trim()),
                           };
-                          if (pass.isNotEmpty) {
-                            await AdminPartnerAccountService.updatePassword(
-                              kind: 'boulangerie',
-                              uid: existing.id,
-                              password: pass,
-                            );
-                          }
                           await db
                               .collection('boulangeries')
                               .doc(existing.id)
                               .update(updates);
+                          if (resetPassword) {
+                            final temp = await AdminPartnerAccountService
+                                .resetToTemporaryPassword(
+                              kind: 'boulangerie',
+                              uid: existing.id,
+                            );
+                            if (ctx.mounted) {
+                              await showPartnerTempCredentialsDialog(
+                                ctx,
+                                title: 'Mot de passe réinitialisé',
+                                identifier: phone,
+                                tempPassword: temp,
+                              );
+                            }
+                          }
                         }
                         if (ctx.mounted) Navigator.pop(ctx);
                       } catch (e) {

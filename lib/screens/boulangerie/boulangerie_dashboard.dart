@@ -1,3 +1,4 @@
+import '../../delivery_proofs/proof_presentation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -200,6 +201,7 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
             onPressed: () => showPartnerAccountSheet(
               context,
               role: 'boulangerie',
+              establishmentId: widget.boulangerieId,
               roleLabel: 'Boulangerie',
               name: name as String?,
               phone: widget.boulangerieData['phone'] as String?,
@@ -522,6 +524,7 @@ class _OrderCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          ProofActions(orderId: orderId, partner: true),
           // ── En-tête statut ───────────────────────────────────────
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

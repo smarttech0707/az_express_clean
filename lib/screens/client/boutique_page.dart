@@ -60,6 +60,11 @@ class _BoutiquePageState extends State<BoutiquePage>
       Map<String, dynamic> product, int qty, String payMethod) async {
     if (_uid == null) return;
 
+    // Total affiché au client (produits + livraison) : envoyé au serveur, qui
+    // refuse tout débit différent (MONTANT_MODIFIE) — jamais de surfacturation.
+    final acceptedTotal =
+        (product["price"] as num? ?? 0).toInt() * qty + kBoutiqueDeliveryFee;
+
     // Stock check (raccourci UX — le serveur revalide de façon autoritaire).
     if ((product["stock"] as int? ?? 0) < qty) {
       _snack(context.tr('insufficient_stock'), Colors.red);
@@ -87,6 +92,7 @@ class _BoutiquePageState extends State<BoutiquePage>
           'qty': qty,
           'deliveryLat': clientLat,
           'deliveryLng': clientLng,
+          'acceptedTotal': acceptedTotal,
         });
 
         if (!mounted) return;
@@ -100,6 +106,8 @@ class _BoutiquePageState extends State<BoutiquePage>
           _snack(context.tr('out_of_stock_label'), Colors.red);
         } else if (msg.contains("SOLDE_INSUFFISANT")) {
           _snack(context.tr('insufficient_balance'), Colors.red);
+        } else if (_billingErrorMessage(msg) != null) {
+          _snack(_billingErrorMessage(msg)!, Colors.red);
         } else {
           _snack("${context.tr('error')} : $msg", Colors.red);
         }
@@ -135,6 +143,7 @@ class _BoutiquePageState extends State<BoutiquePage>
         'qty': qty,
         'deliveryLat': clientLat,
         'deliveryLng': clientLng,
+        'acceptedTotal': acceptedTotal,
       });
 
       if (!mounted) return;
@@ -146,10 +155,27 @@ class _BoutiquePageState extends State<BoutiquePage>
       if (!mounted) return;
       if (msg.contains("STOCK_EPUISE")) {
         _snack(context.tr('out_of_stock_label'), Colors.red);
+      } else if (_billingErrorMessage(msg) != null) {
+        _snack(_billingErrorMessage(msg)!, Colors.red);
       } else {
         _snack("${context.tr('error')} : $msg", Colors.red);
       }
     }
+  }
+
+  /// Refus de facturation renvoyés par le serveur (voir functions/billingPolicy.js).
+  /// Aucun débit n'a eu lieu dans ces cas.
+  String? _billingErrorMessage(String msg) {
+    if (msg.contains('MONTANT_MODIFIE')) {
+      return "Le prix a changé : rouvrez le produit pour voir le nouveau total. Aucun montant n'a été débité.";
+    }
+    if (msg.contains('APP_UPDATE_REQUIRED')) {
+      return "Mettez à jour l'application AZ Express pour commander. Aucun montant n'a été débité.";
+    }
+    if (msg.contains('FACTURATION_INDISPONIBLE')) {
+      return "Commande momentanément indisponible, réessayez plus tard. Aucun montant n'a été débité.";
+    }
+    return null;
   }
 
   Future<void> _showProductDetail(Map<String, dynamic> product) async {
@@ -182,7 +208,11 @@ class _BoutiquePageState extends State<BoutiquePage>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
           final stock = product["stock"] as int? ?? 0;
-          final total = (product["price"] as num? ?? 0).toInt() * qty;
+          // Le client paie séparément les produits et la livraison ; le serveur
+          // (payBoutiqueOrderCF) débite exactement ce total et revalide le montant.
+          final subtotal = (product["price"] as num? ?? 0).toInt() * qty;
+          const deliveryFee = kBoutiqueDeliveryFee;
+          final total = subtotal + deliveryFee;
           final hasWallet = walletBalance >= total;
           return Padding(
             padding: EdgeInsets.only(
@@ -314,6 +344,26 @@ class _BoutiquePageState extends State<BoutiquePage>
                               fontSize: 11, color: Colors.blueGrey),
                         ),
                       ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // Détail du montant à payer (débité = affiché).
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5F5F5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      _AmountRow('Sous-total produits', '$subtotal FCFA'),
+                      const SizedBox(height: 4),
+                      const _AmountRow('Frais de livraison', '$kBoutiqueDeliveryFee FCFA'),
+                      const Divider(height: 16),
+                      _AmountRow('Total à payer', '$total FCFA', bold: true),
                     ],
                   ),
                 ),
@@ -1020,6 +1070,28 @@ class _PayOption extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Frais de livraison Boutique : même valeur que BOUTIQUE_DELIVERY_FEE dans
+/// functions/orderActions.js (le serveur reste la référence et débite ce total).
+const int kBoutiqueDeliveryFee = 500;
+
+class _AmountRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool bold;
+  const _AmountRow(this.label, this.value, {this.bold = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+        fontSize: bold ? 15 : 13,
+        fontWeight: bold ? FontWeight.bold : FontWeight.w500);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [Text(label, style: style), Text(value, style: style)],
     );
   }
 }

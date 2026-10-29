@@ -35,7 +35,9 @@ class DriverRequestsPage extends StatelessWidget {
       "photoUrl": data["photoUrl"] ?? "",
       "idPhotoUrl": data["idPhotoUrl"] ?? "",
       "selfieUrl": data["selfieUrl"] ?? "",
-      "wallet": 500,
+      // Portefeuille initial : 0 FCFA. La 1re recharge (min. 1 000 FCFA) est un
+      // solde utilisable pour les commissions, pas des frais d'inscription.
+      "wallet": 0,
       "isOnline": false,
       "lat": 0,
       "lng": 0,

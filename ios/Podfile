@@ -39,5 +39,12 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    # permission_handler n'inclut le code d'une permission iOS que si sa macro est définie :
+    # sans cela `Permission.microphone` / `Permission.locationAlways` renvoient toujours « refusé ».
+    # Uniquement les permissions réellement utilisées (voir NS*UsageDescription dans Info.plist).
+    target.build_configurations.each do |config|
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] += ['PERMISSION_LOCATION=1', 'PERMISSION_MICROPHONE=1']
+    end
   end
 end

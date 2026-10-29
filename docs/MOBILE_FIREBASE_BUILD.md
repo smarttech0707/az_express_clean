@@ -15,11 +15,11 @@ iOS (macOS, après restauration Firebase et préparation des profils existants) 
 
 ```bash
 python3 scripts/build_mobile.py ipa --check-only
-python3 scripts/build_mobile.py ipa --build-number 12 \
+python3 scripts/build_mobile.py ipa --build-number "$IOS_BUILD_NUMBER" \
   --export-options "$HOME/export_options.plist"
 ```
 
-`--build-number 12` overrides the iOS build number for this IPA only. Keep
+`--build-number "$IOS_BUILD_NUMBER"` overrides the iOS build number for this IPA only. Keep
 `pubspec.yaml` at `1.0.10+11`: changing its shared build suffix would also
 change Android's default build number. The marketing version remains `1.0.10`.
 

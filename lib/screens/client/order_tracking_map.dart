@@ -1,3 +1,5 @@
+import '../../delivery_proofs/proof_presentation.dart';
+import '../../delivery_proofs/delivery_proof_service.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -254,6 +256,11 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
       child: Scaffold(
         extendBodyBehindAppBar: true,
         appBar: AppBar(
+          bottom: deliveryProofUiEnabled
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(48),
+                  child: ProofActions(orderId: widget.order.id))
+              : null,
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: GestureDetector(

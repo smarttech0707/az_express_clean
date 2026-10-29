@@ -2,8 +2,8 @@
   "name": "az-express-rules-tests",
   "private": true,
   "scripts": {
-    "test:rules": "firebase emulators:exec --only firestore \"node --test rules-tests/firestore.rules.test.js\"",
-    "test:storage": "firebase emulators:exec --only firestore,storage \"node --test rules-tests/storage.rules.test.js\""
+    "test:rules": "firebase emulators:exec --only firestore \"node --test rules-tests/firestore.rules.test.js rules-tests/partner-activation.rules.test.js rules-tests/partner-activation-b3.rules.test.js rules-tests/fleet-security.rules.test.js rules-tests/driver-commission.rules.test.js rules-tests/driver-accept-closed.rules.test.js rules-tests/delivery-transfer.rules.test.js rules-tests/order-amounts.rules.test.js rules-tests/ai-consents.rules.test.js\"",
+    "test:storage": "firebase emulators:exec --only firestore,storage \"node --test --test-concurrency=1 rules-tests/storage.rules.test.js rules-tests/partner-activation.storage.rules.test.js\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1"

@@ -31,7 +31,7 @@ function selectDepositNumber(agent, operator) {
 }
 
 function isEligibleAgent(agent) {
-  return agent?.isVerified === true && agent?.isSuspended !== true
+  return agent?.deletionRequested !== true && agent?.isDeleted !== true && agent?.isVerified === true && agent?.isSuspended !== true
     && ['trial', 'active'].includes(agent?.subscriptionStatus);
 }
 

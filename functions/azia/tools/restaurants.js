@@ -1,4 +1,5 @@
 'use strict';
+const {assertNewAccountActivity}=require('../../accountAdmission');
 
 const { createPendingAction } = require('../pendingActions');
 const { dispatchOrder } = require('../../dispatch');
@@ -153,6 +154,7 @@ function createRestaurantOrder({ db, admin, HttpsError }) {
 
     confirmHandler: async (tx, uid, toolInput) => {
       const { restaurantId, restaurantName, items, budget, deliveryLat, deliveryLng, paymentMethod } = toolInput;
+      await assertNewAccountActivity(tx,db,HttpsError,uid,[['restaurants',restaurantId]]);
 
       // Le restaurant est crédité plus tard par deliverOrderCF (côté serveur,
       // quand le livreur marque la commande livrée) — pas ici. Créditer le

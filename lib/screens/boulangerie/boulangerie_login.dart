@@ -10,6 +10,7 @@ import '../../services/notification_service.dart';
 import '../../services/subscription_service.dart';
 import '../../services/auth_service.dart';
 import '../auth/generic_forgot_password_page.dart';
+import '../auth/partner_first_password_page.dart';
 
 class BoulangerieLogin extends StatefulWidget {
   const BoulangerieLogin({super.key});
@@ -45,6 +46,14 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
           .get();
       if (!mounted) return;
       if (doc.exists && (doc.data()?['isActive'] ?? false)) {
+        if (!await PartnerFirstPasswordPage.ensureActivated(context, user)) {
+          await FirebaseAuth.instance.signOut();
+          try {
+            await FirebaseAuth.instance.signInAnonymously();
+          } catch (_) {}
+          if (mounted) setState(() => _autoResuming = false);
+          return;
+        }
         NotificationService().saveToken(user.uid, 'boulangeries');
         await SubscriptionService.checkAndRenew('boulangeries', user.uid);
         if (!mounted) return;
@@ -126,6 +135,20 @@ class _BoulangerieLoginState extends State<BoulangerieLogin> {
         return;
       }
 
+      // Première connexion : changement obligatoire du mot de passe temporaire.
+      if (!mounted) return;
+      if (!await PartnerFirstPasswordPage.ensureActivated(
+          context, credential.user!)) {
+        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+        if (!mounted) return;
+        _snack(
+            "Activation requise : définissez votre mot de passe personnel pour accéder à votre espace.",
+            Colors.orange);
+        return;
+      }
       NotificationService().saveToken(uid, 'boulangeries');
       AuthService().logAuthEvent('login', 'boulangerie');
       if (!mounted) return;

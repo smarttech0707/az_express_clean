@@ -1,0 +1,15 @@
+{
+  "published": true,
+  "versionName": "1.0.10",
+  "versionCode": 11,
+  "releaseDate": "2026-10-14",
+  "downloadUrl": "https://az-express-b0469.web.app/downloads/az-express-latest.apk",
+  "fileSizeBytes": 82412279,
+  "fileSizeLabel": "78,6 Mo",
+  "fileSha256": "7B60FAB2532080E504701F819F5527CB04DCA8ECD1A668DE99037AC520687986",
+  "apkCertificateSha256": "950EF85E42C78E1C37E39390F4D0F78DBB97D2CF60124C7D20A85101419F1AC9",
+  "packageId": "com.azexpress.app",
+  "minAndroidVersion": "7.0",
+  "minAndroidApi": 24,
+  "releaseNotes": []
+}

@@ -1,12 +1,43 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    match /partner_qr/{id} { allow read, write: if false; }
+    match /partner_qr_tokens/{id} { allow read, write: if false; }
+    match /partner_qr_managers/{uid}/{document=**} { allow read, write: if false; }
 
     function isAuth() {
-      return request.auth != null;
+      return request.auth != null
+        && !exists(/databases/$(database)/documents/account_tombstones/$(request.auth.uid));
+    }
+    match /account_tombstones/{uid} { allow read, write: if false; }
+    // Permanent pharmacy ownership is server-only, independent of currentUid.
+    match /pharmacy_owners/{uid} { allow read, write: if false; }
+    match /pharmacy_owner_invitations/{uid} { allow read, write: if false; }
+    match /account_deletions/{uid} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
     function uid() {
       return request.auth.uid;
+    }
+    // Étape B2 : un partenaire créé par l'administration (restaurant, vendeur,
+    // boulangerie) doit remplacer son mot de passe temporaire avant toute
+    // ÉCRITURE professionnelle. Deux sources, toutes deux inaccessibles en
+    // écriture à un client :
+    //  - le journal serveur `partner_provisioning/{uid}` (AUTORITÉ quand il
+    //    existe : couvre un jeton ANCIEN émis avant la pose de la revendication,
+    //    et ne pénalise pas un jeton dont la revendication est périmée après le
+    //    changement) ;
+    //  - sinon, la revendication du jeton `partnerMustChangePassword`, posée et
+    //    retirée uniquement par le serveur (Admin SDK).
+    // Les LECTURES restent permises (l'écran de première connexion lit son
+    // propre profil). Comptes historiques, clients ordinaires et
+    // administrateurs : ni journal ni revendication, aucun effet.
+    function partnerActivated() {
+      let journal = /databases/$(database)/documents/partner_provisioning/$(request.auth.uid);
+      return exists(journal)
+        ? get(journal).data.get('mustChangePassword', false) != true
+        : request.auth.token.get('partnerMustChangePassword', false) != true;
     }
     function adminDoc() {
       return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
@@ -49,12 +80,50 @@ service cloud.firestore {
     function unchanged(field) {
       return request.resource.data.get(field, null) == resource.data.get(field, null);
     }
+    function acceptsNewActivity(collection, id) {
+      return !(id is string) || id == ''
+        || (!exists(/databases/$(database)/documents/$(collection)/$(id)))
+        || (get(/databases/$(database)/documents/$(collection)/$(id)).data.get('deletionRequested', false) != true
+          && get(/databases/$(database)/documents/$(collection)/$(id)).data.get('isDeleted', false) != true);
+    }
+    function orderAdmissionOpen() {
+      let d=request.resource.data;
+      let sellerCollection=d.get('sellerType','')=='restaurant'?'restaurants':d.get('sellerType','')=='boulangerie'?'boulangeries':d.get('sellerType','')=='pharmacie'?'pharmacies':'sellers';
+      return acceptsNewActivity('clients',uid())
+        && acceptsNewActivity(sellerCollection,d.get('sellerId',''))
+        && acceptsNewActivity('pharmacies',d.get('pharmacieId',''))
+        && acceptsNewActivity('restaurants',d.get('restaurantId',''));
+    }
     function vehicleUsersBlocked(firstUid, secondUid) {
       return exists(/databases/$(database)/documents/vehicle_user_blocks/$(firstUid)/blocked/$(secondUid))
         || exists(/databases/$(database)/documents/vehicle_user_blocks/$(secondUid)/blocked/$(firstUid));
     }
     function notPresent(field) {
       return !(field in request.resource.data);
+    }
+    // Montants explicites Marketplace/Boutique (amountsVersion == 1) : écrits
+    // uniquement par le serveur. Les commandes historiques (boulangerie, etc.,
+    // qui écrivent leurs propres itemsAmount/deliveryFee) ne sont pas concernées.
+    function serverOwnedOrderFieldsUnchanged() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny([
+          'commissionAmount', 'commissionPayerId', 'commissionTxId', 'commissionStatus',
+          'acceptedAt', 'driverHistory', 'activeTransferId', 'transferCount',
+          'excludedDriverIds', 'requeuedAt', 'transferAttempts', 'previousDriverId',
+          'lastTransferAt', 'settlementHold', 'settlementStatus', 'heldDriverEarning',
+          'amountsVersion', 'deliveryFeePaid', 'cashBreakdown',
+          'deliveryFeeHold', 'adminReview'])
+        && (resource.data.get('amountsVersion', 0) != 1
+            || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']));
+    }
+    function explicitAmountsUnchanged() {
+      // Un seul diff (coût d'évaluation faible) : la règle update d'orders est
+      // proche de la limite de 1000 expressions de Firestore.
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny(['amountsVersion', 'deliveryFeePaid', 'cashBreakdown',
+          'deliveryFeeHold', 'adminReview'])
+        && (resource.data.get('amountsVersion', 0) != 1
+            || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']));
     }
     // LOT 6 SECURITY (2026-09) — un `orderId` doit désormais être fourni et
     // correspondre exactement à la commande en cours de création. Avant ce
@@ -153,13 +222,13 @@ service cloud.firestore {
         && request.resource.data.fakeOrderCount is int
         && request.resource.data.fakeOrderCount == 0;
       allow update: if isAdmin() ||
-        (isOwner(clientId) && unchanged('wallet') && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled')) ||
+        (isOwner(clientId) && unchanged('wallet') && unchanged('deletionRequested') && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled')) ||
         // Débit wallet autorisé (paiement Ekbine côté client) — solde ne peut que diminuer
         (isOwner(clientId)
           && request.resource.data.wallet is int
           && request.resource.data.wallet >= 0
           && request.resource.data.wallet < resource.data.wallet
-          && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled'));
+          && unchanged('deletionRequested') && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled'));
       allow delete: if isAdmin();
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(clientId) || isAdmin();
@@ -211,12 +280,15 @@ service cloud.firestore {
       // depuis le livreur lui-même (seul `drivers_page.dart`, admin-only,
       // l'écrit).
       allow update: if isAdmin()
-        || (isOwner(livreurId) && unchanged('wallet') && unchanged('isSuspended'))
+        || (isOwner(livreurId) && unchanged('wallet') && unchanged('deletionRequested') && unchanged('isSuspended') && unchanged('deletionRequested')
+            && unchanged('ownerId') && unchanged('ownerName'))
         || (isOwner(livreurId)
             && request.resource.data.wallet is int
             && request.resource.data.wallet >= 0
             && request.resource.data.wallet < resource.data.wallet
-            && unchanged('isSuspended'));
+            && unchanged('isSuspended') && unchanged('deletionRequested')
+            // Affiliation à une flotte : réservée à l'admin (assignDriverToFleet).
+            && unchanged('ownerId') && unchanged('ownerName'));
       allow delete: if isAdmin();
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(livreurId) || isAdmin();
@@ -240,7 +312,9 @@ service cloud.firestore {
       allow read:   if isOwner(sellerId) || hasAdminPermission('demandes_vendeurs');
       allow create: if hasAdminPermission('demandes_vendeurs');
       allow update: if hasAdminPermission('demandes_vendeurs') || (isOwner(sellerId)
-        && unchanged('wallet')
+        && partnerActivated()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive','isSuspended','isDeleted','status'])
+        && unchanged('wallet') && unchanged('deletionRequested')
         && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
         && unchanged('vipStatus') && unchanged('vipExpiresAt')
         && unchanged('vipStartedAt') && unchanged('plan')
@@ -249,7 +323,7 @@ service cloud.firestore {
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(sellerId) || isAdmin();
         allow create: if isAdmin()
-          || (isOwner(sellerId)
+          || (isOwner(sellerId) && partnerActivated()
             && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt'])
             && request.resource.data.amount is int);
         allow update: if false;
@@ -275,14 +349,14 @@ service cloud.firestore {
       // par le client (restaurant_owner_dashboard.dart:_toggleOpen) sans
       // qu'aucune règle owner ne l'autorise jusqu'ici — corrigé au passage,
       // même portée de risque que l'ajout de logoUrl.
-      allow update: if isRealUser()
+      allow update: if isRealUser() && partnerActivated()
         && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
             .data.get('restaurantId', '') == restaurantId
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['logoUrl', 'coverImageUrl', 'isOpen']);
       // Le propriétaire Firebase Auth ne peut écrire que le token du
       // restaurant auquel restaurant_owners/{uid} le rattache.
-      allow update: if isRealUser()
+      allow update: if isRealUser() && partnerActivated()
         && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
             .data.get('restaurantId', '') == restaurantId
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -295,7 +369,7 @@ service cloud.firestore {
       match /menu/{menuId} {
         allow read: if isAuth();
         allow write: if isAdmin()
-          || (isRealUser()
+          || (isRealUser() && partnerActivated()
             && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
                 .data.get('restaurantId', '') == restaurantId);
       }
@@ -324,8 +398,9 @@ service cloud.firestore {
       allow create: if isAdmin();
       // Le propriétaire peut mettre à jour son profil, mais pas les champs financiers
       allow update: if isAdmin() ||
-        (isOwner(boulangerieId)
-          && unchanged('wallet')
+        (isOwner(boulangerieId) && partnerActivated()
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive','isSuspended','isDeleted','status'])
+          && unchanged('wallet') && unchanged('deletionRequested')
           && unchanged('subscriptionStatus')
           && unchanged('subscriptionExpiresAt')
           && unchanged('vipStatus')
@@ -336,7 +411,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
       match /menu_items/{itemId} {
         allow read:  if isAuth();
-        allow write: if isAdmin() || isOwner(boulangerieId);
+        allow write: if isAdmin() || (isOwner(boulangerieId) && partnerActivated());
       }
     }
 
@@ -458,11 +533,21 @@ service cloud.firestore {
 
     match /fleet_owners/{fleetId} {
       allow read:   if isOwner(fleetId) || isAdmin();
-      allow create: if isRealUser() && uid() == fleetId;
-      // Le propriétaire peut mettre à jour son profil, mais pas les champs financiers
+      // Inscription : uniquement SON profil, avec exactement les champs écrits
+      // par fleet_register.dart, et TOUJOURS en attente de validation admin.
+      // Ni wallet, ni plan, ni VIP, ni abonnement ne peuvent être posés ici
+      // (liste fermée) ; seul l'admin fait passer le statut à approved/rejected.
+      allow create: if isRealUser() && uid() == fleetId
+        && request.resource.data.keys().hasOnly(['name', 'phone', 'identifiant', 'status',
+             'photoUrl', 'idPhotoUrl', 'idNumber', 'createdAt'])
+        && request.resource.data.status == 'pending';
+      // Le propriétaire peut mettre à jour son profil, mais ni les champs
+      // financiers ni les champs d'administration (statut de validation).
       allow update: if isAdmin() ||
         (isOwner(fleetId)
-          && unchanged('wallet')
+          && unchanged('status') && unchanged('approvedAt') && unchanged('rejectedAt')
+          && unchanged('isSuspended') && unchanged('isActive') && unchanged('isDeleted')
+          && unchanged('wallet') && unchanged('deletionRequested')
           && unchanged('subscriptionStatus')
           && unchanged('subscriptionExpiresAt')
           && unchanged('vipStatus')
@@ -480,11 +565,22 @@ service cloud.firestore {
         isPharmacieOwnerOfOrder()         ||
         isAdmin()
       );
-      allow create: if isRealUser()
+      allow create: if isRealUser() && orderAdmissionOpen()
         && request.resource.data.clientId == uid()
         && request.resource.data.budget is int
         && request.resource.data.budget >= 500
         && notPresent('driverId')
+        && notPresent('deliveryProofMode')
+        && notPresent('driverAssignmentVersion')
+        && notPresent('pickupProofValidatedAt')
+        && notPresent('pickupProofValidatedBy')
+        && notPresent('deliveryProofValidatedAt')
+        && notPresent('deliveryProofValidatedBy')
+        // Montants explicites Marketplace/Boutique : posés uniquement par le
+        // serveur (sinon un client pourrait faire créditer un livreur de frais
+        // jamais payés via deliveryFeePaid).
+        && notPresent('amountsVersion') && notPresent('deliveryFeePaid')
+        && notPresent('cashBreakdown') && notPresent('deliveryFeeHold') && notPresent('adminReview')
         // isPaid ne peut être vrai à la création que pour un paiement wallet
         // (débit du client dans la même transaction Flutter que la création
         // de la commande — livraison_screen.dart/courses_screen.dart/
@@ -524,15 +620,36 @@ service cloud.firestore {
           && unchanged('paymentMethod') && unchanged('driverId')
           && unchanged('shoppingBudget') && unchanged('sellerId')
           && unchanged('sellerType') && unchanged('pharmacieId')
+          // SMS destination cannot be redirected by the assigned driver.
+          && unchanged('recipientPhone') && unchanged('recipientName')
+          && unchanged('deliveryProofMode')
+          && unchanged('driverAssignmentVersion')
+          && unchanged('pickupProofValidatedAt')
+          && unchanged('pickupProofValidatedBy')
+          && unchanged('deliveryProofValidatedAt')
+          && unchanged('deliveryProofValidatedBy')
+          // Commission AZ, transferts et montants explicites Marketplace/Boutique :
+          // écrits UNIQUEMENT par le serveur (acceptOrderCF, fonctions de
+          // transfert, création/livraison). Ils déterminent qui est remboursé,
+          // qui est payé et comment les gains sont partagés. Regroupés en un seul
+          // diff : la règle update d'orders est proche de la limite de 1000
+          // expressions de Firestore (16 unchanged() séparés la dépassaient).
+          && serverOwnedOrderFieldsUnchanged()
           && (
-            (resource.data.status == 'assigned'    && request.resource.data.status == 'accepted')
-            || (resource.data.status == 'accepted' && request.resource.data.status == 'picked_up')
+            (resource.data.status == 'assigned' && request.resource.data.status == 'accepted'
+              && (!exists(/databases/$(database)/documents/account_deletions/$(uid()))
+                || get(/databases/$(database)/documents/account_deletions/$(uid())).data.consentVerified != true))
+            || (resource.data.status == 'accepted'
+                && resource.data.get('deliveryProofMode', '') != 'qr_v1'
+                && request.resource.data.status == 'picked_up')
             // isPaid ne peut plus être flippé directement ici (faille confirmée
             // et corrigée, Master Prompt 80, 2026-07-09) : le passage à "payé"
             // (cash ou wallet) doit obligatoirement transiter par deliverOrderCF/
             // payOrderFromWalletCF (Admin SDK, validation serveur), jamais par
             // une écriture Firestore directe du livreur.
-            || (resource.data.status == 'picked_up' && request.resource.data.status == 'delivered')
+            || (resource.data.status == 'picked_up'
+                && resource.data.get('deliveryProofMode', '') != 'qr_v1'
+                && request.resource.data.status == 'delivered')
             || (resource.data.status == request.resource.data.status)
           )
         ) ||
@@ -541,7 +658,7 @@ service cloud.firestore {
         // coordonnées d'une commande déjà créée. Le tableau de bord ne fait
         // que ces deux transitions sellerStatus (voir
         // boulangerie_dashboard.dart:_updateSellerStatus).
-        (isAuth() && resource.data.sellerId == uid()
+        (isAuth() && partnerActivated() && resource.data.sellerId == uid()
           && resource.data.get('sellerType', '') == 'boulangerie'
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['sellerStatus'])
@@ -555,15 +672,18 @@ service cloud.firestore {
         // Les autres partenaires conservent leur flux existant ; le
         // resserrement ci-dessus est volontairement limité au module
         // Boulangerie audité.
-        (isAuth() && resource.data.sellerId == uid()
+        (isAuth() && partnerActivated() && resource.data.sellerId == uid()
           && resource.data.get('sellerType', '') != 'boulangerie'
+          && unchanged('recipientPhone') && unchanged('recipientName')
           && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
-          && unchanged('paymentMethod') && unchanged('driverId') && unchanged('status')) ||
+          && unchanged('paymentMethod') && unchanged('driverId') && unchanged('status')
+          && explicitAmountsUnchanged()) ||
         // Client annule sa commande en attente
         (isOwner(resource.data.clientId)
           && resource.data.status == 'pending'
           && request.resource.data.status == 'cancelled'
-          && unchanged('budget') && unchanged('driverId') && unchanged('isPaid')) ||
+          && unchanged('budget') && unchanged('driverId') && unchanged('isPaid')
+          && serverOwnedOrderFieldsUnchanged()) ||
         // Client peut noter le livreur ou le vendeur après livraison
         (isOwner(resource.data.clientId)
           && resource.data.status == 'delivered'
@@ -571,7 +691,8 @@ service cloud.firestore {
           && unchanged('isPaid') && unchanged('paymentMethod')
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['rating', 'sellerRating']));
-      allow delete: if isAdmin();
+      // Phase 1: disable destructive purge, including from older Admin clients.
+      allow delete: if false;
     }
 
     // ── Commissions AZ Express — lecture admin uniquement ────────────────────
@@ -701,7 +822,7 @@ service cloud.firestore {
           'plan', 'priorityLevel', 'paymentStatus'
         ]);
       allow update: if isAdmin() ||
-        (isOwner(agentId) && unchanged('walletBalance') && unchanged('isVerified')
+        (isOwner(agentId) && unchanged('walletBalance') && unchanged('deletionRequested') && unchanged('isVerified')
           && unchanged('isSuspended') && unchanged('rating') && unchanged('ratingCount')
           && unchanged('totalCompleted')
           && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
@@ -755,7 +876,7 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update: if isAdmin()
         // Propriétaire modifie son annonce (sans toucher views/favoritesCount)
-        || (isRealUser() && resource.data.sellerId == uid()
+        || (isRealUser() && partnerActivated() && resource.data.sellerId == uid()
           && unchanged('sellerId') && unchanged('views') && unchanged('favoritesCount')
           && unchanged('expiresAt') && unchanged('sellerVerified')
           && unchanged('sellerVipStatus') && unchanged('priorityLevel')
@@ -768,7 +889,7 @@ service cloud.firestore {
         // N'importe quel utilisateur peut modifier favoritesCount uniquement
         || (isAuth()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['favoritesCount']));
-      allow delete: if isAdmin() || (isRealUser() && resource.data.sellerId == uid());
+      allow delete: if isAdmin() || (isRealUser() && partnerActivated() && resource.data.sellerId == uid());
     }
 
     match /marketplace_favorites/{userId} {
@@ -785,10 +906,17 @@ service cloud.firestore {
       // contenu du segment productId — même niveau de sécurité (le suffixe uid
       // doit toujours correspondre exactement à l'appelant), juste indépendant
       // du format de l'ID.
-      allow read, write: if isAdmin() || (isAuth() && (
+      allow read: if isAdmin() || (isAuth() && (
         chatId.matches('mp_.*_' + uid())
         || (resource != null && resource.data.sellerId == uid())
         || (request.resource != null && request.resource.data.sellerId == uid())
+      ));
+      allow write: if isAdmin() || (isAuth() && (
+        chatId.matches('mp_.*_' + uid())
+        || (partnerActivated() && (
+          (resource != null && resource.data.sellerId == uid())
+          || (request.resource != null && request.resource.data.sellerId == uid())
+        ))
       ));
       match /messages/{msgId} {
         allow read: if isAuth() && (isAdmin()
@@ -803,10 +931,16 @@ service cloud.firestore {
         // message, depuis toujours, indépendamment du bug de regex ci-dessus).
         // Même exigence de sécurité (l'expéditeur doit être l'appelant), juste
         // sur le bon nom de champ.
+        // Un vendeur non activé ne répond pas aux acheteurs ; les messages d'un
+        // acheteur (ou de tout autre utilisateur) ne sont pas concernés.
         allow create: if isAuth()
           && request.resource.data.senderUid == uid()
           && request.resource.data.keys().hasAll(['senderUid','type'])
-          && request.resource.data.type in ['text','audio'];
+          && request.resource.data.type in ['text','audio']
+          && (partnerActivated()
+            || !(exists(/databases/$(database)/documents/marketplace_chats/$(chatId))
+              && get(/databases/$(database)/documents/marketplace_chats/$(chatId))
+                   .data.get('sellerId', '') == uid()));
         allow update, delete: if isAdmin();
       }
     }
@@ -822,7 +956,7 @@ service cloud.firestore {
     match /real_estate_agents/{agentId} {
       allow read:   if isOwner(agentId) || isAdmin();
       allow create: if isAdmin();
-      allow update: if isAdmin() || (isOwner(agentId) && unchanged('isVerified') && unchanged('isActive'));
+      allow update: if isAdmin() || (isOwner(agentId) && unchanged('deletionRequested') && unchanged('isVerified') && unchanged('isActive'));
       allow delete: if isAdmin();
     }
 
@@ -989,13 +1123,13 @@ service cloud.firestore {
     match /boutique_products/{productId} {
       allow read: if isAuth();
       allow create: if isAdmin()
-        || (isRealUser() && request.resource.data.sellerId == uid());
+        || (isRealUser() && partnerActivated() && request.resource.data.sellerId == uid());
       allow update: if isAdmin()
-        || (isRealUser()
+        || (isRealUser() && partnerActivated()
           && resource.data.sellerId == uid()
           && unchanged('sellerId'));
       allow delete: if isAdmin()
-        || (isRealUser() && resource.data.sellerId == uid());
+        || (isRealUser() && partnerActivated() && resource.data.sellerId == uid());
     }
 
     match /services/{serviceId} {
@@ -1190,7 +1324,7 @@ service cloud.firestore {
     // par un admin, jamais une suppression automatique instantanée de données financières.
     match /account_deletion_requests/{reqId} {
       allow create: if request.resource.data.keys().hasAll(['role', 'contactPhone', 'status', 'requestedVia'])
-        && request.resource.data.role in ['client', 'livreur', 'seller', 'restaurant', 'pharmacie', 'boulangerie', 'ekbine_agent', 'real_estate_agent', 'fleet_owner']
+        && request.resource.data.role in ['client', 'livreur', 'seller', 'restaurant', 'pharmacie', 'boulangerie', 'ekbine_agent', 'real_estate_agent', 'fleet_owner', 'artisan', 'event_provider']
         && request.resource.data.contactPhone is string && request.resource.data.contactPhone.size() > 0 && request.resource.data.contactPhone.size() <= 30
         && request.resource.data.status == 'pending'
         && request.resource.data.requestedVia in ['app', 'web'];
@@ -1378,6 +1512,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Consentement au partage avec les fournisseurs d'IA (Anthropic, Google) :
+    // lecture par le propriétaire, écriture exclusivement par azIaChat (Admin SDK).
+    match /ai_consents/{uid} {
+      allow read:  if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
     // ── Master Prompt 113 — mémoire utilisateur AZ IA (jalon M8, version
     // scopée : pas d'écran de gestion dédié dans cette passe, mais une vraie
     // collection opt-in, pas un stub). Écrite exclusivement par l'outil AZ IA
@@ -1388,6 +1529,29 @@ service cloud.firestore {
     // (contrôle utilisateur sur sa propre mémoire).
     match /ai_user_memory/{uid} {
       allow read:  if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    match /delivery_proofs/{document=**} {
+      allow read, write: if false;
+    }
+
+    // Transferts de livraison entre livreurs (deliveryTransferCF) : écriture
+    // serveur uniquement. Lecture : livreur demandeur, destinataire, candidat
+    // proposé, ou admin. Le client suit la commande, pas le transfert.
+    // Règlement des gains d'une course transférée : écriture serveur uniquement
+    // (settleTransferEarningsCF). Lecture : super-admin et livreurs concernés.
+    match /transfer_settlements/{orderId} {
+      allow read: if isRealUser() && (isAdmin() || request.auth.uid in resource.data.driverIds);
+      allow write: if false;
+    }
+
+    match /delivery_transfers/{transferId} {
+      allow read: if isRealUser() && (
+        resource.data.fromDriverId == request.auth.uid ||
+        resource.data.toDriverId == request.auth.uid ||
+        request.auth.uid in resource.data.candidateIds ||
+        isAdmin());
       allow write: if false;
     }
 
@@ -2000,7 +2164,7 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && (
-          (isRealUser()
+          (isRealUser() && partnerActivated()
             && request.resource.data.sellerId == uid()
             && request.resource.data.status in ['draft', 'active'])
             && !exists(/databases/$(database)/documents/vehicle_seller_suspensions/$(uid()))
@@ -2012,7 +2176,7 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time
         && (
           isAdmin()
-          || (isRealUser()
+          || (isRealUser() && partnerActivated()
             && resource.data.sellerId == uid()
             && resource.data.status != 'suspended'
             && !exists(/databases/$(database)/documents/vehicle_seller_suspensions/$(uid()))

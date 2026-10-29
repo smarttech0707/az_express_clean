@@ -3,6 +3,7 @@ import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../constants/app_constants.dart';
 import '../screens/client/recharge_wallet_screen.dart';
 import '../services/feexpay_service.dart';
 import 'tap_effect.dart';
@@ -33,6 +34,26 @@ class WalletActionSheet extends StatefulWidget {
     required String userName,
     required int currentBalance,
   }) {
+    // Point d'entrée unique de toutes les recharges/retraits mobile money : aucun appel FeexPay tant que le
+    // service n'est pas ouvert. Le portefeuille livreur est rechargé par l'administration contre espèces.
+    if (!AppConfig.electronicPaymentsEnabled) {
+      return showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Service bientôt disponible'),
+          content: Text(action == WalletAction.recharge
+              ? 'La recharge par mobile money n\'est pas encore ouverte. Pour recharger votre portefeuille, '
+                  'remettez des espèces au bureau AZ Express ou contactez le support : ${AppConfig.supportPhone}.'
+              : 'Les retraits par mobile money ne sont pas encore ouverts. '
+                  'Contactez le support AZ Express : ${AppConfig.supportPhone}.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Compris')),
+          ],
+        ),
+      );
+    }
     if (action == WalletAction.recharge) {
       return Navigator.push(
         context,

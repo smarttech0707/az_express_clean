@@ -50,7 +50,11 @@ class EventService {
       'event_providers/$uid/$providerId/$kind/'
       '${DateTime.now().microsecondsSinceEpoch}.$extension',
     );
-    await ref.putFile(File(path));
+    // Type MIME explicite : storage.rules n'accepte que image/* ou video/* (event_providers).
+    final ext = extension.toLowerCase();
+    const videoTypes = {'mp4': 'video/mp4', 'mov': 'video/quicktime', '3gp': 'video/3gpp'};
+    final contentType = videoTypes[ext] ?? 'image/${ext == 'jpg' ? 'jpeg' : ext}';
+    await ref.putFile(File(path), SettableMetadata(contentType: contentType));
     return ref.getDownloadURL();
   }
 

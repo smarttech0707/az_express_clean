@@ -1,3 +1,5 @@
+import 'dart:math';
+import '../models/decline_order_result.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -179,117 +181,31 @@ class FirestoreService {
   // ACCEPTER COMMANDE
   // ==============================
 
+  /// Accepte une course via la Cloud Function `acceptOrderCF`.
+  ///
+  /// La commission (100 FCFA sous 1 000 FCFA, 200 FCFA au-delà), le contrôle du
+  /// portefeuille et le débit sont faits par le SERVEUR, dans une seule
+  /// transaction : aucun montant de portefeuille ne vient du client. Un rejeu
+  /// (double tap) ne débite pas deux fois. Les erreurs gardent leur message
+  /// (ex. `CREDIT_INSUFFISANT:<solde>:<commission>`) pour l'interface livreur.
   Future<void> acceptOrder(
     String orderId,
     String driverId, {
     String? acceptanceSelfieUrl,
     String? driverPhotoUrl,
   }) async {
-    final orderRef = db.collection("orders").doc(orderId);
-    final driverRef = db.collection("livreurs").doc(driverId);
-
-    String? commissionDescription;
-    int commissionAmount = 0;
-    List<String> otherDriverIds = [];
-
-    await db.runTransaction((transaction) async {
-      final orderSnapshot = await transaction.get(orderRef);
-      final driverSnapshot = await transaction.get(driverRef);
-
-      if (!orderSnapshot.exists || !driverSnapshot.exists) return;
-
-      final orderData = orderSnapshot.data() as Map<String, dynamic>;
-      final status = orderData["status"] as String? ?? '';
-
-      // Accepte à la fois les assignations directes et les broadcasts
-      if (status != "assigned" && status != "broadcast") return;
-
-      // Ré-vérification à l'acceptation : dispatchOrder() (functions/dispatch.js)
-      // exclut déjà les livreurs suspendus/hors-ligne/déjà en course au moment
-      // de l'OFFRE, mais rien ne re-vérifiait ces mêmes conditions au moment de
-      // l'ACCEPTATION — un livreur notifié avant d'être suspendu (ou passé
-      // hors-ligne, ou déjà occupé par une autre course acceptée entre-temps)
-      // pouvait donc encore accepter. Fenêtre étroite mais réelle.
-      //
-      // Correctif 2026-07-19 : `driverSnapshot["champ"]` (operator [] de
-      // DocumentSnapshot) appelle .get("champ") en interne, qui lève un
-      // StateError ("field ... does not exist within the
-      // DocumentSnapshotPlatform") si le champ est absent — le `as bool? ??
-      // false` qui suit ne protège jamais contre ça, l'exception part avant
-      // que le `??` ne puisse s'appliquer. Confirmé en production : les
-      // livreurs approuvés via le flux standard (driver_requests_page.dart)
-      // n'ont jamais `isSuspended`/`isAvailable` à la création (déjà
-      // documenté CLAUDE.md), donc CHAQUE première acceptation d'un nouveau
-      // livreur faisait planter cette transaction. Corrigé en passant par
-      // `.data()` (un Map, dont l'opérateur [] retourne bien `null` sur une
-      // clé absente, sans exception) avant de lire les champs individuels.
-      final driverData = driverSnapshot.data() ?? {};
-      final bool driverSuspended = driverData["isSuspended"] as bool? ?? false;
-      final bool driverOnline = driverData["isOnline"] as bool? ?? false;
-      final bool driverOnDelivery =
-          driverData["isOnDelivery"] as bool? ?? false;
-      if (driverSuspended) {
-        throw Exception(
-            "Votre compte a été suspendu, vous ne pouvez plus accepter de commandes.");
-      }
-      if (!driverOnline) {
-        throw Exception("Vous devez être en ligne pour accepter une commande.");
-      }
-      if (driverOnDelivery) {
-        throw Exception("Vous avez déjà une livraison en cours.");
-      }
-
-      final int price = (orderData["budget"] as num? ?? 0).toInt();
-      commissionAmount = calculateCommission(price);
-
-      final int wallet = (driverSnapshot["wallet"] as num? ?? 0).toInt();
-      if (wallet < commissionAmount) {
-        throw Exception("CREDIT_INSUFFISANT:$wallet:$commissionAmount");
-      }
-
-      // Livreurs à notifier de l'annulation (pour broadcast)
-      final notified =
-          List<String>.from(orderData["notifiedDriverIds"] as List? ?? []);
-      otherDriverIds = notified.where((id) => id != driverId).toList();
-
-      // Commission déduite + flag isOnDelivery
-      transaction.update(driverRef, {
-        "wallet": wallet - commissionAmount,
-        "isOnDelivery": true,
+    // driverId est conservé pour les appelants existants : le serveur utilise
+    // l'identité authentifiée.
+    try {
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('acceptOrderCF')
+          .call(<String, dynamic>{
+        'orderId': orderId,
+        if (acceptanceSelfieUrl != null) 'acceptanceSelfieUrl': acceptanceSelfieUrl,
+        if (driverPhotoUrl != null) 'driverPhotoUrl': driverPhotoUrl,
       });
-
-      transaction.update(orderRef, {
-        "status": "accepted",
-        "driverId": driverId,
-        "notifiedDriverIds": FieldValue.delete(),
-        if (acceptanceSelfieUrl != null)
-          "driverAcceptanceSelfie": acceptanceSelfieUrl,
-        if (driverPhotoUrl != null) "driverPhotoUrl": driverPhotoUrl,
-      });
-
-      commissionDescription =
-          "Commission AZ Express — course ${orderData['description']?.toString().split('\n').first ?? ''} ($price FCFA)";
-    });
-
-    // Effacer pendingOrderId chez les autres livreurs notifiés
-    if (otherDriverIds.isNotEmpty) {
-      final batch = db.batch();
-      for (final id in otherDriverIds) {
-        batch.update(db.collection("livreurs").doc(id), {
-          "pendingOrderId": FieldValue.delete(),
-        });
-      }
-      await batch.commit();
-    }
-
-    if (commissionAmount > 0 && commissionDescription != null) {
-      await _logTransaction(
-        driverId,
-        "commission",
-        commissionAmount,
-        commissionDescription!,
-        orderId: orderId,
-      );
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(e.message ?? 'Acceptation impossible');
     }
   }
 
@@ -297,63 +213,31 @@ class FirestoreService {
   // REFUSER COMMANDE (Yango-style)
   // ==============================
 
-  /// Refus d'une course par [driverId].
-  /// — Broadcast : retire ce livreur de notifiedDriverIds + efface pendingOrderId.
-  ///   Si dernier livreur → reset pending + re-cherche à rayon élargi.
-  /// — Assignation directe : reset pending + re-cherche.
-  Future<void> declineOrder(String orderId, String driverId) async {
-    final orderRef = db.collection("orders").doc(orderId);
-    final driverRef = db.collection("livreurs").doc(driverId);
-
-    // Effacer pendingOrderId chez ce livreur immédiatement
-    await driverRef.update({"pendingOrderId": FieldValue.delete()});
-
-    List<String> remaining = [];
-    String currentStatus = '';
-
-    await db.runTransaction((tx) async {
-      final snap = await tx.get(orderRef);
-      if (!snap.exists) return;
-      final data = snap.data()!;
-      currentStatus = data["status"] as String? ?? '';
-
-      if (currentStatus == "broadcast") {
-        final notified =
-            List<String>.from(data["notifiedDriverIds"] as List? ?? []);
-        remaining = notified.where((id) => id != driverId).toList();
-
-        if (remaining.isEmpty) {
-          // Tous ont refusé → reset
-          tx.update(orderRef, {
-            "status": "pending",
-            "notifiedDriverIds": FieldValue.delete(),
-          });
-        } else {
-          // D'autres attendent encore
-          tx.update(orderRef, {"notifiedDriverIds": remaining});
-        }
-      } else if (currentStatus == "assigned") {
-        // Assignation directe refusée
-        tx.update(orderRef, {
-          "status": "pending",
-          "driverId": FieldValue.delete(),
-        });
-      }
-    });
-
-    // Si plus aucun livreur disponible → re-chercher à rayon plus large
-    if (remaining.isEmpty &&
-        (currentStatus == "broadcast" || currentStatus == "assigned")) {
-      final snap = await orderRef.get();
-      if (!snap.exists) return;
-      final d = snap.data()!;
-      await findNearestDriver(
-        (d["latitude"] ?? 0).toDouble(),
-        (d["longitude"] ?? 0).toDouble(),
-        orderId,
-        budget: (d["budget"] as num? ?? 0).toInt(),
-        radiusKm: 5.0,
-      );
+  /// Refuse une mission assignée via la Cloud Function sécurisée.
+  /// Le serveur vérifie le livreur connecté et gère la récupération du dispatch.
+  Future<DeclineOrderResult> declineOrder(String orderId, String driverId) async {
+    // driverId est conservé pour les appelants existants.
+    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('declineLegacyOrderCF');
+    final response = await callable.call(<String, dynamic>{'orderId': orderId});
+    return DeclineOrderResult.fromData(response.data);
+  }
+  /// Libère une course acceptée mais PAS encore récupérée (transfert, cas 1).
+  ///
+  /// Le serveur rembourse une seule fois la commission du livreur, remet la
+  /// commande en file avec le même identifiant et le même prix, puis relance
+  /// l'attribution sans ce livreur. [reason] : `vehicle_problem`, `emergency`,
+  /// `too_far`, `customer_unreachable` ou `other`. Une course avec avance
+  /// d'achat n'est pas libérable automatiquement (message `SHOPPING_BUDGET_REVIEW`).
+  Future<bool> releaseOrderBeforePickup(String orderId, String reason) async {
+    try {
+      final response = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('releaseOrderBeforePickupCF')
+          .call(<String, dynamic>{'orderId': orderId, 'reason': reason});
+      final data = response.data;
+      return data is Map && data['success'] == true;
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(e.message ?? 'Libération impossible');
     }
   }
 
@@ -472,16 +356,29 @@ class FirestoreService {
         .snapshots();
   }
 
-  Future<void> rechargeDriverWallet(String driverId, int amount,
-      {String adminNote = "Rechargé par l'admin"}) async {
-    final driverRef = db.collection("livreurs").doc(driverId);
-    await db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(driverRef);
-      if (!snapshot.exists) return;
-      final wallet = (snapshot["wallet"] as num? ?? 0).toInt();
-      transaction.update(driverRef, {"wallet": wallet + amount});
+  /// Clé de confirmation d'une recharge manuelle : à générer UNE fois quand l'admin confirme le montant, puis à
+  /// réutiliser telle quelle si l'appel est rejoué (double appui, reprise réseau) — le serveur ne crédite qu'une fois.
+  static String newRechargeKey() {
+    final random = Random.secure();
+    return List.generate(24, (_) => random.nextInt(16).toRadixString(16)).join();
+  }
+
+  /// Recharge manuelle du portefeuille d'un livreur après remise d'espèces au bureau. Passe par la Cloud Function
+  /// `adminDriverRechargeCF` (autorisation admin, plafond configurable, idempotence, audit) : aucune écriture
+  /// directe du solde depuis l'application. Retourne le nouveau solde.
+  Future<int> rechargeDriverWallet(String driverId, int amount,
+      {String adminNote = '', required String idempotencyKey}) async {
+    if (amount <= 0) throw ArgumentError('Montant de recharge invalide');
+    final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('adminDriverRechargeCF')
+        .call({
+      'driverId': driverId,
+      'amount': amount,
+      'idempotencyKey': idempotencyKey,
+      if (adminNote.trim().isNotEmpty) 'note': adminNote.trim(),
     });
-    await _logTransaction(driverId, "recharge", amount, adminNote);
+    final data = (result.data as Map?)?['data'] as Map?;
+    return (data?['newBalance'] as num?)?.toInt() ?? 0;
   }
 
   Future<void> assignDriverToFleet(

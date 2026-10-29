@@ -65,35 +65,28 @@ class _DeleteAccountBody extends StatelessWidget {
       child: Container(
         width: docWidth,
         padding: EdgeInsets.symmetric(horizontal: hPad(context), vertical: 48),
-        child: Column(
+        child: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _InfoBlock(
+            _InfoBlock(
               title: 'Procédure',
               body:
-                  'Renseignez le formulaire ci-dessous avec le rôle de votre compte '
-                  '(client, livreur, vendeur, restaurant, pharmacie, boulangerie, agent '
-                  'Ekbine, agent immobilier ou patron de flotte) et le numéro de téléphone '
-                  'associé à votre compte AZ Express. Votre demande est transmise à notre '
-                  'équipe, qui désactive votre compte dès réception de la demande.',
+                  'Renseignez le formulaire avec le role et le contact de votre compte. '
+                  'Cet envoi enregistre une demande ; il ne supprime pas le compte.',
             ),
-            const _InfoBlock(
-              title: 'Délai de traitement',
-              body:
-                  'Votre compte est désactivé sous 48 heures ouvrables suivant la demande. '
-                  'Vos données personnelles sont ensuite effacées sous 30 jours, sauf '
-                  'obligation légale de conservation (ex. historique des transactions '
-                  'financières, conservé le temps requis par la réglementation applicable). '
-                  'Les clients peuvent aussi supprimer leur compte instantanément depuis '
-                  'l\'application (Profil > Supprimer mon compte).',
+            _InfoBlock(
+              title: 'Traitement',
+              body: 'Notre equipe doit verifier votre identite, les operations en cours et '
+                  'les donnees a conserver avant de confirmer le traitement. '
+                  'Le compte reste accessible tant que sa desactivation n est pas confirmee.',
             ),
             _InfoBlock(
               title: 'Contact support',
               body: 'Pour toute question sur votre demande de suppression : '
                   '${AppConfig.supportEmail} ou WhatsApp +225 07 98 05 13 97.',
             ),
-            const SizedBox(height: 24),
-            const _DeleteAccountForm(),
+            SizedBox(height: 24),
+            _DeleteAccountForm(),
           ],
         ),
       ),
@@ -165,11 +158,13 @@ class _DeleteAccountFormState extends State<_DeleteAccountForm> {
         reason: _reasonCtrl.text.trim(),
         requestedVia: 'web',
       );
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _success = true;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _error = 'Une erreur est survenue. Réessayez ou contactez le support.';
@@ -198,8 +193,8 @@ class _DeleteAccountFormState extends State<_DeleteAccountForm> {
           textAlign: TextAlign.center),
       const SizedBox(height: 10),
       Text(
-        'Votre compte sera désactivé sous 48 heures ouvrables. '
-        'Vous recevrez une confirmation par téléphone.',
+        'Demande enregistree. Votre compte n est pas supprime. '
+        'Notre equipe doit encore verifier et traiter votre demande.',
         style: GoogleFonts.inter(fontSize: 14, color: kTextMuted),
         textAlign: TextAlign.center,
       ),

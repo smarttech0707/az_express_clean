@@ -222,6 +222,18 @@ class AzIaService {
   FirebaseFunctions get _functions =>
       _functionsInstance ??= FirebaseFunctions.instanceFor(region: 'europe-west1');
 
+  /// Consentement au partage avec les fournisseurs d'IA (Anthropic, Google),
+  /// enregistré côté serveur et lié au compte. Aucune donnée n'est envoyée à
+  /// un modèle par ces appels. [grant] exige la version du texte affiché.
+  Future<bool> setAiConsent({required bool granted, required int version}) async {
+    final result = await _functions.httpsCallable('azIaChat').call(<String, dynamic>{
+      'consentAction': granted ? 'grant' : 'revoke',
+      if (granted) 'consentVersion': version,
+    });
+    final data = Map<String, dynamic>.from(result.data as Map);
+    return (data['consent'] as Map?)?['granted'] == true;
+  }
+
   Future<AzIaChatResult> sendMessage({
     required String message,
     String? conversationId,

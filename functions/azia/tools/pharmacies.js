@@ -1,4 +1,5 @@
 'use strict';
+const {assertNewAccountActivity}=require('../../accountAdmission');
 
 const { createPendingAction } = require('../pendingActions');
 const { dispatchOrder } = require('../../dispatch');
@@ -114,6 +115,7 @@ function createPharmacieOrder({ db, admin, HttpsError }) {
 
     confirmHandler: async (tx, uid, toolInput) => {
       const { pharmacieId, pharmacieName, description, budget, deliveryLat, deliveryLng, paymentMethod } = toolInput;
+      await assertNewAccountActivity(tx,db,HttpsError,uid,[['pharmacies',pharmacieId]]);
 
       if (paymentMethod === 'wallet') {
         const clientRef  = db.collection('clients').doc(uid);

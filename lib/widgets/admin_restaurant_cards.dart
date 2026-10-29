@@ -148,11 +148,16 @@ class AdminRestaurantActions extends StatelessWidget {
     required this.onMenu,
     required this.onSubscription,
     required this.onDelete,
+    this.onAssignOwner,
   });
 
   final VoidCallback onMenu;
   final VoidCallback onSubscription;
   final VoidCallback onDelete;
+
+  /// Attribution manuelle d'un responsable à un établissement historique
+  /// (réservée au super-admin côté serveur). Absent = bouton non affiché.
+  final VoidCallback? onAssignOwner;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -175,6 +180,14 @@ class AdminRestaurantActions extends StatelessWidget {
                   size: 18, color: Colors.amber),
               label: const Text('Abo', style: TextStyle(color: Colors.amber)),
             ),
+            if (onAssignOwner != null)
+              TextButton.icon(
+                onPressed: onAssignOwner,
+                icon: const Icon(Icons.person_add_alt_1_rounded,
+                    size: 18, color: Color(0xFF2E7D32)),
+                label: const Text('Responsable',
+                    style: TextStyle(color: Color(0xFF2E7D32))),
+              ),
             TextButton(
               onPressed: onDelete,
               style: TextButton.styleFrom(

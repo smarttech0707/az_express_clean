@@ -1,4 +1,5 @@
 'use strict';
+const { query: lifecycleQuery } = require('./lifecycleFake');
 
 // Teste l'outil AZ IA `cancel_order` (functions/azia/tools/delivery.js) après
 // sa migration vers le cœur transactionnel partagé (cancelOrderTx/
@@ -44,6 +45,7 @@ function makeFakeDb(seed = {}) {
 
   function makeCollection(name) {
     return {
+      ...lifecycleQuery(store, name),
       doc: (id) => makeRef(`${name}/${id ?? `auto${autoId++}`}`),
       add: async (data) => {
         const path = `${name}/auto${autoId++}`;
@@ -57,7 +59,7 @@ function makeFakeDb(seed = {}) {
     collection: (name) => makeCollection(name),
     runTransaction: async (fn) => {
       const tx = {
-        get: async (ref) => ({ exists: store.has(ref.__path), data: () => store.get(ref.__path) }),
+        get: async (ref) => ref.__path ? ({ exists: store.has(ref.__path), data: () => store.get(ref.__path) }) : ref.get(),
         update: (ref, data) => store.set(ref.__path, applyUpdate(store.get(ref.__path) || {}, data)),
         set: (ref, data) => store.set(ref.__path, data),
       };
@@ -71,6 +73,7 @@ function makeFakeDb(seed = {}) {
 const fakeAdmin = {
   firestore: {
     FieldValue: {
+      delete: () => ({ __delete: true }),
       serverTimestamp: () => '__SERVER_TIMESTAMP__',
       increment: (n) => ({ __increment: n }),
     },

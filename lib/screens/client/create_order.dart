@@ -380,16 +380,20 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _snack('Frais trop élevés. Vérifiez la distance.');
       return;
     }
-    if (_paymentMethod == 'wallet' && _walletBalance < deliveryFee) {
+    final shoppingBudget =
+        (int.tryParse(_shoppingBudgetCtrl.text.trim()) ?? 0).clamp(0, 9999999);
+    // Montant exigé par la règle Firestore walletDebitMatchesPaidOrder :
+    // budget (livraison) + shoppingBudget (articles). Même calcul que
+    // courses_screen.dart (totalBudget).
+    final totalAmount = deliveryFee + shoppingBudget;
+
+    if (_paymentMethod == 'wallet' && _walletBalance < totalAmount) {
       _snack(
-        'Solde insuffisant (${_fmtW(_walletBalance)} FCFA). Frais : $deliveryFee FCFA',
+        'Solde insuffisant (${_fmtW(_walletBalance)} FCFA). Total : $totalAmount FCFA',
         color: Colors.red,
       );
       return;
     }
-
-    final shoppingBudget =
-        (int.tryParse(_shoppingBudgetCtrl.text.trim()) ?? 0).clamp(0, 9999999);
 
     setState(() => _sending = true);
 
@@ -479,12 +483,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         await FirebaseFirestore.instance.runTransaction((tx) async {
           final snap = await tx.get(clientRef);
           final balance = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
-          if (balance < deliveryFee) throw Exception('SOLDE_INSUFFISANT');
+          if (balance < totalAmount) throw Exception('SOLDE_INSUFFISANT');
           // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
           // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
           // débit ne soit réutilisé pour valider plusieurs commandes.
           tx.update(clientRef, {
-            'wallet': balance - deliveryFee,
+            'wallet': balance - totalAmount,
             'lastPaidOrderId': order.id,
           });
           tx.set(orderRef, order.toMap());

@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../../services/account_deletion_service.dart';
+import '../../widgets/account_deletion_dialog.dart';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,6 +19,7 @@ import '../../services/notification_service.dart';
 import '../admin/admin_login.dart';
 import '../main_dashboard.dart';
 import '../auth/client_auth_page.dart';
+import '../auth/partner_first_password_page.dart';
 import '../seller/seller_dashboard.dart';
 import '../pro/pro_portal.dart';
 import '../support/support_screen.dart';
@@ -225,7 +228,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         // à chaque écran de connexion manuelle), risquant des notifications
         // non délivrées après un long moment sans relancer l'app via un
         // vrai formulaire de connexion.
+        // Mot de passe temporaire non remplacé : pas d'accès au tableau de bord.
+        if (!await PartnerFirstPasswordPage.ensureActivated(context, user)) {
+          await FirebaseAuth.instance.signOut();
+          try {
+            await FirebaseAuth.instance.signInAnonymously();
+          } catch (_) {}
+          return;
+        }
         NotificationService().saveToken(user.uid, 'sellers');
+        if (!mounted) return;
         Navigator.push(
             context,
             AppTransitions.fadeSlide(
@@ -813,6 +825,21 @@ class _CardsSection extends StatelessWidget {
 
           SizedBox(height: AppLayout.sm(context) + 2),
 
+          TextButton(
+            onPressed: () async {
+              try {
+                final result = await AccountDeletionService.checkLastRequest();
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => AccountDeletionStatusPage(initial: result)));
+              } catch (_) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Suivi indisponible sur cet appareil. Contactez le support. Aucune suppression confirmee.')));
+              }
+            },
+            child: const Text('Suivre ma demande de suppression'),
+          ),
           // Bouton Espace Pro
           TapEffect(
             onTap: onPro,

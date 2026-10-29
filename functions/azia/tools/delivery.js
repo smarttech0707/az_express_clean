@@ -1,9 +1,11 @@
 'use strict';
+const {assertNewAccountActivity}=require('../../accountAdmission');
 
 const { createPendingAction } = require('../pendingActions');
 const { dispatchOrder, calculateCommission } = require('../../dispatch');
 const tarifService = require('../../tarifService');
 const { cancelOrderTx, cancelOrderPostTx } = require('../../orderActions');
+const { readAmounts } = require('../../orderAmounts');
 
 const MIN_SHOPPING_BUDGET = 500;
 const MAX_ITEMS = 20;
@@ -90,6 +92,7 @@ function trackOrder({ db }) {
 // transaction — le dispatch (recherche de livreur) n'est PAS transactionnel
 // (comme côté Dart) et se fait dans afterConfirm, après coup.
 async function debitWalletIfNeeded(tx, db, admin, HttpsError, uid, amount, paymentMethod) {
+  await assertNewAccountActivity(tx,db,HttpsError,uid);
   if (paymentMethod !== 'wallet') return;
   const clientRef = db.collection('clients').doc(uid);
   const snap = await tx.get(clientRef);
@@ -384,7 +387,16 @@ function cancelOrder({ db, admin, HttpsError }) {
         return { error: `Cette commande ne peut plus être annulée (statut actuel : ${data.status}).` };
       }
 
-      const summaryFr = `Annuler la commande "${data.description || orderId}" (${data.budget || 0} FCFA).`;
+      // Commande Marketplace/Boutique à montants explicites : le client doit savoir
+      // AVANT de confirmer ce qui sera remboursé (règle : frais de livraison non
+      // remboursés automatiquement une fois le colis récupéré).
+      const amounts = readAmounts(data);
+      let summaryFr = `Annuler la commande "${data.description || orderId}" (${data.budget || 0} FCFA).`;
+      if (amounts && data.paymentMethod === 'wallet') {
+        summaryFr = data.status === 'picked_up'
+          ? `Annuler la commande "${data.description || orderId}" : produits ${amounts.productAmount} FCFA remboursés ; frais de livraison ${amounts.deliveryFee} FCFA non remboursés automatiquement (colis déjà récupéré, examen par l'administration).`
+          : `Annuler la commande "${data.description || orderId}" : remboursement intégral de ${amounts.totalAmount} FCFA (produits ${amounts.productAmount} + livraison ${amounts.deliveryFee}).`;
+      }
       const actionId = await createPendingAction(db, admin, {
         uid,
         conversationId: ctx?.conversationId,
