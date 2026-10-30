@@ -39,6 +39,37 @@ LocalPlace _place(String id, String name) => LocalPlace(
       verified: true,
     );
 
+const _geolocatorChannel = MethodChannel('flutter.baseflow.com/geolocator');
+
+/// Simule la localisation du téléphone (permission accordée, position fixe).
+void mockGeolocator({required double latitude, required double longitude}) {
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(_geolocatorChannel, (call) async {
+    switch (call.method) {
+      case 'requestPermission':
+      case 'checkPermission':
+        return 2; // LocationPermission.whileInUse
+      case 'isLocationServiceEnabled':
+        return true;
+      case 'getCurrentPosition':
+        return <String, dynamic>{
+          'latitude': latitude,
+          'longitude': longitude,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+          'accuracy': 5.0,
+          'altitude': 0.0,
+          'altitude_accuracy': 0.0,
+          'heading': 0.0,
+          'heading_accuracy': 0.0,
+          'speed': 0.0,
+          'speed_accuracy': 0.0,
+          'is_mocked': false,
+        };
+    }
+    return null;
+  });
+}
+
 void main() {
   late ActiveCityProvider cityProvider;
 
@@ -48,6 +79,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
             const MethodChannel('flutter/platform_views'), (_) async => 0);
+    mockGeolocator(latitude: 6.7297, longitude: -3.4964);
     PlacesSearchService.debugResetSearchState();
     PlacesSearchService.debugSetCityPlacesLoader(
         (cityId) async => cityId == 'abengourou'
@@ -74,6 +106,8 @@ void main() {
   tearDown(() {
     PlacesSearchService.debugResetSearchState();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_geolocatorChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
             const MethodChannel('flutter/platform_views'), null);
   });
@@ -88,6 +122,22 @@ void main() {
 
   Finder fieldWithHint(String hint) => find.byWidgetPredicate(
       (w) => w is TextField && w.decoration?.hintText == hint);
+
+  /// Touche un bouton qui déclenche la localisation : la géolocalisation inverse
+  /// (HTTP) passe par un client simulé, donc aucune attente réelle n'est utile.
+  Future<void> tapAndLocate(WidgetTester tester, Finder target) async {
+    await http.runWithClient(
+      () async {
+        await tester.tap(target);
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump(const Duration(milliseconds: 500));
+      },
+      () => MockClient((_) async => http.Response('{}', 200)),
+    );
+  }
+
+  Finder fieldWithValue(String value) => find
+      .byWidgetPredicate((w) => w is TextField && w.controller?.text == value);
 
   Future<void> openPickupSearch(WidgetTester tester) async {
     await tester.runAsync(cityProvider.initialize);
@@ -163,6 +213,52 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Maternité Cafétou'), findsOneWidget);
     expect(cityProvider.activeCityId, isNull);
+  });
+
+  testWidgets(
+      'Réessayer la localisation ne remplace pas une adresse déjà choisie '
+      'mais résout la ville', (tester) async {
+    await openPickupSearch(tester);
+    await tester.tap(find.byKey(const Key('search-city-abengourou')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(find.byType(TextField).first, 'château');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('École Château'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(fieldWithValue('École Château'), findsOneWidget);
+
+    // Retour dans la recherche (ville toujours non résolue) puis nouvel essai.
+    await tester.tap(fieldWithValue('École Château'));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(cityProvider.activeCityId, isNull);
+    await tapAndLocate(tester, find.byKey(const Key('retry-location-button')));
+
+    expect(cityProvider.activeCityId, 'abengourou');
+    expect(find.byKey(const Key('city-context-panel')), findsNothing);
+    // L'adresse choisie à la main est conservée (le champ apparaît aussi dans
+    // l'en-tête de la recherche active).
+    expect(fieldWithValue('École Château'), findsWidgets);
+    expect(find.text('Ma position actuelle'), findsNothing);
+  });
+
+  testWidgets(
+      '« Ma position » continue de remplacer le champ par la position actuelle',
+      (tester) async {
+    await openPickupSearch(tester);
+    await tester.tap(find.byKey(const Key('search-city-abengourou')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(find.byType(TextField).first, 'château');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('École Château'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(fieldWithValue('École Château'), findsOneWidget);
+
+    await tapAndLocate(tester, find.text('Ma position'));
+
+    // Comportement historique du bouton, volontairement inchangé : le champ
+    // reçoit la position (le texte exact dépend de la géolocalisation inverse).
+    expect(cityProvider.activeCityId, 'abengourou');
+    expect(fieldWithValue('École Château'), findsNothing);
   });
 
   testWidgets('GPS résolu : aucun sélecteur de ville', (tester) async {

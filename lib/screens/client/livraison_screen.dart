@@ -344,6 +344,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   Future<void> _getGPS([
     _ActiveField target = _ActiveField.departure,
     bool resolveAddress = true,
+    bool fillField = true,
   ]) async {
     if (_gpsLoading) return;
     final cityProvider = context.read<ActiveCityProvider>();
@@ -384,6 +385,12 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           _locationIssue = null;
           _searchCityId = null;
         });
+      }
+      if (!fillField) {
+        // « Réessayer la localisation » ne sert qu'à déterminer la ville : une
+        // adresse déjà choisie à la main n'est jamais remplacée par la position.
+        await _loadPopularPlaces(cityProvider);
+        return;
       }
       final place = await buildLivraisonGpsPlace(
         latitude: pos.latitude,
@@ -2149,7 +2156,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             children: [
               TextButton.icon(
                 key: const Key('retry-location-button'),
-                onPressed: _gpsLoading ? null : () => _getGPS(_activeField),
+                onPressed: _gpsLoading
+                    ? null
+                    : () => _getGPS(_activeField, false, false),
                 icon: const Icon(Icons.refresh_rounded, size: 18),
                 label: const Text('Réessayer la localisation'),
               ),
