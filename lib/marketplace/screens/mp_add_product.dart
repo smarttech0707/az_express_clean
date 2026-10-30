@@ -48,6 +48,10 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
   final _picker = ImagePicker();
   bool _uploading = false;
   bool _discardConfirmed = false;
+  // Fixé à l'ouverture de l'écran : tout réessai de CETTE publication réutilise
+  // le même identifiant, donc ne peut pas créer une seconde annonce. Un nouvel
+  // écran (annonce volontairement distincte) génère un nouvel identifiant.
+  final String _publicationId = MpService.newPublicationId();
 
   bool get _isEdit => widget.editProduct != null;
 
@@ -171,6 +175,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
   }
 
   Future<void> _submit() async {
+    if (_uploading) return;
     if (!_formKey.currentState!.validate()) return;
     if (_brand.isEmpty) {
       _snack('Sélectionnez une marque', Colors.orange);
@@ -252,7 +257,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
         final removed = _originalUrls.where((u) => !allImages.contains(u));
         if (removed.isNotEmpty) unawaited(deleteStorageUrls(removed));
       } else {
-        await MpService.addProduct(data);
+        await MpService.addProduct(data, publicationId: _publicationId);
       }
 
       if (!mounted) return;

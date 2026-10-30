@@ -106,3 +106,87 @@ test('tâche quotidienne: une annonce expirée passe réellement en hidden', asy
   assert.equal(writes[0].data.status, 'hidden');
 });
 
+
+// ── Idempotence de publishMarketplaceProduct ────────────────────────────────
+
+function fakePublishDb() {
+  const docs = new Map();
+  const ref = (col, id) => ({ col, id, path: `${col}/${id}`,
+    get: async () => ({ exists: false, data: () => null }) });
+  let auto = 0;
+  const db = {
+    docs,
+    collection: (col) => ({
+      doc: (id) => ref(col, id ?? `auto${String(++auto).padStart(16, '0')}XXXX`),
+      where() { return this; },
+      limit() { return this; },
+    }),
+    runTransaction: async (fn) => fn({
+      get: async (target) => {
+        if (target.path) {
+          const data = docs.get(target.path);
+          return { exists: data !== undefined, data: () => data };
+        }
+        return { size: [...docs.values()].filter((d) => d.status === 'active').length };
+      },
+      set: (target, data) => { docs.set(target.path, data); },
+    }),
+  };
+  return db;
+}
+
+const publishAdmin = { firestore: { Timestamp: { now: () => ({ toMillis: () => FakeTimestamp.nowMs }),
+  fromMillis: (ms) => new FakeTimestamp(ms) } } };
+const publishRequest = (uid, extra = {}) => ({
+  auth: { uid, token: { firebase: { sign_in_provider: 'password' } } },
+  data: { product: { title: 'iPhone 11', price: 80000 }, ...extra },
+});
+
+test('publication: même publicationId rejoué => une seule annonce, même identifiant', async () => {
+  const { buildPublishMarketplaceProduct } = require('../marketplacePublishing');
+  const db = fakePublishDb();
+  const handler = buildPublishMarketplaceProduct({ db, admin: publishAdmin });
+  const publicationId = 'AbCdEfGhIjKlMnOpQrSt';
+  const first = await handler(publishRequest('u1', { publicationId }));
+  const retry = await handler(publishRequest('u1', { publicationId }));
+  assert.equal(first.productId, publicationId);
+  assert.equal(retry.productId, publicationId);
+  assert.equal(retry.duplicate, true);
+  assert.equal(db.docs.size, 1);
+});
+
+test('publication: deux publicationId différents restent deux annonces', async () => {
+  const { buildPublishMarketplaceProduct } = require('../marketplacePublishing');
+  const db = fakePublishDb();
+  const handler = buildPublishMarketplaceProduct({ db, admin: publishAdmin });
+  await handler(publishRequest('u1', { publicationId: 'AAAAAAAAAAAAAAAAAAAA' }));
+  await handler(publishRequest('u1', { publicationId: 'BBBBBBBBBBBBBBBBBBBB' }));
+  assert.equal(db.docs.size, 2);
+});
+
+test('publication: sans publicationId (ancien client) comportement inchangé', async () => {
+  const { buildPublishMarketplaceProduct } = require('../marketplacePublishing');
+  const db = fakePublishDb();
+  const handler = buildPublishMarketplaceProduct({ db, admin: publishAdmin });
+  await handler(publishRequest('u1'));
+  await handler(publishRequest('u1'));
+  assert.equal(db.docs.size, 2);
+});
+
+test('publication: publicationId d\'un autre vendeur refusé, document intact', async () => {
+  const { buildPublishMarketplaceProduct } = require('../marketplacePublishing');
+  const db = fakePublishDb();
+  const handler = buildPublishMarketplaceProduct({ db, admin: publishAdmin });
+  const publicationId = 'CCCCCCCCCCCCCCCCCCCC';
+  await handler(publishRequest('u1', { publicationId }));
+  await assert.rejects(handler(publishRequest('u2', { publicationId })),
+    (e) => e.code === 'already-exists');
+  assert.equal(db.docs.get(`marketplace_products/${publicationId}`).sellerId, 'u1');
+});
+
+test('publication: publicationId mal formé refusé', async () => {
+  const { buildPublishMarketplaceProduct } = require('../marketplacePublishing');
+  const handler = buildPublishMarketplaceProduct({ db: fakePublishDb(), admin: publishAdmin });
+  await assert.rejects(handler(publishRequest('u1', { publicationId: '../etc' })),
+    (e) => e.code === 'invalid-argument');
+});

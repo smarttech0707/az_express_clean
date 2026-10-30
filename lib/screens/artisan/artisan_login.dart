@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
 import '../auth/generic_forgot_password_page.dart';
+import '../client/service_provider_register_page.dart';
 
 import 'artisan_dashboard.dart';
 
@@ -300,12 +301,41 @@ class _ArtisanLoginState extends State<ArtisanLogin> {
                                 ),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      // Inscription existante (formulaire + validation admin) :
+                      // le compte n'est utilisable qu'après approbation.
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: OutlinedButton(
+                          onPressed: _loading
+                              ? null
+                              : () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ServiceProviderRegisterPage()),
+                                  ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFF1565C0)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: const Text(
+                            "Créer mon compte artisan",
+                            style: TextStyle(
+                                color: Color(0xFF1565C0),
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 24),
                 const Text(
-                  "Votre code PIN vous a été remis par l'équipe AZ Express.",
+                  "Nouvel artisan : envoyez votre demande, l'équipe AZ Express la valide puis vous remet votre code PIN.",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white54, fontSize: 12),
                 ),

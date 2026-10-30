@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -80,7 +81,22 @@ class MpService {
 
   // ── CRUD ───────────────────────────────────────────────────────────────────
 
-  static Future<String> addProduct(Map<String, dynamic> data) async {
+  /// Identifiant de publication : 20 caractères alphanumériques (forme attendue
+  /// par le serveur), généré sans Firebase pour que l'écran se construise aussi
+  /// hors connexion et en test.
+  static String newPublicationId() {
+    const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    final random = Random.secure();
+    return List.generate(20, (_) => chars[random.nextInt(chars.length)])
+        .join();
+  }
+
+  /// [publicationId] identifie une intention de publication : le serveur le
+  /// rejoue sans créer de seconde annonce si l'appel est répété (réessai après
+  /// délai dépassé, double envoi).
+  static Future<String> addProduct(Map<String, dynamic> data,
+      {String? publicationId}) async {
     try {
       final payload = Map<String, dynamic>.from(data)
         ..remove('createdAt')
@@ -91,7 +107,10 @@ class MpService {
         ..remove('status');
       final result = await _functions
           .httpsCallable('publishMarketplaceProduct')
-          .call(<String, dynamic>{'product': payload}).timeout(
+          .call(<String, dynamic>{
+        'product': payload,
+        if (publicationId != null) 'publicationId': publicationId,
+      }).timeout(
               const Duration(seconds: 45));
       return (result.data as Map)['productId'] as String;
     } on TimeoutException {

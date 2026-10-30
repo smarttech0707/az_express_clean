@@ -1667,27 +1667,30 @@ exports.checkClientPhone = onCall({ maxInstances: 2 }, async (request) => {
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe C, réduction
 // modérée de maxInstances, cpu inchangé.
 exports.submitServiceProviderApplication = onCall({ maxInstances: 2 }, async (request) => {
-  const { name, phone, address, description, subcategory, category, photos, lat, lng, docId } = request.data;
-  if (!name || !phone || !address || !subcategory) {
-    throw new HttpsError('invalid-argument', 'Nom, téléphone, adresse et catégorie requis');
-  }
+  // Forme et taille des champs validées avant toute écriture (module testé).
+  const { name, phone, address, description, subcategory, category, photos, lat, lng, docId } =
+    sanitizeApplication(request.data);
 
-  await checkRateLimit(`sp_apply_${phone}`, 'service_provider_apply', 5, 3600);
+  await enforceApplicationLimits({ checkRateLimit, request, phone });
 
   // Réutilise l'ID généré côté client (avant l'appel, pour uploader les
   // photos au bon chemin Storage service_providers/{docId}/...) si fourni.
   const docRef = docId ? db.collection('service_providers').doc(String(docId))
                         : db.collection('service_providers').doc();
-  await docRef.set({
-    name:        String(name),
-    phone:       String(phone),
-    address:     String(address),
-    description: description ? String(description) : '',
-    subcategory: String(subcategory),
-    category:    category ? String(category) : 'artisans',
-    photos:      Array.isArray(photos) ? photos.slice(0, 10).map(String) : [],
-    lat:         typeof lat === 'number' ? lat : 0,
-    lng:         typeof lng === 'number' ? lng : 0,
+
+  // Une seule demande ou un seul compte par numéro (hors demande refusée) :
+  // un réessai de la MÊME demande renvoie le même identifiant ; l'ancien
+  // `set()` écrasait n'importe quel document dont l'identifiant était connu.
+  const sameNumber = await db.collection('service_providers')
+    .where('phone', '==', phone).limit(10).get();
+  const blocking = sameNumber.docs.filter((d) => d.data().status !== 'rejected');
+  if (blocking.some((d) => d.id === docRef.id)) return { docId: docRef.id };
+  if (blocking.length > 0) {
+    throw new HttpsError('already-exists', 'Une demande ou un compte existe déjà pour ce numéro');
+  }
+
+  await docRef.create({
+    name, phone, address, description, subcategory, category, photos, lat, lng,
     isAvailable: false,
     isVerified:  false,
     status:      'pending',
@@ -1717,6 +1720,7 @@ exports.submitServiceProviderApplication = onCall({ maxInstances: 2 }, async (re
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
 // légère de maxInstances uniquement.
 const { buildArtisanLogin, buildSetArtisanPin } = require('./artisanAccounts');
+const { sanitizeApplication, enforceApplicationLimits } = require('./serviceProviderApplication');
 exports.artisanLogin = onCall({ maxInstances: 2 }, buildArtisanLogin({
   db, checkRateLimit,
 }));

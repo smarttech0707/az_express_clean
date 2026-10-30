@@ -23,8 +23,9 @@ class ProPortal extends StatelessWidget {
         foregroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.close_rounded),
-          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: 'Retour',
+          onPressed: () => Navigator.maybePop(context),
         ),
         title: Text(
           'Espace Professionnel',

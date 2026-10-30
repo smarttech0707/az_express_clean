@@ -42,6 +42,9 @@ function publicationSystemFields({ seller, isProfessional, now, timestamp }) {
   };
 }
 
+// Forme d'un identifiant automatique Firestore, généré côté client.
+const PUBLICATION_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
+
 function validateProduct(product) {
   if (!product || typeof product !== 'object' || Array.isArray(product)) {
     throw new HttpsError('invalid-argument', 'Annonce invalide.');
@@ -66,13 +69,33 @@ function buildPublishMarketplaceProduct({ db, admin }) {
     const uid = request.auth.uid;
     const product = request.data?.product;
     validateProduct(product);
-    const productRef = db.collection('marketplace_products').doc();
+    // Idempotence : un réessai (délai dépassé côté client, double tap, coupure
+    // réseau après l'écriture) renvoie le MÊME identifiant au lieu de créer une
+    // seconde annonce. Sans publicationId (anciens clients), comportement
+    // inchangé : une nouvelle annonce à chaque appel.
+    const publicationId = request.data?.publicationId;
+    if (publicationId !== undefined && !PUBLICATION_ID_PATTERN.test(String(publicationId))) {
+      throw new HttpsError('invalid-argument', 'Identifiant de publication invalide.');
+    }
+    const productRef = publicationId === undefined
+      ? db.collection('marketplace_products').doc()
+      : db.collection('marketplace_products').doc(String(publicationId));
     const sellerRef = db.collection('sellers').doc(uid);
     const now = admin.firestore.Timestamp.now();
     console.log(`[marketplace-publish] start uid=${uid} productId=${productRef.id}`);
 
     console.log(`[marketplace-publish] transaction-start uid=${uid} productId=${productRef.id}`);
-    await db.runTransaction(async (tx) => {
+    const duplicate = await db.runTransaction(async (tx) => {
+      if (publicationId !== undefined) {
+        const existing = await tx.get(productRef);
+        if (existing.exists) {
+          // Même identifiant d'un autre vendeur : jamais rejoué ni écrasé.
+          if (existing.data()?.sellerId !== uid) {
+            throw new HttpsError('already-exists', 'Identifiant de publication déjà utilisé.');
+          }
+          return true;
+        }
+      }
       const sellerSnap = await tx.get(sellerRef);
       const seller = sellerSnap.exists ? sellerSnap.data() : null;
       if(seller?.deletionRequested===true||seller?.isDeleted===true)throw new HttpsError('failed-precondition','Compte en cours de suppression');
@@ -94,10 +117,11 @@ function buildPublishMarketplaceProduct({ db, admin }) {
         createdAt: now,
       });
       console.log(`[marketplace-publish] product-write-prepared uid=${uid} productId=${productRef.id}`);
+      return false;
     });
     console.log(`[marketplace-publish] transaction-complete uid=${uid} productId=${productRef.id}`);
     console.log(`[marketplace-publish] response-sent uid=${uid} productId=${productRef.id}`);
-    return { productId: productRef.id };
+    return duplicate ? { productId: productRef.id, duplicate: true } : { productId: productRef.id };
   };
 }
 
