@@ -66,7 +66,13 @@ CREDENTIALS = ('APP_STORE_CONNECT_ISSUER_ID', 'APP_STORE_CONNECT_KEY_IDENTIFIER'
 
 
 def latest_from_app_store(run=subprocess.run, environ=os.environ):
-    """Plus haut numéro de build TestFlight, toutes versions confondues.
+    """Plus haut numéro de build connu d'App Store Connect, toutes versions confondues.
+
+    `get-latest-build-number --all-versions` renvoie le maximum entre les builds
+    TestFlight (expirés compris) et ceux rattachés aux versions App Store : un
+    sur-ensemble de `get-latest-testflight-build-number`. L'option --all-versions
+    exige codemagic-cli-tools >= 0.67.0 ; un outil plus ancien la rejette et la
+    compilation est bloquée.
 
     codemagic-cli-tools (vérifié sur 0.70.2) écrit le numéro seul sur stdout
     (print(str(value))) et ses journaux sur stderr. Toute autre situation
@@ -85,7 +91,7 @@ def latest_from_app_store(run=subprocess.run, environ=os.environ):
             + ', '.join(missing) + ') : vérifiez que l\'intégration « AZ Express '
             'Codemagic » est attachée au workflow. Compilation bloquée : le '
             'dernier numéro de build ne peut pas être confirmé.')
-    command = ['app-store-connect', 'get-latest-testflight-build-number',
+    command = ['app-store-connect', 'get-latest-build-number',
                '--all-versions', '--platform', 'IOS', apple_id]
     try:
         result = run(command, capture_output=True, text=True, timeout=120)

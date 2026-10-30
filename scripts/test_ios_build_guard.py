@@ -78,7 +78,10 @@ class LatestBuildTest(unittest.TestCase):
         run = fake_run('Log\n17\n')
         latest = guard.latest_from_app_store(run=run, environ=env())
         self.assertEqual(latest, 17)
+        # Superset App Store + TestFlight, et non la seule version la plus haute.
+        self.assertEqual(run.command[:2], ['app-store-connect', 'get-latest-build-number'])
         self.assertIn('--all-versions', run.command)
+        self.assertNotIn('get-latest-testflight-build-number', run.command)
         self.assertEqual(run.command[-1], '123456')
 
     def test_lookup_requires_apple_id(self):
