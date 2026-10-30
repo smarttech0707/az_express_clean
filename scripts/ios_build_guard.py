@@ -61,8 +61,23 @@ def check_candidate(candidate, latest):
             'ou plus.')
 
 
+# Injectées par `integrations: app_store_connect` au démarrage du build : elles
+# n'apparaissent pas dans les variables de l'application et c'est normal. Seule
+# leur présence (jamais la valeur) est journalisée ; c'est le CLI qui tranche.
 CREDENTIALS = ('APP_STORE_CONNECT_ISSUER_ID', 'APP_STORE_CONNECT_KEY_IDENTIFIER',
                'APP_STORE_CONNECT_PRIVATE_KEY')
+
+
+def credentials_status(environ=os.environ):
+    return {name: bool(environ.get(name, '').strip()) for name in CREDENTIALS}
+
+
+def failure_summary(stderr):
+    """Dernières lignes utiles de stderr, sans couleurs ni ligne `usage:` géante."""
+    clean = re.sub(r'\x1b\[[0-9;]*m', '', stderr or '')
+    lines = [line.strip() for line in clean.splitlines()
+             if line.strip() and not line.lstrip().startswith('usage:')]
+    return ' | '.join(line[:300] for line in lines[-3:])
 
 
 def latest_from_app_store(run=subprocess.run, environ=os.environ):
@@ -84,13 +99,6 @@ def latest_from_app_store(run=subprocess.run, environ=os.environ):
             'APP_STORE_APPLE_ID est absent ou invalide : renseignez l\'Apple ID '
             'numérique de l\'application (App Store Connect > Informations sur '
             'l\'app).')
-    missing = [name for name in CREDENTIALS if not environ.get(name, '').strip()]
-    if missing:
-        raise GuardError(
-            'Identifiants App Store Connect absents de l\'environnement ('
-            + ', '.join(missing) + ') : vérifiez que l\'intégration « AZ Express '
-            'Codemagic » est attachée au workflow. Compilation bloquée : le '
-            'dernier numéro de build ne peut pas être confirmé.')
     command = ['app-store-connect', 'get-latest-build-number',
                '--all-versions', '--platform', 'IOS', apple_id]
     try:
@@ -100,9 +108,14 @@ def latest_from_app_store(run=subprocess.run, environ=os.environ):
     except subprocess.TimeoutExpired as error:
         raise GuardError('App Store Connect ne répond pas (délai de 120 s dépassé).') from error
     if result.returncode != 0:
-        tail = ' | '.join((result.stderr or '').strip().splitlines()[-3:])
+        tail = failure_summary(result.stderr)
+        absent = [name for name, present in credentials_status(environ).items()
+                  if not present]
+        hint = (' Variables absentes de l\'environnement : ' + ', '.join(absent)
+                + ' (l\'intégration « AZ Express Codemagic » est-elle attachée ?).'
+                if absent else '')
         raise GuardError('Lecture du dernier build App Store Connect impossible '
-                         f'(code {result.returncode}) : {tail or "sans détail"}')
+                         f'(code {result.returncode}) : {tail or "sans détail"}.{hint}')
     latest = parse_latest(result.stdout)
     if latest is None:
         raise GuardError('Réponse vide d\'App Store Connect : dernier build inconnu.')
@@ -130,6 +143,8 @@ def preflight(environ=os.environ, run=subprocess.run):
     print(f'Version de l\'application : {name}')
     print(f'Build demandé (IOS_BUILD_NUMBER) : {candidate}')
     print(f'Commit compilé : {commit} (branche {branch})')
+    for name, present in credentials_status(environ).items():
+        print(f'{name} : {"présent" if present else "absent"}')
     latest = latest_from_app_store(run=run, environ=environ)
     check_candidate(candidate, latest)
     print(f'Dernier build App Store Connect : {latest} -> {candidate} est disponible.')

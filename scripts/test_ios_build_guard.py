@@ -89,11 +89,38 @@ class LatestBuildTest(unittest.TestCase):
             with self.assertRaises(guard.GuardError):
                 guard.latest_from_app_store(run=fake_run('17'), environ=environ)
 
-    def test_lookup_requires_integration_credentials(self):
+    def test_cli_decides_when_credentials_are_not_in_the_environment(self):
+        # Les identifiants peuvent être fournis autrement que par l'environnement
+        # visible du script : c'est la réponse du CLI qui fait foi.
+        run = fake_run('17\n')
+        self.assertEqual(guard.latest_from_app_store(
+            run=run, environ={'APP_STORE_APPLE_ID': '1'}), 17)
+
+    def test_cli_failure_names_missing_credentials_but_never_values(self):
+        secret = 'TOPSECRETVALUE'
+        environ = {'APP_STORE_APPLE_ID': '1', 'APP_STORE_CONNECT_PRIVATE_KEY': secret}
         with self.assertRaises(guard.GuardError) as raised:
-            guard.latest_from_app_store(run=fake_run('17'),
-                                        environ={'APP_STORE_APPLE_ID': '1'})
-        self.assertIn('APP_STORE_CONNECT_PRIVATE_KEY', str(raised.exception))
+            guard.latest_from_app_store(run=fake_run('', 2, 'invalid'), environ=environ)
+        message = str(raised.exception)
+        self.assertIn('APP_STORE_CONNECT_ISSUER_ID', message)
+        self.assertNotIn('APP_STORE_CONNECT_PRIVATE_KEY', message)
+        self.assertNotIn(secret, message)
+
+    def test_failure_summary_drops_usage_and_colors(self):
+        stderr = ('usage: app-store-connect ' + 'x' * 500 + '\n'
+                  '\x1b[31mapp-store-connect: error: argument --private-key: invalid\x1b[0m\n')
+        summary = guard.failure_summary(stderr)
+        self.assertEqual(summary, 'app-store-connect: error: argument --private-key: invalid')
+
+    def test_preflight_logs_presence_never_values(self):
+        secret = 'TOPSECRETVALUE'
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            guard.preflight(environ={**env(IOS_BUILD_NUMBER='20'),
+                                     'APP_STORE_CONNECT_PRIVATE_KEY': secret},
+                            run=fake_run('15\n'))
+        text = output.getvalue()
+        self.assertIn('APP_STORE_CONNECT_PRIVATE_KEY : présent', text)
+        self.assertNotIn(secret, text)
 
     def test_lookup_failures_stop_the_build(self):
         environ = env()
