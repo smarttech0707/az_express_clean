@@ -23,6 +23,16 @@
       cocoapods: "1.17.0"
 
     scripts:
+      # Échoue en quelques secondes, avant toute compilation payante, si
+      # IOS_BUILD_NUMBER est absent/invalide ou n'est pas strictement supérieur
+      # au dernier build d'App Store Connect (APP_STORE_APPLE_ID requis ; les
+      # identifiants API viennent de l'intégration). Voir scripts/ios_build_guard.py.
+      - name: Check iOS build number against App Store Connect
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          python3 scripts/ios_build_guard.py preflight
+
       - name: Check build environment
         script: |
           #!/usr/bin/env bash
@@ -164,6 +174,15 @@
             echo "IPA export failed: no IPA artifact was generated."
             exit 1
           }
+
+      # Lit le CFBundleVersion réellement présent dans l'IPA et refuse la
+      # publication s'il diffère d'IOS_BUILD_NUMBER (les étapes échouées
+      # empêchent le bloc `publishing`).
+      - name: Verify build number embedded in the IPA
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          python3 scripts/ios_build_guard.py verify-ipa
 
     artifacts:
       - build/ios/ipa/*.ipa
