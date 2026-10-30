@@ -63,6 +63,42 @@ typedef LocalPlacesQueryExecutor = Future<List<LocalPlace>> Function({
   required LocalPlacesQueryKind kind,
 });
 
+/// Lieux vérifiés d'une ville (recherche par mots, voir [placesMatchingWords]).
+typedef CityPlacesLoader = Future<List<LocalPlace>> Function(String cityId);
+
+/// Lieux dont chaque mot de la requête est le début d'un mot du nom ou d'un
+/// alias : « château » retrouve « École Château », « grand marché » retrouve
+/// « Grand Marché Abengourou ». [normalizedQuery] est déjà normalisé
+/// (sans accents, en minuscules). Tri : popularité puis nom.
+List<LocalPlace> placesMatchingWords(
+  Iterable<LocalPlace> places,
+  String normalizedQuery,
+) {
+  final queryWords = normalizedQuery
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .toList(growable: false);
+  if (queryWords.isEmpty) return const [];
+
+  bool matches(LocalPlace place) {
+    final words = <String>{
+      ...place.normalizedName.split(RegExp(r'\s+')),
+      for (final alias in place.aliases) ...alias.split(RegExp(r'\s+')),
+    }..removeWhere((word) => word.isEmpty);
+    return queryWords
+        .every((query) => words.any((word) => word.startsWith(query)));
+  }
+
+  final found = places.where(matches).toList()
+    ..sort((a, b) {
+      final byCount = b.searchCount.compareTo(a.searchCount);
+      return byCount != 0
+          ? byCount
+          : a.normalizedName.compareTo(b.normalizedName);
+    });
+  return found;
+}
+
 typedef LearnedPlaceLookup = Future<LocalPlace?> Function({
   required String cityId,
   required String normalizedName,
@@ -123,14 +159,24 @@ class PlacesSearchService {
   static const _nominatimCacheStorageKey = 'geo_cache_nominatim_v1';
   static Future<void>? _cacheLoadFuture;
 
+  // ── Lieux vérifiés par ville (recherche par mots) ─────────────────────────
+  // Une seule lecture Firestore par ville toutes les 10 min, au lieu d'une
+  // requête par frappe ; aucun appel Google. Borné pour rester léger.
+  static final Map<String, _CityPlacesCache> _cityPlacesCache = {};
+  static const _cityPlacesTtl = Duration(minutes: 10);
+  static const _cityPlacesLimit = 300;
+  static CityPlacesLoader? _cityPlacesLoaderOverride;
+
   static ActiveCityService get defaultCityService => _defaultCityService;
 
   /// Les lieux les plus utilisés de la ville active, sans repli inter-ville.
   static Future<List<LocalPlace>> popularPlaces({
     required ActiveCityService cityService,
     PopularPlacesQueryExecutor? queryExecutor,
+    String? contextCityId,
   }) async {
-    final cityId = await _resolvedCityId(cityService);
+    final cityId =
+        await _resolvedCityId(cityService, contextCityId: contextCityId);
     if (cityId == null) return const [];
     if (queryExecutor != null) {
       final places = await queryExecutor(cityId);
@@ -162,6 +208,7 @@ class PlacesSearchService {
     ActiveCityService? cityService,
     bool expandSearch = false,
     LocalPlacesQueryExecutor? queryExecutor,
+    String? contextCityId,
   }) async {
     final q = LocalPlace.normalize(query.trim());
     if (q.length < minQueryLength) {
@@ -170,7 +217,11 @@ class PlacesSearchService {
     }
 
     final service = cityService ?? _defaultCityService;
-    final context = await _activeCityContext(service);
+    // [contextCityId] (ville choisie à la main quand le GPS ne résout rien) ne
+    // sert QU'À cadrer la recherche : le GPS résolu garde toujours la priorité
+    // et cette valeur n'est jamais écrite dans l'état de ville active.
+    final context =
+        await _activeCityContext(service, contextCityId: contextCityId);
     if (context == null) {
       _lastSearchState = PlacesSearchState.cityUnavailable;
       return [];
@@ -181,6 +232,7 @@ class PlacesSearchService {
       q,
       cityService: service,
       queryExecutor: queryExecutor,
+      contextCityId: contextCityId,
     );
     if (localOutcome == null) {
       _lastSearchState = PlacesSearchState.cityUnavailable;
@@ -225,12 +277,14 @@ class PlacesSearchService {
     ActiveCityService? cityService,
     bool expandSearch = false,
     LocalPlacesQueryExecutor? queryExecutor,
+    String? contextCityId,
   }) async {
     final places = await search(
       input,
       cityService: cityService,
       expandSearch: expandSearch,
       queryExecutor: queryExecutor,
+      contextCityId: contextCityId,
     );
     return places.map(_toSuggestion).toList(growable: false);
   }
@@ -239,12 +293,14 @@ class PlacesSearchService {
     String input, {
     ActiveCityService? cityService,
     LocalPlacesQueryExecutor? queryExecutor,
+    String? contextCityId,
   }) =>
       autocomplete(
         input,
         cityService: cityService,
         expandSearch: true,
         queryExecutor: queryExecutor,
+        contextCityId: contextCityId,
       );
 
   static Future<LatLng?> getCoordinates(
@@ -284,21 +340,25 @@ class PlacesSearchService {
       );
 
   static Future<_ActiveCityContext?> _activeCityContext(
-    ActiveCityService cityService,
-  ) async {
+    ActiveCityService cityService, {
+    String? contextCityId,
+  }) async {
     final state = await cityService.initialize();
-    if (!cityService.hasUsableActiveCity || state.activeCityId == null) {
-      return null;
-    }
+    // Ville résolue (GPS ou choix validé) : prioritaire. Sinon seulement, la
+    // ville choisie pour la recherche, si elle fait partie des villes actives.
+    final resolved =
+        cityService.hasUsableActiveCity && state.activeCityId != null;
+    final targetCityId = resolved ? state.activeCityId : contextCityId;
+    if (targetCityId == null) return null;
     for (final city in cityService.activeCities) {
-      if (city.cityId == state.activeCityId &&
+      if (city.cityId == targetCityId &&
           city.name != null &&
           city.lat != null &&
           city.lng != null &&
           city.radiusKm != null &&
           city.radiusKm! > 0) {
         return _ActiveCityContext(
-          cityId: state.activeCityId!,
+          cityId: targetCityId,
           name: city.name!,
           latitude: city.lat!,
           longitude: city.lng!,
@@ -317,9 +377,11 @@ class PlacesSearchService {
     String q, {
     required ActiveCityService cityService,
     LocalPlacesQueryExecutor? queryExecutor,
+    String? contextCityId,
   }) async {
     try {
-      final cityId = await _resolvedCityId(cityService);
+      final cityId =
+          await _resolvedCityId(cityService, contextCityId: contextCityId);
       if (cityId == null) {
         _lastLocalSearchStatus = LocalPlacesSearchStatus.cityUnavailable;
         return null;
@@ -329,30 +391,47 @@ class PlacesSearchService {
       final results = <LocalPlace>[];
       final seen = <String>{};
 
-      final prefixResults = await _runLocalQuery(
-        cityId: cityId,
-        query: q,
-        kind: LocalPlacesQueryKind.prefix,
-        queryExecutor: queryExecutor,
-      );
-      for (final place in prefixResults) {
-        if (seen.add(place.id)) results.add(place);
-      }
-
-      var exactMatch = prefixResults.any(
-        (place) => place.normalizedName == q,
-      );
-      if (!exactMatch) {
-        final aliasResults = await _runLocalQuery(
+      var exactMatch = false;
+      try {
+        final prefixResults = await _runLocalQuery(
           cityId: cityId,
           query: q,
-          kind: LocalPlacesQueryKind.alias,
+          kind: LocalPlacesQueryKind.prefix,
           queryExecutor: queryExecutor,
         );
-        for (final place in aliasResults) {
+        for (final place in prefixResults) {
           if (seen.add(place.id)) results.add(place);
         }
-        exactMatch = aliasResults.any((place) => place.aliases.contains(q));
+
+        exactMatch = prefixResults.any(
+          (place) => place.normalizedName == q,
+        );
+        if (!exactMatch) {
+          final aliasResults = await _runLocalQuery(
+            cityId: cityId,
+            query: q,
+            kind: LocalPlacesQueryKind.alias,
+            queryExecutor: queryExecutor,
+          );
+          for (final place in aliasResults) {
+            if (seen.add(place.id)) results.add(place);
+          }
+          exactMatch = aliasResults.any((place) => place.aliases.contains(q));
+        }
+      } catch (e) {
+        // Un échec des requêtes par préfixe n'empêche pas la recherche par mots.
+        debugPrint('[PlacesSearch] Firestore error: $e');
+      }
+
+      // Recherche sur tous les mots du nom (« château » → « École Château »).
+      // Avec un `queryExecutor` injecté (tests historiques), cette étape n'a
+      // lieu que si un chargeur est aussi injecté.
+      if (!exactMatch &&
+          (queryExecutor == null || _cityPlacesLoaderOverride != null)) {
+        final cityPlaces = await _cityPlaces(cityId);
+        for (final place in placesMatchingWords(cityPlaces, q)) {
+          if (seen.add(place.id)) results.add(place);
+        }
       }
 
       return _LocalSearchOutcome(results, exactMatch: exactMatch);
@@ -400,11 +479,51 @@ class PlacesSearchService {
   }
 
   static Future<String?> _resolvedCityId(
-    ActiveCityService cityService,
-  ) async {
+    ActiveCityService cityService, {
+    String? contextCityId,
+  }) async {
     final state = await cityService.initialize();
-    if (!cityService.hasUsableActiveCity) return null;
-    return state.activeCityId;
+    if (cityService.hasUsableActiveCity) return state.activeCityId;
+    if (contextCityId != null &&
+        cityService.activeCities.any((city) => city.cityId == contextCityId)) {
+      return contextCityId;
+    }
+    return null;
+  }
+
+  /// Lieux vérifiés de la ville, lus une fois puis gardés [_cityPlacesTtl].
+  /// Un échec n'est pas mis en cache et n'interrompt pas la recherche.
+  static Future<List<LocalPlace>> _cityPlaces(String cityId) async {
+    final cached = _cityPlacesCache[cityId];
+    if (cached != null && !cached.isExpired(_cityPlacesTtl)) {
+      return cached.places;
+    }
+    try {
+      final loader = _cityPlacesLoaderOverride;
+      final List<LocalPlace> places;
+      if (loader != null) {
+        places = await loader(cityId);
+      } else {
+        final snapshot = await _db
+            .collection('places')
+            .where('cityId', isEqualTo: cityId)
+            .where('verified', isEqualTo: true)
+            .limit(_cityPlacesLimit)
+            .get();
+        if (snapshot.docs.length >= _cityPlacesLimit) {
+          debugPrint('[PlacesSearch] Limite de $_cityPlacesLimit lieux '
+              'atteinte pour $cityId : recherche par mots partielle.');
+        }
+        places = snapshot.docs
+            .map((doc) => LocalPlace.fromMap(doc.id, doc.data()))
+            .toList(growable: false);
+      }
+      _cityPlacesCache[cityId] = _CityPlacesCache(places);
+      return places;
+    } catch (e) {
+      debugPrint('[PlacesSearch] Chargement des lieux de $cityId : $e');
+      return cached?.places ?? const [];
+    }
   }
 
   @visibleForTesting
@@ -412,6 +531,7 @@ class PlacesSearchService {
     String query, {
     required ActiveCityService cityService,
     required LocalPlacesQueryExecutor queryExecutor,
+    String? contextCityId,
   }) async {
     final q = LocalPlace.normalize(query.trim());
     if (q.length < minQueryLength) return [];
@@ -419,8 +539,15 @@ class PlacesSearchService {
       q,
       cityService: cityService,
       queryExecutor: queryExecutor,
+      contextCityId: contextCityId,
     );
     return outcome?.results ?? [];
+  }
+
+  @visibleForTesting
+  static void debugSetCityPlacesLoader(CityPlacesLoader? loader) {
+    _cityPlacesLoaderOverride = loader;
+    _cityPlacesCache.clear();
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -882,6 +1009,8 @@ class PlacesSearchService {
   @visibleForTesting
   static void debugResetSearchState() {
     _nominatimCache.clear();
+    _cityPlacesCache.clear();
+    _cityPlacesLoaderOverride = null;
     _cacheLoadFuture = null;
     _lastSearchState = PlacesSearchState.idle;
     _httpClient = http.Client();
@@ -929,5 +1058,12 @@ class _NominatimCache {
   final DateTime createdAt;
   _NominatimCache(this.results, {DateTime? createdAt})
       : createdAt = createdAt ?? DateTime.now();
+  bool isExpired(Duration ttl) => DateTime.now().difference(createdAt) > ttl;
+}
+
+class _CityPlacesCache {
+  final List<LocalPlace> places;
+  final DateTime createdAt;
+  _CityPlacesCache(this.places) : createdAt = DateTime.now();
   bool isExpired(Duration ttl) => DateTime.now().difference(createdAt) > ttl;
 }

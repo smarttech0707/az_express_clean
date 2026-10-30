@@ -9,6 +9,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../models/delivery_zone.dart';
 import '../../models/local_place.dart';
 import '../../models/route_model.dart';
 import '../../providers/active_city_provider.dart';
@@ -122,6 +123,46 @@ String activeLivraisonCityName(ActiveCityProvider provider) {
   return '';
 }
 
+/// Pourquoi la ville n'a pas pu être déterminée par le GPS.
+enum LivraisonLocationIssue {
+  denied,
+  deniedForever,
+  unavailable,
+  outsideService,
+}
+
+@visibleForTesting
+String livraisonLocationIssueMessage(LivraisonLocationIssue? issue) =>
+    switch (issue) {
+      LivraisonLocationIssue.denied =>
+        'La localisation est refusée. Autorisez-la pour détecter votre ville.',
+      LivraisonLocationIssue.deniedForever =>
+        'La localisation est désactivée pour AZ Express. Activez-la dans les '
+            'réglages de votre téléphone.',
+      LivraisonLocationIssue.unavailable =>
+        'Votre position est indisponible pour le moment.',
+      LivraisonLocationIssue.outsideService =>
+        'Vous semblez hors des zones desservies par AZ Express.',
+      null => 'Nous n\'avons pas pu déterminer votre ville.',
+    };
+
+/// Villes proposées dans le sélecteur de recherche : actives et localisables.
+/// Ce choix ne sert qu'à cadrer la recherche d'adresses.
+@visibleForTesting
+List<({String cityId, String name})> livraisonSelectableCities(
+  Iterable<DeliveryZone> cities,
+) =>
+    [
+      for (final city in cities)
+        if (city.cityId != null && city.name != null && city.hasUsableGeometry)
+          (cityId: city.cityId!, name: city.name!),
+    ];
+
+/// Le sélecteur n'apparaît que si le GPS n'a pas résolu de ville.
+@visibleForTesting
+bool shouldShowLivraisonCityPicker({required String? activeCityId}) =>
+    activeCityId == null;
+
 @visibleForTesting
 String? livraisonOrderCoordinateSource(String source) => switch (source) {
       'gps' => 'gps',
@@ -197,6 +238,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   Timer? _debounce;
   List<LocalPlace> _popularPlaces = const [];
   String? _popularPlacesCityId;
+  // Ville choisie à la main quand le GPS ne résout rien. Elle cadre UNIQUEMENT
+  // la recherche d'adresses : jamais la ville de livraison, les zones
+  // desservies ni les tarifs (voir `ActiveCityProvider`, inchangé).
+  String? _searchCityId;
+  LivraisonLocationIssue? _locationIssue;
 
   // ── Route ──────────────────────────────────────────────────────────────────
   RouteModel _route = RouteModel.empty();
@@ -306,6 +352,12 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       final perm = await Geolocator.requestPermission();
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
+        await _recordLocationIssue(
+          cityProvider,
+          perm == LocationPermission.deniedForever
+              ? LivraisonLocationIssue.deniedForever
+              : LivraisonLocationIssue.denied,
+        );
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
@@ -318,6 +370,21 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         latitude: pos.latitude,
         longitude: pos.longitude,
       );
+      if (cityProvider.activeCityId == null) {
+        // Position obtenue mais hors des villes desservies : pas de ville
+        // active, donc la recherche passe par la ville choisie à la main.
+        await _recordLocationIssue(
+          cityProvider,
+          cityProvider.cityResolutionStatus == 'outside_service'
+              ? LivraisonLocationIssue.outsideService
+              : LivraisonLocationIssue.unavailable,
+        );
+      } else if (mounted) {
+        setState(() {
+          _locationIssue = null;
+          _searchCityId = null;
+        });
+      }
       final place = await buildLivraisonGpsPlace(
         latitude: pos.latitude,
         longitude: pos.longitude,
@@ -341,13 +408,58 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       _mapCtrl?.animateCamera(
           CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15));
     } catch (_) {
+      // Délai dépassé, service de localisation coupé, erreur plateforme :
+      // on l'indique au lieu de laisser une recherche vide sans explication.
+      await _recordLocationIssue(
+          cityProvider, LivraisonLocationIssue.unavailable);
     } finally {
       if (mounted) setState(() => _gpsLoading = false);
     }
   }
 
+  /// Mémorise la raison de l'échec GPS et charge la liste des villes (utile au
+  /// sélecteur même quand `resolveGps` n'a jamais été appelé).
+  Future<void> _recordLocationIssue(
+    ActiveCityProvider cityProvider,
+    LivraisonLocationIssue issue,
+  ) async {
+    try {
+      await cityProvider.initialize();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _locationIssue = issue);
+  }
+
+  Future<void> _selectSearchCity(String cityId) async {
+    final cityProvider = context.read<ActiveCityProvider>();
+    setState(() {
+      _searchCityId = cityId;
+      _suggestions = [];
+      _searched = false;
+      _awaitingExpansion = false;
+    });
+    try {
+      await _loadPopularPlaces(cityProvider);
+    } catch (_) {
+      // Les lieux populaires sont facultatifs : ils ne bloquent pas la recherche.
+    }
+    final query =
+        (_activeField == _ActiveField.destination ? _destCtrl : _depCtrl)
+            .text
+            .trim();
+    if (mounted && query.length >= PlacesSearchService.minQueryLength) {
+      setState(() => _searching = true);
+      await _runSearch(query);
+    }
+  }
+
+  /// Ville servant au cadrage de la recherche : celle du GPS si elle est
+  /// résolue, sinon celle choisie à la main.
+  String? _effectiveSearchCityId(ActiveCityProvider cityProvider) =>
+      cityProvider.activeCityId ?? _searchCityId;
+
   Future<void> _loadPopularPlaces(ActiveCityProvider cityProvider) async {
-    final cityId = cityProvider.activeCityId;
+    final cityId = _effectiveSearchCityId(cityProvider);
     if (cityId == null) {
       if (mounted) {
         setState(() {
@@ -359,8 +471,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     }
     final places = await PlacesSearchService.popularPlaces(
       cityService: cityProvider.service,
+      contextCityId: _searchCityId,
     );
-    if (!mounted || cityProvider.activeCityId != cityId) return;
+    if (!mounted || _effectiveSearchCityId(cityProvider) != cityId) return;
     setState(() {
       _popularPlaces = places;
       _popularPlacesCityId = cityId;
@@ -429,6 +542,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     final results = await PlacesSearchService.search(
       query,
       cityService: context.read<ActiveCityProvider>().service,
+      contextCityId: _searchCityId,
     );
     if (!mounted) return;
     setState(() {
@@ -464,6 +578,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     final suggestions = await PlacesSearchService.expandSearch(
       query,
       cityService: context.read<ActiveCityProvider>().service,
+      contextCityId: _searchCityId,
     );
     if (!mounted) return;
     setState(() {
@@ -1967,7 +2082,92 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     );
   }
 
+  /// Résultats, précédés d'un sélecteur de ville tant que le GPS n'a pas
+  /// résolu de ville. Même rendu pour « Où récupérer ? » et « Où livrons-nous ? ».
   Widget _buildResultsList() {
+    final cityProvider = context.watch<ActiveCityProvider>();
+    if (!shouldShowLivraisonCityPicker(
+        activeCityId: cityProvider.activeCityId)) {
+      return _buildResultsBody();
+    }
+    final panel = _buildCityContextPanel(cityProvider);
+    // Aucune ville choisie : la recherche ne peut rien renvoyer ; on évite un
+    // trompeur « Aucun lieu trouvé » et on n'affiche que le sélecteur.
+    if (_searchCityId == null) {
+      return SingleChildScrollView(child: panel);
+    }
+    return Column(children: [panel, Expanded(child: _buildResultsBody())]);
+  }
+
+  Widget _buildCityContextPanel(ActiveCityProvider cityProvider) {
+    final cities = livraisonSelectableCities(cityProvider.activeCities);
+    final issue = _locationIssue;
+    return Padding(
+      key: const Key('city-context-panel'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.location_off_rounded,
+                size: 20, color: AppColors.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                livraisonLocationIssueMessage(issue),
+                key: const Key('city-context-message'),
+                style: GoogleFonts.urbanist(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _premiumMuted),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            'Choisissez la ville pour chercher une adresse. La livraison reste '
+            'limitée aux zones desservies.',
+            style: GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final city in cities)
+                ChoiceChip(
+                  key: Key('search-city-${city.cityId}'),
+                  label: Text(city.name),
+                  selected: _searchCityId == city.cityId,
+                  onSelected: (_) => _selectSearchCity(city.cityId),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                key: const Key('retry-location-button'),
+                onPressed: _gpsLoading ? null : () => _getGPS(_activeField),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Réessayer la localisation'),
+              ),
+              if (issue == LivraisonLocationIssue.deniedForever)
+                TextButton.icon(
+                  key: const Key('open-location-settings-button'),
+                  onPressed: Geolocator.openAppSettings,
+                  icon: const Icon(Icons.settings_rounded, size: 18),
+                  label: const Text('Ouvrir les réglages'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResultsBody() {
     final hasQuery = (_activeField == _ActiveField.departure
                 ? _depCtrl.text
                 : _destCtrl.text)
@@ -2058,13 +2258,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
   Widget _buildQuickPlaces() {
     final cityProvider = context.watch<ActiveCityProvider>();
-    final cityName = activeLivraisonCityName(cityProvider);
+    final cityName = _searchCityId != null && cityProvider.activeCityId == null
+        ? livraisonSelectableCities(cityProvider.activeCities)
+                .where((city) => city.cityId == _searchCityId)
+                .map((city) => city.name)
+                .firstOrNull ??
+            ''
+        : activeLivraisonCityName(cityProvider);
     final titleColor = livraisonPopularPlaceTitleColor(
       platform: Theme.of(context).platform,
       brightness: Theme.of(context).brightness,
     );
     if (cityName.isEmpty ||
-        _popularPlacesCityId != cityProvider.activeCityId ||
+        _popularPlacesCityId != _effectiveSearchCityId(cityProvider) ||
         _popularPlaces.isEmpty) {
       return const SizedBox.shrink();
     }
