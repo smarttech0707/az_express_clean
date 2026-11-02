@@ -4,6 +4,7 @@ import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../utils/partner_location_validator.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminRestaurantRequestsPage extends StatefulWidget {
   const AdminRestaurantRequestsPage({super.key});
@@ -125,15 +126,10 @@ class _AdminRestaurantRequestsPageState
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         centerTitle: true,
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: const ['En attente', 'Traitées'],
           controller: _tabCtrl,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          tabs: const [
-            Tab(text: 'En attente'),
-            Tab(text: 'Traitées'),
-          ],
+          backgroundColor: const Color(0xFF1565C0),
         ),
       ),
       body: TabBarView(

@@ -62,7 +62,8 @@ void main() {
     expect(deco.color, isNot(Colors.white));
   });
 
-  testWidgets('onglet actif = orange AZ, quel que soit le thème',
+  testWidgets(
+      'sombre : onglet actif = orange AZ vif (clair : voir nav_premium)',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: AppTheme.dark,

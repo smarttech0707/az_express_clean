@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -194,10 +195,21 @@ class _SellerLoginState extends State<SellerLogin> {
   @override
   Widget build(BuildContext context) {
     if (_autoResuming) {
+      // Reprise de session : la flèche reste disponible si le réseau est lent.
       return const Scaffold(
         backgroundColor: Color(0xFFF5F5F5),
-        body:
-            Center(child: CircularProgressIndicator(color: Color(0xFF1565C0))),
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Center(
+                  child: CircularProgressIndicator(color: Color(0xFF1565C0))),
+              Positioned(
+                  top: 4,
+                  left: 4,
+                  child: ProBackButton(color: Color(0xFF1565C0))),
+            ],
+          ),
+        ),
       );
     }
     return Scaffold(
@@ -210,167 +222,173 @@ class _SellerLoginState extends State<SellerLogin> {
           ),
         ),
         child: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              // ── HEADER ─────────────────────────────────────
-              const Padding(
-                padding: EdgeInsets.fromLTRB(24, 32, 24, 0),
-                child: Column(
-                  children: [
-                    Icon(Icons.storefront_rounded,
-                        color: Colors.white, size: 64),
-                    SizedBox(height: 16),
-                    Text(
-                      "Espace Vendeur",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                      ),
+              Column(
+                children: [
+                  // ── HEADER ─────────────────────────────────────
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(24, 32, 24, 0),
+                    child: Column(
+                      children: [
+                        Icon(Icons.storefront_rounded,
+                            color: Colors.white, size: 64),
+                        SizedBox(height: 16),
+                        Text(
+                          "Espace Vendeur",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          "Gérez vos commandes et livraisons",
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                      ],
                     ),
-                    SizedBox(height: 6),
-                    Text(
-                      "Gérez vos commandes et livraisons",
-                      style: TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 32),
-
-              // ── FORM ───────────────────────────────────────
-              Expanded(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF5F5F5),
-                    borderRadius:
-                        BorderRadius.vertical(top: Radius.circular(32)),
                   ),
-                  padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "Connexion",
-                        style: TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 24),
 
-                      // Phone
-                      TextField(
-                        controller: _phoneCtrl,
-                        keyboardType: TextInputType.phone,
-                        decoration: InputDecoration(
-                          labelText: "Numéro de téléphone",
-                          hintText: "07 00 00 00 00",
-                          prefixIcon: const Icon(Icons.phone_rounded,
-                              color: Color(0xFF1565C0)),
-                          filled: true,
-                          fillColor: Theme.of(context).colorScheme.surface,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
+                  const SizedBox(height: 32),
 
-                      // Password
-                      TextField(
-                        controller: _passCtrl,
-                        obscureText: !_showPass,
-                        decoration: InputDecoration(
-                          labelText: "Mot de passe",
-                          prefixIcon: const Icon(Icons.lock_rounded,
-                              color: Color(0xFF1565C0)),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _showPass
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: Colors.grey,
-                            ),
-                            onPressed: () =>
-                                setState(() => _showPass = !_showPass),
-                          ),
-                          filled: true,
-                          fillColor: Theme.of(context).colorScheme.surface,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                        onSubmitted: (_) => _login(),
+                  // ── FORM ───────────────────────────────────────
+                  Expanded(
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF5F5F5),
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(32)),
                       ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GenericForgotPasswordPage(
-                                userType: 'seller',
-                                accentColor: Color(0xFF1565C0),
-                                title: 'Mot de passe oublié',
+                      padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "Connexion",
+                            style: TextStyle(
+                                fontSize: 20, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Phone
+                          TextField(
+                            controller: _phoneCtrl,
+                            keyboardType: TextInputType.phone,
+                            decoration: InputDecoration(
+                              labelText: "Numéro de téléphone",
+                              hintText: "07 00 00 00 00",
+                              prefixIcon: const Icon(Icons.phone_rounded,
+                                  color: Color(0xFF1565C0)),
+                              filled: true,
+                              fillColor: Theme.of(context).colorScheme.surface,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide.none,
                               ),
                             ),
                           ),
-                          child: const Text(
-                            'Mot de passe oublié ?',
-                            style: TextStyle(
-                                color: Color(0xFF1565C0), fontSize: 13),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
+                          const SizedBox(height: 14),
 
-                      SizedBox(
-                        width: double.infinity,
-                        height: 54,
-                        child: ScaleButton(
-                          onPressed: _loading ? null : _login,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1565C0),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16)),
-                            elevation: 4,
-                          ),
-                          child: _loading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white)
-                              : const Text(
-                                  "Se connecter",
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold),
+                          // Password
+                          TextField(
+                            controller: _passCtrl,
+                            obscureText: !_showPass,
+                            decoration: InputDecoration(
+                              labelText: "Mot de passe",
+                              prefixIcon: const Icon(Icons.lock_rounded,
+                                  color: Color(0xFF1565C0)),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _showPass
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: Colors.grey,
                                 ),
-                        ),
-                      ),
-
-                      const Spacer(),
-
-                      Center(
-                        child: TextButton(
-                          onPressed: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const SellerRegister()),
+                                onPressed: () =>
+                                    setState(() => _showPass = !_showPass),
+                              ),
+                              filled: true,
+                              fillColor: Theme.of(context).colorScheme.surface,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                            onSubmitted: (_) => _login(),
                           ),
-                          child: const Text(
-                            "Pas encore inscrit ? S'inscrire",
-                            style: TextStyle(
-                                color: Color(0xFF1565C0), fontSize: 13),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const GenericForgotPasswordPage(
+                                    userType: 'seller',
+                                    accentColor: Color(0xFF1565C0),
+                                    title: 'Mot de passe oublié',
+                                  ),
+                                ),
+                              ),
+                              child: const Text(
+                                'Mot de passe oublié ?',
+                                style: TextStyle(
+                                    color: Color(0xFF1565C0), fontSize: 13),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 12),
+
+                          SizedBox(
+                            width: double.infinity,
+                            height: 54,
+                            child: ScaleButton(
+                              onPressed: _loading ? null : _login,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1565C0),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16)),
+                                elevation: 4,
+                              ),
+                              child: _loading
+                                  ? const CircularProgressIndicator(
+                                      color: Colors.white)
+                                  : const Text(
+                                      "Se connecter",
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                            ),
+                          ),
+
+                          const Spacer(),
+
+                          Center(
+                            child: TextButton(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const SellerRegister()),
+                              ),
+                              child: const Text(
+                                "Pas encore inscrit ? S'inscrire",
+                                style: TextStyle(
+                                    color: Color(0xFF1565C0), fontSize: 13),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
+              const Positioned(top: 4, left: 4, child: ProBackButton()),
             ],
           ),
         ),

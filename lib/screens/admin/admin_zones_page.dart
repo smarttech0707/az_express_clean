@@ -6,6 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../models/delivery_zone.dart';
 import '../../models/delivery_zone_form.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminZonesPage extends StatefulWidget {
   const AdminZonesPage({super.key});
@@ -364,12 +365,10 @@ class _AdminZonesPageState extends State<AdminZonesPage>
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         title: const Text('Gestion géographique'),
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: _tabs,
           controller: _tabController,
-          isScrollable: true,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          tabs: _tabs.map((label) => Tab(text: label)).toList(),
+          backgroundColor: const Color(0xFF1565C0),
         ),
       ),
       body: TabBarView(

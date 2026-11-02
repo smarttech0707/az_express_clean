@@ -1,16 +1,22 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
+import 'app_snack.dart';
 
 class RatingDialog extends StatefulWidget {
   final String orderId;
   final String driverName;
 
+  /// Injection de test uniquement ; en production : `FirestoreService.rateOrder`.
+  final Future<void> Function(String orderId, int rating)? submit;
+
   const RatingDialog({
     super.key,
     required this.orderId,
     required this.driverName,
+    this.submit,
   });
 
   @override
@@ -20,6 +26,7 @@ class RatingDialog extends StatefulWidget {
 class _RatingDialogState extends State<RatingDialog> {
   int _selected = 0;
   bool _sending = false;
+  String? _error;
 
   static const _labels = [
     "",
@@ -30,11 +37,39 @@ class _RatingDialogState extends State<RatingDialog> {
     "Excellent !"
   ];
 
+  static String _messageFor(Object error) {
+    if (error is FirebaseException && error.code == 'permission-denied') {
+      return "Cette commande ne peut pas être notée (livraison non terminée "
+          "ou déjà notée).";
+    }
+    return "Impossible d'enregistrer votre note. Vérifiez votre connexion "
+        "et réessayez.";
+  }
+
   Future<void> _submit() async {
-    if (_selected == 0) return;
-    setState(() => _sending = true);
-    await FirestoreService().rateOrder(widget.orderId, _selected);
-    if (mounted) Navigator.of(context).pop();
+    if (_selected == 0 || _sending) return;
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+    try {
+      final send = widget.submit ?? FirestoreService().rateOrder;
+      await send(widget.orderId, _selected);
+    } catch (e) {
+      // Sans ce garde, une écriture refusée laissait le bouton en chargement
+      // indéfiniment, sans aucun message.
+      if (mounted) {
+        setState(() {
+          _sending = false;
+          _error = _messageFor(e);
+        });
+      }
+      return;
+    }
+    if (!mounted) return;
+    AppSnack.show(context, 'Merci pour votre note !',
+        type: AppSnackType.success);
+    Navigator.of(context).pop();
   }
 
   @override
@@ -85,6 +120,21 @@ class _RatingDialogState extends State<RatingDialog> {
                 _labels[_selected],
                 style: const TextStyle(
                     color: Colors.amber, fontWeight: FontWeight.bold),
+              ),
+            ],
+
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.errorText(Theme.of(context).brightness),
+                    fontSize: 13,
+                  ),
+                ),
               ),
             ],
 

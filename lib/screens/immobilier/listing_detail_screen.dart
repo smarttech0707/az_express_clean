@@ -13,6 +13,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/immobilier/listing_gallery_viewer.dart';
 import '../../widgets/immobilier/property_details_display_section.dart';
 import '../../widgets/immobilier/real_estate_location_card.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/stream_error_state.dart';
 
 class ListingDetailScreen extends StatefulWidget {
@@ -155,15 +156,20 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             .doc(widget.listingId)
             .snapshots(),
         builder: (context, snap) {
+          // États sans AppBar : la flèche évite de bloquer l'utilisateur sur
+          // une erreur réseau ou une annonce supprimée.
           if (snap.hasError) {
-            return const StreamErrorState(
-                message: "Impossible de charger cette annonce.");
+            return const BackOverlay(
+                child: StreamErrorState(
+                    message: "Impossible de charger cette annonce."));
           }
           if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator());
+            return const BackOverlay(
+                child: Center(child: CircularProgressIndicator()));
           }
           if (!snap.data!.exists) {
-            return const Center(child: Text('Annonce introuvable'));
+            return const BackOverlay(
+                child: Center(child: Text('Annonce introuvable')));
           }
           final listing = RealEstateListing.fromDoc(snap.data!);
 

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../artisan/artisan_login.dart';
 import '../driver/driver_login.dart';
@@ -11,168 +10,58 @@ import '../boulangerie/boulangerie_login.dart';
 import '../../theme/app_theme.dart';
 import '../../event/screens/event_provider_portal.dart';
 
+/// Espace professionnel : huit accès partenaires, rangés en trois catégories.
+/// Chaque carte ouvre la page de connexion de son rôle (routes inchangées ;
+/// les inscriptions et permissions vivent dans ces pages, pas ici).
 class ProPortal extends StatelessWidget {
   const ProPortal({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final b = Theme.of(context).brightness;
+    final text = Theme.of(context).textTheme;
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1117),
+      backgroundColor: AppColors.premiumBg(b),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D1117),
-        foregroundColor: Colors.white,
-        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           tooltip: 'Retour',
           onPressed: () => Navigator.maybePop(context),
         ),
-        title: Text(
-          'Espace Professionnel',
-          style: GoogleFonts.urbanist(
-              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
-        ),
+        title: const Text('Espace Professionnel'),
         centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           children: [
-            // Header
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.business_center_rounded,
-                        color: AppColors.primary, size: 24),
+            _PartnerNotice(brightness: b),
+            for (final section in _sections) ...[
+              const SizedBox(height: 24),
+              Semantics(
+                header: true,
+                child: Text(
+                  section.title,
+                  style: text.titleSmall?.copyWith(
+                    color: AppColors.premiumTextSecondary(b),
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Accès réservé aux partenaires',
-                            style: GoogleFonts.urbanist(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14)),
-                        Text(
-                            'Comptes créés par l\'administrateur AZ Express uniquement.',
-                            style: GoogleFonts.urbanist(
-                                color: Colors.white54, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-
-            const SizedBox(height: 28),
-
-            Text(
-              'Choisissez votre espace',
-              style: GoogleFonts.urbanist(
-                  color: Colors.white54, fontSize: 12, letterSpacing: 1.2),
-            ),
-            const SizedBox(height: 14),
-
-            // Cartes services pro
-            _ProCard(
-              icon: Icons.handyman_rounded,
-              title: 'Artisan / Mécanicien',
-              subtitle: 'Gérez vos photos de réalisations',
-              gradient: const [Color(0xFF1565C0), Color(0xFF1976D2)],
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const ArtisanLogin())),
-            ),
+              const SizedBox(height: 10),
+              for (final entry in section.entries) ...[
+                _ProCard(entry: entry, brightness: b),
+                const SizedBox(height: 10),
+              ],
+            ],
             const SizedBox(height: 12),
-            _ProCard(
-              icon: Icons.delivery_dining_rounded,
-              title: 'Livreur',
-              subtitle: 'Accédez à votre espace courses',
-              gradient: const [Color(0xFF0D47A1), Color(0xFF1976D2)],
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const DriverLogin())),
-            ),
-            const SizedBox(height: 12),
-            _ProCard(
-              icon: Icons.storefront_rounded,
-              title: 'Boutique / Vendeur',
-              subtitle: 'Gérez vos produits et commandes',
-              gradient: const [Color(0xFF1565C0), Color(0xFF1E88E5)],
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const SellerLogin())),
-            ),
-            const SizedBox(height: 12),
-            _ProCard(
-              icon: Icons.restaurant_rounded,
-              title: 'Restaurant',
-              subtitle: 'Gérez votre menu et vos commandes',
-              gradient: const [Color(0xFF1565C0), Color(0xFF1E88E5)],
-              onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const RestaurantOwnerLogin())),
-            ),
-            const SizedBox(height: 12),
-            _ProCard(
-              icon: Icons.motorcycle_rounded,
-              title: 'Patron de Flotte',
-              subtitle: 'Gérez vos livreurs et vos gains',
-              gradient: const [Color(0xFF6A1B9A), Color(0xFF8E24AA)],
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const FleetLogin())),
-            ),
-            const SizedBox(height: 12),
-            _ProCard(
-              icon: Icons.local_pharmacy_rounded,
-              title: 'Pharmacie',
-              subtitle: 'Gérez votre statut de garde et wallet',
-              gradient: [Colors.red.shade800, Colors.red.shade500],
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const PharmacieLogin())),
-            ),
-            const SizedBox(height: 12),
-            _ProCard(
-              icon: Icons.bakery_dining_rounded,
-              title: 'Boulangerie / Café',
-              subtitle: 'Gérez votre menu et vos commandes',
-              gradient: const [Color(0xFF4E342E), Color(0xFF8D6E63)],
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const BoulangerieLogin())),
-            ),
-            const SizedBox(height: 12),
-            _ProCard(
-              icon: Icons.celebration_rounded,
-              title: 'Prestataire événementiel',
-              subtitle: 'Locations, décoration, traiteur & personnel',
-              gradient: const [Color(0xFF6A1B9A), Color(0xFFE65100)],
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const EventProviderPortal()),
-              ),
-            ),
-
-            const SizedBox(height: 32),
-
             Center(
               child: Text(
                 'AZ Express — Abengourou',
-                style:
-                    GoogleFonts.urbanist(color: Colors.white24, fontSize: 11),
+                style: text.bodySmall
+                    ?.copyWith(color: AppColors.premiumTextSecondary(b)),
               ),
             ),
           ],
@@ -182,97 +71,215 @@ class ProPortal extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Données : catégories et accès ────────────────────────────────────────────
 
-class _ProCard extends StatefulWidget {
+enum _Accent { orange, blue, green, violet }
+
+class _ProEntry {
   final IconData icon;
   final String title;
   final String subtitle;
-  final List<Color> gradient;
-  final VoidCallback onTap;
+  final _Accent accent;
+  final Widget Function() page;
 
-  const _ProCard({
+  const _ProEntry({
     required this.icon,
     required this.title,
     required this.subtitle,
-    required this.gradient,
-    required this.onTap,
+    required this.accent,
+    required this.page,
   });
-
-  @override
-  State<_ProCard> createState() => _ProCardState();
 }
 
-class _ProCardState extends State<_ProCard> {
-  bool _pressed = false;
+class _ProSection {
+  final String title;
+  final List<_ProEntry> entries;
+  const _ProSection(this.title, this.entries);
+}
+
+final List<_ProSection> _sections = [
+  _ProSection('LIVRAISON ET TRANSPORT', [
+    _ProEntry(
+      icon: Icons.delivery_dining_rounded,
+      title: 'Livreur',
+      subtitle: 'Accédez à votre espace courses',
+      accent: _Accent.blue,
+      page: () => const DriverLogin(),
+    ),
+    _ProEntry(
+      icon: Icons.motorcycle_rounded,
+      title: 'Patron de Flotte',
+      subtitle: 'Gérez vos livreurs et vos gains',
+      accent: _Accent.violet,
+      page: () => const FleetLogin(),
+    ),
+  ]),
+  _ProSection('COMMERCE', [
+    _ProEntry(
+      icon: Icons.storefront_rounded,
+      title: 'Boutique / Vendeur',
+      subtitle: 'Gérez vos produits et commandes',
+      accent: _Accent.orange,
+      page: () => const SellerLogin(),
+    ),
+    _ProEntry(
+      icon: Icons.restaurant_rounded,
+      title: 'Restaurant',
+      subtitle: 'Gérez votre menu et vos commandes',
+      accent: _Accent.orange,
+      page: () => const RestaurantOwnerLogin(),
+    ),
+    _ProEntry(
+      icon: Icons.local_pharmacy_rounded,
+      title: 'Pharmacie',
+      subtitle: 'Gérez votre statut de garde et wallet',
+      accent: _Accent.green,
+      page: () => const PharmacieLogin(),
+    ),
+    _ProEntry(
+      icon: Icons.bakery_dining_rounded,
+      title: 'Boulangerie / Café',
+      subtitle: 'Gérez votre menu et vos commandes',
+      accent: _Accent.orange,
+      page: () => const BoulangerieLogin(),
+    ),
+  ]),
+  _ProSection('SERVICES', [
+    _ProEntry(
+      icon: Icons.handyman_rounded,
+      title: 'Artisan / Mécanicien',
+      subtitle: 'Gérez vos photos de réalisations',
+      accent: _Accent.blue,
+      page: () => const ArtisanLogin(),
+    ),
+    _ProEntry(
+      icon: Icons.celebration_rounded,
+      title: 'Prestataire événementiel',
+      subtitle: 'Locations, décoration, traiteur & personnel',
+      accent: _Accent.violet,
+      page: () => const EventProviderPortal(),
+    ),
+  ]),
+];
+
+Color _accentColor(_Accent a, Brightness b) {
+  final dark = b == Brightness.dark;
+  switch (a) {
+    case _Accent.orange:
+      return AppColors.primaryText(b);
+    case _Accent.blue:
+      return dark ? AppColors.blue.withValues(alpha: 1) : AppColors.blueAction;
+    case _Accent.green:
+      return dark ? AppColors.success : AppColors.successStrong;
+    case _Accent.violet:
+      return dark ? AppColors.eventAccentDark : AppColors.eventAccent;
+  }
+}
+
+// ── Composants ───────────────────────────────────────────────────────────────
+
+class _PartnerNotice extends StatelessWidget {
+  final Brightness brightness;
+  const _PartnerNotice({required this.brightness});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        widget.onTap();
-      },
-      onTapCancel: () => setState(() => _pressed = false),
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 100),
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: widget.gradient,
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
+    final b = brightness;
+    final text = Theme.of(context).textTheme;
+    final accent = AppColors.primaryText(b);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.10),
+        borderRadius: AppRadius.cardR,
+        border: Border.all(color: accent.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.verified_user_rounded, color: accent, size: 26),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Accès réservé aux partenaires',
+                    style: text.titleSmall?.copyWith(
+                        color: AppColors.premiumTextPrimary(b),
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(
+                    'Comptes créés par l\'administrateur AZ Express uniquement.',
+                    style: text.bodySmall?.copyWith(
+                        color: AppColors.premiumTextSecondary(b))),
+              ],
             ),
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: widget.gradient.first.withValues(alpha: 0.35),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(14),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProCard extends StatelessWidget {
+  final _ProEntry entry;
+  final Brightness brightness;
+  const _ProCard({required this.entry, required this.brightness});
+
+  @override
+  Widget build(BuildContext context) {
+    final b = brightness;
+    final text = Theme.of(context).textTheme;
+    final accent = _accentColor(entry.accent, b);
+    return Semantics(
+      button: true,
+      label: '${entry.title}. ${entry.subtitle}',
+      excludeSemantics: true,
+      child: Material(
+        color: AppColors.premiumSurface(b),
+        borderRadius: AppRadius.cardR,
+        child: InkWell(
+          borderRadius: AppRadius.cardR,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => entry.page()),
+          ),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: AppRadius.cardR,
+              border: Border.all(color: AppColors.premiumBorder(b)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(entry.icon, color: accent, size: 26),
                 ),
-                child: Icon(widget.icon, color: Colors.white, size: 28),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(widget.title,
-                        style: GoogleFonts.urbanist(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16)),
-                    Text(widget.subtitle,
-                        style: GoogleFonts.urbanist(
-                            color: Colors.white70, fontSize: 12)),
-                  ],
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(entry.title,
+                          style: text.titleMedium?.copyWith(
+                              color: AppColors.premiumTextPrimary(b),
+                              fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 2),
+                      Text(entry.subtitle,
+                          style: text.bodySmall?.copyWith(
+                              color: AppColors.premiumTextSecondary(b))),
+                    ],
+                  ),
                 ),
-              ),
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.arrow_forward_ios,
-                    color: Colors.white, size: 13),
-              ),
-            ],
+                Icon(Icons.chevron_right_rounded,
+                    color: AppColors.premiumTextSecondary(b)),
+              ],
+            ),
           ),
         ),
       ),

@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/firestore_service.dart';
 import 'driver_recharge_flow.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminRechargePage extends StatefulWidget {
   const AdminRechargePage({super.key});
@@ -79,20 +80,11 @@ class _AdminRechargePageState extends State<AdminRechargePage>
             title: const Text("Wallets",
                 style: TextStyle(color: Colors.white, fontSize: 18)),
             centerTitle: true,
-            bottom: TabBar(
-              controller: _tabs,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white60,
-              isScrollable: true,
-              tabAlignment: TabAlignment.center,
-              tabs: const [
-                Tab(text: "Recharge livreur"),
-                Tab(text: "Retraits en attente"),
-                Tab(text: "Traités"),
-                Tab(text: "Échoués / Rejetés"),
-              ],
-            ),
+            bottom: AzTabBar(
+          labels: const ["Recharge livreur", "Retraits en attente", "Traités", "Échoués / Rejetés"],
+          controller: _tabs,
+          backgroundColor: const Color(0xFF2E7D32),
+        ),
           ),
         ],
         body: TabBarView(

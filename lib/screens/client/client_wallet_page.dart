@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../l10n/app_text.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/wallet_action_sheet.dart';
 import '../../theme/app_theme.dart';
 
@@ -20,7 +21,8 @@ class _ClientWalletPageState extends State<ClientWalletPage> {
   Widget build(BuildContext context) {
     if (_uid == null) {
       return Scaffold(
-        body: Center(child: Text(context.tr('conn_required'))),
+        body: BackOverlay(
+            child: Center(child: Text(context.tr('conn_required')))),
       );
     }
 

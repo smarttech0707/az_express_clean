@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../theme/app_theme.dart';
+import '../../widgets/az_tab_bar.dart';
 
 Future<void> _openDocument(dynamic url) async {
   if (url is String && url.isNotEmpty) {
@@ -124,31 +125,38 @@ Future<void> _suspend(
   );
 }
 
+/// Onglets de l'administration Événementiel, dans l'ordre de `TabBarView`.
+const _eventTabLabels = [
+  'Prestataires',
+  'Réservations',
+  'Annonces',
+  'Signalements',
+];
+
 class AdminEventScreen extends StatelessWidget {
-  const AdminEventScreen({super.key});
+  const AdminEventScreen({super.key, @visibleForTesting this.pages});
+
+  /// Contenu des onglets, remplaçable en test (les vrais écrans exigent
+  /// Firebase). `null` en production.
+  final List<Widget>? pages;
 
   @override
   Widget build(BuildContext context) => DefaultTabController(
-        length: 4,
+        length: _eventTabLabels.length,
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Événementiel'),
-            bottom: const TabBar(
-              isScrollable: true,
-              tabs: [
-                Tab(text: 'Prestataires'),
-                Tab(text: 'Réservations'),
-                Tab(text: 'Annonces'),
-                Tab(text: 'Signalements'),
-              ],
-            ),
+            bottom: const AzTabBar(labels: _eventTabLabels),
           ),
-          body: const TabBarView(children: [
-            _ProvidersAdmin(),
-            _ReservationsAdmin(),
-            _OffersAdmin(),
-            _ReportsAdmin(),
-          ]),
+          body: TabBarView(
+            children: pages ??
+                const [
+                  _ProvidersAdmin(),
+                  _ReservationsAdmin(),
+                  _OffersAdmin(),
+                  _ReportsAdmin(),
+                ],
+          ),
         ),
       );
 }

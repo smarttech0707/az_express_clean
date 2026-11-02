@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../widgets/empty_state.dart';
 import '../../constants/support_categories.dart';
+import '../../widgets/az_tab_bar.dart';
 
 /// Support client + signalements — première visibilité admin sur
 /// `support_tickets`/`marketplace_reports`, jusqu'ici lus par aucun écran
@@ -43,15 +44,10 @@ class _AdminSupportPageState extends State<AdminSupportPage>
         backgroundColor: const Color(0xFF00695C),
         foregroundColor: Colors.white,
         centerTitle: true,
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: const ['Tickets support', 'Signalements produits'],
           controller: _tabCtrl,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          tabs: const [
-            Tab(text: 'Tickets support'),
-            Tab(text: 'Signalements produits'),
-          ],
+          backgroundColor: const Color(0xFF00695C),
         ),
       ),
       body: TabBarView(

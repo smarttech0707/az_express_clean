@@ -1,3 +1,4 @@
+import 'package:az_express/screens/admin/admin_partner_account_service.dart';
 import 'package:az_express/screens/admin/admin_sellers_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 // ignore: depend_on_referenced_packages
@@ -32,8 +33,17 @@ void main() {
     originalPlatform = platform.FirebaseFirestorePlatform.instance;
     store = _SellerStore();
     platform.FirebaseFirestorePlatform.instance = store;
+    // La page n'écrit plus sur Firestore : elle appelle manageSellerAccountCF.
+    // Ce faux serveur applique le même contrat (fusion des seuls champs de fiche).
+    AdminPartnerAccountService.manageSellerHook =
+        ({required sellerId, profile, isActive}) async {
+      final changes = profile ?? {'isActive': isActive};
+      store.writes.add(Map<String, dynamic>.from(changes));
+      store.server.addAll(changes);
+    };
   });
   tearDownAll(() {
+    AdminPartnerAccountService.manageSellerHook = null;
     platform.FirebaseFirestorePlatform.instance = originalPlatform;
   });
 
@@ -83,7 +93,8 @@ void main() {
     addTearDown(() {
       FlutterError.onError = previousErrorHandler;
       expect(knownVisualDiagnostics, greaterThan(0),
-          reason: 'retirer cette attente lorsque le défaut visuel sera corrigé');
+          reason:
+              'retirer cette attente lorsque le défaut visuel sera corrigé');
     });
     await tester.pumpWidget(const MaterialApp(home: AdminSellersPage()));
     await tester.pumpAndSettle();
@@ -218,7 +229,8 @@ class _SellerStore extends platform.FirebaseFirestorePlatform {
   platform.FirebaseFirestorePlatform delegateFor({
     required FirebaseApp app,
     required String databaseId,
-  }) => this;
+  }) =>
+      this;
 
   @override
   platform.CollectionReferencePlatform collection(String collectionPath) {
@@ -250,7 +262,8 @@ class _Sellers extends platform.CollectionReferencePlatform {
   Stream<platform.QuerySnapshotPlatform> snapshots({
     bool includeMetadataChanges = false,
     required platform.ListenSource listenSource,
-  }) => Stream.value(platform.QuerySnapshotPlatform([
+  }) =>
+      Stream.value(platform.QuerySnapshotPlatform([
         platform.DocumentSnapshotPlatform(
           store,
           'sellers/test-seller',
@@ -277,7 +290,8 @@ class _SellerDocument extends platform.DocumentReferencePlatform {
   Stream<platform.DocumentSnapshotPlatform> snapshots({
     bool includeMetadataChanges = false,
     required platform.ListenSource listenSource,
-  }) => Stream.value(platform.DocumentSnapshotPlatform(
+  }) =>
+      Stream.value(platform.DocumentSnapshotPlatform(
         store,
         path,
         Map<String, dynamic>.from(store.server),

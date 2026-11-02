@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminGeoStatsPage extends StatefulWidget {
   const AdminGeoStatsPage({super.key});
@@ -121,19 +122,10 @@ class _AdminGeoStatsPageState extends State<AdminGeoStatsPage>
             tooltip: 'Actualiser',
           ),
         ],
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: const ['Zones actives', 'Routes fréquentes', 'Horaires de pointe', 'Évolution'],
           controller: _tabs,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white54,
-          labelStyle:
-              const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-          tabs: const [
-            Tab(text: 'Zones actives'),
-            Tab(text: 'Routes fréquentes'),
-            Tab(text: 'Horaires de pointe'),
-            Tab(text: 'Évolution'),
-          ],
+          backgroundColor: const Color(0xFF1565C0),
         ),
       ),
       body: _loading

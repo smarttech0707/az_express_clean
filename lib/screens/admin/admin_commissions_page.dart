@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../widgets/stream_error_state.dart';
+import '../../widgets/az_tab_bar.dart';
 
 const _kCommission = 100;
 
@@ -40,17 +41,10 @@ class _AdminCommissionsPageState extends State<AdminCommissionsPage>
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         centerTitle: true,
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: const ['Statistiques', 'Historique'],
           controller: _tabs,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white54,
-          indicatorColor: Colors.white,
-          labelStyle:
-              GoogleFonts.urbanist(fontWeight: FontWeight.w600, fontSize: 13),
-          tabs: const [
-            Tab(text: 'Statistiques'),
-            Tab(text: 'Historique'),
-          ],
+          backgroundColor: const Color(0xFF1565C0),
         ),
       ),
       body: TabBarView(

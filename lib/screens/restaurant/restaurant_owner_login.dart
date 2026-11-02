@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -253,8 +254,10 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
     if (_autoResuming) {
       return const Scaffold(
         backgroundColor: Color(0xFFF5F5F5),
-        body:
-            Center(child: CircularProgressIndicator(color: Color(0xFF1565C0))),
+        body: BackOverlay(
+            color: Color(0xFF1565C0),
+            child: Center(
+                child: CircularProgressIndicator(color: Color(0xFF1565C0)))),
       );
     }
     return Scaffold(

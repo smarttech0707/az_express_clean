@@ -99,6 +99,9 @@ flutter:
     - assets/logo.png
     - assets/motorbike.png
     - assets/payment/
+    # Urbanist embarquée (SIL OFL 1.1, voir OFL.txt) : textes corrects hors
+    # ligne. google_fonts les trouve par leur nom avant tout téléchargement.
+    - assets/google_fonts/
 
 
 # ------------------------------

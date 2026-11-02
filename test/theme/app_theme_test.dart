@@ -241,9 +241,10 @@ void main() {
             t.colorScheme.onSurface, AppColors.premiumTextPrimary(brightness));
       });
 
-      test('AppBar reste orange plein (non migré dans ce lot)', () async {
+      test("AppBar : orange d'action foncé, texte blanc AA (≥ 4,5:1)",
+          () async {
         final t = await loadTheme();
-        expect(t.appBarTheme.backgroundColor, AppColors.primary);
+        expect(t.appBarTheme.backgroundColor, AppColors.primaryAction);
         expect(t.appBarTheme.foregroundColor, Colors.white);
       });
 
@@ -262,14 +263,14 @@ void main() {
         expect(dec.fillColor, AppColors.premiumSurface(brightness));
         final focused = dec.focusedBorder as OutlineInputBorder;
         expect(focused.borderRadius, AppRadius.inputR);
-        expect(focused.borderSide.color, AppColors.primary);
+        expect(focused.borderSide.color, AppColors.primaryText(brightness));
       });
 
-      test('ElevatedButtonTheme : fond orange par défaut, taille officielle',
+      test("ElevatedButtonTheme : orange d'action (AA), taille officielle",
           () async {
         final style = (await loadTheme()).elevatedButtonTheme.style!;
         final bg = style.backgroundColor!.resolve({});
-        expect(bg, AppColors.primary);
+        expect(bg, AppColors.primaryAction);
         final minSize = style.minimumSize!.resolve({});
         expect(minSize, const Size(64, 54));
         final shape = style.shape!.resolve({}) as RoundedRectangleBorder;

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,6 +26,7 @@ import '../immobilier/immobilier_home_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/live_marker_cache.dart';
 import '../../event/screens/event_home_screen.dart';
+import '../../ekbine/screens/ek_home_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTES
@@ -32,10 +34,47 @@ import '../../event/screens/event_home_screen.dart';
 const LatLng _abengourou = LatLng(6.7273, -3.4961);
 const Color _primary = AppColors.primary;
 
+// Habillage de l'écran selon le thème : la carte Google reste claire, mais le
+// panneau, les pastilles et les cartes de services suivent le mode clair/sombre.
+Brightness _bright(BuildContext c) => Theme.of(c).brightness;
+Color _mapSurface(BuildContext c) => AppColors.premiumSurface(_bright(c));
+Color _mapBorder(BuildContext c) => AppColors.premiumBorder(_bright(c));
+Color _mapText(BuildContext c) => AppColors.premiumTextPrimary(_bright(c));
+Color _mapTextSecondary(BuildContext c) =>
+    AppColors.premiumTextSecondary(_bright(c));
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ÉTAT PERMISSION
 // ─────────────────────────────────────────────────────────────────────────────
 enum _PermState { checking, granted, denied, serviceOff }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POSITIONS DU PANNEAU DE SERVICES (fractions de la hauteur de l'écran)
+// ─────────────────────────────────────────────────────────────────────────────
+typedef ClientPanelSizes = ({double collapsed, double mid, double expanded});
+
+/// Hauteurs du panneau déplaçable, calculées en pixels puis converties en
+/// fractions : le même code sert un 360×640 et un 430×932.
+/// - réduit : poignée + salutation/portefeuille, au-dessus de la barre flottante ;
+/// - moyen : en plus, la carte reste visible sur près de 40 % de l'écran ;
+/// - agrandi : s'arrête sous la barre de recherche (jamais par-dessus).
+@visibleForTesting
+ClientPanelSizes clientPanelSizes({
+  required double height,
+  required double topInset,
+  required double bottomInset,
+}) {
+  final h = height <= 0 ? 1.0 : height;
+  final collapsed = ((100 + bottomInset) / h).clamp(0.12, 0.34).toDouble();
+  // Barre de recherche : décalage 12 + badge 36 + espace 10 + champ 52 + marge.
+  final headerBottom = topInset + 12 + 36 + 10 + 52 + 10;
+  final expanded =
+      (1 - headerBottom / h).clamp(collapsed + 0.2, 0.92).toDouble();
+  final mid = ((360 + bottomInset) / h)
+      .clamp(collapsed + 0.1, math.min(0.62, expanded - 0.08))
+      .toDouble();
+  return (collapsed: collapsed, mid: mid, expanded: expanded);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAP SCREEN
@@ -51,8 +90,7 @@ class ClientMap extends StatefulWidget {
   State<ClientMap> createState() => _ClientMapState();
 }
 
-class _ClientMapState extends State<ClientMap>
-    with SingleTickerProviderStateMixin {
+class _ClientMapState extends State<ClientMap> {
   GoogleMapController? _mapController;
   LatLng? _clientPosition;
   _PermState _permState = _PermState.checking;
@@ -65,33 +103,18 @@ class _ClientMapState extends State<ClientMap>
   BitmapDescriptor? _driverIcon;
   BitmapDescriptor? _clientIcon;
 
-  // Animation du panneau inférieur
-  late AnimationController _panelCtrl;
-  late Animation<Offset> _panelSlide;
-  late Animation<double> _panelFade;
+  // Panneau de services déplaçable (3 positions : réduit / moyen / agrandi).
+  final DraggableScrollableController _sheetCtrl =
+      DraggableScrollableController();
+  ClientPanelSizes? _panelSizes;
+  double _sheetHeight = 0;
 
   // ── Initialisation ──────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
-    _initPanelAnimation();
     _loadIcons();
     _checkPermissionAndLocate();
-  }
-
-  void _initPanelAnimation() {
-    _panelCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _panelSlide = Tween<Offset>(
-      begin: const Offset(0, 1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _panelCtrl, curve: Curves.easeOutCubic));
-    _panelFade = CurvedAnimation(parent: _panelCtrl, curve: Curves.easeOut);
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (mounted) _panelCtrl.forward();
-    });
   }
 
   Future<void> _loadIcons() async {
@@ -113,7 +136,7 @@ class _ClientMapState extends State<ClientMap>
   void dispose() {
     _driversSub?.cancel();
     _mapController?.dispose();
-    _panelCtrl.dispose();
+    _sheetCtrl.dispose();
     super.dispose();
   }
 
@@ -213,15 +236,15 @@ class _ClientMapState extends State<ClientMap>
             ? LiveMarkerChangeType.added
             : LiveMarkerChangeType.modified,
         marker: Marker(
-        markerId: MarkerId(doc.id),
-        position: LatLng(lat, lng),
-        infoWindow: InfoWindow(
-          title: data['name'] as String? ?? 'Livreur',
-          snippet: data['vehicle'] as String? ?? '',
-        ),
-        icon: _driverIcon ??
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        zIndexInt: 1,
+          markerId: MarkerId(doc.id),
+          position: LatLng(lat, lng),
+          infoWindow: InfoWindow(
+            title: data['name'] as String? ?? 'Livreur',
+            snippet: data['vehicle'] as String? ?? '',
+          ),
+          icon: _driverIcon ??
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          zIndexInt: 1,
         ),
       ));
     }
@@ -236,7 +259,8 @@ class _ClientMapState extends State<ClientMap>
             position: _clientPosition!,
             infoWindow: const InfoWindow(title: 'Vous'),
             icon: _clientIcon ??
-                BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                BitmapDescriptor.defaultMarkerWithHue(
+                    BitmapDescriptor.hueAzure),
             zIndexInt: 2,
           ),
         ..._driverMarkers.values,
@@ -288,6 +312,74 @@ class _ClientMapState extends State<ClientMap>
     }
   }
 
+  void _cycleSheet() {
+    final sizes = _panelSizes;
+    if (sizes == null || !_sheetCtrl.isAttached) return;
+    final current = _sheetCtrl.size;
+    final target = current < sizes.mid - 0.02
+        ? sizes.mid
+        : current < sizes.expanded - 0.02
+            ? sizes.expanded
+            : sizes.collapsed;
+    _sheetCtrl.animateTo(target,
+        duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+  }
+
+  /// Glissement sur la poignée (fixe, hors du contenu défilant, donc hors de la
+  /// portée du défilement natif du panneau) : suit le doigt.
+  void _dragSheet(double dy) {
+    final sizes = _panelSizes;
+    if (sizes == null || !_sheetCtrl.isAttached || _sheetHeight <= 0) return;
+    _sheetCtrl.jumpTo(
+      (_sheetCtrl.size - dy / _sheetHeight)
+          .clamp(sizes.collapsed, sizes.expanded)
+          .toDouble(),
+    );
+  }
+
+  /// Relâché : se cale sur la position la plus proche, en tenant compte de
+  /// l'élan (vitesse vers le bas > 0).
+  void _settleSheet(double velocityY) {
+    final sizes = _panelSizes;
+    if (sizes == null || !_sheetCtrl.isAttached || _sheetHeight <= 0) return;
+    final projected = _sheetCtrl.size - velocityY * 0.12 / _sheetHeight;
+    final stops = [sizes.collapsed, sizes.mid, sizes.expanded];
+    var target = stops.first;
+    for (final stop in stops) {
+      if ((stop - projected).abs() < (target - projected).abs()) target = stop;
+    }
+    _sheetCtrl.animateTo(target,
+        duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+  }
+
+  Widget _buildServicesSheet() {
+    return LayoutBuilder(builder: (context, c) {
+      final pad = MediaQuery.of(context).padding;
+      final sizes = clientPanelSizes(
+        height: c.maxHeight,
+        topInset: pad.top,
+        bottomInset: pad.bottom,
+      );
+      _panelSizes = sizes;
+      _sheetHeight = c.maxHeight;
+      return DraggableScrollableSheet(
+        controller: _sheetCtrl,
+        initialChildSize: sizes.mid,
+        minChildSize: sizes.collapsed,
+        maxChildSize: sizes.expanded,
+        snap: true,
+        snapSizes: [sizes.mid],
+        builder: (_, scrollController) => _BottomPanel(
+          onlineDrivers: _onlineDrivers,
+          scrollController: scrollController,
+          onHandleTap: _cycleSheet,
+          onHandleDrag: _dragSheet,
+          onHandleDragEnd: _settleSheet,
+        ),
+      );
+    });
+  }
+
   // ── BUILD ────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -330,6 +422,11 @@ class _ClientMapState extends State<ClientMap>
                 ),
               ),
 
+            // ── PANNEAU DÉPLAÇABLE ────────────────────────────────────────
+            // Placé sous l'en-tête : agrandi, il ne recouvre jamais la barre de
+            // recherche. Hors du panneau, les gestes atteignent la carte.
+            Positioned.fill(child: _buildServicesSheet()),
+
             // ── BARRE DE RECHERCHE + BADGE LIVREURS ──────────────────────
             Positioned(
               top: MediaQuery.of(context).padding.top + 12,
@@ -358,20 +455,6 @@ class _ClientMapState extends State<ClientMap>
                 ],
               ),
             ),
-
-            // ── PANNEAU INFÉRIEUR ─────────────────────────────────────────
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: SlideTransition(
-                position: _panelSlide,
-                child: FadeTransition(
-                  opacity: _panelFade,
-                  child: _BottomPanel(onlineDrivers: _onlineDrivers),
-                ),
-              ),
-            ),
           ],
         ),
       ),
@@ -393,26 +476,21 @@ class _DriversBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: _mapSurface(context),
+        borderRadius: AppRadius.pillR,
+        border: Border.all(color: _mapBorder(context)),
+        boxShadow: AppShadow.sm,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 400),
+          Container(
             width: 8,
             height: 8,
             decoration: BoxDecoration(
-              color:
-                  isAvailable ? const Color(0xFF22C55E) : Colors.grey.shade400,
+              color: isAvailable
+                  ? AppColors.successStrong
+                  : AppColors.premiumTextMutedLight,
               shape: BoxShape.circle,
             ),
           ),
@@ -426,7 +504,7 @@ class _DriversBadge extends StatelessWidget {
             style: GoogleFonts.urbanist(
               fontWeight: FontWeight.w600,
               fontSize: 13,
-              color: Colors.black87,
+              color: _mapText(context),
             ),
           ),
         ],
@@ -444,23 +522,25 @@ class _RecenterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Semantics(
+      label: 'Recentrer la carte sur ma position',
+      button: true,
+      excludeSemantics: true,
       onTap: onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
-              blurRadius: 14,
-              offset: const Offset(0, 4),
-            ),
-          ],
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: _mapSurface(context),
+            shape: BoxShape.circle,
+            border: Border.all(color: _mapBorder(context)),
+            boxShadow: AppShadow.sm,
+          ),
+          child: const Icon(Icons.my_location_rounded,
+              color: AppColors.primaryAction, size: 22),
         ),
-        child: const Icon(Icons.my_location_rounded, color: _primary, size: 20),
       ),
     );
   }
@@ -529,25 +609,21 @@ class _SearchBar extends StatelessWidget {
         height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          color: _mapSurface(context),
+          borderRadius: AppRadius.pillR,
+          border: Border.all(color: _mapBorder(context)),
+          boxShadow: AppShadow.md,
         ),
         child: Row(children: [
-          const Icon(Icons.search_rounded, color: AppColors.primary, size: 22),
+          const Icon(Icons.search_rounded,
+              color: AppColors.primaryAction, size: 22),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               'Où allez-vous ?',
               style: GoogleFonts.urbanist(
                 fontSize: 16,
-                color: Colors.grey.shade500,
+                color: _mapTextSecondary(context),
                 fontWeight: FontWeight.w400,
               ),
             ),
@@ -556,11 +632,11 @@ class _SearchBar extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.1),
+              color: AppColors.primaryAction.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.mic_rounded,
-                color: AppColors.primary, size: 20),
+                color: AppColors.primaryAction, size: 20),
           ),
         ]),
       ),
@@ -573,7 +649,20 @@ class _SearchBar extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _BottomPanel extends StatefulWidget {
   final int onlineDrivers;
-  const _BottomPanel({required this.onlineDrivers});
+
+  /// Fourni par `DraggableScrollableSheet` : c'est lui qui relie le défilement
+  /// du contenu au déplacement du panneau.
+  final ScrollController scrollController;
+  final VoidCallback onHandleTap;
+  final ValueChanged<double> onHandleDrag;
+  final ValueChanged<double> onHandleDragEnd;
+  const _BottomPanel({
+    required this.onlineDrivers,
+    required this.scrollController,
+    required this.onHandleTap,
+    required this.onHandleDrag,
+    required this.onHandleDragEnd,
+  });
 
   @override
   State<_BottomPanel> createState() => _BottomPanelState();
@@ -623,117 +712,7 @@ class _BottomPanelState extends State<_BottomPanel> {
     return v.toString();
   }
 
-  void _showPlusMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final bottom = MediaQuery.of(ctx).padding.bottom;
-        return Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(ctx).size.height * 0.82,
-          ),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(top: 12, bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    ctx.tr('more_services'),
-                    style: GoogleFonts.urbanist(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(20, 0, 20, 24 + bottom),
-                  child: const Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _PlusCard(
-                          icon: Icons.bakery_dining_rounded,
-                          routeKey: 'boulangerie',
-                          color: Color(0xFF5D4037)),
-                      _PlusCard(
-                          icon: Icons.storefront_rounded,
-                          routeKey: 'boutique',
-                          color: Colors.deepOrange),
-                      _PlusCard(
-                          icon: Icons.local_pharmacy_rounded,
-                          routeKey: 'pharmacy',
-                          color: Colors.red),
-                      _PlusCard(
-                          icon: Icons.local_laundry_service_rounded,
-                          routeKey: 'laundry',
-                          color: Colors.blue),
-                      _PlusCard(
-                          icon: Icons.card_giftcard_rounded,
-                          routeKey: 'parcel',
-                          color: Colors.orange),
-                      _PlusCard(
-                          icon: Icons.water_drop_rounded,
-                          routeKey: 'water',
-                          color: Colors.teal),
-                      _PlusCard(
-                          icon: Icons.home_rounded,
-                          routeKey: 'houses',
-                          color: Color(0xFF00695C)),
-                      _PlusCard(
-                          icon: Icons.apartment_rounded,
-                          routeKey: 'furnished',
-                          color: Color(0xFF4A148C)),
-                      _PlusCard(
-                          icon: Icons.villa_rounded,
-                          routeKey: 'real_estate',
-                          color: Color(0xFF00838F)),
-                      _PlusCard(
-                          icon: Icons.construction_rounded,
-                          routeKey: 'local_services',
-                          color: Color(0xFF1565C0)),
-                      _PlusCard(
-                          icon: Icons.wine_bar_rounded,
-                          routeKey: 'cave',
-                          color: Color(0xFF880E4F)),
-                      _PlusCard(
-                          icon: Icons.electric_rickshaw_rounded,
-                          routeKey: 'tricycle',
-                          color: Color(0xFF6D4C41)),
-                      _PlusCard(
-                          icon: Icons.local_taxi_rounded,
-                          routeKey: 'night_taxi',
-                          color: Color(0xFF37474F)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  void _showPlusMenu(BuildContext context) => showPlusServicesMenu(context);
 
   @override
   Widget build(BuildContext context) {
@@ -742,189 +721,240 @@ class _BottomPanelState extends State<_BottomPanel> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _mapSurface(context),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border.all(color: _mapBorder(context)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 24,
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 20,
             offset: const Offset(0, -4),
           ),
         ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          // Drag handle
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.only(top: 10, bottom: 16),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-
-          // ── GREETING + WALLET ──────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _firstName.isNotEmpty
-                            ? '${context.tr('hello')} $_firstName 👋'
-                            : context.tr('hello'),
-                        style: GoogleFonts.urbanist(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        context.tr('where_send'),
-                        style: GoogleFonts.urbanist(
-                          fontSize: 12.5,
-                          color: Colors.grey.shade500,
-                        ),
-                      ),
-                    ],
+          // Poignée FIXE (reste visible quand les services défilent) : glisser
+          // déplace le panneau, un appui le fait passer à la position suivante
+          // (alternative au geste pour l'accessibilité).
+          Semantics(
+            label: 'Panneau des services. Appuyer pour agrandir ou réduire',
+            button: true,
+            excludeSemantics: true,
+            onTap: widget.onHandleTap,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onHandleTap,
+              onVerticalDragUpdate: (d) => widget.onHandleDrag(d.delta.dy),
+              onVerticalDragEnd: (d) =>
+                  widget.onHandleDragEnd(d.velocity.pixelsPerSecond.dy),
+              child: SizedBox(
+                height: 32,
+                width: double.infinity,
+                child: Center(
+                  child: Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: AppColors.premiumTextMutedLight
+                          .withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
-
-                // ── Wallet chip ────────────────────────────────────────
-                GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const ClientWalletPage()),
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [_primary, Color(0xFFFF8F00)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _primary.withValues(alpha: 0.35),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              controller: widget.scrollController,
+              physics: const ClampingScrollPhysics(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ── GREETING + WALLET ──────────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Icon(Icons.account_balance_wallet_rounded,
-                            color: Colors.white, size: 14),
-                        const SizedBox(width: 6),
-                        Text(
-                          '${_fmtWallet(_walletBalance)} F',
-                          style: GoogleFonts.urbanist(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _firstName.isNotEmpty
+                                    ? '${context.tr('hello')} $_firstName 👋'
+                                    : context.tr('hello'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.urbanist(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w700,
+                                  color: _mapText(context),
+                                  height: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                context.tr('where_send'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.urbanist(
+                                  fontSize: 13,
+                                  color: _mapTextSecondary(context),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 3),
-                        const Icon(Icons.chevron_right_rounded,
-                            color: Colors.white70, size: 16),
+                        const SizedBox(width: 12),
+
+                        // ── Wallet chip ──────────────────────────────────────
+                        // Orange d'action (texte blanc ≥ 4,5:1) et zone d'appui de
+                        // 48 px ; mêmes données et même destination qu'avant.
+                        Semantics(
+                          label:
+                              'Portefeuille, solde ${_fmtWallet(_walletBalance)} '
+                              'francs CFA. Ouvrir',
+                          button: true,
+                          excludeSemantics: true,
+                          child: GestureDetector(
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const ClientWalletPage()),
+                            ),
+                            child: Container(
+                              constraints: const BoxConstraints(minHeight: 48),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 14),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    AppColors.primaryActionLight,
+                                    AppColors.primaryAction,
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: AppRadius.btnR,
+                                boxShadow: AppShadow.colored(
+                                    AppColors.primaryAction,
+                                    opacity: 0.25),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                      Icons.account_balance_wallet_rounded,
+                                      color: Colors.white,
+                                      size: 16),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${_fmtWallet(_walletBalance)} F',
+                                    style: GoogleFonts.urbanist(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  const Icon(Icons.chevron_right_rounded,
+                                      color: Colors.white, size: 18),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
 
-          SizedBox(height: screenH < 700 ? 14 : 18),
+                  SizedBox(height: screenH < 700 ? 14 : 18),
 
-          // ── GRILLE SERVICES 2×2 ────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: [
-                Row(children: [
-                  // ── Livraison ──────────────────────────────────────────
-                  _ServiceCard(
-                    icon: Icons.delivery_dining_rounded,
-                    label: 'Livraison',
-                    description: 'Envoyer un colis rapidement',
-                    color: _primary,
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const LivraisonScreen())),
-                  ),
-                  const SizedBox(width: 12),
-                  // ── Courses ────────────────────────────────────────────
-                  _ServiceCard(
-                    icon: Icons.shopping_basket_rounded,
-                    label: 'Courses',
-                    description: 'Vos achats du quotidien',
-                    color: const Color(0xFF2E7D32),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const CoursesScreen())),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-                Row(children: [
-                  // ── Food ───────────────────────────────────────────────
-                  _ServiceCard(
-                    icon: Icons.restaurant_rounded,
-                    label: 'Food',
-                    description: 'Commandez vos repas',
-                    color: const Color(0xFF1565C0),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const RestaurantList())),
-                  ),
-                  const SizedBox(width: 12),
-                  // ── Plus de services ───────────────────────────────────
-                  _ServiceCard(
-                    icon: Icons.grid_view_rounded,
-                    label: context.tr('more_services'),
-                    description: 'Découvrir tous les services',
-                    color: const Color(0xFF6A1B9A),
-                    onTap: () => _showPlusMenu(context),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-                Row(children: [
-                  _ServiceCard(
-                    icon: Icons.celebration_rounded,
-                    label: 'Événementiel',
-                    description: 'Location, déco, traiteur & personnel',
-                    color: const Color(0xFF8E24AA),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const EventHomeScreen()),
+                  // ── SERVICES ──────────────────────────────────────────────
+                  // Livraison en tête (carte principale), puis deux colonnes
+                  // équilibrées, puis « Plus de services » pleine largeur.
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      children: [
+                        _ServiceCard(
+                          variant: _ServiceVariant.featured,
+                          icon: Icons.delivery_dining_rounded,
+                          label: 'Livraison',
+                          description: 'Envoyer un colis rapidement',
+                          accent: AppColors.primary,
+                          onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const LivraisonScreen())),
+                        ),
+                        const SizedBox(height: 12),
+                        _ServiceRow(
+                          left: _ServiceCard(
+                            icon: Icons.shopping_basket_rounded,
+                            label: 'Courses',
+                            description: 'Vos achats du quotidien',
+                            accent: _kAccentCourses,
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const CoursesScreen())),
+                          ),
+                          right: _ServiceCard(
+                            icon: Icons.restaurant_rounded,
+                            label: 'Food',
+                            description: 'Commandez vos repas',
+                            accent: _kAccentFood,
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const RestaurantList())),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _ServiceRow(
+                          left: _ServiceCard(
+                            icon: Icons.phone_android_rounded,
+                            label: 'E-Kbine',
+                            description: context.tr('ekbine_sub'),
+                            accent: _kAccentEkbine,
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const EkHomeScreen())),
+                          ),
+                          right: _ServiceCard(
+                            icon: Icons.celebration_rounded,
+                            label: 'Événementiel',
+                            description: 'Location, déco, traiteur & personnel',
+                            accent: _kAccentEvent,
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const EventHomeScreen())),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _ServiceCard(
+                          variant: _ServiceVariant.wide,
+                          icon: Icons.grid_view_rounded,
+                          label: context.tr('more_services'),
+                          description: 'Découvrir tous les services',
+                          accent: _kAccentMore,
+                          onTap: () => _showPlusMenu(context),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  const Spacer(),
-                ]),
-              ],
+
+                  SizedBox(height: bottomPad + 20),
+                ],
+              ),
             ),
           ),
-
-          SizedBox(height: bottomPad + 20),
         ],
       ),
     );
@@ -934,18 +964,60 @@ class _BottomPanelState extends State<_BottomPanel> {
 // ─────────────────────────────────────────────────────────────────────────────
 // SERVICE CARD
 // ─────────────────────────────────────────────────────────────────────────────
+// Accents par service (et par catégorie du menu « Plus de services »).
+const Color _kAccentCourses = AppColors.successStrong;
+const Color _kAccentFood = AppColors.primaryAction;
+const Color _kAccentEkbine = AppColors.blueAction;
+const Color _kAccentEvent = AppColors.eventAccent;
+const Color _kAccentMore = AppColors.premiumTextSecondaryLight;
+
+/// Version de l'accent lisible sur le fond sombre (le clair y est trop profond).
+Color _accentFor(Color accent, Brightness b) {
+  if (b == Brightness.light) return accent;
+  if (accent == _kAccentCourses) return const Color(0xFF4ADE80);
+  if (accent == _kAccentFood) return AppColors.primary;
+  if (accent == _kAccentEkbine) return AppColors.bluePremiumDark;
+  if (accent == _kAccentEvent) return AppColors.eventAccentDark;
+  return AppColors.premiumTextSecondaryDark;
+}
+
+enum _ServiceVariant { featured, tile, wide }
+
+/// Deux cartes côte à côte, de même hauteur.
+class _ServiceRow extends StatelessWidget {
+  final Widget left;
+  final Widget right;
+  const _ServiceRow({required this.left, required this.right});
+
+  @override
+  Widget build(BuildContext context) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: left),
+          const SizedBox(width: 12),
+          Expanded(child: right),
+        ],
+      ),
+    );
+  }
+}
+
 class _ServiceCard extends StatefulWidget {
+  final _ServiceVariant variant;
   final IconData icon;
   final String label;
   final String description;
-  final Color color;
+  final Color accent;
   final VoidCallback onTap;
 
   const _ServiceCard({
+    this.variant = _ServiceVariant.tile,
     required this.icon,
     required this.label,
     required this.description,
-    required this.color,
+    required this.accent,
     required this.onTap,
   });
 
@@ -958,8 +1030,95 @@ class _ServiceCardState extends State<_ServiceCard> {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
+    final b = _bright(context);
+    final featured = widget.variant == _ServiceVariant.featured;
+    final wide = widget.variant == _ServiceVariant.wide;
+    final accent = _accentFor(widget.accent, b);
+
+    // Principale : orange d'action plein (texte blanc ≥ 4,5:1), sans dégradé.
+    // Autres : fond de carte discret + bordure, accent porté par l'icône.
+    final Color fill = featured
+        ? (_pressed ? AppColors.primaryActionPressed : AppColors.primaryAction)
+        : (b == Brightness.dark
+            ? AppColors.premiumSurfaceElevatedDark
+            : AppColors.premiumBgLight);
+    final Color titleColor = featured ? Colors.white : _mapText(context);
+    final Color descColor =
+        featured ? Colors.white : _mapTextSecondary(context);
+    final Color iconBg = featured
+        ? Colors.white.withValues(alpha: 0.2)
+        : accent.withValues(alpha: b == Brightness.dark ? 0.2 : 0.12);
+    final Color iconFg = featured ? Colors.white : accent;
+
+    final iconBox = Container(
+      width: featured ? 52 : 44,
+      height: featured ? 52 : 44,
+      decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+      child: Icon(widget.icon, color: iconFg, size: featured ? 28 : 24),
+    );
+
+    final title = Text(
+      widget.label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: GoogleFonts.urbanist(
+        fontSize: featured ? 20 : 15,
+        fontWeight: featured ? FontWeight.w800 : FontWeight.w700,
+        color: titleColor,
+        height: 1.2,
+      ),
+    );
+    final desc = Text(
+      widget.description,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: GoogleFonts.urbanist(
+        fontSize: featured ? 13.5 : 12,
+        fontWeight: FontWeight.w500,
+        color: descColor,
+        height: 1.25,
+      ),
+    );
+
+    final Widget content;
+    if (featured || wide) {
+      content = Row(
+        children: [
+          iconBox,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [title, const SizedBox(height: 2), desc],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(Icons.chevron_right_rounded,
+              color: featured ? Colors.white : _mapTextSecondary(context),
+              size: 24),
+        ],
+      );
+    } else {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          iconBox,
+          const SizedBox(height: 12),
+          title,
+          const SizedBox(height: 2),
+          desc,
+        ],
+      );
+    }
+
+    return Semantics(
+      label: '${widget.label}. ${widget.description}',
+      button: true,
+      excludeSemantics: true,
+      onTap: widget.onTap,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) {
           setState(() => _pressed = false);
@@ -967,66 +1126,24 @@ class _ServiceCardState extends State<_ServiceCard> {
         },
         onTapCancel: () => setState(() => _pressed = false),
         child: AnimatedScale(
-          scale: _pressed ? 0.94 : 1.0,
-          duration: const Duration(milliseconds: 100),
+          scale: _pressed ? 0.97 : 1.0,
+          duration: const Duration(milliseconds: 90),
           curve: Curves.easeOut,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 100),
-            height: 88,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Container(
+            constraints: BoxConstraints(
+              minHeight: featured ? 132 : (wide ? 68 : 0),
+            ),
+            padding: EdgeInsets.all(featured ? 18 : 14),
             decoration: BoxDecoration(
-              color: widget.color.withValues(alpha: _pressed ? 0.15 : 0.08),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: widget.color.withValues(alpha: 0.25),
-                width: 1.5,
-              ),
+              color: fill,
+              borderRadius: AppRadius.cardR,
+              border: featured ? null : Border.all(color: _mapBorder(context)),
+              boxShadow: featured
+                  ? AppShadow.colored(AppColors.primaryAction, opacity: 0.22)
+                  : null,
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.start,
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: widget.color.withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(widget.icon, color: widget.color, size: 20),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.urbanist(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        widget.description,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.urbanist(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w400,
-                          color: Colors.black54,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            alignment: Alignment.centerLeft,
+            child: content,
           ),
         ),
       ),
@@ -1035,17 +1152,208 @@ class _ServiceCardState extends State<_ServiceCard> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PLUS CARD
+// MENU « PLUS DE SERVICES »
 // ─────────────────────────────────────────────────────────────────────────────
-class _PlusCard extends StatefulWidget {
+class _PlusEntry {
   final IconData icon;
   final String routeKey;
+
+  /// Couleur historique transmise telle quelle aux pages `SimpleServicePage`
+  /// (elle ne sert plus à l'affichage du menu, qui suit la catégorie).
   final Color color;
 
+  /// Libellé littéral pour l'entrée sans clé de traduction.
+  final String? label;
+
+  const _PlusEntry(this.icon, this.routeKey, this.color, {this.label});
+}
+
+class _PlusCategory {
+  final String titleKey;
+  final Color accent;
+  final List<_PlusEntry> entries;
+  const _PlusCategory(this.titleKey, this.accent, this.entries);
+}
+
+/// 13 services d'origine + le raccourci E-Kbine (route déjà existante).
+const List<_PlusCategory> _plusCategories = [
+  _PlusCategory('plus_cat_commerce', _kAccentFood, [
+    _PlusEntry(Icons.bakery_dining_rounded, 'boulangerie', Color(0xFF5D4037)),
+    _PlusEntry(Icons.storefront_rounded, 'boutique', Colors.deepOrange),
+    _PlusEntry(Icons.local_pharmacy_rounded, 'pharmacy', Colors.red),
+    _PlusEntry(Icons.wine_bar_rounded, 'cave', Color(0xFF880E4F)),
+    _PlusEntry(Icons.water_drop_rounded, 'water', Colors.teal),
+  ]),
+  _PlusCategory('plus_cat_home', _kAccentEkbine, [
+    _PlusEntry(Icons.home_rounded, 'houses', Color(0xFF00695C)),
+    _PlusEntry(Icons.apartment_rounded, 'furnished', Color(0xFF4A148C)),
+    _PlusEntry(Icons.villa_rounded, 'real_estate', Color(0xFF00838F)),
+  ]),
+  _PlusCategory('plus_cat_daily', _kAccentCourses, [
+    _PlusEntry(Icons.local_laundry_service_rounded, 'laundry', Colors.blue),
+    _PlusEntry(Icons.card_giftcard_rounded, 'parcel', Colors.orange),
+    _PlusEntry(Icons.construction_rounded, 'local_services', Color(0xFF1565C0)),
+  ]),
+  _PlusCategory('plus_cat_transport', _kAccentEvent, [
+    _PlusEntry(Icons.electric_rickshaw_rounded, 'tricycle', Color(0xFF6D4C41)),
+    _PlusEntry(Icons.local_taxi_rounded, 'night_taxi', Color(0xFF37474F)),
+    _PlusEntry(Icons.phone_android_rounded, 'ekbine', Color(0xFF00695C),
+        label: 'E-Kbine'),
+  ]),
+];
+
+/// Menu des services secondaires, groupé par catégorie. Se ferme par la
+/// croix, le retour Android, un glissement vers le bas ou un appui à côté.
+void showPlusServicesMenu(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (ctx) => const _PlusMenuSheet(),
+  );
+}
+
+class _PlusMenuSheet extends StatelessWidget {
+  const _PlusMenuSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).padding.bottom;
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
+      decoration: BoxDecoration(
+        color: _mapSurface(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border.all(color: _mapBorder(context)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Center(
+            child: Container(
+              width: 44,
+              height: 5,
+              margin: const EdgeInsets.only(top: 10, bottom: 6),
+              decoration: BoxDecoration(
+                color: AppColors.premiumTextMutedLight.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 8, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      context.tr('more_services'),
+                      style: GoogleFonts.urbanist(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: _mapText(context),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Fermer',
+                  constraints:
+                      const BoxConstraints(minWidth: 48, minHeight: 48),
+                  onPressed: () => Navigator.pop(context),
+                  icon: Icon(Icons.close_rounded,
+                      color: _mapTextSecondary(context)),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 4, 20, 24 + bottom),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final cat in _plusCategories) _PlusSection(cat),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlusSection extends StatelessWidget {
+  final _PlusCategory category;
+  const _PlusSection(this.category);
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _accentFor(category.accent, _bright(context));
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            header: true,
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    context.tr(category.titleKey),
+                    style: GoogleFonts.urbanist(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: _mapText(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          LayoutBuilder(builder: (context, c) {
+            // 3 colonnes, largeur plafonnée pour rester lisible sur tablette.
+            final w = (math.min(c.maxWidth, 560.0) - 24) / 3;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final e in category.entries)
+                  _PlusCard(entry: e, accent: category.accent, width: w),
+              ],
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlusCard extends StatefulWidget {
+  final _PlusEntry entry;
+  final Color accent;
+  final double width;
+
   const _PlusCard({
-    required this.icon,
-    required this.routeKey,
-    required this.color,
+    required this.entry,
+    required this.accent,
+    required this.width,
   });
 
   @override
@@ -1055,12 +1363,18 @@ class _PlusCard extends StatefulWidget {
 class _PlusCardState extends State<_PlusCard> {
   bool _pressed = false;
 
+  String get _title => widget.entry.label ?? context.tr(widget.entry.routeKey);
+
   void _navigate(BuildContext context) {
-    Navigator.pop(context);
-    final title = context.tr(widget.routeKey);
-    final subtitle = context.tr('${widget.routeKey}_sub');
+    final nav = Navigator.of(context);
+    final key = widget.entry.routeKey;
+    final title = _title;
+    final subtitle =
+        key == 'ekbine' ? context.tr('ekbine_sub') : context.tr('${key}_sub');
+    final color = widget.entry.color;
+    nav.pop();
     Widget? page;
-    switch (widget.routeKey) {
+    switch (key) {
       case 'boulangerie':
         page = const BoulangeriesList();
         break;
@@ -1098,6 +1412,9 @@ class _PlusCardState extends State<_PlusCard> {
       case 'local_services':
         page = const ServicesHubPage();
         break;
+      case 'ekbine':
+        page = const EkHomeScreen();
+        break;
       case 'cave':
         page = SimpleServicePage(
           serviceType: 'cave',
@@ -1105,7 +1422,7 @@ class _PlusCardState extends State<_PlusCard> {
           subtitle: subtitle,
           icon: Icons.wine_bar_rounded,
           gradient: const [Color(0xFF880E4F), Color(0xFFAD1457)],
-          color: widget.color,
+          color: color,
         );
         break;
       case 'tricycle':
@@ -1115,7 +1432,7 @@ class _PlusCardState extends State<_PlusCard> {
           subtitle: subtitle,
           icon: Icons.electric_rickshaw_rounded,
           gradient: const [Color(0xFF4E342E), Color(0xFF8D6E63)],
-          color: widget.color,
+          color: color,
         );
         break;
       case 'night_taxi':
@@ -1125,39 +1442,51 @@ class _PlusCardState extends State<_PlusCard> {
           subtitle: subtitle,
           icon: Icons.local_taxi_rounded,
           gradient: const [Color(0xFF263238), Color(0xFF546E7A)],
-          color: widget.color,
+          color: color,
         );
         break;
     }
     if (page != null) {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => page!));
+      nav.push(MaterialPageRoute(builder: (_) => page!));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cardWidth = (MediaQuery.of(context).size.width - 40 - 24) / 3;
+    final b = _bright(context);
+    final accent = _accentFor(widget.accent, b);
+    final dark = b == Brightness.dark;
+    final fill =
+        dark ? AppColors.premiumSurfaceElevatedDark : AppColors.premiumBgLight;
+    final title = _title;
 
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        _navigate(context);
-      },
-      onTapCancel: () => setState(() => _pressed = false),
-      child: AnimatedScale(
-        scale: _pressed ? 0.93 : 1.0,
-        duration: const Duration(milliseconds: 100),
-        child: SizedBox(
-          width: cardWidth,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 100),
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+    return Semantics(
+      label: title,
+      button: true,
+      excludeSemantics: true,
+      onTap: () => _navigate(context),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) {
+          setState(() => _pressed = false);
+          _navigate(context);
+        },
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.96 : 1.0,
+          duration: const Duration(milliseconds: 90),
+          curve: Curves.easeOut,
+          child: Container(
+            width: widget.width,
+            constraints: const BoxConstraints(minHeight: 96),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
             decoration: BoxDecoration(
-              color: widget.color.withValues(alpha: _pressed ? 0.15 : 0.07),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                  color: widget.color.withValues(alpha: 0.22), width: 1.5),
+              color: _pressed
+                  ? Color.alphaBlend(accent.withValues(alpha: 0.12), fill)
+                  : fill,
+              borderRadius: AppRadius.cardR,
+              border: Border.all(color: _mapBorder(context)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1166,22 +1495,22 @@ class _PlusCardState extends State<_PlusCard> {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: widget.color.withValues(alpha: 0.14),
+                    color: accent.withValues(alpha: dark ? 0.2 : 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(widget.icon, color: widget.color, size: 22),
+                  child: Icon(widget.entry.icon, color: accent, size: 24),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  context.tr(widget.routeKey),
+                  title,
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.urbanist(
-                    fontSize: 12,
+                    fontSize: 12.5,
                     fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                    height: 1.3,
+                    color: _mapText(context),
+                    height: 1.25,
                   ),
                 ),
               ],

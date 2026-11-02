@@ -38,6 +38,8 @@ const adminPermissionKeys = <String>{
   'boulangeries',
   'ekbine',
   'purger',
+  // Valide côté serveur (moderateVehicleEntity) ; jamais attribuée automatiquement.
+  'auto_moto',
 };
 
 bool isAdminSessionValid({

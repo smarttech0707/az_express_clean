@@ -104,22 +104,37 @@ class _SellerCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _SellerCard({required this.docId, required this.data});
 
-  Future<void> _toggleActive() async {
+  // Une écriture refusée par les règles (ex. sous-admin sans la permission)
+  // ne doit pas rester silencieuse.
+  Future<void> _setActive(BuildContext context, bool active) async {
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      await FirebaseFirestore.instance
-          .collection('sellers')
-          .doc(docId)
-          .update({'isActive': !(data['isActive'] ?? true)});
-    } catch (_) {}
+      await AdminPartnerAccountService.manageSeller(
+          sellerId: docId, isActive: active);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text("Action refusée ou impossible. Réessayez."),
+        backgroundColor: Colors.red,
+      ));
+    }
   }
 
-  Future<void> _delete(BuildContext context) async {
+  Future<void> _toggleActive(BuildContext context) =>
+      _setActive(context, !(data['isActive'] ?? true));
+
+  // Le document n'est jamais supprimé depuis cet écran : un simple delete()
+  // laissait le compte Auth, les produits et les commandes orphelins, sans
+  // trace d'audit. La suppression définitive passe par le flux de suppression
+  // de compte (demande + moteur serveur). Ici : désactivation réversible.
+  Future<void> _deactivate(BuildContext context) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Supprimer ce vendeur ?"),
+        title: const Text("Désactiver ce vendeur ?"),
         content: Text(
-            "\"${data['name'] ?? ''}\" sera supprimé. Il ne pourra plus se connecter."),
+            "\"${data['name'] ?? ''}\" ne pourra plus se connecter. Ses données "
+            "sont conservées et le compte peut être réactivé. La suppression "
+            "définitive passe par une demande de suppression de compte."),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -127,18 +142,13 @@ class _SellerCard extends StatelessWidget {
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text("Supprimer"),
+            child: const Text("Désactiver"),
           ),
         ],
       ),
     );
-    if (ok != true) return;
-    try {
-      await FirebaseFirestore.instance
-          .collection('sellers')
-          .doc(docId)
-          .delete();
-    } catch (_) {}
+    if (ok != true || !context.mounted) return;
+    await _setActive(context, false);
   }
 
   @override
@@ -244,8 +254,8 @@ class _SellerCard extends StatelessWidget {
         ),
         trailing: PopupMenuButton<String>(
           onSelected: (v) {
-            if (v == 'toggle') _toggleActive();
-            if (v == 'delete') _delete(context);
+            if (v == 'toggle') _toggleActive(context);
+            if (v == 'delete') _deactivate(context);
             if (v == 'edit') {
               Navigator.push(
                 context,
@@ -287,7 +297,7 @@ class _SellerCard extends StatelessWidget {
                   Icon(Icons.delete_outline_rounded,
                       color: Colors.red, size: 18),
                   SizedBox(width: 8),
-                  Text("Supprimer", style: TextStyle(color: Colors.red)),
+                  Text("Désactiver", style: TextStyle(color: Colors.red)),
                 ],
               ),
             ),
@@ -374,21 +384,19 @@ class _SellerFormPageState extends State<_SellerFormPage> {
       final longitude = double.parse(_lngCtrl.text.trim());
 
       if (_isEditing) {
-        await FirebaseFirestore.instance
-            .collection('sellers')
-            .doc(widget.docId!)
-            .set(
-              buildSellerProfileData(
-                isCreating: false,
-                name: name,
-                phone: phone,
-                type: _type,
-                isActive: _isActive,
-                latitude: latitude,
-                longitude: longitude,
-              ),
-              SetOptions(merge: true),
-            );
+        // Écriture serveur (permission + journal d'audit) : plus de set() client.
+        await AdminPartnerAccountService.manageSeller(
+          sellerId: widget.docId!,
+          profile: buildSellerProfileData(
+            isCreating: false,
+            name: name,
+            phone: phone,
+            type: _type,
+            isActive: _isActive,
+            latitude: latitude,
+            longitude: longitude,
+          ),
+        );
       } else {
         // Compte Auth ET profil complet créés côté serveur, de façon
         // reprenable : plus de seconde écriture Flutter qui pourrait laisser

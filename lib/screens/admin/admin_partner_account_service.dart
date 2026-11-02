@@ -1,4 +1,5 @@
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 
 /// Appels à la fonction serveur `manageAdminPartnerAccount`.
 ///
@@ -10,9 +11,38 @@ class AdminPartnerAccountService {
   static final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'europe-west1');
 
+  /// Fiche / activation d'un vendeur via la fonction serveur (permission,
+  /// validation et journal d'audit côté serveur) : plus d'écriture directe.
+  static Future<void> manageSeller({
+    required String sellerId,
+    Map<String, dynamic>? profile,
+    bool? isActive,
+  }) async {
+    final hook = manageSellerHook;
+    if (hook != null) {
+      return hook(sellerId: sellerId, profile: profile, isActive: isActive);
+    }
+    await _functions.httpsCallable('manageSellerAccountCF').call({
+      'action': profile != null ? 'updateProfile' : 'setActive',
+      'sellerId': sellerId,
+      if (profile != null) 'profile': profile,
+      if (profile == null) 'isActive': isActive,
+    });
+  }
+
+  /// Remplace l'appel réseau dans les tests d'interface (le contrat serveur
+  /// est couvert par functions/test/manageSellerAccount.test.js).
+  @visibleForTesting
+  static Future<void> Function({
+    required String sellerId,
+    Map<String, dynamic>? profile,
+    bool? isActive,
+  })? manageSellerHook;
+
   static Future<Map> _call(Map<String, dynamic> payload) async {
-    final result =
-        await _functions.httpsCallable('manageAdminPartnerAccount').call(payload);
+    final result = await _functions
+        .httpsCallable('manageAdminPartnerAccount')
+        .call(payload);
     return result.data as Map;
   }
 

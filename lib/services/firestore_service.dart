@@ -463,27 +463,18 @@ class FirestoreService {
   // NOTATION
   // ==============================
 
+  /// Enregistre la note du client sur sa commande livrée.
+  ///
+  /// Le client ne peut écrire que `rating` sur sa propre commande (règles
+  /// Firestore). La moyenne du livreur (`avgRating`/`ratingCount`) est mise à
+  /// jour côté serveur par `applyDriverRatingOnOrderUpdate` : l'ancienne
+  /// transaction écrivait aussi `livreurs/{id}`, refusé par les règles, ce qui
+  /// faisait échouer toute la notation.
   Future<void> rateOrder(String orderId, int rating) async {
-    final orderRef = db.collection("orders").doc(orderId);
-    await db.runTransaction((tx) async {
-      final orderSnap = await tx.get(orderRef);
-      if (!orderSnap.exists) return;
-      final driverId = orderSnap.data()?['driverId'] as String?;
-      tx.update(orderRef, {'rating': rating});
-      if (driverId != null) {
-        final driverRef = db.collection("livreurs").doc(driverId);
-        final driverSnap = await tx.get(driverRef);
-        final currentAvg =
-            (driverSnap.data()?['avgRating'] as num? ?? 0).toDouble();
-        final currentCount =
-            (driverSnap.data()?['ratingCount'] as num? ?? 0).toInt();
-        final newCount = currentCount + 1;
-        final newAvg = double.parse(
-            ((currentAvg * currentCount + rating) / newCount)
-                .toStringAsFixed(1));
-        tx.update(driverRef, {'avgRating': newAvg, 'ratingCount': newCount});
-      }
-    });
+    if (rating < 1 || rating > 5) {
+      throw ArgumentError.value(rating, 'rating', 'doit être entre 1 et 5');
+    }
+    await db.collection("orders").doc(orderId).update({'rating': rating});
   }
 
   // ==============================

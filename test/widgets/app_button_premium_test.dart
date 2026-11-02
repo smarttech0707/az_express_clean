@@ -40,7 +40,7 @@ void main() {
 
     expect(deco.gradient, isA<LinearGradient>());
     final gradient = deco.gradient as LinearGradient;
-    expect(gradient.colors, [AppColors.primaryLight, AppColors.primary]);
+    expect(gradient.colors, [AppColors.primaryActionLight, AppColors.primaryAction]);
     expect(deco.borderRadius, AppRadius.premiumLgR);
   });
 
@@ -69,7 +69,7 @@ void main() {
         onPressed: () {},
       ),
     );
-    expect(deco.color, AppColors.bluePremiumDark);
+    expect(deco.color, AppColors.blueAction);
   });
 
   testWidgets('outlined : fond transparent, bordure premium', (tester) async {

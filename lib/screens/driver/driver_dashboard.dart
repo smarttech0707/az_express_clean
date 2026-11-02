@@ -26,6 +26,7 @@ import '../../services/notification_service.dart';
 import '../driver_tracking_screen.dart';
 import 'driver_wallet.dart';
 import 'driver_transfer_page.dart';
+import 'driver_rides_page.dart';
 import '../../constants/app_constants.dart';
 import '../../services/min_version_service.dart';
 import '../../delivery_proofs/delivery_transfer_service.dart';
@@ -788,6 +789,9 @@ class _DriverDashboardState extends State<DriverDashboard>
                 // Stats row
                 _buildStatsRow(),
 
+                // Historique des courses
+                _buildMyRidesButton(),
+
                 // Active order card (if any)
                 if (activeOrder != null) _buildActiveOrderCard(activeOrder),
 
@@ -947,6 +951,40 @@ class _DriverDashboardState extends State<DriverDashboard>
             child: _statCard("Ma note", ratingLabel, Icons.star_rounded),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMyRidesButton() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(15, 0, 15, 10),
+      child: PremiumCard(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        borderRadius: AppRadius.lgR,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DriverRidesPage(driverId: widget.driverId),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.receipt_long_rounded,
+                size: 22, color: AppColors.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Mes courses',
+                style: GoogleFonts.urbanist(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text),
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                size: 22, color: AppColors.textLight),
+          ],
+        ),
       ),
     );
   }

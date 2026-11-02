@@ -13,6 +13,7 @@ import '../models/route_model.dart';
 import '../services/driver_location_service.dart';
 import '../services/google_routes_service.dart';
 import '../widgets/driver_marker.dart';
+import '../widgets/pro_back_button.dart';
 import '../widgets/route_polyline.dart';
 import '../theme/app_theme.dart';
 
@@ -547,8 +548,9 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 
   Widget _buildLoadingScreen() => Scaffold(
         backgroundColor: Colors.white,
-        body: Center(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
+        body: BackOverlay(
+            child: Center(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
           const CircularProgressIndicator(
               color: AppColors.primary, strokeWidth: 3),
           const SizedBox(height: 20),
@@ -559,7 +561,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
           Text('Veuillez patienter',
               style: GoogleFonts.urbanist(
                   fontSize: 13, color: Colors.grey.shade500)),
-        ])),
+        ]))),
       );
 
   @override

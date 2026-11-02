@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/subscription_service.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminEkbinePage extends StatefulWidget {
   const AdminEkbinePage({super.key});
@@ -36,19 +37,10 @@ class _AdminEkbinePageState extends State<AdminEkbinePage>
         foregroundColor: Colors.white,
         title: const Text('E-Kbine Admin',
             style: TextStyle(fontWeight: FontWeight.bold)),
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: const ['En attente', 'Approuvés', 'Rejetés', 'Commandes'],
           controller: _tabs,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          labelStyle:
-              const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-          tabs: const [
-            Tab(text: 'En attente'),
-            Tab(text: 'Approuvés'),
-            Tab(text: 'Rejetés'),
-            Tab(text: 'Commandes'),
-          ],
+          backgroundColor: _green,
         ),
       ),
       body: TabBarView(

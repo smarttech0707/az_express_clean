@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminFleetPage extends StatefulWidget {
   const AdminFleetPage({super.key});
@@ -75,17 +76,11 @@ class _AdminFleetPageState extends State<AdminFleetPage>
             title: const Text("Flottes",
                 style: TextStyle(color: Colors.white, fontSize: 18)),
             centerTitle: true,
-            bottom: TabBar(
-              controller: _tabs,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white60,
-              tabs: const [
-                Tab(text: "En attente"),
-                Tab(text: "Approuvés"),
-                Tab(text: "Rejetés"),
-              ],
-            ),
+            bottom: AzTabBar(
+          labels: const ["En attente", "Approuvés", "Rejetés"],
+          controller: _tabs,
+          backgroundColor: const Color(0xFF6A1B9A),
+        ),
           ),
         ],
         body: TabBarView(

@@ -9,6 +9,7 @@ import '../models/event_models.dart';
 import '../services/event_service.dart';
 import 'event_chat_screen.dart';
 import 'event_provider_registration.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/stream_error_state.dart';
 import '../../widgets/account_deletion_dialog.dart';
 
@@ -126,14 +127,15 @@ class _EventProviderDashboardState extends State<EventProviderDashboard> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-              body: Center(child: CircularProgressIndicator()));
+              body: BackOverlay(
+                  child: Center(child: CircularProgressIndicator())));
         }
         // Stabilisation V1.0 : une erreur de flux (réseau, permission) ne
         // doit jamais être confondue avec "aucun profil" — sinon un
         // prestataire déjà approuvé se retrouverait devant le formulaire
         // d'inscription à chaque coupure réseau transitoire.
         if (snapshot.hasError) {
-          return const Scaffold(body: StreamErrorState());
+          return const Scaffold(body: BackOverlay(child: StreamErrorState()));
         }
         final profile = snapshot.data;
         if (profile == null) {

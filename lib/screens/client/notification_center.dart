@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/notification_service.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../theme/app_theme.dart';
 
 /// Centre de notifications premium — historique complet des push reçus.
@@ -15,7 +16,8 @@ class NotificationCenterScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
-      return const Scaffold(body: Center(child: Text('Non connecté')));
+      return const Scaffold(
+          body: BackOverlay(child: Center(child: Text('Non connecté'))));
     }
     return _NotificationCenterContent(uid: uid);
   }

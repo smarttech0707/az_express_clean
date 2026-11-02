@@ -1,3 +1,5 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,6 +18,37 @@ class AppColors {
       Color(0xFFFB923C); // orange-400 — "orange secondaire"
   static const primaryDark = Color(0xFFEA580C); // orange-600 — état pressed
   static const primaryBg = Color(0xFFFFF7ED); // orange-50 — teinte de fond
+
+  // ── Accessibilité WCAG AA (Design System, phase 2) ──────────────────────
+  // Le orange de marque `primary` ne porte PAS de texte blanc (2,9:1) et son
+  // usage en texte sur fond clair est trop pâle (2,9:1). Règle :
+  //   • `primary` : identité (icônes, accents, illustrations, logo, dégradés).
+  //     Un texte posé dessus utilise `onPrimary` (6,1:1).
+  //   • `primaryAction` : fonds portant du texte blanc (boutons, AppBar) et
+  //     texte orange sur fond clair — même teinte, plus profonde (4,8:1).
+  static const onPrimary = Color(0xFF161A1D);
+  static const primaryAction = Color(0xFFCC4400);
+  static const primaryActionLight = Color(0xFFD14500); // 4,6:1 avec blanc
+  static const primaryActionPressed = Color(0xFFB93A00); // 5,7:1 avec blanc
+
+  /// Orange lisible comme TEXTE : profond sur fond clair, vif sur fond sombre.
+  static Color primaryText(Brightness b) =>
+      b == Brightness.dark ? primary : primaryAction;
+
+  // Couleurs sémantiques portant du texte blanc (les teintes `success`/`red`
+  // d'origine restent pour les icônes et pastilles : 3,3:1 et 4,4:1 en blanc).
+  static const successStrong = Color(0xFF15803D); // 5,0:1
+  static const errorStrong = Color(0xFFB91C1C); // 6,5:1
+  static const blueAction = Color(0xFF2563EB); // 5,2:1
+
+  /// Accent violet du service Événementiel (icônes, pastilles). Clair : 7,1:1
+  /// sur fond de carte ; sombre : lisible sur surface bleu nuit.
+  static const eventAccent = Color(0xFF6D28D9);
+  static const eventAccentDark = Color(0xFFA78BFA);
+
+  /// Texte d'erreur lisible sur la surface courante.
+  static Color errorText(Brightness b) =>
+      b == Brightness.dark ? const Color(0xFFFCA5A5) : errorStrong;
 
   static const primary05 = Color(0x0DF97316);
   static const primary08 = Color(0x14F97316);
@@ -435,6 +468,19 @@ class AppLayout {
 // ══════════════════════════════════════════════════════════════════════════════
 // FORME & RAYON
 // ══════════════════════════════════════════════════════════════════════════════
+/// Échelle d'espacement (multiples de 4) pour les nouveaux composants — évite
+/// les marges arbitraires (10, 14, 18, 22...) d'un écran à l'autre.
+class AppSpacing {
+  AppSpacing._();
+
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 12;
+  static const double lg = 16;
+  static const double xl = 24;
+  static const double xxl = 32;
+}
+
 class AppRadius {
   AppRadius._();
 
@@ -571,7 +617,17 @@ class AppShadow {
 class AppTransitions {
   AppTransitions._();
 
+  /// Sur iOS, un `PageRouteBuilder` supprime le geste de retour par glissement
+  /// depuis le bord gauche (il n'existe que sur les routes de page
+  /// Material/Cupertino). On y rend donc une route standard, dont la transition
+  /// vient de [AppTheme] ; Android garde les transitions ci-dessous.
+  static bool get _usesNativeIosRoutes =>
+      defaultTargetPlatform == TargetPlatform.iOS;
+
   static Route<T> fadeSlide<T>(Widget page) {
+    if (_usesNativeIosRoutes) {
+      return MaterialPageRoute<T>(builder: (_) => page);
+    }
     return PageRouteBuilder<T>(
       pageBuilder: (_, __, ___) => page,
       transitionDuration: const Duration(milliseconds: 220),
@@ -593,6 +649,9 @@ class AppTransitions {
   }
 
   static Route<T> slideRight<T>(Widget page) {
+    if (_usesNativeIosRoutes) {
+      return MaterialPageRoute<T>(builder: (_) => page);
+    }
     return PageRouteBuilder<T>(
       pageBuilder: (_, __, ___) => page,
       transitionDuration: const Duration(milliseconds: 220),
@@ -661,6 +720,11 @@ class AppTheme {
     final border = AppColors.premiumBorder(brightness);
     final inputBorder =
         isDark ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
+    // Orange lisible en texte / contour : profond en clair, vif en sombre.
+    final actionText = AppColors.primaryText(brightness);
+    final pressedAction =
+        isDark ? AppColors.primaryLight : AppColors.primaryActionPressed;
+    final errorText = AppColors.errorText(brightness);
 
     final base = ThemeData(
       useMaterial3: true,
@@ -668,7 +732,7 @@ class AppTheme {
       colorScheme: ColorScheme(
         brightness: brightness,
         primary: AppColors.primary,
-        onPrimary: Colors.white,
+        onPrimary: AppColors.onPrimary,
         primaryContainer: isDark ? AppColors.primaryDark : AppColors.primaryBg,
         onPrimaryContainer:
             isDark ? AppColors.primaryBg : AppColors.primaryDark,
@@ -782,7 +846,7 @@ class AppTheme {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: true,
-        backgroundColor: AppColors.primary,
+        backgroundColor: AppColors.primaryAction,
         foregroundColor: Colors.white,
         systemOverlayStyle: SystemUiOverlayStyle.light,
         titleTextStyle: _ts(
@@ -795,14 +859,16 @@ class AppTheme {
       ),
 
       // ── Boutons ────────────────────────────────────────────────────────
+      // Fond `primaryAction` + texte blanc : 4,8:1 (AA). Le orange vif de
+      // marque ne porte pas de texte blanc (2,9:1) — voir AppColors.
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ButtonStyle(
           backgroundColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed))
-              return AppColors.primaryDark;
+              return AppColors.primaryActionPressed;
             if (states.contains(WidgetState.disabled))
-              return AppColors.primary.withValues(alpha: 0.5);
-            return AppColors.primary;
+              return AppColors.primaryAction.withValues(alpha: 0.5);
+            return AppColors.primaryAction;
           }),
           foregroundColor: WidgetStateProperty.all(Colors.white),
           overlayColor: WidgetStateProperty.resolveWith((states) {
@@ -816,8 +882,33 @@ class AppTheme {
           }),
           shadowColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) return Colors.transparent;
-            return AppColors.primary.withValues(alpha: 0.30);
+            return AppColors.primaryAction.withValues(alpha: 0.30);
           }),
+          shape: WidgetStateProperty.all(
+              const RoundedRectangleBorder(borderRadius: AppRadius.btnR)),
+          padding: WidgetStateProperty.all(
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 16)),
+          textStyle:
+              WidgetStateProperty.all(_ts(size: 16, weight: FontWeight.w600)),
+          minimumSize: WidgetStateProperty.all(const Size(64, 54)),
+          animationDuration: const Duration(milliseconds: 80),
+        ),
+      ),
+
+      // FilledButton (36 usages sans style propre) : même rendu que
+      // ElevatedButton, sans ombre.
+      filledButtonTheme: FilledButtonThemeData(
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) {
+              return AppColors.primaryActionPressed;
+            }
+            if (states.contains(WidgetState.disabled)) {
+              return AppColors.primaryAction.withValues(alpha: 0.5);
+            }
+            return AppColors.primaryAction;
+          }),
+          foregroundColor: WidgetStateProperty.all(Colors.white),
           shape: WidgetStateProperty.all(
               const RoundedRectangleBorder(borderRadius: AppRadius.btnR)),
           padding: WidgetStateProperty.all(
@@ -832,20 +923,19 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: ButtonStyle(
           foregroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.pressed))
-              return AppColors.primaryDark;
-            return AppColors.primary;
+            if (states.contains(WidgetState.pressed)) return pressedAction;
+            return actionText;
           }),
           overlayColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed))
-              return AppColors.primary.withValues(alpha: 0.12);
+              return actionText.withValues(alpha: 0.12);
             return null;
           }),
           side: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) {
-              return const BorderSide(color: AppColors.primaryDark, width: 2);
+              return BorderSide(color: pressedAction, width: 2);
             }
-            return const BorderSide(color: AppColors.primary, width: 1.5);
+            return BorderSide(color: actionText, width: 1.5);
           }),
           shape: WidgetStateProperty.all(
               const RoundedRectangleBorder(borderRadius: AppRadius.btnR)),
@@ -861,13 +951,12 @@ class AppTheme {
       textButtonTheme: TextButtonThemeData(
         style: ButtonStyle(
           foregroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.pressed))
-              return AppColors.primaryDark;
-            return AppColors.primary;
+            if (states.contains(WidgetState.pressed)) return pressedAction;
+            return actionText;
           }),
           overlayColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed))
-              return AppColors.primary.withValues(alpha: 0.12);
+              return actionText.withValues(alpha: 0.12);
             return null;
           }),
           textStyle:
@@ -882,8 +971,10 @@ class AppTheme {
         fillColor: surface,
         labelStyle: _ts(size: 14, weight: FontWeight.w500, color: textMuted),
         floatingLabelStyle:
-            _ts(size: 14, weight: FontWeight.w600, color: AppColors.primary),
+            _ts(size: 14, weight: FontWeight.w600, color: actionText),
         hintStyle: _ts(size: 14, weight: FontWeight.w400, color: textLight),
+        errorStyle: _ts(size: 12, weight: FontWeight.w500, color: errorText),
+        helperStyle: _ts(size: 12, weight: FontWeight.w400, color: textMuted),
         prefixIconColor: textMuted,
         suffixIconColor: textMuted,
         border: OutlineInputBorder(
@@ -895,9 +986,9 @@ class AppTheme {
         disabledBorder: OutlineInputBorder(
             borderRadius: AppRadius.inputR,
             borderSide: BorderSide(color: divider, width: 1)),
-        focusedBorder: const OutlineInputBorder(
+        focusedBorder: OutlineInputBorder(
             borderRadius: AppRadius.inputR,
-            borderSide: BorderSide(color: AppColors.primary, width: 2)),
+            borderSide: BorderSide(color: actionText, width: 2)),
         errorBorder: const OutlineInputBorder(
             borderRadius: AppRadius.inputR,
             borderSide: BorderSide(color: AppColors.red, width: 1.5)),
@@ -913,7 +1004,13 @@ class AppTheme {
         elevation: 0,
         color: surface,
         shadowColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(borderRadius: AppRadius.cardR),
+        // Pas de teinte Material 3 (voilerait la surface d'orange) ; liseré
+        // fin identique à `AppCard.standard` pour détacher la carte du fond.
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppRadius.cardR,
+          side: BorderSide(color: border, width: 1),
+        ),
         margin: EdgeInsets.zero,
       ),
 
@@ -934,23 +1031,32 @@ class AppTheme {
       // ── BottomSheet ────────────────────────────────────────────────────
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: surface,
+        surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.topXxl),
       ),
 
       // ── Snackbar ───────────────────────────────────────────────────────
+      // Texte blanc sur fond sombre (17:1) ; l'action reprend l'orange clair
+      // (7,7:1 sur ce fond). Les messages typés passent par `AppSnack`.
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: isDark ? surface : AppColors.text,
         contentTextStyle:
-            _ts(size: 13, weight: FontWeight.w400, color: Colors.white),
+            _ts(size: 14, weight: FontWeight.w500, color: Colors.white),
+        actionTextColor: AppColors.primaryLight,
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.mdR),
       ),
 
       // ── Dialog ─────────────────────────────────────────────────────────
       dialogTheme: DialogThemeData(
         backgroundColor: surface,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.cardR),
+        titleTextStyle:
+            _ts(size: 18, weight: FontWeight.w700, color: onSurface),
+        contentTextStyle:
+            _ts(size: 14, weight: FontWeight.w400, color: textMuted),
       ),
 
       // ── Divider ────────────────────────────────────────────────────────
@@ -965,10 +1071,12 @@ class AppTheme {
       ),
 
       // ── Page Transitions ───────────────────────────────────────────────
+      // iOS : transition Cupertino, indispensable pour le geste de retour par
+      // glissement depuis le bord gauche (ZoomPageTransitionsBuilder le désactive).
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: ZoomPageTransitionsBuilder(),
-          TargetPlatform.iOS: ZoomPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         },
       ),
 

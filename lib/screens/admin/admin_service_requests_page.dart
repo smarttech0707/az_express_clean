@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/artisan_account_service.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../widgets/az_tab_bar.dart';
 
 String _generatePin() {
   final rand = Random.secure();
@@ -59,17 +60,10 @@ class AdminServiceRequestsPage extends StatelessWidget {
           backgroundColor: const Color(0xFF1565C0),
           foregroundColor: Colors.white,
           centerTitle: true,
-          bottom: TabBar(
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white54,
-            indicatorColor: Colors.white,
-            labelStyle:
-                GoogleFonts.urbanist(fontWeight: FontWeight.w600, fontSize: 13),
-            tabs: const [
-              Tab(text: 'En attente'),
-              Tab(text: 'Traitées'),
-            ],
-          ),
+          bottom: const AzTabBar(
+          labels: ['En attente', 'Traitées'],
+          backgroundColor: Color(0xFF1565C0),
+        ),
         ),
         body: const TabBarView(
           children: [

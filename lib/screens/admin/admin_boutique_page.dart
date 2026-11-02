@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/storage_cleanup.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminBoutiquePage extends StatefulWidget {
   const AdminBoutiquePage({super.key});
@@ -108,7 +109,8 @@ class _AdminBoutiquePageState extends State<AdminBoutiquePage>
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text("Boutique"),
-        backgroundColor: AppColors.primary,
+        // Blanc sur l'orange vif de marque = 2,9:1 ; même teinte AA que le thème.
+        backgroundColor: AppColors.primaryAction,
         foregroundColor: Colors.white,
         centerTitle: true,
         actions: [
@@ -118,16 +120,10 @@ class _AdminBoutiquePageState extends State<AdminBoutiquePage>
             tooltip: "Numéros Wave/Orange",
           ),
         ],
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: const ["Produits", "Commandes", "Recharges"],
           controller: _tabCtrl,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(text: "Produits"),
-            Tab(text: "Commandes"),
-            Tab(text: "Recharges"),
-          ],
+          backgroundColor: AppColors.primaryAction,
         ),
       ),
       body: TabBarView(

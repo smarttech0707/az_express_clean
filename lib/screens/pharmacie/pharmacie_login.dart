@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -208,7 +209,9 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
     if (_autoResuming) {
       return Scaffold(
         backgroundColor: const Color(0xFFF5F5F5),
-        body: Center(child: CircularProgressIndicator(color: red)),
+        body: BackOverlay(
+            color: red,
+            child: Center(child: CircularProgressIndicator(color: red))),
       );
     }
     return Scaffold(

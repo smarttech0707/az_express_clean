@@ -79,30 +79,35 @@ class _AppButtonState extends State<AppButton>
       case AppButtonVariant.primary:
         // Léger dégradé orange (subtil, 2 tons très proches) — brief LOT 2 :
         // "léger gradient orange possible seulement si subtil".
+        // Les deux tons restent ≥ 4,6:1 avec le texte blanc (WCAG AA) : le
+        // orange vif de marque (2,9:1) ne peut pas porter ce texte.
         return const _ButtonColors(
-          background: AppColors.primary,
+          background: AppColors.primaryAction,
           foreground: Colors.white,
           border: null,
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [AppColors.primaryLight, AppColors.primary],
+            colors: [AppColors.primaryActionLight, AppColors.primaryAction],
           ),
         );
       case AppButtonVariant.secondary:
         // Bleu AZ Premium (LOT 1), dépendant de la luminosité — remplace
         // l'ancien bleu statique `AppColors.blue`.
+        // En sombre, `bluePremiumDark` (3,7:1 en blanc) est remplacé par un
+        // bleu plein à 5,2:1 : il reste le même bleu AZ, lisible avec du blanc.
         return _ButtonColors(
-          background: AppColors.bluePremium(
-              isDark ? Brightness.dark : Brightness.light),
+          background: isDark
+              ? AppColors.blueAction
+              : AppColors.bluePremium(Brightness.light),
           foreground: Colors.white,
           border: null,
         );
       case AppButtonVariant.outlined:
-        return const _ButtonColors(
+        return _ButtonColors(
           background: Colors.transparent,
-          foreground: AppColors.primary,
-          border: AppColors.primary,
+          foreground: isDark ? AppColors.primary : AppColors.primaryAction,
+          border: isDark ? AppColors.primary : AppColors.primaryAction,
         );
       case AppButtonVariant.ghost:
         return _ButtonColors(
@@ -112,13 +117,13 @@ class _AppButtonState extends State<AppButton>
         );
       case AppButtonVariant.danger:
         return const _ButtonColors(
-          background: AppColors.red,
+          background: AppColors.errorStrong,
           foreground: Colors.white,
           border: null,
         );
       case AppButtonVariant.success:
         return const _ButtonColors(
-          background: AppColors.success,
+          background: AppColors.successStrong,
           foreground: Colors.white,
           border: null,
         );

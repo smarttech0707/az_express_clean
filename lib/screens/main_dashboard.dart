@@ -234,11 +234,13 @@ class _NavTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const kPrimary = AppColors.primary;
-    // LOT 3 — état inactif = textMuted premium (theme-aware), au lieu de
-    // l'ancien `AppColors.textLight` statique (illisible sur fond sombre
-    // une fois la surface de la nav devenue bleu nuit, voir ci-dessous).
-    final inactive = AppColors.premiumTextMuted(Theme.of(context).brightness);
+    final brightness = Theme.of(context).brightness;
+    // Actif : orange lisible comme texte (profond en clair, vif en sombre —
+    // l'orange de marque pur n'atteint que 2,9:1 sur fond blanc).
+    // Inactif : gris secondaire du design system (≥ 4,5:1 dans les deux
+    // thèmes ; l'ancien gris « muted » était à 2,5:1 en clair).
+    final kPrimary = AppColors.primaryText(brightness);
+    final inactive = AppColors.premiumTextSecondary(brightness);
     final iconSize = AppLayout.iconMd(context);
     final labelSize = AppTypography.labelSmall(context);
 
@@ -271,21 +273,16 @@ class _NavTab extends StatelessWidget {
                 ),
                 decoration: BoxDecoration(
                   color: selected
-                      ? kPrimary.withValues(alpha: 0.12)
+                      ? kPrimary.withValues(alpha: 0.14)
                       : Colors.transparent,
                   borderRadius: AppRadius.pillR,
                 ),
-                // Master Prompt 124 — l'onglet actif grandit légèrement plutôt
-                // que de ne changer que sa couleur, pour un feedback plus vivant.
-                child: AnimatedScale(
-                  scale: selected ? 1.12 : 1.0,
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutBack,
-                  child: Icon(
-                    selected ? icon : iconOff,
-                    color: selected ? kPrimary : inactive,
-                    size: iconSize,
-                  ),
+                // L'onglet actif se reconnaît à sa pastille, son icône pleine
+                // et son libellé en gras : pas d'animation d'échelle.
+                child: Icon(
+                  selected ? icon : iconOff,
+                  color: selected ? kPrimary : inactive,
+                  size: iconSize,
                 ),
               ),
               SizedBox(height: AppLayout.xs(context) / 2),
@@ -294,7 +291,7 @@ class _NavTab extends StatelessWidget {
                 duration: const Duration(milliseconds: 200),
                 style: GoogleFonts.urbanist(
                   fontSize: labelSize,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   color: selected ? kPrimary : inactive,
                 ),
                 child:
@@ -370,13 +367,19 @@ class _CommanderButtonState extends State<_CommanderButton>
               width: btnSize,
               height: btnSize,
               decoration: BoxDecoration(
+                // Orange d'action : le « + » blanc y atteint 4,6:1 (WCAG AA),
+                // contre ~2,5:1 sur l'ancien dégradé clair.
                 gradient: const LinearGradient(
-                  colors: [AppColors.primaryLight, AppColors.primaryDark],
+                  colors: [
+                    AppColors.primaryActionLight,
+                    AppColors.primaryAction,
+                  ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 shape: BoxShape.circle,
-                boxShadow: AppShadow.colored(AppColors.primary, opacity: 0.45),
+                boxShadow:
+                    AppShadow.colored(AppColors.primaryAction, opacity: 0.35),
               ),
               child: Icon(
                 Icons.add_rounded,

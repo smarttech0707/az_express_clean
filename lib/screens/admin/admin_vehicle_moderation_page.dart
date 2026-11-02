@@ -3,6 +3,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminVehicleModerationPage extends StatefulWidget {
   const AdminVehicleModerationPage({super.key});
@@ -132,24 +133,14 @@ class _AdminVehicleModerationPageState extends State<AdminVehicleModerationPage>
             ),
           ),
         ),
-        bottom: TabBar(
+        bottom: AzTabBar(
           controller: _tabController,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          labelPadding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
-          labelStyle: AppTypography.labelLargeStyle(context),
-          unselectedLabelStyle: AppTypography.labelLargeStyle(context),
-          tabs: [
-            for (final label in const [
-              'Annonces',
-              'Vendeurs',
-              'Pros/Magasins',
-              'Signalements',
-            ])
-              Tab(
-                height: tabHeight,
-                child: Text(label, maxLines: 1, softWrap: false),
-              ),
+          tabHeight: tabHeight,
+          labels: const [
+            'Annonces',
+            'Vendeurs',
+            'Pros/Magasins',
+            'Signalements',
           ],
         ),
       ),

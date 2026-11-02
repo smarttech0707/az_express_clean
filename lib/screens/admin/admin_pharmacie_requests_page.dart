@@ -4,6 +4,7 @@ import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../utils/partner_location_validator.dart';
+import '../../widgets/az_tab_bar.dart';
 
 /// Document `pharmacies` créé à l'approbation d'une demande.
 ///
@@ -158,15 +159,10 @@ class _AdminPharmacieRequestsPageState extends State<AdminPharmacieRequestsPage>
         backgroundColor: Colors.red.shade700,
         foregroundColor: Colors.white,
         centerTitle: true,
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: const ['En attente', 'Traitées'],
           controller: _tabCtrl,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          tabs: const [
-            Tab(text: 'En attente'),
-            Tab(text: 'Traitées'),
-          ],
+          backgroundColor: Colors.red.shade700,
         ),
       ),
       body: TabBarView(
