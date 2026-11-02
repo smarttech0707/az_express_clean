@@ -17,7 +17,7 @@ const { buildAcceptOrder } = require('../driverAcceptance');
 const { withSelfie } = require('./selfieHelper');
 const { buildReleaseOrderBeforePickup } = require('../driverRelease');
 const { buildDeliveryTransfer } = require('../driverTransfer');
-const { buildDeliverOrder, buildCancelOrder } = require('../orderActions');
+const { buildDeliverOrder, buildCancelOrder, cancelOrderTx } = require('../orderActions');
 const { buildSettleTransferEarnings } = require('../transferSettlement');
 const { calculateCommission, DispatchError } = require('../dispatch');
 
@@ -191,11 +191,28 @@ test('5. annulation avant récupération : A remboursé de sa commission, client
 });
 
 // ---------------------------------------------------------------- 6
+// Annulation APRÈS récupération : le client n'a plus la main (refusée côté serveur).
+// Seule une décision administrative peut clore la commande ; on l'exerce par le même
+// cœur transactionnel (adminDecision) pour garder la couverture de la clôture des
+// transferts et du remboursement du payeur d'origine.
+async function adminCancel(h, orderId = 'o1') {
+  const orderRef = h.db.collection('orders').doc(orderId);
+  return h.db.runTransaction(async (tx) => {
+    const order = (await tx.get(orderRef)).data();
+    return cancelOrderTx(tx, {
+      db: h.db, admin, orderRef, order, uid: order.clientId, calculateCommission,
+      reason: 'admin_close_stuck', adminDecision: { refundFee: false },
+    });
+  });
+}
+
 test('6. annulation après transfert : commission rendue à A (payeur), client remboursé, B et AZ à 0', async () => {
   const h = world();
   await transferToB(h);
   assert.equal(h.w('dA'), 800);
-  await h.call('cancel', 'c1', { orderId: 'o1' });
+  await assert.rejects(h.call('cancel', 'c1', { orderId: 'o1' }), (e) => e.code === 'failed-precondition');
+  assert.equal(h.w('c1'), 4000, 'le client ne peut pas se faire rembourser seul après récupération');
+  await adminCancel(h);
   assert.equal(h.w('c1'), 5000);
   assert.equal(h.w('dA'), 1000); // payeur d’origine
   assert.equal(h.w('dB'), 1000); // B n’a rien payé, rien reçu
@@ -264,7 +281,8 @@ test('annulation pendant un transfert (B réservé) : B libéré, transfert annu
   const h = world();
   const { id, p } = await reserveB(h);
   assert.equal(h.get('livreurs/dB').isOnDelivery, true);
-  await h.call('cancel', 'c1', { orderId: 'o1' });
+  await assert.rejects(h.call('cancel', 'c1', { orderId: 'o1' }), (e) => e.code === 'failed-precondition');
+  await adminCancel(h);
   // B immédiatement disponible
   assert.equal(h.get('livreurs/dB').isOnDelivery, false);
   assert.equal(h.get('livreurs/dB').pendingOrderId, undefined);
@@ -298,7 +316,7 @@ test('annulation pendant une demande non encore acceptée : transfert annulé, a
   await h.call('accept', 'dA', { orderId: 'o1' });
   h.db.store.set('orders/o1', { ...h.get('orders/o1'), status: 'picked_up', pickedUpAt: 1 });
   const r = await h.call('transfer', 'dA', { action: 'request', orderId: 'o1', reason: 'other' });
-  await h.call('cancel', 'c1', { orderId: 'o1' });
+  await adminCancel(h);
   assert.equal(h.get(`delivery_transfers/${r.transferId}`).status, 'cancelled');
   assert.equal(h.get('orders/o1').activeTransferId, undefined);
   await assert.rejects(h.call('transfer', 'dB', { action: 'accept', transferId: r.transferId }));
@@ -309,7 +327,7 @@ test('annulation pendant une demande non encore acceptée : transfert annulé, a
 test('annulation cash pendant un transfert : aucun mouvement de wallet client, commission rendue à A', async () => {
   const h = world({ method: 'cash' });
   await reserveB(h);
-  await h.call('cancel', 'c1', { orderId: 'o1' });
+  await adminCancel(h);
   assert.deepEqual([h.w('c1'), h.w('dA'), h.w('dB')], [5000, 1000, 1000]);
   assert.equal(h.get('livreurs/dB').isOnDelivery, false);
 });

@@ -13,10 +13,16 @@ const { readAmounts } = require('./orderAmounts');
 const WAITING_STATUSES = ['pending', 'broadcast', 'assigned'];
 
 // Montants à rembourser / reprendre selon la forme de la commande.
+// Le client wallet est débité de `budget + shoppingBudget` à la création (règle
+// `walletDebitMatchesPaidOrder`) : le remboursement doit rendre les deux, comme
+// cancelOrderTx. `shoppingBudget` n'est jamais crédité au vendeur : `sellerShare`
+// ne le contient pas.
 function refundAmounts(order) {
   const explicit = readAmounts(order);
-  const total = explicit ? explicit.totalAmount : Number(order.budget || 0);
-  return { total, sellerShare: explicit ? explicit.productAmount : total };
+  const base = explicit ? explicit.totalAmount : Number(order.budget || 0);
+  const shopping = Number.isFinite(Number(order.shoppingBudget)) && Number(order.shoppingBudget) > 0
+    ? Number(order.shoppingBudget) : 0;
+  return { total: base + shopping, sellerShare: explicit ? explicit.productAmount : base };
 }
 
 async function readSeller(tx, db, order, willRefund) {

@@ -8,7 +8,7 @@ const { settleTerminalOrder, diagnoseDriver, clearAcceptedOffers, runLifecycleTr
 function fixture(extra = {}) {
   return fakeDb({
     'livreurs/d1': { wallet: 400, isOnDelivery: true, isOnline: true, pendingOrderId: 'o1' },
-    'orders/o1': { status: 'accepted', driverId: 'd1', clientId: 'c1', budget: 500, paymentMethod: 'cash' },
+    'orders/o1': { status: 'accepted', driverId: 'd1', clientId: 'c1', budget: 500, paymentMethod: 'cash', commissionStatus: 'charged', commissionPayerId: 'd1', commissionAmount: 100 },
     ...extra,
   });
 }

@@ -6,6 +6,7 @@
 //     "node --test functions/test/transferSettlement.emulator.test.js"
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { withSelfie } = require('./selfieHelper');
 
 const emulated = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 const options = { skip: emulated ? false : 'émulateur Firestore requis' };
@@ -155,14 +156,23 @@ async function cancelWorld(tag) {
   const { HttpsError } = require('firebase-functions/v2/https');
   const { buildAcceptOrder } = require('../driverAcceptance');
   const { buildDeliveryTransfer } = require('../driverTransfer');
-  const { buildCancelOrder } = require('../orderActions');
+  const { buildCancelOrder, cancelOrderTx } = require('../orderActions');
   const { calculateCommission } = require('../dispatch');
+  const { runLifecycleTransaction } = require('../driverLifecycle');
   const common = { db, admin, HttpsError, checkRateLimit: async () => {}, logAudit: async () => {} };
   const oc = (...a) => ({ run: a[a.length - 1] });
   const fns = {
     accept: withSelfie(buildAcceptOrder({ ...common, onCall: oc, calculateCommission }).run),
     transfer: buildDeliveryTransfer({ ...common, onCall: oc }).run,
     cancel: buildCancelOrder({ ...common, onCall: oc, calculateCommission }).run,
+    // Après récupération le client ne peut plus annuler seul : seule une décision
+    // administrative (adminDecision, comme adminBilling / adminOrderDispute) clôt la commande.
+    adminCancel: (orderId, clientId) => runLifecycleTransaction(db, async (tx) => {
+      const orderRef = db.doc(`orders/${orderId}`);
+      const order = (await tx.get(orderRef)).data();
+      return cancelOrderTx(tx, { db, admin, orderRef, order, uid: clientId, calculateCommission,
+        reason: 'admin_close_stuck', adminDecision: { refundFee: false } });
+    }),
   };
   const ids = { o: `${tag}_${Date.now()}`, c: `c_${tag}_${Date.now()}`, a: `dA_${tag}_${Date.now()}`, b: `dB_${tag}_${Date.now()}` };
   const city = `city_${tag}_${Date.now()}`; // isole les candidats des autres tests
@@ -191,10 +201,11 @@ const snapshotAfter = async (ids) => ({
 test('émulateur : annulations simultanées pendant un transfert, un seul remboursement', options, async () => {
   const { fns, ids, tid } = await cancelWorld('cc');
   const results = await Promise.allSettled([
-    fns.cancel(req(ids.c, { orderId: ids.o })), fns.cancel(req(ids.c, { orderId: ids.o })),
-    fns.cancel(req(ids.c, { orderId: ids.o })),
+    fns.adminCancel(ids.o, ids.c), fns.adminCancel(ids.o, ids.c), fns.adminCancel(ids.o, ids.c),
+    fns.cancel(req(ids.c, { orderId: ids.o })), // le client, lui, est refusé après récupération
   ]);
   assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(results[3].status, 'rejected');
   const s = await snapshotAfter(ids);
   assert.equal(s.c, 5000); // 1000 remboursés une seule fois
   assert.equal(s.a, 1000); // commission rendue une seule fois
@@ -207,7 +218,7 @@ test('émulateur : annulations simultanées pendant un transfert, un seul rembou
 test('émulateur : annulation et confirmation de remise simultanées, état final toujours cohérent', options, async () => {
   const { fns, ids, tid, p } = await cancelWorld('cx');
   const results = await Promise.allSettled([
-    fns.cancel(req(ids.c, { orderId: ids.o })),
+    fns.adminCancel(ids.o, ids.c),
     fns.transfer(req(ids.a, { action: 'confirmHandover', transferId: tid, token: p.token })),
   ]);
   assert.equal(results[0].status, 'fulfilled'); // l'annulation aboutit toujours

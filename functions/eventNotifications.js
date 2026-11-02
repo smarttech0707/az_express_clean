@@ -1,5 +1,7 @@
 'use strict';
 
+const { adminNotificationTokens, NOTIFICATION_PERMISSION } = require('./adminPermissions');
+
 function createEventNotificationFunctions({
   db,
   onDocumentCreated,
@@ -13,9 +15,9 @@ function createEventNotificationFunctions({
       if (!provider || provider.status !== 'pending') return;
       const admins = await db.collection('admins')
         .where('isActive', '==', true).get();
-      const tokens = [...new Set(admins.docs
-        .map((doc) => doc.data()?.fcmToken)
-        .filter((token) => typeof token === 'string' && token.length > 10))];
+      // Super-admin + sous-admins porteurs de la permission « eventiel » seulement.
+      const tokens = adminNotificationTokens(
+        admins.docs, NOTIFICATION_PERMISSION.event_provider_application);
       await Promise.all(tokens.map((token) => sendToToken(
         token,
         'Nouveau prestataire événementiel',

@@ -9,7 +9,11 @@ const admin  = require('firebase-admin');
 const axios  = require('axios');
 const crypto = require('crypto');
 const { expireOrderTx, rateLimitCancelTx } = require('./orderRefunds');
+const { retryPendingDispatch, newlyNotifiedDriverIds } = require('./dispatchRetry');
+const { observeOrderTariff } = require('./tariffObservation');
+const { scanStuckOrders } = require('./stuckOrderAlerts');
 const { buildAdminBilling } = require('./adminBilling');
+const { buildAdminOrderDispute } = require('./adminOrderDisputes');
 const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
 const {
   isAuthorizedWebhookCall,
@@ -38,7 +42,8 @@ const { buildManageProfessionalSubscription } = require('./professionalSubscript
 const { buildManageAdminPartnerAccount } = require('./adminPartnerAccounts');
 const { buildCompletePartnerFirstPasswordChange } = require('./partnerFirstLogin');
 const { assertPartnerActivated } = require('./partnerActivationGuard');
-const { requireAdminPermission, requireSuperAdmin } = require('./adminGuards');
+const { requireAdminPermission, requireSuperAdmin, requireWithdrawalAccess } = require('./adminGuards');
+const { validatePermissions, adminNotificationTokens, NOTIFICATION_PERMISSION } = require('./adminPermissions');
 const {
   buildPublishMarketplaceProduct,
   buildRepublishMarketplaceProduct,
@@ -103,6 +108,7 @@ const { buildReleaseOrderBeforePickup } = require('./driverRelease');
 const { buildDeclineLegacyOrder } = require('./driverDecline');
 const { buildDeliveryTransfer, expireDueTransfers } = require('./driverTransfer');
 const { buildSettleTransferEarnings } = require('./transferSettlement');
+const { shouldProcess: shouldApplyDriverRating, applyDriverRating } = require('./driverRatings');
 
 // Forward-only lifecycle repair: never handles deletions or scans old drivers.
 exports.syncDriverOrderLifecycle = onDocumentUpdated({
@@ -115,6 +121,21 @@ exports.syncDriverOrderLifecycle = onDocumentUpdated({
     await settleTerminalOrder(db, admin, event.params.orderId, before);
   } else if (after.status === 'accepted') {
     await clearAcceptedOffers(db, admin, event.params.orderId, before);
+  }
+});
+
+// Note client → moyenne du livreur. Le client note la commande (règles
+// Firestore : `rating` seul) ; seul le serveur écrit `livreurs.avgRating`.
+// Aucun montant ni statut touché. cpu/maxInstances minimaux (quota régional).
+exports.applyDriverRatingOnOrderUpdate = onDocumentUpdated({
+  document: 'orders/{orderId}', maxInstances: 1, cpu: 0.5, concurrency: 1,
+  memory: '256MiB', retry: true,
+}, async event => {
+  const before = event.data.before.data();
+  if (!shouldApplyDriverRating(event.data.after.data(), before)) return;
+  const result = await applyDriverRating({ db, orderId: event.params.orderId, before });
+  if (result.applied) {
+    console.log('driver_rating_applied', JSON.stringify({ orderId: event.params.orderId, ...result }));
   }
 });
 
@@ -300,8 +321,9 @@ async function logSecurityEvent(userId, eventType, severity, description) {
     });
     // Si critique : notifier les admins
     if (severity === 'critical' || severity === 'high') {
+      // Les alertes de sécurité exposent des informations sensibles : super-admin seul.
       const adminsSnap = await db.collection('admins').where('isActive', '==', true).get();
-      const tokens = adminsSnap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
+      const tokens = adminNotificationTokens(adminsSnap.docs, NOTIFICATION_PERMISSION.security_alert);
       if (tokens.length) {
         await sendToMultipleTokens(tokens,
           `🔴 Alerte sécurité — ${eventType}`,
@@ -792,14 +814,10 @@ exports.checkWithdrawalStatus = onCall({
   if (!wdSnap.exists) throw new HttpsError('not-found', 'Retrait introuvable');
   const wd = wdSnap.data();
 
-  // Autorisation : le propriétaire du retrait, ou un administrateur actif.
-  // Un client ne peut jamais vérifier ni faire évoluer le retrait d'autrui.
-  if (wd.userId !== uid) {
-    const adminSnap = await db.collection('admins').doc(uid).get();
-    if (!adminSnap.exists || adminSnap.data().isActive !== true) {
-      throw new HttpsError('permission-denied', 'Accès refusé');
-    }
-  }
+  // Autorisation : le propriétaire du retrait, ou le super-administrateur.
+  // Cette vérification peut régler ou rembourser un retrait : un sous-admin
+  // (même actif) ou un client ne peut jamais la déclencher pour autrui.
+  await requireWithdrawalAccess({ request, db, withdrawal: wd });
   await checkRateLimit(uid, 'withdrawal_status', 10, 60);
 
   if (!wd.providerReference) {
@@ -1077,10 +1095,9 @@ exports.notifyBroadcastDrivers = onDocumentUpdated({ document: 'orders/{orderId}
     const before = event.data.before.data();
     const after  = event.data.after.data();
     if (!before || !after) return;
-    if (before.status === 'broadcast' || after.status !== 'broadcast') return;
-
-    const driverIds = after.notifiedDriverIds;
-    if (!Array.isArray(driverIds) || driverIds.length === 0) return;
+    // Transition vers broadcast : tous les livreurs ; élargissement du rayon : seulement les nouveaux.
+    const driverIds = newlyNotifiedDriverIds(before, after);
+    if (driverIds.length === 0) return;
 
     const driverDocs = await Promise.all(
       driverIds.map(id => db.collection('livreurs').doc(id).get())
@@ -1866,6 +1883,10 @@ exports.createSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
   if (!name || !email || !password) {
     throw new HttpsError('invalid-argument', 'Champs name, email, password requis');
   }
+  // Clés inconnues refusées AVANT toute création de compte (liste officielle).
+  let cleanPermissions;
+  try { cleanPermissions = validatePermissions(permissions); }
+  catch (e) { throw new HttpsError('invalid-argument', e.message); }
 
   await checkRateLimit(request.auth.uid, 'create_admin', 10, 3600);
 
@@ -1876,7 +1897,7 @@ exports.createSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
     email,
     phone:       phone || '',
     role:        'sub',
-    permissions: permissions || [],
+    permissions: cleanPermissions,
     isActive:    true,
     createdAt:   admin.firestore.FieldValue.serverTimestamp(),
     createdBy:   request.auth.uid,
@@ -1907,7 +1928,7 @@ exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{drive
   const driver = event.data.data();
   if (!driver) return;
   const snap = await db.collection('admins').where('isActive', '==', true).get();
-  const tokens = snap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
+  const tokens = adminNotificationTokens(snap.docs, NOTIFICATION_PERMISSION.admin_new_driver);
   if (!tokens.length) return;
   await sendToMultipleTokens(tokens,
     '🛵 Nouvelle demande livreur',
@@ -1921,7 +1942,7 @@ exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'servic
   const provider = event.data.data();
   if (!provider || provider.status !== 'pending') return;
   const snap = await db.collection('admins').where('isActive', '==', true).get();
-  const tokens = snap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
+  const tokens = adminNotificationTokens(snap.docs, NOTIFICATION_PERMISSION.admin_new_service_provider);
   if (!tokens.length) return;
   await sendToMultipleTokens(tokens,
     '🏪 Nouveau prestataire en attente',
@@ -2182,6 +2203,21 @@ exports.autoExpireOrders = onSchedule({
   // schedulers (Groupe D) qui, eux, passent aussi à cpu:0.5.
   maxInstances:   1,
 }, async () => {
+  // L'expiration / remboursement passe toujours en premier ; la reprise du
+  // dispatch (I2) ne s'exécute qu'ensuite et ne peut jamais la bloquer.
+  try {
+    await expireStaleOrders();
+  } finally {
+    await retryPendingDispatch({ db, admin, dispatchOrder, DispatchError, observe: (id, o) => observeOrderTariff(db, id, o) });
+    // I3 : alertes (lecture seule, aucune action sur les commandes), toutes les 5 minutes.
+    if (Math.floor(Date.now() / 60000) % 5 === 0) {
+      await scanStuckOrders({ db, admin, sendToToken, logAudit })
+        .catch((err) => console.error('[stuckOrders]', err.message));
+    }
+  }
+});
+
+async function expireStaleOrders() {
   const now       = admin.firestore.Timestamp.now();
   const tenMinAgo = new admin.firestore.Timestamp(now.seconds - 600, now.nanoseconds);
 
@@ -2233,7 +2269,7 @@ exports.autoExpireOrders = onSchedule({
       console.error(`❌ Erreur expiration commande ${orderId}:`, err.message);
     }
   }
-});
+}
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2330,6 +2366,9 @@ exports.dispatchOrderToDriver = onCall({ maxInstances: 3 }, async (request) => {
   if (!isOwner && !isCallerAdmin) {
     throw new HttpsError('permission-denied', 'Non autorisé');
   }
+
+  // C2 phase 0 : journal des écarts de tarif, jamais bloquant (aucun refus, aucune modification).
+  await observeOrderTariff(db, String(orderId), order);
 
   const lat    = Number(order.latitude ?? order.deliveryLatitude ?? 0);
   const lng    = Number(order.longitude ?? order.deliveryLongitude ?? 0);
@@ -2439,6 +2478,18 @@ exports.settleTransferEarningsCF = buildSettleTransferEarnings({
 // après récupération, remboursement boutique) — super-admin uniquement.
 exports.adminBillingCF = buildAdminBilling({
   db, admin, onCall, HttpsError, checkRateLimit, logAudit, requireSuperAdmin, calculateCommission,
+});
+// Litiges après récupération du colis (livraisons ordinaires) : décision administrative
+// explicite, jamais de remboursement automatique. Remboursement exceptionnel = super-admin.
+exports.adminOrderDisputeCF = buildAdminOrderDispute({
+  db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+  requireAdminPermission, requireSuperAdmin, calculateCommission,
+});
+// Confirmation ADMINISTRATIVE de livraison (litige après récupération) : super-admin seul, même cœur
+// financier que deliverOrderCF (mode adminConfirm), requestId idempotent, justification et preuve obligatoires.
+exports.adminConfirmDeliveryCF = buildDeliverOrder({
+  db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+  adminConfirm: true, requireSuperAdmin,
 });
 exports.releaseOrderBeforePickupCF = buildReleaseOrderBeforePickup({
   db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit,
@@ -2689,6 +2740,16 @@ exports.moderateVehicleEntity = onCall(
   { maxInstances: 3 },
   buildModerateVehicleEntity({
     db, admin, requireAdminPermission, HttpsError,
+  }),
+);
+
+// Fiche / activation d'un compte vendeur depuis l'admin, avec journal d'audit.
+// Pas encore appelée par un écran rattaché au menu ; quota CPU : 0,5 × 1.
+const { buildManageSellerAccount } = require('./manageSellerAccount');
+exports.manageSellerAccountCF = onCall(
+  { maxInstances: 1, cpu: 0.5 },
+  buildManageSellerAccount({
+    db, admin, HttpsError, requireAdminPermission, checkRateLimit, logAudit,
   }),
 );
 

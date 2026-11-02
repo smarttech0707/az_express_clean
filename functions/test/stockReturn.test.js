@@ -43,7 +43,7 @@ test('annulation après récupération : stock inchangé (le produit est parti a
   h.assign(id);
   await h.call('accept', 'dA', { orderId: id });
   h.pickUp(id);
-  await h.call('cancel', 'c1', { orderId: id });
+  await assert.rejects(() => h.call('cancel', 'c1', { orderId: id }), (e) => e.code === 'failed-precondition');
   assert.equal(stock(h), 8);
 });
 

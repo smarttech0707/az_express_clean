@@ -1,6 +1,7 @@
 'use strict';
 
 const { readDriverState, terminalDriverPatch, runLifecycleTransaction } = require('./driverLifecycle');
+const { verifyLegacyCommissionProof, expectedLegacyCommission } = require('./commissionProof');
 
 // Libération d'une course AVANT récupération du colis (transfert, cas 1).
 //
@@ -87,16 +88,31 @@ function buildReleaseOrderBeforePickup({
       }
       if (!driverSnap.exists) throw new HttpsError('permission-denied', 'Compte livreur introuvable');
 
-      // Remboursement de la commission : montant tracé si disponible, sinon
-      // règle historique (commandes acceptées avant le suivi serveur).
+      // Remboursement de la commission : seulement si une écriture fiable prouve le prélèvement.
+      // Preuve 1 : trace sur la commande (acceptOrderCF). Preuve 2, pour les commandes acceptées avant
+      // ce suivi : la transaction de wallet `commission_<commande>_<livreur>` écrite avec le débit.
+      // Jamais déduit du barème théorique.
       const traced = order.commissionStatus === 'charged' &&
         order.commissionPayerId === uid &&
         Number.isSafeInteger(order.commissionAmount) && order.commissionAmount >= 0;
-      const legacyCharged = !order.commissionStatus;
+      // Le journal wallet_transactions est inscriptible par le livreur : la preuve ancienne n'est retenue
+      // que si elle est compatible avec un prélèvement serveur et plafonnée au barème (commissionProof.js).
+      let proofTx = null;
+      let proofRejectReason = null;
+      if (!traced && !order.commissionStatus) {
+        const proofSnap = await tx.get(driverRef.collection('wallet_transactions').doc(`commission_${orderId}_${uid}`));
+        const expected = await expectedLegacyCommission(db, order, calculateCommission);
+        const verdict = verifyLegacyCommissionProof({
+          proof: proofSnap.exists ? proofSnap.data() : null, orderId, expected,
+        });
+        if (verdict.amount !== null) proofTx = { amount: verdict.amount };
+        proofRejectReason = verdict.reason;
+      }
       let refund = 0;
       if (traced) refund = order.commissionAmount;
-      else if (legacyCharged) refund = await calculateCommission(db, Number(order.budget || 0));
+      else if (proofTx) refund = proofTx.amount;
       // commissionStatus 'refunded' (ou autre) : aucun remboursement.
+      const unproven = !traced && !proofTx && !order.commissionStatus;
 
       const state = await readDriverState(tx, db, uid, orderId);
       const wallet = Number(driverSnap.data().wallet || 0);
@@ -113,6 +129,13 @@ function buildReleaseOrderBeforePickup({
         });
       }
 
+      if (unproven) {
+        // Aucun crédit sans preuve : signalement idempotent, vérification manuelle par le super-admin.
+        tx.set(db.collection('reconciliation_flags').doc(`${orderId}_commission_untraced_${uid}`), {
+          orderId, type: 'commission_untraced', status: 'open', driverId: uid,
+          reason: 'release_before_pickup', proofRejectReason, createdAtMs: Date.now(),
+        });
+      }
       const version = Number(order.driverAssignmentVersion || 1);
       tx.update(orderRef, {
         status: 'pending',
@@ -121,7 +144,7 @@ function buildReleaseOrderBeforePickup({
         driverPhotoUrl: FieldValue.delete(),
         acceptedAt: FieldValue.delete(),
         notifiedDriverIds: FieldValue.delete(),
-        commissionStatus: 'refunded',
+        ...(unproven ? {} : { commissionStatus: 'refunded' }),
         driverAssignmentVersion: version + 1,
         transferCount: transfers + 1,
         excludedDriverIds: FieldValue.arrayUnion(uid),

@@ -197,15 +197,65 @@ test('livreur non assigné, motif invalide, anonyme, statuts non libérables : r
   }
 });
 
-test('commande ancienne sans suivi serveur : remboursement selon la règle historique, une fois', async () => {
-  const h = setup();
+const untrace = (h) => {
   const legacy = { ...order(h) };
-  delete legacy.commissionStatus; delete legacy.commissionPayerId; delete legacy.commissionAmount;
+  delete legacy.commissionStatus; delete legacy.commissionPayerId; delete legacy.commissionAmount; delete legacy.commissionTxId;
   h.db.store.set('orders/o1', legacy);
+};
+const flagsOf = (h) => [...h.db.store.keys()].filter((k) => k.startsWith('reconciliation_flags/o1_commission_untraced'));
+
+test('ancienne commande sans trace mais AVEC la transaction de prélèvement : remboursée du montant réellement prélevé, une fois', async () => {
+  const h = setup({ extra: { 'livreurs/dA/wallet_transactions/commission_o1_dA': { type: 'commission', amount: 150, orderId: 'o1' } } });
+  untrace(h);
   const result = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
-  assert.equal(result.commissionRefunded, 200); // budget 1500 -> 200
-  assert.equal(wallet(h, 'dA'), 500);
+  assert.equal(result.commissionRefunded, 150); // montant prouvé, pas le barème (200)
+  assert.equal(wallet(h, 'dA'), 450);
   assert.equal(order(h).commissionStatus, 'refunded');
+  assert.equal(flagsOf(h).length, 0);
+  const again = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
+  assert.equal(again.replay, true);
+  assert.equal(wallet(h, 'dA'), 450);
+});
+
+test('ancienne commande SANS aucune preuve de prélèvement : libérée normalement, aucun crédit, signalement idempotent', async () => {
+  const h = setup();
+  untrace(h);
+  const result = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
+  assert.equal(result.success, true);
+  assert.equal(result.commissionRefunded, 0);
+  assert.equal(wallet(h, 'dA'), 300, 'jamais déduit du barème théorique');
+  assert.equal(order(h).status, 'pending');
+  assert.equal(order(h).driverId, undefined);
+  assert.notEqual(order(h).commissionStatus, 'refunded');
+  assert.equal(ledgerKeys(h, 'dA').length, 0);
+  assert.equal(flagsOf(h).length, 1);
+  assert.equal(h.db.store.get(flagsOf(h)[0]).type, 'commission_untraced');
+  const again = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
+  assert.equal(again.replay, true);
+  assert.equal(flagsOf(h).length, 1);
+  assert.equal(wallet(h, 'dA'), 300);
+});
+
+test('preuves invalides (autre type, autre commande, montant nul ou non entier) : aucun crédit', async () => {
+  for (const bad of [
+    { type: 'refund', amount: 150, orderId: 'o1' }, { type: 'commission', amount: 150, orderId: 'autre' },
+    { type: 'commission', amount: 0, orderId: 'o1' }, { type: 'commission', amount: 15.5, orderId: 'o1' },
+  ]) {
+    const h = setup({ extra: { 'livreurs/dA/wallet_transactions/commission_o1_dA': bad } });
+    untrace(h);
+    const result = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
+    assert.equal(result.commissionRefunded, 0, JSON.stringify(bad));
+    assert.equal(wallet(h, 'dA'), 300);
+  }
+});
+
+test('commission tracée : remboursée une fois, jamais de signalement ; libération normale du livreur', async () => {
+  const h = setup();
+  const result = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
+  assert.equal(result.commissionRefunded, 200);
+  assert.equal(flagsOf(h).length, 0);
+  assert.equal(h.db.store.get('livreurs/dA').isOnDelivery, false);
+  assert.equal(ledgerKeys(h, 'dA').length, 1);
 });
 
 test('commission déjà remboursée (statut refunded) : aucun remboursement', async () => {
@@ -213,4 +263,47 @@ test('commission déjà remboursée (statut refunded) : aucun remboursement', as
   const result = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
   assert.equal(result.commissionRefunded, 0);
   assert.equal(wallet(h, 'dA'), 300);
+});
+
+// ── Régression : le journal wallet_transactions du livreur est inscriptible par lui-même ──
+test('RÉGRESSION libération : preuve forgée de 100000 FCFA → aucun crédit, signalement avec la raison, course libérée', async () => {
+  const h = setup({ extra: { 'livreurs/dA/wallet_transactions/commission_o1_dA': { type: 'commission', amount: 100000, orderId: 'o1' } } });
+  untrace(h);
+  const result = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
+  assert.equal(result.success, true);
+  assert.equal(result.commissionRefunded, 0);
+  assert.equal(wallet(h, 'dA'), 300, 'aucun argent créé');
+  assert.equal(order(h).status, 'pending');
+  assert.notEqual(order(h).commissionStatus, 'refunded');
+  assert.equal(flagsOf(h).length, 1);
+  assert.equal(h.db.store.get(flagsOf(h)[0]).proofRejectReason, 'proof_exceeds_policy');
+});
+
+test('RÉGRESSION libération : preuve au-dessus du barème (201) refusée ; au barème (200) acceptée une seule fois', async () => {
+  let h = setup({ extra: { 'livreurs/dA/wallet_transactions/commission_o1_dA': { type: 'commission', amount: 201, orderId: 'o1' } } });
+  untrace(h);
+  assert.equal((await h.release(h.req({ orderId: 'o1', reason: 'other' }))).commissionRefunded, 0);
+  assert.equal(wallet(h, 'dA'), 300);
+  h = setup({ extra: { 'livreurs/dA/wallet_transactions/commission_o1_dA': { type: 'commission', amount: 200, orderId: 'o1' } } });
+  untrace(h);
+  assert.equal((await h.release(h.req({ orderId: 'o1', reason: 'other' }))).commissionRefunded, 200);
+  assert.equal((await h.release(h.req({ orderId: 'o1', reason: 'other' }))).replay, true);
+  assert.equal(wallet(h, 'dA'), 500, 'jamais plus que la commission légitime, jamais deux fois');
+});
+
+test('RÉGRESSION libération : preuve avec champs réservés au client (provider/txId) → aucun crédit', async () => {
+  for (const extra of [{ provider: 'x' }, { txId: 'y' }]) {
+    const h = setup({ extra: { 'livreurs/dA/wallet_transactions/commission_o1_dA': { type: 'commission', amount: 100, orderId: 'o1', ...extra } } });
+    untrace(h);
+    assert.equal((await h.release(h.req({ orderId: 'o1', reason: 'other' }))).commissionRefunded, 0);
+    assert.equal(wallet(h, 'dA'), 300);
+    assert.equal(h.db.store.get(flagsOf(h)[0]).proofRejectReason, 'proof_client_shape');
+  }
+});
+
+test('RÉGRESSION libération : commande tracée par acceptOrderCF → le journal forgé est ignoré, seul commissionAmount compte', async () => {
+  const h = setup({ extra: { 'livreurs/dA/wallet_transactions/commission_o1_dA': { type: 'commission', amount: 100000, orderId: 'o1' } } });
+  const result = await h.release(h.req({ orderId: 'o1', reason: 'other' }));
+  assert.equal(result.commissionRefunded, 200);
+  assert.equal(wallet(h, 'dA'), 500);
 });

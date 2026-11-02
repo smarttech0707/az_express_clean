@@ -4,7 +4,7 @@ const {assertNewAccountActivity}=require('../../accountAdmission');
 const { createPendingAction } = require('../pendingActions');
 const { dispatchOrder, calculateCommission } = require('../../dispatch');
 const tarifService = require('../../tarifService');
-const { cancelOrderTx, cancelOrderPostTx } = require('../../orderActions');
+const { cancelOrderTx, cancelOrderPostTx, isPickedUp } = require('../../orderActions');
 const { readAmounts } = require('../../orderAmounts');
 
 const MIN_SHOPPING_BUDGET = 500;
@@ -383,6 +383,10 @@ function cancelOrder({ db, admin, HttpsError }) {
       if (!snap.exists) return { error: 'Commande introuvable.' };
       const data = snap.data();
       if (data.clientId !== uid) return { error: 'Commande introuvable.' };
+      if (isPickedUp(data)) {
+        return { error: 'Le colis a déjà été récupéré : je ne peux plus annuler cette commande. ' +
+          'Contactez le support AZ Express pour examiner la situation.' };
+      }
       if (!CANCELLABLE_STATUSES.includes(data.status)) {
         return { error: `Cette commande ne peut plus être annulée (statut actuel : ${data.status}).` };
       }
@@ -393,9 +397,8 @@ function cancelOrder({ db, admin, HttpsError }) {
       const amounts = readAmounts(data);
       let summaryFr = `Annuler la commande "${data.description || orderId}" (${data.budget || 0} FCFA).`;
       if (amounts && data.paymentMethod === 'wallet') {
-        summaryFr = data.status === 'picked_up'
-          ? `Annuler la commande "${data.description || orderId}" : produits ${amounts.productAmount} FCFA remboursés ; frais de livraison ${amounts.deliveryFee} FCFA non remboursés automatiquement (colis déjà récupéré, examen par l'administration).`
-          : `Annuler la commande "${data.description || orderId}" : remboursement intégral de ${amounts.totalAmount} FCFA (produits ${amounts.productAmount} + livraison ${amounts.deliveryFee}).`;
+        // Le colis récupéré est refusé plus haut : ici le remboursement est intégral.
+        summaryFr = `Annuler la commande "${data.description || orderId}" : remboursement intégral de ${amounts.totalAmount} FCFA (produits ${amounts.productAmount} + livraison ${amounts.deliveryFee}).`;
       }
       const actionId = await createPendingAction(db, admin, {
         uid,
@@ -424,6 +427,10 @@ function cancelOrder({ db, admin, HttpsError }) {
       } catch (err) {
         if (err.message === 'ORDER_NOT_CANCELLABLE') {
           throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée.');
+        }
+        if (err.message === 'ORDER_PICKED_UP') {
+          throw new HttpsError('failed-precondition',
+            'Le colis a déjà été récupéré : annulation impossible, contactez le support AZ Express.');
         }
         throw err;
       }

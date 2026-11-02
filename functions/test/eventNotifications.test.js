@@ -80,8 +80,12 @@ test('event notification: notifie les administrateurs lors d’une inscription',
             async get() {
               return {
                 docs: [
-                  { data: () => ({ fcmToken: 'admin-token-12345' }) },
-                  { data: () => ({ fcmToken: 'admin-token-12345' }) },
+                  { data: () => ({ role: 'super', isActive: true, fcmToken: 'admin-token-12345' }) },
+                  { data: () => ({ role: 'super', isActive: true, fcmToken: 'admin-token-12345' }) },
+                  // S5 : seuls les sous-admins porteurs de « eventiel » sont notifiés.
+                  { data: () => ({ role: 'sub', isActive: true, permissions: ['eventiel'], fcmToken: 'sub-eventiel-token' }) },
+                  { data: () => ({ role: 'sub', isActive: true, permissions: ['support'], fcmToken: 'sub-support-token' }) },
+                  { data: () => ({ role: 'sub', isActive: true, permissions: [], fcmToken: 'sub-vide-token-1' }) },
                 ],
               };
             },
@@ -100,6 +104,6 @@ test('event notification: notifie les administrateurs lors d’une inscription',
     data: { data: () => ({ status: 'pending', shopName: 'Events AZ' }) },
     params: { providerId: 'provider-1' },
   });
-  assert.equal(sent.length, 1);
+  assert.deepEqual(sent.map((call) => call[0]).sort(), ['admin-token-12345', 'sub-eventiel-token']);
   assert.equal(sent[0][3].providerId, 'provider-1');
 });

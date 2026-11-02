@@ -12,6 +12,7 @@ const {
   buildPayBoutiqueOrder,
   buildPayBoutiqueOrderCash,
   buildRefundExpiredBoutiqueOrder,
+  cancelOrderTx,
 } = require('../orderActions');
 
 // Fake Firestore : un Map en mémoire + de quoi satisfaire get/set/update/add
@@ -326,7 +327,7 @@ test('cancelOrderCF: refunds the client wallet when the order was paid by wallet
 
 test('cancelOrderCF: also refunds the driver commission when the order was already accepted', async () => {
   const { db, store } = makeFakeDb({
-    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500, commissionStatus: 'charged', commissionPayerId: 'd1', commissionAmount: 200 },
     'clients/c1':  { wallet: 0 },
     'livreurs/d1': { wallet: 50 },
   });
@@ -341,6 +342,87 @@ test('cancelOrderCF: also refunds the driver commission when the order was alrea
   // budget=1500 >= threshold(1000) -> commission 200 (fakeCalculateCommission)
   assert.equal(store.get('livreurs/d1').wallet, 250);
   assert.equal(store.get('clients/c1').wallet, 0); // cash order: no client refund
+});
+
+test('cancelOrderCF: commission non tracée → aucun crédit au livreur, signalement idempotent, annulation effective', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', isPaid: true, budget: 1500 },
+    'clients/c1':  { wallet: 0 },
+    'livreurs/d1': { wallet: 50 },
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('livreurs/d1').wallet, 50, 'jamais déduit du barème théorique');
+  assert.equal(store.get('clients/c1').wallet, 1500);
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+  assert.equal(store.get('reconciliation_flags/o1_commission_untraced').type, 'commission_untraced');
+});
+
+test('cancelOrderCF: ancienne commande sans trace mais AVEC la transaction de prélèvement → montant prélevé rendu une fois', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'clients/c1':  { wallet: 0 },
+    'livreurs/d1': { wallet: 50 },
+    'livreurs/d1/wallet_transactions/commission_o1_d1': { type: 'commission', amount: 150, orderId: 'o1' },
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 200, '50 + 150 prélevés, jamais le barème (200)');
+  assert.equal(store.get('orders/o1').commissionStatus, 'refunded');
+  assert.equal(store.has('reconciliation_flags/o1_commission_untraced'), false);
+  await assert.rejects(() => fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } }));
+  assert.equal(store.get('livreurs/d1').wallet, 200, 'idempotent');
+});
+
+test('cancelOrderCF: preuves de prélèvement invalides → aucune restitution, signalement', async () => {
+  for (const bad of [
+    { type: 'refund', amount: 150, orderId: 'o1' }, { type: 'commission', amount: 150, orderId: 'autre' },
+    { type: 'commission', amount: 0, orderId: 'o1' }, { type: 'commission', amount: 15.5, orderId: 'o1' },
+    { type: 'commission', amount: '150', orderId: 'o1' },
+  ]) {
+    const { db, store } = makeFakeDb({
+      'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+      'clients/c1':  { wallet: 0 },
+      'livreurs/d1': { wallet: 50 },
+      'livreurs/d1/wallet_transactions/commission_o1_d1': bad,
+    });
+    const fn = buildCancelOrder({
+      db, admin: fakeAdmin, onCall, HttpsError,
+      checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+      calculateCommission: fakeCalculateCommission,
+    });
+    await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+    assert.equal(store.get('livreurs/d1').wallet, 50, JSON.stringify(bad));
+    assert.equal(store.get('orders/o1').status, 'cancelled');
+    assert.equal(store.get('reconciliation_flags/o1_commission_untraced').status, 'open');
+  }
+});
+
+test('cancelOrderCF: preuve de prélèvement d’un AUTRE livreur ignorée (seul le livreur de la commande compte)', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'clients/c1':  { wallet: 0 },
+    'livreurs/d1': { wallet: 50 }, 'livreurs/d2': { wallet: 50 },
+    'livreurs/d2/wallet_transactions/commission_o1_d2': { type: 'commission', amount: 150, orderId: 'o1' },
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 50);
+  assert.equal(store.get('livreurs/d2').wallet, 50);
 });
 
 test('cancelOrderCF: debits a marketplace seller already paid at order creation', async () => {
@@ -1249,7 +1331,17 @@ test('cancelOrderCF: le remboursement vise le payeur d’origine, pas le livreur
     'livreurs/dA': { wallet: 10 },
     'livreurs/dB': { wallet: 700 },
   });
-  await cancelFn(db).run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  // Colis récupéré : le client ne peut plus annuler seul (aucune écriture d'argent).
+  await assert.rejects(() => cancelFn(db).run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } }),
+    (e) => e.code === 'failed-precondition');
+  assert.equal(store.get('livreurs/dA').wallet, 10);
+  // Décision administrative : même cœur transactionnel, commission rendue au PAYEUR d'origine.
+  const orderRef = db.collection('orders').doc('o1');
+  await db.runTransaction(async (tx) => {
+    const order = (await tx.get(orderRef)).data();
+    return cancelOrderTx(tx, { db, admin: fakeAdmin, orderRef, order, uid: 'c1',
+      calculateCommission: fakeCalculateCommission, reason: 'admin_close_stuck', adminDecision: { refundFee: false } });
+  });
   assert.equal(store.get('livreurs/dA').wallet, 110);
   assert.equal(store.get('livreurs/dB').wallet, 700, 'B n’a rien payé et ne reçoit rien');
 });
@@ -1550,4 +1642,63 @@ test('payOrderFromWalletCF: client sans document (compte anonyme) : refus SOLDE_
   assert.equal(store.has('clients/anon1'), false);
   assert.equal(store.get('livreurs/d1').wallet, 500);
   assert.equal(store.get('orders/o1').isPaid, false);
+});
+
+// ── Régression : journal wallet_transactions inscriptible par le livreur (preuve forgée) ──
+// Avant correctif, une ligne `commission_<commande>_<livreur>` créée librement par le livreur
+// (montant arbitraire) était créditée telle quelle à l'annulation d'une commande sans trace.
+function legacyForgedFixture(proof, budget = 1500) {
+  return makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget },
+    'clients/c1':  { wallet: 0 },
+    'livreurs/d1': { wallet: 50 },
+    'livreurs/d1/wallet_transactions/commission_o1_d1': proof,
+  });
+}
+const cancelO1 = (db) => cancelFn(db).run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+
+test('RÉGRESSION cancelOrderCF: preuve forgée de 100000 FCFA → aucun crédit, commande annulée, signalement avec la raison', async () => {
+  const { db, store } = legacyForgedFixture({ type: 'commission', amount: 100000, orderId: 'o1' });
+  await cancelO1(db);
+  assert.equal(store.get('livreurs/d1').wallet, 50, 'aucun argent créé');
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+  assert.notEqual(store.get('orders/o1').commissionStatus, 'refunded');
+  const flag = store.get('reconciliation_flags/o1_commission_untraced');
+  assert.equal(flag.status, 'open');
+  assert.equal(flag.proofRejectReason, 'proof_exceeds_policy');
+});
+
+test('RÉGRESSION cancelOrderCF: preuve légèrement supérieure au barème (201 > 200) refusée, égale au barème acceptée', async () => {
+  let r = legacyForgedFixture({ type: 'commission', amount: 201, orderId: 'o1' });
+  await cancelO1(r.db);
+  assert.equal(r.store.get('livreurs/d1').wallet, 50);
+  r = legacyForgedFixture({ type: 'commission', amount: 200, orderId: 'o1' });
+  await cancelO1(r.db);
+  assert.equal(r.store.get('livreurs/d1').wallet, 250, 'jamais plus que la commission légitime');
+});
+
+test('RÉGRESSION cancelOrderCF: preuve portant des champs réservés au client (provider/txId) refusée', async () => {
+  for (const extra of [{ provider: 'x' }, { txId: 'y' }]) {
+    const { db, store } = legacyForgedFixture({ type: 'commission', amount: 100, orderId: 'o1', ...extra });
+    await cancelO1(db);
+    assert.equal(store.get('livreurs/d1').wallet, 50, JSON.stringify(extra));
+    assert.equal(store.get('reconciliation_flags/o1_commission_untraced').proofRejectReason, 'proof_client_shape');
+  }
+});
+
+test('RÉGRESSION cancelOrderCF: budget inconnu → barème inconnu → aucun remboursement automatique', async () => {
+  const { db, store } = legacyForgedFixture({ type: 'commission', amount: 100, orderId: 'o1' }, null);
+  await cancelO1(db);
+  assert.equal(store.get('livreurs/d1').wallet, 50);
+  assert.equal(store.get('reconciliation_flags/o1_commission_untraced').proofRejectReason, 'expected_unknown');
+});
+
+test('RÉGRESSION cancelOrderCF: preuve absente → aucun crédit, signalement « proof_missing »', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'clients/c1':  { wallet: 0 }, 'livreurs/d1': { wallet: 50 },
+  });
+  await cancelO1(db);
+  assert.equal(store.get('livreurs/d1').wallet, 50);
+  assert.equal(store.get('reconciliation_flags/o1_commission_untraced').proofRejectReason, 'proof_missing');
 });

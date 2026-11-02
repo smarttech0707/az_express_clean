@@ -212,6 +212,9 @@ async function dispatchOrder(db, admin, {
   radiusKm = DEFAULT_RADIUS_KM,
   // Livreurs ayant déjà libéré cette commande : jamais re-proposée à eux.
   excludedDriverIds = [],
+  // Élargissement d'une commande déjà diffusée (`broadcast`, sans livreur) : les nouveaux
+  // livreurs sont AJOUTÉS à notifiedDriverIds, jamais substitués ni réassignés.
+  expandBroadcast = false,
 }) {
   assertValidDispatchPoint(Number(lat), Number(lng), 'collecte');
   const excludedSet = new Set(Array.isArray(excludedDriverIds) ? excludedDriverIds : []);
@@ -322,7 +325,9 @@ async function dispatchOrder(db, admin, {
     if (!orderSnap.exists) {
       return { dispatched: false, mode: 'none' };
     }
-    if (orderSnap.data().status !== 'pending') {
+    const current = orderSnap.data();
+    const expanding = expandBroadcast === true && current.status === 'broadcast' && !current.driverId;
+    if (current.status !== 'pending' && !expanding) {
       return { dispatched: false, mode: 'already_assigned' };
     }
 
@@ -333,6 +338,17 @@ async function dispatchOrder(db, admin, {
       const deletion=await tx.get(db.collection('account_deletions').doc(id));
       if (!deletion.exists || deletion.data().consentVerified !== true) eligibleIds.push(id);
     }
+    if (expanding) {
+      // Seuls les livreurs pas encore sollicités ; la commande reste `broadcast`.
+      const known = new Set(Array.isArray(current.notifiedDriverIds) ? current.notifiedDriverIds : []);
+      const added = eligibleIds.filter((id) => !known.has(id));
+      if (!added.length) return { dispatched: false, mode: 'none' };
+      tx.update(orderRef, {
+        notifiedDriverIds: admin.firestore.FieldValue.arrayUnion(...added),
+        lastDispatchAtMs: Date.now(),
+      });
+      return { dispatched: true, mode: 'broadcast', ids: added, expanded: true };
+    }
     if (!eligibleIds.length) return { dispatched:false, mode:'none' };
     if (eligibleIds.length === 1) {
       tx.update(orderRef, { driverId: eligibleIds[0], status: 'assigned' });
@@ -342,6 +358,7 @@ async function dispatchOrder(db, admin, {
     tx.update(orderRef, {
       status:            'broadcast',
       notifiedDriverIds: admin.firestore.FieldValue.arrayUnion(...eligibleIds),
+      lastDispatchAtMs:  Date.now(),
     });
     return { dispatched: true, mode: 'broadcast', ids:eligibleIds };
   });
@@ -360,7 +377,7 @@ async function dispatchOrder(db, admin, {
   }
 
   console.log(`[dispatch] orderId=${orderId} résultat=${result.mode} dispatched=${result.dispatched}`);
-  return { dispatched: result.dispatched, mode: result.mode };
+  return { dispatched: result.dispatched, mode: result.mode, ...(result.expanded ? { expanded: true } : {}) };
 }
 
 module.exports = {

@@ -1,6 +1,6 @@
 ﻿const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
 test('Hosting revalidates unversioned paths and reserves immutable for hashed resources',()=>{
- const h=JSON.parse(fs.readFileSync('firebase.json','utf8')).hosting;
+ const h=JSON.parse(fs.readFileSync(require('node:path').join(__dirname,'..','..','firebase.json'),'utf8')).hosting;
  const cache=x=>x.headers.find(v=>v.key==='Cache-Control')?.value;
  assert.equal(cache(h.headers[0]),'no-cache, max-age=0, must-revalidate');
  assert.equal(h.headers[0].source,'**');

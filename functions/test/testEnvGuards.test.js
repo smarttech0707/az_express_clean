@@ -19,6 +19,7 @@ test('assertTestProject : production et noms non explicites refusés', () => {
   }
   assert.equal(g.assertTestProject('az-express-test'), 'az-express-test');
   assert.equal(g.assertTestProject('demo-az-test'), 'demo-az-test');
+  assert.equal(g.assertTestProject('az-express-preprod'), 'az-express-preprod');
 });
 
 test('assertNoProductionEnv : variable visant la production refusée', () => {

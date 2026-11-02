@@ -112,7 +112,7 @@ test('AZ IA cancel_order: annulation normale rembourse le client (wallet)', asyn
 
 test('AZ IA cancel_order: rembourse aussi la commission du livreur si déjà acceptée', async () => {
   const { db, store } = makeFakeDb({
-    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500, commissionStatus: 'charged', commissionPayerId: 'd1', commissionAmount: 200 },
     'clients/c1':  { wallet: 0 },
     'livreurs/d1': { wallet: 50 },
   });

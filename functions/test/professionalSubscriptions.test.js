@@ -203,16 +203,62 @@ test('action admin requires the permission mapped to its collection', async (t) 
   }, 'sub-1')), (error) => error.code === 'permission-denied');
 });
 
-test('action admin accepts the matching active sub-admin permission', async (t) => {
+// Décision : activations (gratuites ou payantes), essai et VIP = super-admin
+// seul ; le sous-admin de la catégorie garde les actions de protection.
+test('sous-admin avec la bonne permission : AUCUNE activation d\'abonnement, VIP ou essai', async (t) => {
+  for (const [action, extra] of [
+    ['activateStandard', { chargeWallet: false }], ['activateStandard', { chargeWallet: true }],
+    ['activateVip', { chargeWallet: false }], ['activateVip', { chargeWallet: true }],
+    ['activateTrial', {}], ['activateStandard', {}],
+  ]) {
+    const h = harness({
+      'admins/sub-1': { role: 'sub', isActive: true, permissions: ['demandes_vendeurs'] },
+      'sellers/seller-1': { wallet: 5000, subscriptionStatus: 'expired', vipStatus: 'none' },
+    });
+    t.after(h.restore);
+    await assert.rejects(h.handler(ownerRequest({
+      action, requestId: '1234567890abcdef', ...extra,
+    }, 'sub-1')), (error) => error.code === 'permission-denied', `${action} ${JSON.stringify(extra)}`);
+    assert.deepEqual(h.db.store.get('sellers/seller-1'),
+      { wallet: 5000, subscriptionStatus: 'expired', vipStatus: 'none' });
+    assert.ok(![...h.db.store.keys()].some((key) => key.includes('/wallet_transactions/')));
+  }
+});
+
+test('sous-admin avec la bonne permission : suspension et retrait du VIP restent permis', async (t) => {
+  for (const action of ['suspend', 'deactivateVip']) {
+    const h = harness({
+      'admins/sub-1': { role: 'sub', isActive: true, permissions: ['demandes_vendeurs'] },
+      'sellers/seller-1': { wallet: 5000, subscriptionStatus: 'active', vipStatus: 'vip' },
+    });
+    t.after(h.restore);
+    const result = await h.handler(ownerRequest({ action, requestId: '1234567890abcdef' }, 'sub-1'));
+    assert.ok(result.outcome, action);
+    assert.equal(h.db.store.get('sellers/seller-1').wallet, 5000, 'aucun débit');
+  }
+});
+
+test('sous-admin sans la permission : suspension refusée aussi', async (t) => {
   const h = harness({
-    'admins/sub-1': { role: 'sub', isActive: true, permissions: ['demandes_vendeurs'] },
-    'sellers/seller-1': { wallet: 5000 },
+    'admins/sub-1': { role: 'sub', isActive: true, permissions: ['restaurants'] },
+    'sellers/seller-1': { wallet: 5000, subscriptionStatus: 'active' },
   });
   t.after(h.restore);
-  const result = await h.handler(ownerRequest({
-    action: 'activateStandard', requestId: '1234567890abcdef', chargeWallet: false,
-  }, 'sub-1'));
-  assert.equal(result.outcome, 'activated');
+  await assert.rejects(h.handler(ownerRequest({ action: 'suspend', requestId: '1234567890abcdef' }, 'sub-1')),
+    (error) => error.code === 'permission-denied');
+});
+
+test('le super-admin garde toutes les activations', async (t) => {
+  for (const [action, extra] of [['activateStandard', { chargeWallet: false }],
+    ['activateVip', { chargeWallet: true }], ['activateTrial', {}]]) {
+    const h = harness({
+      'admins/boss': { role: 'super', isActive: true },
+      'sellers/seller-1': { wallet: 5000 },
+    });
+    t.after(h.restore);
+    const result = await h.handler(ownerRequest({ action, requestId: '1234567890abcdef', ...extra }, 'boss'));
+    assert.ok(result.outcome, action);
+  }
 });
 
 test('session anonyme refusee avant toute lecture ou ecriture sensible', async (t) => {
@@ -235,4 +281,69 @@ test('suppression en cours ou compte supprimé : aucun débit ni renouvellement,
     assert.equal(h.db.store.get('sellers/seller-1').subscriptionStatus, 'active');
     assert.equal([...h.db.store.keys()].some((k) => k.startsWith('subscription_operations/')), false);
   }
+});
+
+// S4 : renouveler le compte d'AUTRUI (débit de son wallet) exige la permission
+// de la catégorie ; être « un admin actif quelconque » ne suffit plus.
+test('S4 : sous-admin sans la permission de la catégorie ne renouvelle pas un compte tiers', async (t) => {
+  const h = harness({
+    'admins/sub-1': { role: 'sub', isActive: true, permissions: ['restaurants', 'recharges'] },
+    'sellers/seller-1': { wallet: 5000, subscriptionStatus: 'active', subscriptionExpiresAt: null },
+  });
+  t.after(h.restore);
+  await assert.rejects(h.handler(ownerRequest({}, 'sub-1')),
+    (error) => error.code === 'permission-denied');
+  assert.equal(h.db.store.get('sellers/seller-1').wallet, 5000);
+  assert.ok(![...h.db.store.keys()].some((key) => key.includes('/wallet_transactions/')));
+});
+
+test('S4 : sous-admin désactivé, rôle inconnu ou simple client : aucun renouvellement d\'autrui', async (t) => {
+  for (const admin of [
+    { role: 'sub', isActive: false, permissions: ['demandes_vendeurs'] },
+    { role: 'other', isActive: true, permissions: ['demandes_vendeurs'] },
+    undefined,
+  ]) {
+    const h = harness({
+      ...(admin ? { 'admins/who': admin } : {}),
+      'sellers/seller-1': { wallet: 5000, subscriptionStatus: 'active', subscriptionExpiresAt: null },
+    });
+    t.after(h.restore);
+    await assert.rejects(h.handler(ownerRequest({}, 'who')),
+      (error) => error.code === 'permission-denied');
+    assert.equal(h.db.store.get('sellers/seller-1').wallet, 5000);
+  }
+});
+
+// Débiter le wallet d'un compte tiers est financier : super-admin seul, même
+// pour un sous-admin porteur de la permission de la catégorie.
+test('renouvellement d\'un compte tiers : super-admin seulement', async (t) => {
+  const hSub = harness({
+    'admins/adm': { role: 'sub', isActive: true, permissions: ['demandes_vendeurs'] },
+    'sellers/seller-1': { wallet: 5000, subscriptionStatus: 'active', subscriptionExpiresAt: null },
+  });
+  t.after(hSub.restore);
+  await assert.rejects(hSub.handler(ownerRequest({}, 'adm')), (e) => e.code === 'permission-denied');
+  assert.equal(hSub.db.store.get('sellers/seller-1').wallet, 5000);
+  const hSuper = harness({
+    'admins/adm': { role: 'super', isActive: true },
+    'sellers/seller-1': { wallet: 5000, subscriptionStatus: 'active', subscriptionExpiresAt: null },
+  });
+  t.after(hSuper.restore);
+  const result = await hSuper.handler(ownerRequest({}, 'adm'));
+  assert.equal(result.chargedAmount, 1000);
+  assert.equal(hSuper.db.store.get('sellers/seller-1').wallet, 4000);
+});
+
+test('S4 : le restaurateur propriétaire renouvelle son restaurant, pas celui d\'un autre', async (t) => {
+  const h = harness({
+    'restaurant_owners/own': { restaurantId: 'r1' },
+    'restaurants/r1': { wallet: 5000, subscriptionStatus: 'active', subscriptionExpiresAt: null },
+    'restaurants/r2': { wallet: 5000, subscriptionStatus: 'active', subscriptionExpiresAt: null },
+  });
+  t.after(h.restore);
+  const ok = await h.handler(ownerRequest({ collection: 'restaurants', docId: 'r1' }, 'own'));
+  assert.equal(ok.chargedAmount, 1000);
+  await assert.rejects(h.handler(ownerRequest({ collection: 'restaurants', docId: 'r2' }, 'own')),
+    (error) => error.code === 'permission-denied');
+  assert.equal(h.db.store.get('restaurants/r2').wallet, 5000);
 });

@@ -1,6 +1,7 @@
 'use strict';
 
 const { resolveDispatchGeography, calculateCommission: tieredCommission } = require('./dispatch');
+const { verifyLegacyCommissionProof, expectedLegacyCommission } = require('./commissionProof');
 const { readDriverState, terminalDriverPatch, runLifecycleTransaction } = require('./driverLifecycle');
 const { verifyProofInTransaction, getProofRefs } = require('./deliveryProofs');
 const { settlementDocument } = require('./earningsSettlement');
@@ -174,9 +175,45 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
 // le déclencheur pour l'audit/le support (ex. 'client_cancel', 'ai_client_cancel')
 // — même champ que celui déjà écrit par autoExpireOrders ('no_driver_found'),
 // désormais cohérent sur les 3 chemins d'annulation.
+// Colis déjà récupéré (statut ou horodatage de récupération).
+function isPickedUp(order) {
+  return order.status === 'picked_up' || order.pickedUpAt != null;
+}
+
+// Demande d'annulation d'un client après récupération : aucune annulation ni
+// remboursement, seulement une trace pour l'examen administratif. Ne remplace
+// jamais une demande déjà posée. Transaction séparée de celle de cancelOrderTx
+// (qui a échoué, donc rien n'y est écrit).
+async function recordPickedUpCancelRequest(db, admin, { orderRef, uid }) {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(orderRef);
+    if (!snap.exists) return false;
+    const order = snap.data();
+    if (order.clientId !== uid || !isPickedUp(order) ||
+        ['delivered', 'cancelled'].includes(order.status) || order.cancelRequestAfterPickup) {
+      return false;
+    }
+    tx.update(orderRef, {
+      cancelRequestAfterPickup: {
+        status: 'pending_admin_review',
+        requestedBy: uid,
+        requestedAtMs: Date.now(),
+      },
+    });
+    return true;
+  });
+}
+
 async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason, adminDecision }) {
   if (['delivered', 'cancelled'].includes(order.status)) {
     throw new Error('ORDER_NOT_CANCELLABLE');
+  }
+  // Après récupération, le colis est chez le livreur : un client ne peut plus se
+  // faire rembourser seul. Seule une décision administrative (adminDecision,
+  // fournie par adminBilling) peut clore la commande. Contrôle DANS la
+  // transaction, donc valable aussi face à un changement de statut concurrent.
+  if (isPickedUp(order) && !adminDecision) {
+    throw new Error('ORDER_PICKED_UP');
   }
 
   const budget         = Number(order.budget || 0);
@@ -264,6 +301,23 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
   const payerSnap = payerRef && payerRef !== driverRef && needsDriverRefund
     ? await tx.get(payerRef) : driverSnap;
 
+  // Ordre de preuve : (1) trace valide sur la commande ; (2) à défaut (commande antérieure à
+  // acceptOrderCF), transaction `commission_<commande>_<livreur>` du wallet du livreur, retenue
+  // seulement si elle est compatible avec un prélèvement serveur ET plafonnée au barème
+  // (voir commissionProof.js : le journal est inscriptible par le livreur) ; sinon aucune restitution
+  // automatique et signalement administratif. Jamais le barème seul.
+  let walletProofAmount = null;
+  let proofRejectReason = null;
+  if (needsDriverRefund && !tracedCommission && !order.commissionStatus && order.driverId) {
+    const proofSnap = await tx.get(driverRef.collection('wallet_transactions').doc(`commission_${orderRef.id}_${order.driverId}`));
+    const expected = await expectedLegacyCommission(db, order, typeof calculateCommission === 'function' ? calculateCommission : tieredCommission);
+    const verdict = verifyLegacyCommissionProof({
+      proof: proofSnap.exists ? proofSnap.data() : null, orderId: orderRef.id, expected,
+    });
+    walletProofAmount = verdict.amount;
+    proofRejectReason = verdict.reason;
+  }
+
   // Transfert entre livreurs en cours (demande ou remplaçant réservé) : l'annulation
   // le clôt dans la MÊME transaction — le remplaçant B est libéré tout de suite,
   // le transfert est annulé (historique conservé) et la preuve de remise est
@@ -345,18 +399,22 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
     }
   }
 
-  if (needsDriverRefund) {
+  if (needsDriverRefund && !tracedCommission && walletProofAmount === null) {
+    // Aucune écriture fiable ne prouve un prélèvement : on ne déduit pas un débit réel du barème
+    // théorique (crédit potentiellement injustifié). Signalement idempotent, rapprochement manuel.
+    tx.set(db.collection('reconciliation_flags').doc(`${orderRef.id}_commission_untraced`), {
+      orderId: orderRef.id, type: 'commission_untraced', status: 'open', driverId: order.driverId,
+      reason: reason || 'cancel', proofRejectReason, createdAtMs: Date.now(),
+    });
+  }
+  if (needsDriverRefund && (tracedCommission || walletProofAmount !== null)) {
     driverId     = payerId;
-    driverRefund = tracedCommission
-      ? order.commissionAmount
-      : await calculateCommission(db, budget);
+    driverRefund = tracedCommission ? order.commissionAmount : walletProofAmount;
     if (payerSnap && payerSnap.exists) {
       const w = Number(payerSnap.data().wallet || 0);
       tx.update(payerRef, { wallet: w + driverRefund });
     }
-    if (tracedCommission) {
-      tx.update(orderRef, { commissionStatus: 'refunded' });
-    }
+    tx.update(orderRef, { commissionStatus: 'refunded' });
   }
 
   if (needsSellerDebit && sellerSnap.exists) {
@@ -427,8 +485,10 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
 
     const orderRef = db.collection('orders').doc(String(orderId));
     let refundInfo;
+    let pickedUpBlocked = false;
 
     await runLifecycleTransaction(db, async (tx) => {
+      pickedUpBlocked = false;
       const orderSnap = await tx.get(orderRef);
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
       const order = orderSnap.data();
@@ -443,9 +503,25 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
         if (err.message === 'ORDER_NOT_CANCELLABLE') {
           throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée');
         }
+        if (err.message === 'ORDER_PICKED_UP') {
+          // Rien n'a été écrit : on sort proprement et on traite le litige après.
+          pickedUpBlocked = true;
+          return;
+        }
         throw err;
       }
     });
+
+    if (pickedUpBlocked) {
+      const recorded = await recordPickedUpCancelRequest(db, admin, { orderRef, uid });
+      await logAudit({
+        userId: uid, userType: 'client', action: 'cancel_order', targetId: orderId,
+        status: 'denied', metadata: { reason: 'picked_up', requestRecorded: recorded },
+      });
+      throw new HttpsError('failed-precondition',
+        'Le colis a déjà été récupéré : la commande ne peut plus être annulée directement. ' +
+        'Votre demande a été transmise au support AZ Express.');
+    }
 
     await cancelOrderPostTx(db, admin, { orderId, uid, ...refundInfo });
 
@@ -464,21 +540,58 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
 // aucune autre source de vérité côté serveur), comme avant. price n'est plus
 // un paramètre : relu depuis la commande elle-même (order.budget) pour ne
 // jamais faire confiance à un montant fourni par le client.
+//
+// Mode `adminConfirm` (confirmation ADMINISTRATIVE de livraison, litige après récupération) :
+// MÊME cœur financier (une seule voie de crédit livreur, jamais de nouvelle commission), mais
+// déclenché par le super-administrateur pour la commande `picked_up` d'un livreur, avec
+// justification, preuve déclarée et requestId idempotent. Voir docs/ORDER_DISPUTES_SPEC.md.
 function buildDeliverOrder({
   db, admin, onCall, HttpsError, checkRateLimit, logAudit,
-  requireProof = false, deliveryProofPepper,
+  requireProof = false, deliveryProofPepper, adminConfirm = false, requireSuperAdmin,
 }) {
   const options = deliveryProofPepper ? { secrets: [deliveryProofPepper] } : {};
   return onCall(options, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
-    const uid = request.auth.uid;
+    const actorUid = request.auth.uid;
+    let uid = actorUid; // livreur dont la livraison est créditée (≠ acteur en mode adminConfirm)
     const {
       orderId, markCashPaid, deliveredLat, deliveredLng, deliveryPhotoUrl,
       proofToken, proofPin,
     } = request.data || {};
     if (!orderId) throw new HttpsError('invalid-argument', 'orderId manquant');
 
-    await checkRateLimit(uid, 'deliver_order', 30, 60);
+    let adminInfo = null;
+    if (adminConfirm) {
+      if (request.auth.token?.firebase?.sign_in_provider === 'anonymous') {
+        throw new HttpsError('unauthenticated', 'Vous devez être connecté');
+      }
+      const { requestId, justification, evidence } = request.data || {};
+      const text = typeof justification === 'string' ? justification.trim() : '';
+      if (text.length < 10) throw new HttpsError('invalid-argument', 'Justification obligatoire (10 caractères minimum)');
+      if (typeof requestId !== 'string' || requestId.length < 16 || requestId.length > 128) {
+        throw new HttpsError('invalid-argument', 'requestId idempotent requis');
+      }
+      if (!ADMIN_DELIVERY_EVIDENCE.includes(evidence)) {
+        throw new HttpsError('invalid-argument', 'Preuve de livraison invalide');
+      }
+      await checkRateLimit(actorUid, 'admin_confirm_delivery', 30, 600);
+      await requireSuperAdmin({ request, db });
+      const pre = await db.collection('orders').doc(String(orderId)).get();
+      if (!pre.exists) throw new HttpsError('not-found', 'Commande introuvable');
+      const driverOfRecord = pre.data().driverId;
+      if (typeof driverOfRecord !== 'string' || !driverOfRecord || driverOfRecord.includes('/')) {
+        throw new HttpsError('failed-precondition', 'Aucun livreur assigné à cette commande');
+      }
+      uid = driverOfRecord;
+      adminInfo = { byUid: actorUid, requestId, justification: text, evidence };
+    } else {
+      await checkRateLimit(uid, 'deliver_order', 30, 60);
+    }
+    const opRef = adminInfo
+      ? db.collection('order_dispute_decisions').doc(
+        require('crypto').createHash('sha256').update(`${orderId}|${adminInfo.requestId}`).digest('hex'))
+      : null;
+    let replayed = false;
 
     const orderRef  = db.collection('orders').doc(String(orderId));
     const driverRef = db.collection('livreurs').doc(uid);
@@ -493,6 +606,8 @@ function buildDeliverOrder({
 
     await runLifecycleTransaction(db, async (tx) => {
       neutralized = null;
+      replayed = false;
+      if (opRef && (await tx.get(opRef)).exists) { replayed = true; return; }
       const orderSnap = await tx.get(orderRef);
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
       const order = orderSnap.data();
@@ -500,13 +615,23 @@ function buildDeliverOrder({
       if (order.driverId !== uid) {
         throw new HttpsError('permission-denied', "Cette commande ne vous est pas assignée");
       }
+      if (adminInfo) {
+        // Seule une commande réellement récupérée peut être confirmée par l'administration ;
+        // course transférée (gain à répartir) : règlement administratif dédié, jamais ici.
+        if (order.status !== 'picked_up') {
+          throw new HttpsError('failed-precondition', 'Seule une commande récupérée (picked_up) peut être confirmée');
+        }
+        if (order.settlementHold === true) {
+          throw new HttpsError('failed-precondition', 'Course transférée : utiliser le règlement de transfert');
+        }
+      }
       if (requireProof && order.deliveryProofMode === 'qr_v1' && order.status === 'delivered') {
         throw new HttpsError('failed-precondition', 'Code déjà utilisé');
       }
       if (!['accepted', 'picked_up'].includes(order.status)) {
         throw new HttpsError('failed-precondition', 'Cette commande ne peut pas être marquée livrée');
       }
-      if (order.deliveryProofMode === 'qr_v1' && !requireProof) {
+      if (order.deliveryProofMode === 'qr_v1' && !requireProof && !adminInfo) {
         throw new HttpsError('failed-precondition', 'Une preuve de réception est requise');
       }
       if (requireProof && order.deliveryProofMode !== 'qr_v1') {
@@ -629,6 +754,23 @@ function buildDeliverOrder({
         ...(typeof deliveredLng === 'number' ? { deliveredLng } : {}),
         ...(deliveryPhotoUrl ? { deliveryPhoto: deliveryPhotoUrl } : {}),
       });
+
+      if (adminInfo) {
+        tx.update(orderRef, {
+          adminDeliveryConfirmation: {
+            byUid: adminInfo.byUid, atMs: Date.now(), justification: adminInfo.justification,
+            evidence: adminInfo.evidence, requestId: adminInfo.requestId,
+          },
+          ...(order.cancelRequestAfterPickup
+            ? { cancelRequestAfterPickup: { ...order.cancelRequestAfterPickup, status: 'resolved_delivery_confirmed', resolvedAtMs: Date.now() } }
+            : {}),
+        });
+        tx.set(opRef, {
+          orderId: String(orderId), requestId: adminInfo.requestId, decision: 'confirmDelivery', byUid: adminInfo.byUid,
+          result: { financialTreatment: 'normal_delivery' }, createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
 
       // La livraison et la vente Boutique doivent atteindre leur état terminal
       // dans la même transaction. Les documents historiques sans
@@ -793,6 +935,8 @@ function buildDeliverOrder({
       }
     });
 
+    if (replayed) return { success: true, replay: true };
+
     if (proofFailure) {
       await logAudit({
         userId: uid,
@@ -870,7 +1014,14 @@ function buildDeliverOrder({
       });
     }
 
-    await logAudit({
+    await logAudit(adminInfo ? {
+      userId: actorUid, userType: 'admin', action: 'admin_confirm_delivery', targetId: orderId,
+      amount: creditAmount || null,
+      metadata: {
+        walletTarget, deliveryFee, payMethod, driverId: uid, evidence: adminInfo.evidence,
+        justification: adminInfo.justification,
+      },
+    } : {
       userId: uid, userType: 'driver', action: 'deliver_order', targetId: orderId,
       amount: creditAmount || null,
       metadata: { walletTarget, deliveryFee, payMethod, proofValidated, settlementHold: held },
@@ -887,6 +1038,9 @@ function buildDeliverOrder({
     return { success: true };
   });
 }
+
+// Preuves acceptées pour une confirmation administrative (déclarées par le super-admin, tracées).
+const ADMIN_DELIVERY_EVIDENCE = Object.freeze(['client_confirmed', 'driver_proof', 'phone_verified', 'other_justified']);
 
 function buildDeliverOrderWithProof(options) {
   return buildDeliverOrder({ ...options, requireProof: true });
@@ -1519,11 +1673,14 @@ module.exports = {
   buildCancelOrder,
   buildDeliverOrder,
   buildDeliverOrderWithProof,
+  ADMIN_DELIVERY_EVIDENCE,
   buildPayBoutiqueOrder,
   buildPayBoutiqueOrderCash,
   buildRefundExpiredBoutiqueOrder,
   cancelOrderTx,
   cancelOrderPostTx,
+  isPickedUp,
+  recordPickedUpCancelRequest,
   partnerCollection,
   AZ_COMMISSION_FIXED,
   PREPAID_PARTNER_TYPES,

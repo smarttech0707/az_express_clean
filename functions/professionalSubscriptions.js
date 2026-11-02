@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
-const { requireAdminPermission } = require('./adminGuards');
+const { requireAdminPermission, requireSuperAdmin } = require('./adminGuards');
 const { assertPartnerActivated } = require('./partnerActivationGuard');
 
 const COLLECTIONS = new Set([
@@ -21,6 +21,13 @@ const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 const TRIAL_MS = 60 * 24 * 60 * 60 * 1000;
 const ADMIN_ACTIONS = new Set([
   'activateStandard', 'activateVip', 'deactivateVip', 'suspend', 'activateTrial',
+]);
+// Activations d'abonnement / VIP / essai gratuit et renouvellement du compte
+// d'AUTRUI (débit de son wallet) : opérations financières, super-admin seul.
+// Un sous-admin de la catégorie ne garde que les actions de protection
+// (suspension, retrait du VIP), qui ne créent aucun avantage payant.
+const SUPER_ONLY_ACTIONS = new Set([
+  'activateStandard', 'activateVip', 'activateTrial', 'renew',
 ]);
 const ADMIN_PERMISSIONS = Object.freeze({
   sellers: 'demandes_vendeurs',
@@ -60,23 +67,26 @@ function buildManageProfessionalSubscription({ db, auth, timestamp, fieldValue }
 
     let isAdmin = false;
     if (ADMIN_ACTIONS.has(action)) {
-      await requireAdminPermission({ request, db, permission: ADMIN_PERMISSIONS[collection] });
+      if (SUPER_ONLY_ACTIONS.has(action)) {
+        await requireSuperAdmin({ request, db });
+      } else {
+        await requireAdminPermission({ request, db, permission: ADMIN_PERMISSIONS[collection] });
+      }
       isAdmin = true;
     }
     if (action === 'renew') {
-      const adminSnap = await db.collection('admins').doc(request.auth.uid).get();
-      const adminData = adminSnap.data();
-      isAdmin = adminSnap.exists && adminData?.isActive === true &&
-        ['super', 'sub'].includes(adminData?.role);
-    }
-    if (action === 'renew' && !isAdmin) {
+      // Le propriétaire renouvelle son propre compte. Débiter le wallet d'un
+      // compte tiers est une opération financière : super-admin seul.
+      let isOwner;
       if (collection === 'restaurants') {
         const owner = await db.collection('restaurant_owners').doc(request.auth.uid).get();
-        if (!owner.exists || owner.data()?.restaurantId !== docId) {
-          throw new HttpsError('permission-denied', 'Restaurant non autorise');
-        }
-      } else if (docId !== request.auth.uid) {
-        throw new HttpsError('permission-denied', 'Compte non autorise');
+        isOwner = owner.exists && owner.data()?.restaurantId === docId;
+      } else {
+        isOwner = docId === request.auth.uid;
+      }
+      if (!isOwner) {
+        await requireSuperAdmin({ request, db });
+        isAdmin = true;
       }
     }
     if (ADMIN_ACTIONS.has(action) &&
@@ -226,4 +236,5 @@ module.exports = {
   STANDARD_PRICES,
   VIP_PRICE,
   ADMIN_PERMISSIONS,
+  SUPER_ONLY_ACTIONS,
 };

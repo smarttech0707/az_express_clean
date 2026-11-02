@@ -36,7 +36,7 @@ async function pickedUpBoutique(h = world()) {
 // ───────────────────────────── annulation après récupération ─────────────────────────────
 test('marketplace wallet annulée APRÈS récupération : produits rendus, frais retenus, commission non rendue, vendeur repris', async () => {
   const { h, id } = await pickedUpMarketplace();
-  await h.call('cancel', 'c1', { orderId: id });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: id });
   assert.equal(h.w('clients/c1'), 4500 + 5000); // produits seuls
   assert.equal(h.w('sellers/s1'), 0);
   assert.equal(h.w('livreurs/dA'), 900); // commission non rendue tant que les frais sont retenus
@@ -53,7 +53,7 @@ test('marketplace wallet annulée APRÈS récupération : produits rendus, frais
 
 test('boutique wallet annulée APRÈS récupération : produits rendus, frais retenus, commande boutique remboursée', async () => {
   const { h, id } = await pickedUpBoutique();
-  await h.call('cancel', 'c1', { orderId: id });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: id });
   assert.deepEqual([h.w('clients/c1'), h.w('sellers/s1'), h.w('livreurs/dA')], [9500, 0, 900]);
   assert.equal(hold(h, id).amount, 500);
   const bo = h.get(h.keys('boutique_orders/')[0]);
@@ -64,7 +64,7 @@ test('boutique wallet annulée APRÈS récupération : produits rendus, frais re
 
 test('paiement cash annulé après récupération : rien payé, rien retenu, commission rendue', async () => {
   const { h, id } = await pickedUpMarketplace(world(), 'cash');
-  await h.call('cancel', 'c1', { orderId: id });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: id });
   assert.equal(h.w('clients/c1'), 10000);
   assert.equal(h.get(`orders/${id}`).deliveryFeeHold, undefined);
   assert.equal(h.w('livreurs/dA'), 1000);
@@ -76,7 +76,7 @@ test('commande historique annulée après récupération : comportement inchang�
       sellerId: 's1', sellerType: 'seller' },
     'clients/c1': { wallet: 0 }, 'sellers/s1': { wallet: 5000 },
   });
-  await h.call('cancel', 'c1', { orderId: 'old' });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: 'old' });
   assert.deepEqual([h.w('clients/c1'), h.w('sellers/s1')], [5000, 0]);
   assert.equal(h.get('orders/old').deliveryFeeHold, undefined);
 });
@@ -84,7 +84,7 @@ test('commande historique annulée après récupération : comportement inchang�
 // ───────────────────────────── décision sur les frais retenus ─────────────────────────────
 test('resolveFeeHold refundClient (faute du livreur/AZ) : frais rendus au client, commission rendue, une seule fois', async () => {
   const { h, id } = await pickedUpMarketplace();
-  await h.call('cancel', 'c1', { orderId: id });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: id });
   const r = await ADMIN(h, { action: 'resolveFeeHold', orderId: id, decision: 'refundClient' });
   assert.equal(r.decision, 'refundClient');
   assert.equal(h.w('clients/c1'), 10000);
@@ -100,7 +100,7 @@ test('resolveFeeHold refundClient (faute du livreur/AZ) : frais rendus au client
 
 test('resolveFeeHold payDriver : livreur rémunéré des frais (commission conservée), commission AZ enregistrée une fois', async () => {
   const { h, id } = await pickedUpMarketplace();
-  await h.call('cancel', 'c1', { orderId: id });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: id });
   await ADMIN(h, { action: 'resolveFeeHold', orderId: id, decision: 'payDriver' });
   assert.equal(h.w('livreurs/dA'), 900 + 500); // net +400 comme une livraison normale
   assert.equal(h.w('clients/c1'), 9500);
@@ -116,7 +116,7 @@ test('resolveFeeHold payDriver : livreur rémunéré des frais (commission conse
 
 test('resolveFeeHold retain : AZ garde les frais, commission rendue, rien d’autre ne bouge', async () => {
   const { h, id } = await pickedUpMarketplace();
-  await h.call('cancel', 'c1', { orderId: id });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: id });
   await ADMIN(h, { action: 'resolveFeeHold', orderId: id, decision: 'retain' });
   assert.deepEqual([h.w('clients/c1'), h.w('livreurs/dA')], [9500, 1000]);
   assert.equal(retained(h), 500);
@@ -127,7 +127,7 @@ test('resolveFeeHold retain : AZ garde les frais, commission rendue, rien d’au
 
 test('resolveFeeHold : réservé au super-admin, justification obligatoire, décision valide, frais existants', async () => {
   const { h, id } = await pickedUpMarketplace();
-  await h.call('cancel', 'c1', { orderId: id });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: id });
   const bad = (uid, data) => h.call('adminBilling', uid, { justification: 'Examen du dossier par AZ', ...data });
   await assert.rejects(() => bad('c1', { action: 'resolveFeeHold', orderId: id, decision: 'refundClient' }),
     (e) => e.code === 'permission-denied');
@@ -285,7 +285,7 @@ test('rejeu en rafale : annulation, clôture et décisions répétées ne créen
   const { h, id } = await pickedUpMarketplace();
   // Avant l'annulation, les 500 de frais payés par le client sont en transit (dans aucun wallet).
   const start = h.totalMoney() + 500; // = 11000 − 100 de commission déjà encaissée
-  await h.call('cancel', 'c1', { orderId: id });
+  await ADMIN(h, { action: 'closeStuckDelivery', orderId: id });
   for (let i = 0; i < 3; i += 1) {
     await h.call('cancel', 'c1', { orderId: id }).catch(() => {});
     await ADMIN(h, { action: 'closeStuckDelivery', orderId: id }).catch(() => {});
