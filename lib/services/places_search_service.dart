@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -47,6 +48,38 @@ enum PlacesSearchState {
   externalResults,
   awaitingExpansion,
   expanded,
+}
+
+/// Issue de la dernière requête Nominatim. Sert uniquement au diagnostic : un
+/// `[]` renvoyé à l'interface avait plusieurs causes indiscernables (réseau,
+/// HTTP, JSON, filtrage, simple absence de résultat). Ne contient jamais le
+/// texte recherché ni aucune adresse.
+enum NominatimOutcome {
+  ok,
+  noResults,
+  allFilteredOut,
+  httpError,
+  timeout,
+  network,
+  invalidResponse,
+}
+
+class NominatimDiagnostic {
+  const NominatimDiagnostic({
+    required this.outcome,
+    this.httpStatus,
+    this.rawCount = 0,
+    this.keptCount = 0,
+  });
+
+  final NominatimOutcome outcome;
+  final int? httpStatus;
+  final int rawCount;
+  final int keptCount;
+
+  @override
+  String toString() =>
+      'NominatimDiagnostic($outcome, http=$httpStatus, raw=$rawCount, kept=$keptCount)';
 }
 
 enum PlaceLearningStatus {
@@ -151,6 +184,25 @@ class PlacesSearchService {
   static LocalPlacesSearchStatus get lastLocalSearchStatus =>
       _lastLocalSearchStatus;
   static PlacesSearchState get lastSearchState => _lastSearchState;
+
+  static NominatimDiagnostic? _lastNominatimDiagnostic;
+  static NominatimDiagnostic? get lastNominatimDiagnostic =>
+      _lastNominatimDiagnostic;
+
+  /// Libellé de ville à joindre aux requêtes externes (Nominatim, Google
+  /// Places et géocodage : mêmes textes libres). Les noms d'affichage
+  /// peuvent porter une décoration, par exemple « Abengourou (TEST) » en
+  /// préproduction : envoyée telle quelle, elle fait échouer toute recherche
+  /// (0 résultat pour « hopital, Abengourou (TEST) », 1 pour « hopital,
+  /// Abengourou »). La zone `viewbox` borne déjà la recherche à la ville.
+  @visibleForTesting
+  static String nominatimCityLabel(String name) {
+    final cleaned = name
+        .replaceAll(RegExp(r'\([^)]*\)|\[[^\]]*\]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return cleaned.isEmpty ? name.trim() : cleaned;
+  }
 
   // ── Cache de recherche externe (ville + requête, TTL 5 min) ─────────────
   static final Map<String, _NominatimCache> _nominatimCache = {};
@@ -559,7 +611,7 @@ class PlacesSearchService {
     _ActiveCityContext context,
   ) async {
     try {
-      final q = '$query, ${context.name}';
+      final q = '$query, ${nominatimCityLabel(context.name)}';
       final viewbox = _viewboxFor(context);
       final uri = Uri.parse('$_nominatimBase/search').replace(
         queryParameters: {
@@ -578,8 +630,18 @@ class PlacesSearchService {
         'Accept-Language': 'fr',
       }).timeout(const Duration(seconds: 5));
 
-      if (resp.statusCode != 200) return [];
-      final list = jsonDecode(resp.body) as List? ?? [];
+      if (resp.statusCode != 200) {
+        _recordNominatim(NominatimOutcome.httpError,
+            httpStatus: resp.statusCode);
+        return [];
+      }
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! List) {
+        _recordNominatim(NominatimOutcome.invalidResponse,
+            httpStatus: resp.statusCode);
+        return [];
+      }
+      final list = decoded;
 
       final result = list
           .map((item) {
@@ -612,6 +674,17 @@ class PlacesSearchService {
           .where((p) => p.name.isNotEmpty && p.hasCoords)
           .toList();
 
+      _recordNominatim(
+        result.isNotEmpty
+            ? NominatimOutcome.ok
+            : list.isEmpty
+                ? NominatimOutcome.noResults
+                : NominatimOutcome.allFilteredOut,
+        httpStatus: resp.statusCode,
+        rawCount: list.length,
+        keptCount: result.length,
+      );
+
       // Mettre en cache sous cityId|requête normalisée.
       final cacheKey = '${context.cityId}|${LocalPlace.normalize(query)}';
       _nominatimCache[cacheKey] = _NominatimCache(result);
@@ -622,9 +695,30 @@ class PlacesSearchService {
       await _persistCache();
       return result;
     } catch (e) {
-      debugPrint('[PlacesSearch] Nominatim error: $e');
+      _recordNominatim(e is TimeoutException
+          ? NominatimOutcome.timeout
+          : e is FormatException
+              ? NominatimOutcome.invalidResponse
+              : NominatimOutcome.network);
       return [];
     }
+  }
+
+  static void _recordNominatim(
+    NominatimOutcome outcome, {
+    int? httpStatus,
+    int rawCount = 0,
+    int keptCount = 0,
+  }) {
+    final diagnostic = NominatimDiagnostic(
+      outcome: outcome,
+      httpStatus: httpStatus,
+      rawCount: rawCount,
+      keptCount: keptCount,
+    );
+    _lastNominatimDiagnostic = diagnostic;
+    // Sans texte recherché ni adresse : seulement la nature de l'issue.
+    debugPrint('[PlacesSearch] $diagnostic');
   }
 
   static String _osmCategoryFrom(String type, String cls) {
@@ -655,7 +749,7 @@ class PlacesSearchService {
     _ActiveCityContext context,
   ) async {
     try {
-      final q = '$query, ${context.name}, Côte d\'Ivoire';
+      final q = '$query, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire';
       final uri = Uri.parse('$_googleBase/place/autocomplete/json').replace(
         queryParameters: {
           'input': q,
@@ -716,7 +810,8 @@ class PlacesSearchService {
       if (context == null) return null;
       final uri = Uri.parse('$_googleBase/geocode/json').replace(
         queryParameters: {
-          'address': '${place.name}, ${context.name}, Côte d\'Ivoire',
+          'address':
+              '${place.name}, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire',
           'language': 'fr',
           'key': _mapsKey,
         },
@@ -755,7 +850,8 @@ class PlacesSearchService {
     try {
       final uri = Uri.parse('$_googleBase/geocode/json').replace(
         queryParameters: {
-          'address': '$address, ${context.name}, Côte d\'Ivoire',
+          'address':
+              '$address, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire',
           'language': 'fr',
           'key': _mapsKey,
         },
