@@ -1,0 +1,13 @@
+--- a/firestore.rules
++++ b/firestore.rules.closed
+@@ -698,9 +698,7 @@
+           // expressions de Firestore (16 unchanged() séparés la dépassaient).
+           && serverOwnedOrderFieldsUnchanged()
+           && (
+-            (resource.data.status == 'assigned' && request.resource.data.status == 'accepted'
+-              && (!exists(/databases/$(database)/documents/account_deletions/$(uid()))
+-                || get(/databases/$(database)/documents/account_deletions/$(uid())).data.consentVerified != true))
++            false
+             || (resource.data.status == 'accepted'
+                 && resource.data.get('deliveryProofMode', '') != 'qr_v1'
+                 && request.resource.data.status == 'picked_up')
