@@ -11,7 +11,7 @@ const PRODUCTION = Object.freeze({
     '01c30533de15cda1ea4e60', '6ebbf16cc8131e53ea4e60'],
 });
 
-const TEST_ID_PATTERN = /(test|staging|demo)/i;
+const TEST_ID_PATTERN = /(test|staging|demo|preprod)/i;
 
 function isProductionProject(id) {
   return PRODUCTION.projectIds.includes(String(id || '').trim().toLowerCase());
@@ -23,7 +23,7 @@ function assertTestProject(id) {
   if (!value) throw new Error('Projet manquant (--project <id-projet-test>).');
   if (isProductionProject(value)) throw new Error(`Refus : « ${value} » est le projet de PRODUCTION.`);
   if (!TEST_ID_PATTERN.test(value)) {
-    throw new Error(`Refus : « ${value} » ne ressemble pas à un projet de test (le nom doit contenir test, staging ou demo).`);
+    throw new Error(`Refus : « ${value} » ne ressemble pas à un projet de test (le nom doit contenir test, staging, preprod ou demo).`);
   }
   return value;
 }

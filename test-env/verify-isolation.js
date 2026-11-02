@@ -49,6 +49,14 @@ if (gs !== null) {
   } catch (_) { problems.push(`${gsFile} : format inattendu`); }
 }
 
+// Cle Google Maps de PRODUCTION (lib/constants/maps_key.dart, versionnee) : le build de test doit l'avoir remplacee.
+// Les imports conditionnels Dart n'honorent pas --dart-define dans cette chaine d'outils (verifie le 2026-10-31) :
+// seule la substitution du fichier par build-test-apk.ps1 est fiable. Option --maps-swapped pour le build.
+if (args.includes('--maps-swapped')) {
+  const maps = read('lib/constants/maps_key.dart');
+  if (maps !== null && /AIza[0-9A-Za-z_-]{20,}/.test(maps)) problems.push('lib/constants/maps_key.dart : cle Google Maps de production encore presente');
+}
+
 if (problems.length) {
   console.error('ISOLATION NON VALIDÉE :');
   problems.forEach((p) => console.error(` - ${p}`));

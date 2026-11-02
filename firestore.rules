@@ -58,6 +58,18 @@ service cloud.firestore {
       return isActiveAdmin()
         && (adminDoc().role == 'super' || permission in adminDoc().permissions);
     }
+    // Liste OFFICIELLE des permissions administratives (S8). Miroir de
+    // functions/adminPermissions.js et de adminPermissionKeys (Flutter) : un test
+    // de parité (functions/test/adminPermissions.test.js) compare les trois.
+    function adminPermissionsKnown() {
+      return request.resource.data.get('permissions', []).hasOnly([
+            'livreurs','commandes','gains','classement','carte','zones',
+            'demandes','restaurants','demandes_resto','demandes_vendeurs',
+            'demandes_boulangeries','demandes_pharmacies','pharmacies','boutique',
+            'recharges','flottes','locations','residences','services','eventiel',
+            'tricycle','sos','anti_fraude','cash_marchand','support','ai_dashboard',
+            'boulangeries','ekbine','purger','auto_moto']);
+    }
     function isOwner(userId) {
       return isAuth() && uid() == userId;
     }
@@ -79,6 +91,16 @@ service cloud.firestore {
     // par ce changement.
     function unchanged(field) {
       return request.resource.data.get(field, null) == resource.data.get(field, null);
+    }
+    // Note client d'une commande : soit le champ n'est pas touché, soit il est
+    // posé UNE seule fois (absent → entier 1..5). Jamais modifiée ni retirée,
+    // sinon la moyenne du livreur (calculée côté serveur) pourrait être faussée.
+    function ratingFieldOk(field) {
+      return !(field in request.resource.data.diff(resource.data).affectedKeys())
+        || (resource.data.get(field, null) == null
+            && request.resource.data.get(field, null) is int
+            && request.resource.data.get(field, null) >= 1
+            && request.resource.data.get(field, null) <= 5);
     }
     function acceptsNewActivity(collection, id) {
       return !(id is string) || id == ''
@@ -112,7 +134,13 @@ service cloud.firestore {
           'excludedDriverIds', 'requeuedAt', 'transferAttempts', 'previousDriverId',
           'lastTransferAt', 'settlementHold', 'settlementStatus', 'heldDriverEarning',
           'amountsVersion', 'deliveryFeePaid', 'cashBreakdown',
-          'deliveryFeeHold', 'adminReview'])
+          'deliveryFeeHold', 'adminReview',
+          // Litiges après récupération : demandes et décisions posées par Cloud Function seulement
+          // (une décision forgée ne déclenche aucun mouvement, mais ne doit pas polluer l'examen).
+          'cancelRequestAfterPickup', 'disputeDecision', 'adminDeliveryConfirmation', 'deliveryClosedBy',
+          // Notes : posées par le client propriétaire uniquement (branche dédiée) ;
+          // le marqueur est posé par la Cloud Function de moyenne livreur.
+          'rating', 'sellerRating', 'driverRatingApplied'])
         && (resource.data.get('amountsVersion', 0) != 1
             || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']));
     }
@@ -195,13 +223,23 @@ service cloud.firestore {
 
     match /admins/{adminId} {
       allow read:  if isOwner(adminId) || isAdmin();
-      // Super admin peut tout modifier (permissions, rôle, isActive…)
-      // Tout admin peut mettre à jour uniquement ses propres champs OTP (2FA
-      // login) et sa propre photo de profil (Master Prompt "photos manquantes").
-      allow write: if isSuperAdmin()
+      // Super admin peut tout modifier (rôle, isActive…), mais `permissions` ne
+      // peut contenir QUE des clés de la liste officielle (S8 ; miroir de
+      // functions/adminPermissions.js, un test de parité vérifie les deux).
+      // Un admin ne met à jour que son jeton de notification et sa photo :
+      // l'ancien accès aux champs OTP (otpHash, otpCode, otpExpiry,
+      // otpAttempts) est retiré (S7) — le second facteur est le MFA Firebase
+      // (TOTP/SMS), plus aucun code ne lit ces champs.
+      // Mise à jour : la liste n'est contrôlée que si elle CHANGE (un ancien
+      // compte avec une clé obsolète doit pouvoir être désactivé).
+      allow create: if isSuperAdmin() && adminPermissionsKnown();
+      allow update: if (isSuperAdmin()
+          && (!('permissions' in request.resource.data.diff(resource.data).affectedKeys())
+            || adminPermissionsKnown()))
         || (isOwner(adminId) && isActiveAdmin()
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['otpHash', 'otpCode', 'otpExpiry', 'otpAttempts', 'fcmToken', 'photoUrl']));
+              .hasOnly(['fcmToken', 'photoUrl']));
+      allow delete: if isSuperAdmin();
     }
 
     match /clients/{clientId} {
@@ -292,10 +330,25 @@ service cloud.firestore {
       allow delete: if isAdmin();
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(livreurId) || isAdmin();
+        // Ce journal sert de PREUVE aux Cloud Functions (commission_<commande>_<livreur>,
+        // commission_refund_…, gains) : le livreur ne peut donc pas y écrire librement.
+        // Seul flux client légitime conservé (anciennes versions, _logTransaction) : une
+        // ligne `commission` avec identifiant automatique du SDK (20 caractères alphanumériques,
+        // jamais un identifiant réservé au serveur), montant entier 0..1000, sans champ
+        // provider/txId. Tout le reste (earning, refund, recharge…) vient du serveur ou de l'admin.
         allow create: if isAdmin()
           || (isOwner(livreurId)
-            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt','provider','txId'])
-            && request.resource.data.amount is int);
+            && txId.matches('[A-Za-z0-9]{20}')
+            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt'])
+            && request.resource.data.type == 'commission'
+            && request.resource.data.amount is int
+            && request.resource.data.amount >= 0 && request.resource.data.amount <= 1000
+            && (request.resource.data.get('description', null) == null
+                || (request.resource.data.description is string && request.resource.data.description.size() <= 300))
+            && (request.resource.data.get('orderId', null) == null
+                || (request.resource.data.orderId is string && request.resource.data.orderId.size() <= 128))
+            && (request.resource.data.get('createdAt', null) == null
+                || request.resource.data.createdAt is timestamp));
         allow update: if false;
         allow delete: if isAdmin();
       }
@@ -310,8 +363,16 @@ service cloud.firestore {
 
     match /sellers/{sellerId} {
       allow read:   if isOwner(sellerId) || hasAdminPermission('demandes_vendeurs');
-      allow create: if hasAdminPermission('demandes_vendeurs');
-      allow update: if hasAdminPermission('demandes_vendeurs') || (isOwner(sellerId)
+      // Création : jamais depuis le client pour un sous-admin (compte Auth + profil
+      // passent par manageAdminPartnerAccount, côté serveur). Le super-admin garde
+      // ses droits. Un sous-admin « demandes_vendeurs » ne modifie que la fiche
+      // (jamais wallet, abonnement, VIP, suspension, statut, plan, paiement).
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+        || (hasAdminPermission('demandes_vendeurs')
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['name','phone','type','isActive','lat','lng']))
+        || (isOwner(sellerId)
         && partnerActivated()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive','isSuspended','isDeleted','status'])
         && unchanged('wallet') && unchanged('deletionRequested')
@@ -504,7 +565,8 @@ service cloud.firestore {
         && request.resource.data.sourceType in ['manual', 'external', 'partner']
         && request.resource.data.isVerified is bool
         && request.resource.data.isActive is bool;
-      allow delete: if hasAdminPermission('demandes_vendeurs');
+      // Aligné sur create/update : super-admin seul (S3).
+      allow delete: if isAdmin();
     }
 
     // Contrairement à driver_requests/seller_requests/restaurant_requests
@@ -690,7 +752,8 @@ service cloud.firestore {
           && unchanged('status') && unchanged('budget') && unchanged('driverId')
           && unchanged('isPaid') && unchanged('paymentMethod')
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['rating', 'sellerRating']));
+               .hasOnly(['rating', 'sellerRating'])
+          && ratingFieldOk('rating') && ratingFieldOk('sellerRating'));
       // Phase 1: disable destructive purge, including from older Admin clients.
       allow delete: if false;
     }
@@ -1331,9 +1394,15 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
-    // ── Config app (publique : couleurs, textes UI — pas de données financières) ─
+    // ── Config app : LISTE D'AUTORISATION des documents publics ────────────────
+    // Lus par l'app AVANT toute authentification (version minimale, barème de commission) : commission
+    // (FirestoreService), app_versions (MinVersionService), app_version (WalletPaymentCompatibility).
+    // Tout autre document (az_wallet = revenu cumulé d'AZ, billing, driver_recharge, app…) est réservé au
+    // super-admin ; les Cloud Functions passent par l'Admin SDK (règles ignorées). Inventaire : code Flutter
+    // actuel, sources des versions archivées et historique git — aucune version n'en lit d'autre. Tout NOUVEAU
+    // document public doit être ajouté ici ET à rules-tests/config-financial.rules.test.js.
     match /config/{configId} {
-      allow read:  if true;
+      allow read:  if configId in ['commission', 'app_versions', 'app_version'] || isAdmin();
       allow write: if isAdmin();
     }
 

@@ -6,7 +6,7 @@
 
 ## 1. Principe général déjà en place
 
-Le fichier ouvre sur `service cloud.firestore { match /databases/{database}/documents { ... } }` — **tout accès non explicitement autorisé est refusé par défaut** (comportement natif Firestore, pas besoin d'une règle "deny all" explicite). Une seule règle publique existe dans tout le fichier : `config/{configId}` en lecture (`allow read: if true`) — délibérée et documentée en commentaire ("publique : couleurs, textes UI — pas de données financières"). **C'est la seule exception au principe zero-trust dans toute la base, et elle est intentionnelle.**
+Le fichier ouvre sur `service cloud.firestore { match /databases/{database}/documents { ... } }` — **tout accès non explicitement autorisé est refusé par défaut** (comportement natif Firestore, pas besoin d'une règle "deny all" explicite). Une seule règle publique existe dans tout le fichier : `config/{configId}` — **liste d'autorisation depuis le correctif local du 2026-10-31 (non déployé)** : seuls `commission`, `app_versions` et `app_version` sont lisibles sans connexion (lus avant l'authentification) ; tout autre document, dont `az_wallet`, `billing` et `driver_recharge`, est réservé au super-admin (tests : `rules-tests/config-financial.rules.test.js`). Avant ce correctif, `config/az_wallet` (commissions cumulées d'AZ) était lisible sans connexion. **C'est la seule exception au principe zero-trust dans toute la base, et elle est intentionnelle.**
 
 ## 2. Fonctions utilitaires (le socle du RBAC actuel)
 

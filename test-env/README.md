@@ -16,8 +16,8 @@ aucun secret. Le projet de production (`az-express-b0469`) n'est jamais une cibl
 | `lib/partner_qr/*`, `functions/partnerQr.js` | URL de production en dur | paquet QR isolé, non modifié : **ne pas tester les QR partenaires** sur le projet de test |
 
 ## Étapes à votre charge (aucune n'est exécutée par moi)
-1. Créer le projet (nom contenant `test`, ex. `az-express-test`), plan Blaze requis pour Cloud Functions :
-   `firebase projects:create az-express-test --display-name "AZ Express Test"`
+1. Créer le projet (nom contenant `test`, `preprod`, `staging` ou `demo` ; retenu : `az-express-preprod`), plan Blaze requis pour Cloud Functions :
+   `firebase projects:create az-express-preprod --display-name "AZ Express Preprod"`
 2. Console du projet de test : activer **Authentication** (e-mail/mot de passe), **Firestore** (même région que la production),
    **Storage**, **Cloud Messaging**. Authentication > Sign-in method > **Téléphone** : n'ajouter que des « numéros de test »
    fictifs (code fixe, aucun SMS payant) si l'écran admin exige un OTP.

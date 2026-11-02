@@ -631,9 +631,12 @@ test('admins: un super-admin PEUT modifier le rôle d\'un autre admin', async ()
   await assertSucceeds(asAdmin('super1').doc('admins/target').update({ role: 'super' }));
 });
 
-test('admins: un admin peut mettre à jour son propre champ OTP', async () => {
+// S7 : l'ancien accès aux champs OTP est retiré (le second facteur est le MFA
+// Firebase, plus aucun code ne lit ces champs). Seuls fcmToken et photoUrl restent.
+test('admins: un admin ne peut PLUS écrire ses champs OTP, mais met à jour son jeton', async () => {
   await seed((db) => db.doc('admins/admin1').set({ role: 'sub', isActive: true, permissions: [] }));
-  await assertSucceeds(asAdmin('admin1').doc('admins/admin1').update({ otpCode: '123456' }));
+  await assertFails(asAdmin('admin1').doc('admins/admin1').update({ otpCode: '123456' }));
+  await assertSucceeds(asAdmin('admin1').doc('admins/admin1').update({ fcmToken: 'jeton-notification-1' }));
 });
 
 // ── pharmacies — mot de passe jamais en écriture directe (corrigé cette session) ──
