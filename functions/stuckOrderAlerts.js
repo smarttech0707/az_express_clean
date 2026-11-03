@@ -112,4 +112,64 @@ async function scanStuckOrders({
   return summary;
 }
 
-module.exports = { scanStuckOrders, referenceMs, THRESHOLDS_MS, COLLECTION };
+// Mission 7B-3B-C — reversement cash des commandes Restaurant/Boulangerie v2 en retard (plus de 24 h après la livraison,
+// ni confirmé ni contesté). ALERTE SEULE : aucune sanction, aucun débit, aucune écriture sur la commande. Une alerte par
+// commande (document déterministe créé atomiquement). Requête sur un seul champ (pas d'index composite) ; le filtre de
+// retard se fait en mémoire. Les reversements contestés sont déjà visibles côté administration (statut disputed).
+const CASH_REMITTANCE_DELAY_MS = 24 * 60 * 60 * 1000;
+
+async function scanOverdueCashRemittances({
+  db, sendToToken, logAudit, nowMs = Date.now(), logger = console,
+}) {
+  const summary = { scanned: 0, alerted: 0, duplicates: 0, errors: 0 };
+  let docs;
+  try {
+    const snap = await db.collection('orders').where('cashRemittance.status', 'in', ['pending', 'declared']).limit(BATCH_LIMIT).get();
+    docs = snap.docs;
+  } catch (err) {
+    summary.errors += 1;
+    logger.error(`[cashRemittance] lecture impossible : ${err.message}`);
+    return summary;
+  }
+  for (const doc of docs) {
+    summary.scanned += 1;
+    try {
+      const order = doc.data();
+      const r = order.cashRemittance || {};
+      const since = millis(r.deliveredAtMs);
+      if (order.amountsVersion !== 2 || order.status !== 'delivered' || since == null || nowMs - since <= CASH_REMITTANCE_DELAY_MS) continue;
+      const alertRef = db.collection(COLLECTION).doc(`${doc.id}_cash_remittance_${since}`);
+      try {
+        await alertRef.create({
+          orderId: doc.id, type: 'cash_remittance_overdue', referenceMs: since, alertedAtMs: nowMs,
+          partnerId: order.sellerId || null, driverId: order.driverId || null, amountDue: r.amountDue ?? null,
+          hours: Math.round((nowMs - since) / 3600000),
+        });
+      } catch (err) {
+        if (/already exists|ALREADY_EXISTS|existant|exists/i.test(String(err.message || err.code))) {
+          summary.duplicates += 1;
+          continue;
+        }
+        throw err;
+      }
+      summary.alerted += 1;
+      const hours = Math.round((nowMs - since) / 3600000);
+      const admins = await db.collection('admins').where('isActive', '==', true).get();
+      const tokens = alertTokens(admins.docs);
+      await Promise.all(tokens.map((token) => sendToToken(token, 'Reversement cash en retard',
+        `Produits en espèces non confirmés depuis ${hours} h (${r.amountDue ?? '?'} FCFA). Aucune action automatique : contactez le livreur et le partenaire.`,
+        { type: 'cash_remittance_overdue', orderId: doc.id }).catch(() => {})));
+      await logAudit({
+        userId: 'system', userType: 'system', action: 'cash_remittance_overdue_alert', targetId: doc.id,
+        status: 'success', metadata: { hours, notified: tokens.length },
+      });
+    } catch (err) {
+      summary.errors += 1;
+      logger.error(`[cashRemittance] ${doc.id} : ${err.message}`);
+    }
+  }
+  if (summary.alerted || summary.errors) logger.log(`[cashRemittance] ${JSON.stringify(summary)}`);
+  return summary;
+}
+
+module.exports = { scanStuckOrders, scanOverdueCashRemittances, referenceMs, THRESHOLDS_MS, COLLECTION, CASH_REMITTANCE_DELAY_MS };

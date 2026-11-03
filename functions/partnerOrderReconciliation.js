@@ -203,7 +203,19 @@ function analyzeV2Order(o, amounts, { clientLedger, partnerLedger, driverLedger,
           // Une déclaration du livreur seule ne suffit JAMAIS à considérer le partenaire comme payé.
           add('V2_CASH_SETTLED_WITHOUT_CONFIRMATION', 'high', 'Reversement marqué réglé sans confirmation du partenaire.', { amountDueToPartner: productAmount });
         }
-        if (confirmed) {
+        if (r.status === 'resolved') {
+          // Régularisation par le super-administrateur (Mission 7B-3B-C) : la trace est la décision, pas le partenaire.
+          const res = r.resolution;
+          if (!res || !isInt(res.finalAmount) || !res.byUid || !res.atMs) {
+            add('V2_CASH_CONFIRMATION_UNTRACED', 'high', 'Reversement régularisé sans montant, date ou auteur de la décision.');
+          } else if (res.finalAmount > productAmount) {
+            add('V2_CASH_CONFIRMED_ABOVE_DUE', 'critical', 'Montant régularisé supérieur au montant dû.',
+              { expected: productAmount, actual: res.finalAmount, difference: res.finalAmount - productAmount });
+          } else if (res.finalAmount < productAmount) {
+            add('V2_CASH_RESOLVED_SHORTFALL', 'medium', 'Reversement régularisé avec un reliquat arrêté par décision administrative (aucun débit automatique).',
+              { expected: productAmount, actual: res.finalAmount, difference: productAmount - res.finalAmount, owedTo: 'partner' });
+          }
+        } else if (confirmed) {
           if (!isInt(r.amountConfirmed) || !r.partnerConfirmedAtMs || !r.confirmedBy) {
             add('V2_CASH_CONFIRMATION_UNTRACED', 'high', 'Reversement confirmé sans montant, date ou auteur.');
           } else if (r.amountConfirmed > productAmount) {
@@ -212,6 +224,10 @@ function analyzeV2Order(o, amounts, { clientLedger, partnerLedger, driverLedger,
           } else if (r.amountConfirmed < productAmount && r.status === 'confirmed') {
             add('V2_CASH_SHORTFALL', 'medium', 'Montant confirmé inférieur au montant dû : reliquat à tracer.',
               { expected: productAmount, actual: r.amountConfirmed, difference: productAmount - r.amountConfirmed, owedTo: 'partner' });
+            if (o.merchantCashSettled === true) {
+              add('V2_CASH_SETTLED_WITH_OUTSTANDING', 'high', 'Reversement marqué réglé alors qu’un reliquat reste dû au partenaire.',
+                { expected: productAmount, actual: r.amountConfirmed, difference: productAmount - r.amountConfirmed, owedTo: 'partner' });
+            }
           }
         } else if (r.status === 'disputed') {
           add('V2_CASH_DISPUTED', 'medium', 'Reversement cash contesté : décision du super-administrateur attendue.', { amountDueToPartner: productAmount });

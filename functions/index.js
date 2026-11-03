@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { expireOrderTx, rateLimitCancelTx } = require('./orderRefunds');
 const { retryPendingDispatch, newlyNotifiedDriverIds } = require('./dispatchRetry');
 const { observeOrderTariff } = require('./tariffObservation');
-const { scanStuckOrders } = require('./stuckOrderAlerts');
+const { scanStuckOrders, scanOverdueCashRemittances } = require('./stuckOrderAlerts');
 const { buildAdminBilling } = require('./adminBilling');
 const { buildAdminOrderDispute } = require('./adminOrderDisputes');
 const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
@@ -2136,6 +2136,9 @@ exports.autoExpireOrders = onSchedule({
     if (Math.floor(Date.now() / 60000) % 5 === 0) {
       await scanStuckOrders({ db, admin, sendToToken, logAudit })
         .catch((err) => console.error('[stuckOrders]', err.message));
+      // 7B-3B-C : alerte (sans sanction) sur les reversements cash v2 non confirmés après 24 h.
+      await scanOverdueCashRemittances({ db, sendToToken, logAudit })
+        .catch((err) => console.error('[cashRemittance]', err.message));
     }
   }
 });
@@ -2757,9 +2760,9 @@ exports.quotePartnerOrderCF = buildQuotePartnerOrderCF({
 exports.createPartnerOrderFromQuoteCF = buildCreatePartnerOrderFromQuoteCF({
   db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
 });
-// Préparation des commandes Restaurant/Boulangerie v2 (Mission 7B-3B-P, locale, non déployée). Pas d'interrupteur :
-// sans commande v2 elle n'a rien à traiter. Quota Cloud Run : 0,5 CPU × 2 (+1).
+// Préparation et reversement cash des commandes Restaurant/Boulangerie v2 (Missions 7B-3B-P/C, locale, non déployée).
+// Désactivée par défaut comme les devis (PARTNER_ORDERS_V2 != 'on' → FEATURE_DISABLED). Quota Cloud Run : 0,5 CPU × 2 (+1).
 const { buildPartnerOrderAction } = require('./partnerOrderActions');
 exports.partnerOrderActionCF = buildPartnerOrderAction({
-  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission,
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission, requireSuperAdmin,
 });

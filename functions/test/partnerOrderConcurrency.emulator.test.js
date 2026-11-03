@@ -329,7 +329,7 @@ function prepTools() {
   const { buildAcceptOrder } = require('../driverAcceptance');
   const { withSelfie } = require('./selfieHelper');
   const { calculateCommission } = require('../dispatch');
-  const base = { db, admin, HttpsError, checkRateLimit: async () => {}, logAudit: async () => {}, calculateCommission, onCall: (...a) => ({ run: a[a.length - 1] }) };
+  const base = { db, admin, HttpsError, checkRateLimit: async () => {}, logAudit: async () => {}, calculateCommission, onCall: (...a) => ({ run: a[a.length - 1] }), isEnabled: () => true, requireSuperAdmin: require('../adminGuards').requireSuperAdmin };
   partnerAct = buildPartnerOrderAction(base).run;
   driverAccept = withSelfie(buildAcceptOrder(base).run);
 }
@@ -418,4 +418,98 @@ test('préparation complète sur l\'émulateur : accepter, préparer, prête ; r
   assert.equal((await act(orderId, 'refusePartnerOrder')).code, 'PREPARATION_STARTED');
   assert.equal((await act(orderId, 'startPreparation')).code, 'INVALID_TRANSITION');
   assert.equal((await act(orderId, 'startPreparation', 'someone-else')).code, 'ORDER_NOT_FOUND');
+});
+
+// ── Mission 7B-3B-C : reversement cash sur transactions réellement concurrentes ──
+
+const cashAct = (orderId, action, uid, extra = {}) => partnerAct(as(uid, { orderId, action, ...extra }));
+async function deliveredCashOrder(uid, driverId) {
+  const { orderId, quote } = await paidOrder(uid, driverId, { method: 'cash' });
+  await run.deliver(as(driverId, { orderId }));
+  if ((await orderOf(orderId)).status !== 'delivered') await run.deliver(as(driverId, { orderId }));
+  return { orderId, quote };
+}
+const snapshotWallets = async (uid, driverId) => [
+  await walletOf(uid), (await db.doc(`livreurs/${driverId}`).get()).data().wallet, await partnerWallet(),
+];
+const walletJournals = async (uid, driverId) => (await db.collection(`clients/${uid}/wallet_transactions`).get()).size
+  + (await db.collection(`livreurs/${driverId}/wallet_transactions`).get()).size
+  + (await db.collection('restaurants/pr1/wallet_transactions').get()).size;
+
+test('cash : déclaration, confirmation et litige simultanés (8 tours) — état cohérent, jamais réglé sans confirmation intégrale, aucun wallet', options, async () => {
+  prepTools();
+  for (let i = 0; i < 4; i++) {
+    const uid = `cc${i}`; const driver = `dcc${i}`;
+    const { orderId, quote } = await deliveredCashOrder(uid, driver);
+    const due = quote.data.productAmount;
+    assert.equal((await orderOf(orderId)).cashRemittance.status, 'pending');
+    assert.equal((await orderOf(orderId)).merchantCashSettled, false);
+    const wallets = await snapshotWallets(uid, driver);
+    const journals = await walletJournals(uid, driver);
+    const calls = [
+      cashAct(orderId, 'declareCashHandover', driver, { amount: due }), cashAct(orderId, 'confirmCashRemittance', 'pr1', { amount: due }),
+      cashAct(orderId, 'disputeCashRemittance', driver, { reason: 'Le partenaire conteste la remise' }),
+      cashAct(orderId, 'disputeCashRemittance', 'pr1', { reason: 'Je conteste le montant remis' }),
+      cashAct(orderId, 'declareCashHandover', driver, { amount: due - 100 }),
+    ];
+    await settled(i % 2 ? calls.reverse() : calls);
+    const o = await orderOf(orderId); const c = o.cashRemittance;
+    assert.ok(['declared', 'confirmed', 'disputed'].includes(c.status), `tour ${i} : ${c.status}`);
+    assert.equal(o.merchantCashSettled === true, c.status === 'confirmed' && c.amountConfirmed === due, `tour ${i} : règlement cohérent`);
+    assert.ok(c.amountHandedOver == null || c.amountHandedOver <= due);
+    assert.deepEqual(await snapshotWallets(uid, driver), wallets, `tour ${i} : soldes inchangés`);
+    assert.equal(await walletJournals(uid, driver), journals, `tour ${i} : aucun journal de wallet`);
+  }
+});
+
+test('cash : 8 confirmations simultanées identiques → un seul effet ; confirmation partielle puis intégrale ; reliquat jamais débité', options, async () => {
+  prepTools();
+  const { orderId, quote } = await deliveredCashOrder('cd1', 'dcd1');
+  const due = quote.data.productAmount;
+  const wallets = await snapshotWallets('cd1', 'dcd1');
+  const results = await settled(Array.from({ length: 8 }, () => cashAct(orderId, 'confirmCashRemittance', 'pr1', { amount: due - 500 })));
+  if ((await orderOf(orderId)).cashRemittance.status !== 'confirmed') await cashAct(orderId, 'confirmCashRemittance', 'pr1', { amount: due - 500 });
+  let o = await orderOf(orderId);
+  assert.deepEqual([o.cashRemittance.status, o.cashRemittance.amountConfirmed, o.cashRemittance.outstanding, o.merchantCashSettled], ['confirmed', due - 500, 500, false]);
+  assert.ok(results.filter((r) => r.status === 'fulfilled' && r.value.success && !r.value.data.replay).length <= 1);
+  assert.equal((await cashAct(orderId, 'declareCashHandover', 'dcd1', { amount: due })).success, true);
+  assert.equal((await cashAct(orderId, 'confirmCashRemittance', 'pr1', { amount: due })).success, true);
+  o = await orderOf(orderId);
+  assert.deepEqual([o.cashRemittance.status, o.cashRemittance.outstanding, o.merchantCashSettled], ['confirmed', 0, true]);
+  assert.deepEqual(await snapshotWallets('cd1', 'dcd1'), wallets);
+});
+
+test('cash : résolution administrative concurrente (requestId différents) → une seule décision, un seul signalement, aucun wallet', options, async () => {
+  prepTools();
+  await db.doc('admins/rootcash').set({ role: 'super', isActive: true });
+  const { orderId, quote } = await deliveredCashOrder('ce1', 'dce1');
+  const due = quote.data.productAmount;
+  assert.equal((await cashAct(orderId, 'disputeCashRemittance', 'pr1', { reason: 'Montant remis insuffisant' })).success, true);
+  const wallets = await snapshotWallets('ce1', 'dce1');
+  const resolveWith = (requestId, finalAmount) => cashAct(orderId, 'resolveCashRemittance', 'rootcash', { requestId, justification: 'Décision après appel des deux parties', finalAmount });
+  const results = await settled([
+    resolveWith('resolve-request-0001', due - 300), resolveWith('resolve-request-0002', due), resolveWith('resolve-request-0001', due - 300),
+    resolveWith('resolve-request-0002', due), resolveWith('resolve-request-0001', due - 300),
+  ]);
+  let o = await orderOf(orderId);
+  if (o.cashRemittance.status !== 'resolved') { await resolveWith('resolve-request-0001', due - 300); o = await orderOf(orderId); }
+  assert.equal(o.cashRemittance.status, 'resolved');
+  assert.equal(o.merchantCashSettled, true);
+  const winner = o.cashRemittance.resolution;
+  assert.equal(winner.finalAmount, winner.requestId.endsWith('1') ? due - 300 : due);
+  const flags = await db.collection('reconciliation_flags').where('orderId', '==', orderId).get();
+  assert.equal(flags.size, winner.finalAmount < due ? 1 : 0);
+  assert.ok(results.filter((r) => r.status === 'fulfilled' && r.value.success && !r.value.data.replay).length <= 1);
+  // Un non-administrateur ne peut jamais résoudre.
+  await assert.rejects(() => cashAct(orderId, 'resolveCashRemittance', 'pr1', { requestId: 'resolve-request-0009', justification: 'Je me donne raison', finalAmount: due }), (e) => e.code === 'permission-denied');
+  assert.deepEqual(await snapshotWallets('ce1', 'dce1'), wallets);
+});
+
+test('cash : commande wallet ou non livrée → actions cash refusées sur l\'émulateur', options, async () => {
+  prepTools();
+  const wallet = await paidOrder('cf1', 'dcf1');
+  await db.doc(`orders/${wallet.orderId}`).update({ status: 'delivered' });
+  assert.equal((await cashAct(wallet.orderId, 'declareCashHandover', 'dcf1', { amount: 100 })).code, 'CASH_ORDER_NOT_CASH');
+  const pending = await paidOrder('cf2', 'dcf2', { method: 'cash' });
+  assert.equal((await cashAct(pending.orderId, 'confirmCashRemittance', 'pr1', { amount: 100 })).code, 'CASH_ORDER_NOT_DELIVERED');
 });

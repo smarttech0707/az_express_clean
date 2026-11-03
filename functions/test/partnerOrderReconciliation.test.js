@@ -344,3 +344,22 @@ test('v2 : analyse en lecture seule, anonymisation sans fuite, historique conser
   for (const s of ['secret-order-9', 'secret-partner', 'secret-client', 'partner_reconcile_']) assert.ok(!text.includes(s), s);
   assert.match(text, /V2_CASH_SETTLED_WITHOUT_CONFIRMATION/);
 });
+
+test('A2 × 7B-3B-C : reversement régularisé par décision administrative, reliquat arrêté, règlement avec reliquat signalé', () => {
+  const resolved = (r, settled = true) => ({
+    ...v2o('k', { paymentMethod: 'cash', isPaid: false, merchantCashSettled: settled, cashRemittance: { status: 'resolved', amountDue: 3500, deliveredAtMs: NOW - 1000, ...r } }),
+  });
+  const full = { resolution: { finalAmount: 3500, byUid: 'root', atMs: NOW, requestId: 'resolve-request-0001' } };
+  assert.deepEqual(codes(runV2([{ ...resolved(full), id: 'k1' }]), 'k1'), []);
+  const short = runV2([{ ...resolved({ resolution: { finalAmount: 2000, byUid: 'root', atMs: NOW } }), id: 'k2' }]);
+  assert.equal(finding(short, 'k2', 'V2_CASH_RESOLVED_SHORTFALL').difference, 1500);
+  assert.ok(codes(runV2([{ ...resolved({}), id: 'k3' }]), 'k3').includes('V2_CASH_CONFIRMATION_UNTRACED'));
+  assert.ok(codes(runV2([{ ...resolved({ resolution: { finalAmount: 9000, byUid: 'root', atMs: NOW } }), id: 'k4' }]), 'k4').includes('V2_CASH_CONFIRMED_ABOVE_DUE'));
+  // Confirmation partielle déjà marquée réglée : incohérent (jamais réglé tant qu'un reliquat reste dû).
+  const bad = runV2([{ ...v2o('k5', { paymentMethod: 'cash', isPaid: false, merchantCashSettled: true,
+    cashRemittance: { status: 'confirmed', amountDue: 3500, amountConfirmed: 2000, partnerConfirmedAtMs: NOW, confirmedBy: 'r1', deliveredAtMs: NOW - 1000 } }) }]);
+  assert.equal(finding(bad, 'k5', 'V2_CASH_SETTLED_WITH_OUTSTANDING').severity, 'high');
+  const ok = runV2([{ ...v2o('k6', { paymentMethod: 'cash', isPaid: false, merchantCashSettled: false,
+    cashRemittance: { status: 'confirmed', amountDue: 3500, amountConfirmed: 2000, partnerConfirmedAtMs: NOW, confirmedBy: 'r1', deliveredAtMs: NOW - 1000 } }) }]);
+  assert.deepEqual(codes(ok, 'k6'), ['V2_CASH_SHORTFALL']);
+});
