@@ -248,3 +248,73 @@ test('commande historique (sans amountsVersion) : livraison et annulation inchan
   await run.cancel(as('q9', { orderId: 'legacy-c' }));
   assert.equal((await db.doc('clients/q9').get()).data().wallet, 5700);
 });
+
+// ── Mission 7B-3A : litige administratif v2 (correctif A1) sur transactions réellement concurrentes ──
+
+const adminReq = (uid, data) => ({ auth: { uid, token: { firebase: { sign_in_provider: 'password' } } }, data });
+let dispute; let adminConfirm;
+async function pickedUpOrder(uid, driverId) {
+  const { orderId, quote } = await paidOrder(uid, driverId);
+  await db.doc(`orders/${orderId}`).update({
+    status: 'picked_up', pickedUpAt: Date.now(),
+    cancelRequestAfterPickup: { status: 'pending_admin_review', requestedBy: uid, requestedAtMs: Date.now() },
+  });
+  return { orderId, quote };
+}
+function adminTools() {
+  if (dispute) return;
+  const { HttpsError } = require('firebase-functions/v2/https');
+  const { buildAdminOrderDispute } = require('../adminOrderDisputes');
+  const { buildDeliverOrder } = require('../orderActions');
+  const { requireAdminPermission, requireSuperAdmin } = require('../adminGuards');
+  const { calculateCommission } = require('../dispatch');
+  const base = { db, admin, HttpsError, checkRateLimit: async () => {}, logAudit: async () => {}, calculateCommission };
+  dispute = buildAdminOrderDispute({ ...base, onCall: (...a) => ({ run: a[a.length - 1] }), requireAdminPermission, requireSuperAdmin }).run;
+  adminConfirm = buildDeliverOrder({ ...base, onCall: (...a) => ({ run: a[a.length - 1] }), adminConfirm: true, requireSuperAdmin }).run;
+}
+const exceptional = (orderId, n) => dispute(adminReq('root3a', {
+  action: 'decide', orderId, decision: 'exceptionalCancel', requestId: `request-id-${String(n).padStart(8, '0')}`,
+  justification: 'Litige constaté après appel du client', shoppingContext: 'not_purchased',
+}));
+
+test('A1 émulateur : annulation exceptionnelle v2 → remboursement intégral du total ; 6 appels simultanés = un seul remboursement', options, async () => {
+  adminTools();
+  await db.doc('admins/root3a').set({ role: 'super', isActive: true });
+  const { orderId, quote } = await pickedUpOrder('r3a1', 'dr3a1');
+  const p0 = await partnerWallet();
+  const calls = [...Array.from({ length: 4 }, () => exceptional(orderId, 1)), exceptional(orderId, 2), run.cancel(as('r3a1', { orderId }))];
+  await settled(calls);
+  if ((await orderOf(orderId)).status !== 'cancelled') await exceptional(orderId, 1);
+  const o = await orderOf(orderId);
+  assert.equal(o.status, 'cancelled');
+  assert.equal((await db.doc('clients/r3a1').get()).data().wallet, 10000, 'remboursement exact : total payé rendu, rien de plus');
+  assert.equal((await db.doc('livreurs/dr3a1').get()).data().wallet, 1000, 'commission rendue à son payeur');
+  assert.equal(o.deliveryFeeHold, undefined);
+  assert.equal(o.disputeDecision.clientRefund, quote.data.total);
+  assert.equal(await partnerWallet(), p0);
+  assert.equal((await db.collection('clients/r3a1/wallet_transactions').where('type', '==', 'refund').get()).size, 1);
+  assert.equal((await db.collection('livreurs/dr3a1/wallet_transactions').where('type', '==', 'refund').get()).size, 1);
+});
+
+test('A1 émulateur : confirmation administrative de livraison ET annulation exceptionnelle simultanées → un seul effet', options, async () => {
+  adminTools();
+  for (let i = 0; i < 6; i++) {
+    const uid = `r3b${i}`; const driver = `dr3b${i}`;
+    const { orderId, quote } = await pickedUpOrder(uid, driver);
+    const p0 = await partnerWallet();
+    await settled([
+      adminConfirm(adminReq('root3a', { orderId, requestId: 'confirm-id-0000000001', justification: 'Livraison constatée après appel', evidence: 'client_confirmed' })),
+      exceptional(orderId, 1),
+    ]);
+    const o = await orderOf(orderId);
+    const client = (await db.doc(`clients/${uid}`).get()).data().wallet;
+    const dWallet = (await db.doc(`livreurs/${driver}`).get()).data().wallet;
+    const p1 = await partnerWallet();
+    assert.ok(['delivered', 'cancelled'].includes(o.status), `tour ${i}`);
+    if (o.status === 'delivered') {
+      assert.deepEqual([client, dWallet, p1 - p0], [10000 - quote.data.total, 900 + quote.data.deliveryFee, quote.data.productAmount]);
+    } else {
+      assert.deepEqual([client, dWallet, p1 - p0], [10000, 1000, 0]);
+    }
+  }
+});

@@ -370,9 +370,12 @@ function buildAdminOrderDispute({
         // garde-fous du remboursement d'argent qui s'appliquent quand quelque chose a été payé.
         if (!plan.ok && paidFromWallet(order) > 0) throw new HttpsError('failed-precondition', plan.reason);
         const paid = paidFromWallet(order);
+        // Annulation exceptionnelle = remboursement TOTAL choisi explicitement (c'est ce que le dossier annonce).
+        // `refundFee: true` : pour une commande à montants explicites (Restaurant/Boulangerie v2) les frais ne sont
+        // pas retenus. Sans effet sur les commandes historiques (sans montants explicites, aucune retenue n'existe).
         const info = await cancelOrderTx(tx, {
           db, admin, orderRef, order, uid: order.clientId, calculateCommission,
-          reason: 'admin_dispute_cancel', adminDecision: { refundFee: false },
+          reason: 'admin_dispute_cancel', adminDecision: { refundFee: true },
         });
         // Garde-fou : jamais plus que ce que le client a réellement payé.
         if (info.clientRefund > paid) {

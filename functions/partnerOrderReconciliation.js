@@ -20,8 +20,9 @@
 //   clientLedger  : { orderId, type: 'purchase'|'payment'|'refund', amount }   clients/{uid}/wallet_transactions
 //   partnerLedger : { orderId, type: 'earning', amount }                       {restaurants|boulangeries}/{id}/wallet_transactions
 //   driverLedger  : { orderId, type: 'earning'|'commission'|'refund', amount } livreurs/{id}/wallet_transactions
-// Une commande déjà au format versionné (partnerOrderAmounts.js) est hors périmètre : sa conservation des montants
-// est garantie par construction, elle sera contrôlée par son propre rapprochement.
+// Les commandes versionnées (amountsVersion 2, partnerOrderAmounts.js) ont leur propre analyse (analyzeV2Order) : crédits
+// uniques et exacts à la livraison, remboursements bornés, cash sans mouvement de wallet, reversement tracé.
+// Une version 2 aux montants incohérents est SIGNALÉE (V2_AMOUNTS_INCONSISTENT), jamais traitée comme historique.
 
 const crypto = require('crypto');
 const { PARTNER_SELLER_TYPES, readPartnerAmounts } = require('./partnerOrderAmounts');
@@ -37,14 +38,242 @@ function countOf(lines, orderId, types) {
   return lines.filter((l) => l.orderId === orderId && types.includes(l.type)).length;
 }
 
-function analyzePartnerOrders({ orders = [], clientLedger = [], partnerLedger = [], driverLedger = [] } = {}) {
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Délai provisoire de reversement cash au partenaire (décision métier provisoire : 24 h après livraison, alerte seule).
+const CASH_REMITTANCE_DELAY_MS = DAY_MS;
+
+// ── Commandes versionnées (amountsVersion 2) ────────────────────────────────────────────────────────────────────
+// Modèle attendu (partnerOrderAmounts.js, orderActions.js) :
+//   wallet : le client est débité de `totalAmount` à la création (journal `payment`) ; le partenaire reçoit
+//            `productAmount` UNE fois et le livreur `deliveryFee` UNE fois, tous deux à la LIVRAISON ; rien avant ;
+//            annulation avant récupération = remboursement du total ; frais retenus (deliveryFeeHold) = exception.
+//   cash   : aucun mouvement de wallet ; `cashRemittance` trace la remise des produits au partenaire.
+// Une commande non livrée n'est JAMAIS signalée pour absence de crédit : ces crédits n'existent qu'après livraison.
+// `reconciliationFlags` (optionnel) : signalements ouverts déjà posés par le serveur (ex. partner_credit_missing), qui
+// transforment un crédit absent en régularisation connue plutôt qu'en anomalie inexpliquée.
+function analyzeV2Order(o, amounts, { clientLedger, partnerLedger, driverLedger, reconciliationFlags, nowMs }) {
+  const findings = [];
+  const add = (code, severity, note, extra = {}) => findings.push({ code, severity, note, ...extra });
+  const { productAmount, deliveryFee, totalAmount } = amounts;
+  const wallet = o.paymentMethod === 'wallet';
+  const delivered = o.status === 'delivered';
+  const cancelled = o.status === 'cancelled';
+
+  const clientPaid = sumOf(clientLedger, o.id, ['purchase', 'payment']);
+  const refunded = sumOf(clientLedger, o.id, ['refund']);
+  const partnerCredited = sumOf(partnerLedger, o.id, ['earning']);
+  const partnerLines = countOf(partnerLedger, o.id, ['earning']);
+  const driverEarning = sumOf(driverLedger, o.id, ['earning']);
+  const driverLines = countOf(driverLedger, o.id, ['earning']);
+  const commissionLines = countOf(driverLedger, o.id, ['commission']);
+  const hasFlag = (type) => reconciliationFlags.some((f) => f.orderId === o.id && f.type === type && f.status !== 'resolved');
+
+  const hold = o.deliveryFeeHold && Number.isSafeInteger(o.deliveryFeeHold.amount) ? o.deliveryFeeHold : null;
+  const heldGain = o.settlementHold === true || o.heldDriverEarning != null;
+  const partialRefundAuthorized = delivered && o.deliveryClosedBy === 'admin_dispute'
+    && o.disputeDecision && o.disputeDecision.financialTreatment === 'partial_refund';
+
+  if (wallet) {
+    // ── Encaissement ──────────────────────────────────────────────────────────────────────────────────────────
+    if (o.isPaid !== true) {
+      add('V2_WALLET_NOT_MARKED_PAID', 'high', 'Commande wallet v2 non marquée payée (le débit est fait à la création).');
+    }
+    if (clientPaid === 0) {
+      add('V2_CLIENT_DEBIT_MISSING', 'high', 'Aucun journal de débit client pour une commande wallet v2.',
+        { expected: totalAmount, actual: 0, difference: totalAmount, owedBy: 'client' });
+    } else if (clientPaid !== totalAmount) {
+      add('V2_CLIENT_DEBIT_MISMATCH', 'critical', 'Le débit client journalisé ne correspond pas au total de la commande.',
+        { expected: totalAmount, actual: clientPaid, difference: Math.abs(totalAmount - clientPaid) });
+    }
+    const paid = clientPaid > 0 ? clientPaid : totalAmount;
+
+    // ── Remboursements : jamais plus que le payé, ni plus que la décision prise ───────────────────────────────
+    if (refunded > paid) {
+      add('V2_OVER_REFUNDED', 'critical', 'Remboursement supérieur au montant payé.',
+        { expected: paid, actual: refunded, difference: refunded - paid });
+    }
+    if (cancelled) {
+      // Exception autorisée : frais retenus par décision administrative (en attente ou conservés), jamais rendus.
+      const heldFee = hold && hold.decision !== 'refundClient' ? hold.amount : 0;
+      const expectedRefund = Math.max(0, paid - heldFee);
+      if (refunded === 0 && expectedRefund > 0) {
+        add('V2_CANCELLED_NOT_REFUNDED', 'critical', 'Commande annulée, montant payé non remboursé.',
+          { expected: expectedRefund, actual: 0, difference: expectedRefund, owedTo: 'client' });
+      } else if (refunded > 0 && refunded < expectedRefund) {
+        add('V2_REFUND_INCOMPLETE', 'critical', 'Remboursement inférieur au montant dû au client.',
+          { expected: expectedRefund, actual: refunded, difference: expectedRefund - refunded, owedTo: 'client' });
+      } else if (refunded > expectedRefund && refunded <= paid) {
+        add('V2_REFUND_ABOVE_DECISION', 'high', 'Remboursement supérieur à celui qu\'autorise la décision de retenue.',
+          { expected: expectedRefund, actual: refunded, difference: refunded - expectedRefund });
+      }
+      if (hold && hold.status === 'pending_admin_review') {
+        add('V2_FEE_HOLD_PENDING', 'medium', 'Frais de livraison retenus en attente de décision administrative.',
+          { amountDueToPartner: 0, expected: hold.amount });
+      }
+      if (partnerCredited > 0) {
+        add('V2_PARTNER_CREDITED_ON_CANCELLED', 'critical', 'Partenaire crédité sur une commande annulée.', { actual: partnerCredited });
+      }
+      const paidToDriver = hold && hold.decision === 'payDriver' ? hold.amount : 0;
+      if (driverEarning > paidToDriver) {
+        add('V2_DRIVER_CREDITED_ON_CANCELLED', 'critical', 'Livreur crédité sur une commande annulée.',
+          { expected: paidToDriver, actual: driverEarning, difference: driverEarning - paidToDriver });
+      }
+    } else if (!delivered) {
+      if (refunded > 0) add('V2_REFUND_ON_ACTIVE_ORDER', 'high', 'Remboursement enregistré sur une commande non annulée.', { actual: refunded });
+      if (partnerCredited > 0 || driverEarning > 0) {
+        add('V2_CREDIT_BEFORE_DELIVERY', 'critical', 'Crédit partenaire ou livreur avant la livraison.',
+          { actual: partnerCredited + driverEarning, lines: partnerLines + driverLines });
+      }
+    } else if (partialRefundAuthorized) {
+      // Remboursement partiel décidé par le super-administrateur : montant = décision, jamais le journal seul.
+      if (refunded !== o.disputeDecision.clientRefund) {
+        add('V2_PARTIAL_REFUND_MISMATCH', 'critical', 'Remboursement partiel différent de la décision administrative.',
+          { expected: o.disputeDecision.clientRefund, actual: refunded, difference: Math.abs(refunded - o.disputeDecision.clientRefund) });
+      } else {
+        add('V2_PARTIAL_REFUND_AUTHORIZED', 'info', 'Remboursement partiel autorisé par décision administrative.', { actual: refunded });
+      }
+    } else {
+      // ── Livrée : crédits uniques et exacts ──────────────────────────────────────────────────────────────────
+      if (refunded > 0) {
+        add('V2_REFUND_ON_DELIVERED', 'high', 'Remboursement enregistré sur une commande livrée sans décision administrative.', { actual: refunded });
+      }
+      if (partnerLines === 0) {
+        if (hasFlag('partner_credit_missing')) {
+          add('V2_PARTNER_CREDIT_FLAGGED', 'medium', 'Partenaire introuvable à la livraison : régularisation manuelle ouverte.',
+            { expected: productAmount, actual: 0, difference: productAmount, owedTo: 'partner' });
+        } else {
+          add('V2_PARTNER_CREDIT_MISSING', 'critical', 'Livrée : les produits n\'ont pas été crédités au partenaire.',
+            { expected: productAmount, actual: 0, difference: productAmount, owedTo: 'partner' });
+        }
+      } else {
+        if (partnerLines > 1) add('V2_PARTNER_DOUBLE_CREDIT', 'critical', 'Plusieurs crédits partenaire pour une même commande.', { lines: partnerLines });
+        if (partnerCredited > productAmount) {
+          add('V2_PARTNER_OVERCREDITED', 'critical', 'Le partenaire a reçu plus que le montant des produits.',
+            { expected: productAmount, actual: partnerCredited, difference: partnerCredited - productAmount });
+        } else if (partnerCredited < productAmount) {
+          add('V2_PARTNER_UNDERCREDITED', 'critical', 'Le partenaire a reçu moins que le montant des produits.',
+            { expected: productAmount, actual: partnerCredited, difference: productAmount - partnerCredited, owedTo: 'partner' });
+        }
+      }
+      if (heldGain && o.settlementStatus !== 'settled') {
+        // Course transférée : le gain livreur est retenu pour validation administrative, rien n'est dû ici.
+        add('V2_DRIVER_EARNING_HELD', 'medium', 'Gain livreur retenu (course transférée) en attente de validation administrative.',
+          { expected: deliveryFee });
+        if (driverEarning > 0) {
+          add('V2_DRIVER_CREDITED_WHILE_HELD', 'critical', 'Livreur crédité alors que son gain est retenu.', { actual: driverEarning });
+        }
+      } else if (heldGain) {
+        if (driverEarning > deliveryFee) {
+          add('V2_DRIVER_OVERCREDITED', 'critical', 'Crédit livreur supérieur aux frais de livraison.',
+            { expected: deliveryFee, actual: driverEarning, difference: driverEarning - deliveryFee });
+        }
+      } else if (driverLines === 0) {
+        add('V2_DRIVER_FEE_MISSING', 'high', 'Livrée : les frais de livraison n\'ont pas été crédités au livreur.',
+          { expected: deliveryFee, actual: 0, difference: deliveryFee, owedTo: 'driver' });
+      } else {
+        if (driverLines > 1) add('V2_DRIVER_DOUBLE_CREDIT', 'critical', 'Plusieurs crédits livreur pour une même commande.', { lines: driverLines });
+        if (driverEarning > deliveryFee) {
+          add('V2_DRIVER_OVERCREDITED', 'critical', 'Crédit livreur supérieur aux frais de livraison.',
+            { expected: deliveryFee, actual: driverEarning, difference: driverEarning - deliveryFee });
+        } else if (driverEarning < deliveryFee) {
+          add('V2_DRIVER_UNDERCREDITED', 'high', 'Crédit livreur inférieur aux frais de livraison.',
+            { expected: deliveryFee, actual: driverEarning, difference: deliveryFee - driverEarning, owedTo: 'driver' });
+        }
+      }
+    }
+  } else {
+    // ── Cash : aucun mouvement de wallet, reversement tracé ───────────────────────────────────────────────────
+    if (clientPaid > 0) add('V2_CASH_WALLET_DEBIT', 'critical', 'Commande cash avec un débit wallet client.', { actual: clientPaid });
+    if (refunded > 0) add('V2_CASH_REFUND', 'critical', 'Commande cash avec un remboursement wallet.', { actual: refunded });
+    if (partnerCredited > 0 || driverEarning > 0) {
+      add('V2_CASH_WALLET_CREDIT', 'critical', 'Commande cash avec un crédit wallet partenaire ou livreur (argent déjà encaissé en espèces).',
+        { actual: partnerCredited + driverEarning, lines: partnerLines + driverLines });
+    }
+    if (delivered) {
+      const r = o.cashRemittance;
+      if (!r || typeof r !== 'object') {
+        add('V2_CASH_REMITTANCE_MISSING', 'high', 'Livrée en cash : aucune trace du reversement au partenaire.', { amountDueToPartner: productAmount, owedTo: 'partner' });
+      } else {
+        if (r.amountDue !== productAmount) {
+          add('V2_CASH_AMOUNT_MISMATCH', 'critical', 'Montant dû au partenaire différent des produits de la commande.',
+            { expected: productAmount, actual: r.amountDue ?? null });
+        }
+        const confirmed = r.status === 'confirmed' || r.status === 'resolved';
+        if (o.merchantCashSettled === true && !confirmed) {
+          // Une déclaration du livreur seule ne suffit JAMAIS à considérer le partenaire comme payé.
+          add('V2_CASH_SETTLED_WITHOUT_CONFIRMATION', 'high', 'Reversement marqué réglé sans confirmation du partenaire.', { amountDueToPartner: productAmount });
+        }
+        if (confirmed) {
+          if (!isInt(r.amountConfirmed) || !r.partnerConfirmedAtMs || !r.confirmedBy) {
+            add('V2_CASH_CONFIRMATION_UNTRACED', 'high', 'Reversement confirmé sans montant, date ou auteur.');
+          } else if (r.amountConfirmed > productAmount) {
+            add('V2_CASH_CONFIRMED_ABOVE_DUE', 'critical', 'Montant confirmé supérieur au montant dû.',
+              { expected: productAmount, actual: r.amountConfirmed, difference: r.amountConfirmed - productAmount });
+          } else if (r.amountConfirmed < productAmount && r.status === 'confirmed') {
+            add('V2_CASH_SHORTFALL', 'medium', 'Montant confirmé inférieur au montant dû : reliquat à tracer.',
+              { expected: productAmount, actual: r.amountConfirmed, difference: productAmount - r.amountConfirmed, owedTo: 'partner' });
+          }
+        } else if (r.status === 'disputed') {
+          add('V2_CASH_DISPUTED', 'medium', 'Reversement cash contesté : décision du super-administrateur attendue.', { amountDueToPartner: productAmount });
+        } else {
+          const since = Number.isFinite(Number(r.deliveredAtMs)) ? Number(r.deliveredAtMs) : null;
+          const overdue = since !== null && nowMs - since > CASH_REMITTANCE_DELAY_MS;
+          add(overdue ? 'V2_CASH_REMITTANCE_OVERDUE' : 'V2_CASH_REMITTANCE_PENDING', overdue ? 'medium' : 'info',
+            overdue ? 'Reversement cash en retard (plus de 24 h après la livraison) : alerte administrative.'
+              : 'Reversement cash au partenaire en attente de confirmation.', { amountDueToPartner: productAmount, owedTo: 'partner' });
+        }
+      }
+    }
+  }
+
+  // ── Commission : sur les frais seuls, prélevée une seule fois ───────────────────────────────────────────────
+  if (o.driverId && Number.isSafeInteger(o.commissionAmount) && o.commissionAmount > deliveryFee) {
+    add('V2_COMMISSION_EXCEEDS_FEE', 'critical', 'Commission supérieure aux frais de livraison (elle ne porte jamais sur les produits).',
+      { expected: deliveryFee, actual: o.commissionAmount, difference: o.commissionAmount - deliveryFee });
+  }
+  if (commissionLines > 1) {
+    add('V2_COMMISSION_DOUBLE', 'high', 'Plusieurs prélèvements de commission pour une même commande.', { lines: commissionLines });
+  }
+  return { findings, collected: clientPaid, refunded, partnerCredited, driverEarning };
+}
+
+function analyzePartnerOrders({
+  orders = [], clientLedger = [], partnerLedger = [], driverLedger = [], reconciliationFlags = [], nowMs = Date.now(),
+} = {}) {
   const rows = [];
-  let versionedSkipped = 0;
+  let versionedAnalyzed = 0;
   let outOfScope = 0;
 
   for (const o of orders) {
     if (!PARTNER_SELLER_TYPES.includes(o.sellerType)) { outOfScope += 1; continue; }
-    if (readPartnerAmounts(o)) { versionedSkipped += 1; continue; }
+    const v2Amounts = readPartnerAmounts(o);
+    if (v2Amounts || o.amountsVersion === 2) {
+      versionedAnalyzed += 1;
+      const bakeryV2 = o.sellerType === 'boulangerie';
+      let result;
+      if (v2Amounts) {
+        result = analyzeV2Order(o, v2Amounts, { clientLedger, partnerLedger, driverLedger, reconciliationFlags, nowMs });
+      } else {
+        // Version 2 déclarée mais montants incohérents : jamais traitée comme une commande historique.
+        result = {
+          findings: [{ code: 'V2_AMOUNTS_INCONSISTENT', severity: 'critical', note: 'amountsVersion 2 avec montants incohérents (produits + livraison ≠ total, ou budget ≠ livraison).' }],
+          collected: sumOf(clientLedger, o.id, ['purchase', 'payment']), refunded: sumOf(clientLedger, o.id, ['refund']),
+          partnerCredited: sumOf(partnerLedger, o.id, ['earning']), driverEarning: sumOf(driverLedger, o.id, ['earning']),
+        };
+      }
+      if (result.findings.length) {
+        result.findings.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+        rows.push({
+          orderId: o.id, sellerType: o.sellerType, sellerId: o.sellerId ?? null, clientId: o.clientId ?? null,
+          status: o.status ?? null, paymentMethod: o.paymentMethod ?? null, isPaid: o.isPaid === true,
+          orderKind: bakeryV2 ? 'bakery_v2' : 'restaurant_v2',
+          collectedFromClient: result.collected, refundedToClient: result.refunded,
+          partnerCredited: result.partnerCredited, driverEarning: result.driverEarning,
+          findings: result.findings, worstSeverity: result.findings[0].severity, decisionKey: `partner_reconcile_${o.id}`,
+        });
+      }
+      continue;
+    }
 
     const findings = [];
     const add = (code, severity, note, extra = {}) => findings.push({ code, severity, note, ...extra });
@@ -209,9 +438,10 @@ function analyzePartnerOrders({ orders = [], clientLedger = [], partnerLedger = 
   return {
     rows,
     summary: {
-      ordersAnalyzed: orders.length - outOfScope - versionedSkipped,
+      ordersAnalyzed: orders.length - outOfScope,
       ordersWithFindings: rows.length,
-      versionedSkipped,
+      versionedAnalyzed,
+      versionedSkipped: 0, // conservé pour compatibilité des lecteurs de rapport : les v2 sont désormais analysées
       outOfScope,
       bySeverity,
       byCode,
