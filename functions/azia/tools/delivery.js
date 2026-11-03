@@ -428,6 +428,10 @@ function cancelOrder({ db, admin, HttpsError }) {
         if (err.message === 'ORDER_NOT_CANCELLABLE') {
           throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée.');
         }
+        if (err.message === 'ORDER_IN_PREPARATION') {
+          throw new HttpsError('failed-precondition',
+            'Le partenaire a commencé la préparation : annulation impossible, contactez le support AZ Express.');
+        }
         if (err.message === 'ORDER_PICKED_UP') {
           throw new HttpsError('failed-precondition',
             'Le colis a déjà été récupéré : annulation impossible, contactez le support AZ Express.');

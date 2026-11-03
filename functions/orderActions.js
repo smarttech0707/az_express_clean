@@ -69,6 +69,11 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
       if (order.isPaid === true) {
         throw new HttpsError('failed-precondition', 'Commande déjà payée');
       }
+      // Commande Restaurant/Boulangerie v2 : le total est réglé à la création (wallet) ou en espèces au livreur.
+      // Ce règlement post-livraison (pharmacie) débiterait `budget` une seconde fois, ou payerait en wallet une commande cash.
+      if (order.amountsVersion === 2) {
+        throw new HttpsError('failed-precondition', 'Cette commande ne se règle pas après livraison');
+      }
       driverId = order.driverId;
       if (!driverId) {
         throw new HttpsError('failed-precondition', "Aucun livreur n'est encore assigné");
@@ -176,6 +181,8 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
 // — même champ que celui déjà écrit par autoExpireOrders ('no_driver_found'),
 // désormais cohérent sur les 3 chemins d'annulation.
 // Colis déjà récupéré (statut ou horodatage de récupération).
+const PREPARATION_STARTED = Object.freeze(['preparing', 'ready']);
+
 function isPickedUp(order) {
   return order.status === 'picked_up' || order.pickedUpAt != null;
 }
@@ -215,6 +222,11 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
   if (isPickedUp(order) && !adminDecision) {
     throw new Error('ORDER_PICKED_UP');
   }
+  // Commande partenaire v2 dont la préparation est commencée : pas de remboursement automatique tant que la politique
+  // commerciale n'est pas validée. Seule une décision administrative peut clore la commande.
+  if (order.amountsVersion === 2 && PREPARATION_STARTED.includes(order.sellerStatus) && !adminDecision) {
+    throw new Error('ORDER_IN_PREPARATION');
+  }
 
   const budget         = Number(order.budget || 0);
   const shoppingBudget = Number(order.shoppingBudget || 0);
@@ -241,6 +253,8 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
   //    rémunération du livreur. Aucun paiement fictif : c'est l'argent déjà payé
   //    par le client, simplement non redistribué tant que la décision manque.
   const amounts = readAmounts(order);
+  // v2 aux montants incohérents : jamais traitée comme une commande historique (le remboursement serait faux).
+  if (order.amountsVersion === 2 && !amounts) throw new Error('ORDER_AMOUNTS_INCONSISTENT');
   const pickedUp = order.status === 'picked_up' || order.pickedUpAt != null;
   const adminRefundsFee = adminDecision && adminDecision.refundFee === true;
   const feeNotRefundable = !!amounts && pickedUp && !adminRefundsFee;
@@ -503,6 +517,10 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
         if (err.message === 'ORDER_NOT_CANCELLABLE') {
           throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée');
         }
+        if (err.message === 'ORDER_IN_PREPARATION') {
+          throw new HttpsError('failed-precondition',
+            'Le partenaire a commencé la préparation : la commande ne peut plus être annulée automatiquement. Contactez le support AZ Express.');
+        }
         if (err.message === 'ORDER_PICKED_UP') {
           // Rien n'a été écrit : on sort proprement et on traite le litige après.
           pickedUpBlocked = true;
@@ -603,9 +621,11 @@ function buildDeliverOrder({
     let held = false;
     let commissionInfo = null;
     let neutralized = null; // commission rendue : course historique sans rémunération
+    let v2Credits = null; // commande partenaire v2 wallet : { partner, driver } crédités dans la transaction
 
     await runLifecycleTransaction(db, async (tx) => {
       neutralized = null;
+      v2Credits = null;
       replayed = false;
       if (opRef && (await tx.get(opRef)).exists) { replayed = true; return; }
       const orderSnap = await tx.get(orderRef);
@@ -680,6 +700,12 @@ function buildDeliverOrder({
       // Montants explicites (produits / livraison / total) des nouvelles
       // commandes Marketplace et Boutique ; null = commande historique.
       const amounts = readAmounts(order);
+      // Commande Restaurant/Boulangerie v2 : jamais traitée comme une commande historique (le partenaire
+      // recevrait `budget`, c'est-à-dire les frais, et le livreur rien). Montants incohérents = livraison bloquée.
+      const partnerV2 = order.amountsVersion === 2;
+      if (partnerV2 && !amounts) {
+        throw new HttpsError('failed-precondition', 'Montants de la commande incohérents : contactez le support');
+      }
 
       const driverState = await readDriverState(tx, db, uid, String(orderId));
       const driverSnap = { exists: driverState.exists, data: () => driverState.data };
@@ -832,6 +858,43 @@ function buildDeliverOrder({
           // à faire ici, juste libérer le livreur.
           walletTarget = 'partner_prepaid';
           if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
+        } else if (sid && order.isPaid === true && partnerV2) {
+          // Commande v2 payée en wallet (total débité à la création) : le partenaire reçoit les PRODUITS, le livreur les
+          // FRAIS (sa commission a été prélevée à l'acceptation — jamais reprélevée ici). Les deux crédits et leurs
+          // journaux sont écrits dans CETTE transaction, avec des identifiants déterministes : le statut 'delivered'
+          // empêche tout second passage, l'identifiant empêche tout doublon de journal.
+          const stamp = admin.firestore.FieldValue.serverTimestamp();
+          v2Credits = { partner: 0, driver: 0 };
+          if (partnerSnap && partnerSnap.exists) {
+            tx.update(partnerRef, { wallet: Number(partnerSnap.data().wallet || 0) + amounts.productAmount });
+            tx.set(partnerRef.collection('wallet_transactions').doc(`earning_${orderId}`), {
+              type: 'earning', amount: amounts.productAmount, orderId: String(orderId), provider: 'wallet',
+              description: `Commande livrée — produits ${amounts.productAmount} FCFA (aucune commission AZ sur les produits)`,
+              createdAt: stamp,
+            });
+            v2Credits.partner = amounts.productAmount;
+          } else {
+            // Partenaire introuvable : la livraison n'est pas bloquée (le client a payé, le livreur a livré),
+            // mais le montant dû est signalé pour règlement manuel, jamais perdu en silence.
+            tx.set(db.collection('reconciliation_flags').doc(`${orderId}_partner_credit_missing`), {
+              orderId: String(orderId), type: 'partner_credit_missing', status: 'open', sellerType: sType, sellerId: sid,
+              amount: amounts.productAmount, createdAtMs: Date.now(),
+            });
+          }
+          if (held) {
+            walletTarget = 'driver_held';
+            tx.update(orderRef, { heldDriverEarning: amounts.deliveryFee, settlementStatus: 'pending_admin_review' });
+            if (Object.keys(driverPatch).length) tx.update(driverRef, driverPatch);
+          } else {
+            walletTarget = 'partner_v2';
+            tx.update(driverRef, { wallet: driverWallet + amounts.deliveryFee, ...driverPatch });
+            tx.set(driverRef.collection('wallet_transactions').doc(`earning_${orderId}`), {
+              type: 'earning', amount: amounts.deliveryFee, orderId: String(orderId), provider: 'wallet',
+              description: `Gain livraison — ${amounts.deliveryFee} FCFA (commission AZ déjà prélevée à l'acceptation)`,
+              createdAt: stamp,
+            });
+            v2Credits.driver = amounts.deliveryFee;
+          }
         } else if (sid && order.isPaid === true) {
           partnerId    = sid;
           walletTarget = 'partner';
@@ -918,6 +981,15 @@ function buildDeliverOrder({
         if (amounts) {
           tx.update(orderRef, {
             cashBreakdown: cashBreakdown(amounts, commissionInfo ? commissionInfo.amount : undefined),
+            // Commande v2 : la remise des produits au partenaire est tracée et doit être confirmée PAR le partenaire
+            // (la déclaration du livreur seule n'est pas une preuve). Aucun mouvement de wallet.
+            ...(partnerV2 ? {
+              cashRemittance: {
+                status: 'pending', orderId: String(orderId), partnerId: sid, sellerType: sType, driverId: uid,
+                amountDue: amounts.productAmount, amountHandedOver: null, deliveredAtMs: Date.now(),
+                handedOverAtMs: null, partnerConfirmedAtMs: null,
+              },
+            } : {}),
           });
         }
       }
@@ -1024,7 +1096,7 @@ function buildDeliverOrder({
     } : {
       userId: uid, userType: 'driver', action: 'deliver_order', targetId: orderId,
       amount: creditAmount || null,
-      metadata: { walletTarget, deliveryFee, payMethod, proofValidated, settlementHold: held },
+      metadata: { walletTarget, deliveryFee, payMethod, proofValidated, settlementHold: held, ...(v2Credits ? { v2Credits } : {}) },
     });
 
     if (proofValidated) {

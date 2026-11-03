@@ -237,7 +237,7 @@ function buildCreatePartnerOrderFromQuoteCF({
         });
         if (!tariff.ok) throw new PartnerRefusal(tariff.code, tariff.message);
 
-        // Jamais plus que le devis sans reconfirmation (produits OU livraison) ; moins : le client paie le moindre.
+        // Jamais plus que le devis sans reconfirmation (produits OU livraison) ; moins : nouvelle confirmation du montant exact.
         const quotedLines = new Map(q.lines.map((l) => [l.itemId, l.unitPrice]));
         const raisedItem = current.lines.find((l) => l.unitPrice > quotedLines.get(l.itemId));
         if (raisedItem || tariff.deliveryFee > q.deliveryFee) {
@@ -247,8 +247,18 @@ function buildCreatePartnerOrderFromQuoteCF({
           });
         }
         const amounts = buildPartnerAmounts(current.productAmount, tariff.deliveryFee);
-        // Le client doit avoir confirmé un montant au moins égal au total exact (frais affichés à part côté écran).
-        if (!Number.isSafeInteger(d.confirmedAmount) || d.confirmedAmount < amounts.totalAmount) {
+        // Le client confirme le montant EXACT qui sera débité. Prix en baisse depuis le devis : le nouveau montant
+        // doit être présenté et reconfirmé (aucun débit d'un montant que le client n'a pas vu).
+        if (!Number.isSafeInteger(d.confirmedAmount)) {
+          throw new PartnerRefusal('AMOUNT_NOT_CONFIRMED', 'Montant non confirmé', { amount: amounts.totalAmount });
+        }
+        if (d.confirmedAmount !== amounts.totalAmount) {
+          if (amounts.totalAmount < q.amount && d.confirmedAmount === q.amount) {
+            throw new PartnerRefusal('PRICE_CHANGED', 'Le tarif a baissé : confirmez le nouveau montant', {
+              quotedAmount: q.amount, currentAmount: amounts.totalAmount, decreased: true,
+              productAmount: amounts.productAmount, deliveryFee: amounts.deliveryFee,
+            });
+          }
           throw new PartnerRefusal('AMOUNT_NOT_CONFIRMED', 'Montant non confirmé', { amount: amounts.totalAmount });
         }
 

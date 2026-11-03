@@ -210,6 +210,7 @@ test('création : solde insuffisant, mobile money refusé, montant non confirmé
   const q2 = await w2.q(rReq);
   assert.equal((await w2.o(create(q2, rReq, { confirmedAmount: q2.data.total - 1 }))).code, 'AMOUNT_NOT_CONFIRMED');
   assert.equal((await w2.o(create(q2, rReq, { confirmedAmount: undefined }))).code, 'AMOUNT_NOT_CONFIRMED');
+  assert.equal((await w2.o(create(q2, rReq, { confirmedAmount: q2.data.total + 1 }))).code, 'AMOUNT_NOT_CONFIRMED');
   assert.equal((await w2.o(create(q2, rReq, { deliveryAddress: '' }))).code, 'INVALID_FIELD');
   assert.equal(wallet(w2), 20000); assert.equal(orders(w2).length, 0);
 });
@@ -247,7 +248,7 @@ test('devis altéré (lignes modifiées sans empreinte) : refusé', async () => 
   assert.equal(wallet(w), 20000);
 });
 
-test('prix du menu en hausse : PRICE_CHANGED sans débit ; en baisse : le client paie le montant courant', async () => {
+test('prix du menu en hausse : PRICE_CHANGED sans débit ; en baisse : nouveau montant à reconfirmer, puis débit exact', async () => {
   const w = world();
   const quote = await w.q(rReq);
   w.store.set('restaurants/r1/menu/m1', { name: 'Attiéké poisson', price: 1800, available: true });
@@ -256,7 +257,12 @@ test('prix du menu en hausse : PRICE_CHANGED sans débit ; en baisse : le client
   assert.equal(wallet(w), 20000); assert.equal(orders(w).length, 0);
   assert.equal(w.store.get(`tariff_quotes/${quote.data.quoteId}`).status, 'open');
   w.store.set('restaurants/r1/menu/m1', { name: 'Attiéké poisson', price: 1000, available: true });
-  const down = await w.o(create(quote, rReq));
+  const stale = await w.o(create(quote, rReq));
+  assert.equal(stale.code, 'PRICE_CHANGED');
+  assert.equal(stale.data.decreased, true);
+  assert.equal(stale.data.currentAmount, 2500 + quote.data.deliveryFee);
+  assert.equal(wallet(w), 20000); assert.equal(orders(w).length, 0);
+  const down = await w.o(create(quote, rReq, { confirmedAmount: stale.data.currentAmount }));
   assert.equal(down.success, true);
   assert.equal(down.data.productAmount, 2500);
   assert.equal(down.data.charged, 2500 + quote.data.deliveryFee);

@@ -13,6 +13,8 @@
 //                                 notifications livreur lisent déjà `budget`)
 // Les anciennes commandes (sans `amountsVersion`) gardent leur comportement.
 
+const { PARTNER_AMOUNTS_VERSION, PARTNER_SELLER_TYPES, readPartnerAmounts } = require('./partnerOrderAmounts');
+
 const AMOUNTS_VERSION = 1;
 
 function isMoney(n) {
@@ -38,6 +40,11 @@ function buildAmounts(productAmount, deliveryFee) {
 // Lecture défensive : renvoie les montants explicites si (et seulement si) la
 // commande est cohérente ; sinon null (= commande historique).
 function readAmounts(order) {
+  // Version 2 (Restaurant / Boulangerie, Mission 7B) : mêmes champs, validés par partnerOrderAmounts. Réservée à ces
+  // deux types : une commande Marketplace/Boutique ne peut jamais passer pour une v2.
+  if (order && order.amountsVersion === PARTNER_AMOUNTS_VERSION) {
+    return PARTNER_SELLER_TYPES.includes(order.sellerType) ? readPartnerAmounts(order) : null;
+  }
   if (!order || order.amountsVersion !== AMOUNTS_VERSION) return null;
   const { productAmount, deliveryFee, totalAmount } = order;
   if (!isMoney(productAmount) || !isMoney(deliveryFee) || !isMoney(totalAmount)) return null;
