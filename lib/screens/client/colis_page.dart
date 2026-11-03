@@ -2,8 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:uuid/uuid.dart';
+import '../../services/catalog_order_service.dart';
 import '../../services/wallet_payment_compatibility.dart';
+import '../../widgets/catalog_quote_dialog.dart';
 import '../../theme/app_theme.dart';
 
 class ColisPage extends StatefulWidget {
@@ -26,6 +27,7 @@ class _ColisPageState extends State<ColisPage> {
   String _paymentMethod = 'cash';
   int _walletBalance = 0;
   StreamSubscription? _walletSub;
+  final _checkout = CatalogCheckout();
 
   List<Map<String, dynamic>> _types = [];
   int _fragileSurcharge = 200;
@@ -103,114 +105,49 @@ class _ColisPageState extends State<ColisPage> {
     } catch (_) {}
   }
 
+  // Choix envoyés au serveur : jamais de montant (le serveur calcule le devis officiel).
+  Map<String, dynamic> get _choices => {'colisType': _colisType, 'fragile': _fragile};
+
   Future<void> _submit() async {
+    if (_loading) return;
     if (_recipientNameCtrl.text.trim().isEmpty ||
         _recipientAddressCtrl.text.trim().isEmpty) {
       _snack(
           "Veuillez remplir le nom et l'adresse du destinataire", Colors.red);
       return;
     }
-    if (_paymentMethod == 'wallet' && _walletBalance < _price) {
-      _snack(
-          "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $_price FCFA",
-          Colors.red);
-      return;
-    }
 
     setState(() => _loading = true);
     try {
-      var user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        await FirebaseAuth.instance.signInAnonymously();
-        user = FirebaseAuth.instance.currentUser;
-      }
-      final uid = user!.uid;
-      final id = const Uuid().v4();
-      final desc = StringBuffer("Colis : $_colisType");
-      if (_fragile) desc.write(" (Fragile)");
-      if (_senderNameCtrl.text.trim().isNotEmpty) {
-        desc.write("\nExpéditeur : ${_senderNameCtrl.text.trim()}");
-      }
-      if (_senderPhoneCtrl.text.trim().isNotEmpty) {
-        desc.write(" — ${_senderPhoneCtrl.text.trim()}");
-      }
-      desc.write(
-          "\nDestinataire : ${_recipientNameCtrl.text.trim()} — ${_recipientPhoneCtrl.text.trim()}");
-      desc.write("\nAdresse : ${_recipientAddressCtrl.text.trim()}");
-      if (_descriptionCtrl.text.trim().isNotEmpty) {
-        desc.write("\nContenu : ${_descriptionCtrl.text.trim()}");
-      }
-
-      final orderData = {
-        "id": id,
-        "description": desc.toString(),
-        "budget": _price,
-        "shoppingBudget": 0,
-        "status": "pending",
-        "type": "colis",
-        "colisType": _colisType,
-        "fragile": _fragile,
-        "senderName": _senderNameCtrl.text.trim(),
-        "senderPhone": _senderPhoneCtrl.text.trim(),
-        "recipientName": _recipientNameCtrl.text.trim(),
-        "recipientPhone": _recipientPhoneCtrl.text.trim(),
-        "recipientAddress": _recipientAddressCtrl.text.trim(),
-        "contentDescription": _descriptionCtrl.text.trim(),
-        "latitude": 0,
-        "longitude": 0,
-        "clientId": uid,
-        "paymentMethod": _paymentMethod,
-        "isPaid": _paymentMethod == 'wallet',
-        "createdAt": FieldValue.serverTimestamp(),
-      };
-
       if (_paymentMethod == 'wallet') {
         // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
         if (!mounted) return;
         final compatible =
             await WalletPaymentCompatibilityService.ensureCompatible(context);
         if (!compatible) {
-          setState(() => _loading = false);
+          if (mounted) setState(() => _loading = false);
           return;
         }
-        final clientRef =
-            FirebaseFirestore.instance.collection('clients').doc(uid);
-        final orderRef =
-            FirebaseFirestore.instance.collection('orders').doc(id);
-
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap = await tx.get(clientRef);
-          final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
-          if (wallet < _price) throw Exception('SOLDE_INSUFFISANT');
-          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
-          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
-          // débit ne soit réutilisé pour valider plusieurs commandes.
-          tx.update(clientRef, {
-            'wallet': wallet - _price,
-            'lastPaidOrderId': id,
-          });
-          tx.set(orderRef, orderData);
-        });
-
-        await FirebaseFirestore.instance
-            .collection('clients')
-            .doc(uid)
-            .collection('wallet_transactions')
-            .add({
-          'type': 'purchase',
-          'amount': _price,
-          'description': 'Colis — $_colisType${_fragile ? ' (Fragile)' : ''}',
-          'orderId': id,
-          'createdAt': Timestamp.now(),
-        });
-      } else {
-        await FirebaseFirestore.instance
-            .collection("orders")
-            .doc(id)
-            .set(orderData);
       }
-
-      if (mounted) {
+      if (!mounted) return;
+      final created = await runCatalogCheckout(
+        context,
+        checkout: _checkout,
+        service: 'colis',
+        paymentMethod: _paymentMethod,
+        walletBalance: _walletBalance,
+        choices: _choices,
+        details: {
+          'senderName': _senderNameCtrl.text.trim(),
+          'senderPhone': _senderPhoneCtrl.text.trim(),
+          'recipientName': _recipientNameCtrl.text.trim(),
+          'recipientPhone': _recipientPhoneCtrl.text.trim(),
+          'recipientAddress': _recipientAddressCtrl.text.trim(),
+          'contentDescription': _descriptionCtrl.text.trim(),
+        },
+        notify: (m, err) => _snack(m, err ? Colors.red : Colors.green),
+      );
+      if (created && mounted) {
         _snack("Demande d'envoi créée ! Un livreur va récupérer votre colis.",
             Colors.green);
         Future.delayed(const Duration(seconds: 2), () {
@@ -218,12 +155,7 @@ class _ColisPageState extends State<ColisPage> {
         });
       }
     } catch (e) {
-      final msg = e.toString();
-      if (msg.contains('SOLDE_INSUFFISANT')) {
-        _snack("Solde wallet insuffisant", Colors.red);
-      } else {
-        _snack("Erreur : $e", Colors.red);
-      }
+      _snack("Erreur : $e", Colors.red);
     }
     if (mounted) setState(() => _loading = false);
   }

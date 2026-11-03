@@ -2,8 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:uuid/uuid.dart';
+import '../../services/catalog_order_service.dart';
 import '../../services/wallet_payment_compatibility.dart';
+import '../../widgets/catalog_quote_dialog.dart';
 import '../../theme/app_theme.dart';
 
 class BlanchisseriePage extends StatefulWidget {
@@ -22,6 +23,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
   String _paymentMethod = 'cash';
   int _walletBalance = 0;
   StreamSubscription? _walletSub;
+  final _checkout = CatalogCheckout();
 
   List<String> _services = const [
     "Lavage + Repassage",
@@ -74,108 +76,50 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
     });
   }
 
+  Map<String, dynamic> get _choices =>
+      {'serviceType': _serviceType, 'quantity': _quantity};
+
   Future<void> _submit() async {
+    if (_loading) return;
     if (_addressCtrl.text.trim().isEmpty) {
       _snack("Veuillez entrer votre adresse", Colors.red);
-      return;
-    }
-    if (_paymentMethod == 'wallet' && _walletBalance < _totalPrice) {
-      _snack(
-          "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $_totalPrice FCFA",
-          Colors.red);
       return;
     }
 
     setState(() => _loading = true);
     try {
-      var user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        await FirebaseAuth.instance.signInAnonymously();
-        user = FirebaseAuth.instance.currentUser;
-      }
-      final uid = user!.uid;
-      final id = const Uuid().v4();
-
-      final orderData = {
-        "id": id,
-        "description":
-            "Blanchisserie : $_serviceType — $_quantity kg\nAdresse : ${_addressCtrl.text.trim()}"
-                "${_notesCtrl.text.trim().isNotEmpty ? '\nNotes : ${_notesCtrl.text.trim()}' : ''}",
-        "budget": _totalPrice,
-        "shoppingBudget": 0,
-        "status": "pending",
-        "type": "blanchisserie",
-        "serviceType": _serviceType,
-        "quantity": _quantity,
-        "address": _addressCtrl.text.trim(),
-        "notes": _notesCtrl.text.trim(),
-        "latitude": 0,
-        "longitude": 0,
-        "clientId": uid,
-        "paymentMethod": _paymentMethod,
-        "isPaid": _paymentMethod == 'wallet',
-        "createdAt": FieldValue.serverTimestamp(),
-      };
-
       if (_paymentMethod == 'wallet') {
         // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
         if (!mounted) return;
         final compatible =
             await WalletPaymentCompatibilityService.ensureCompatible(context);
         if (!compatible) {
-          setState(() => _loading = false);
+          if (mounted) setState(() => _loading = false);
           return;
         }
-        final clientRef =
-            FirebaseFirestore.instance.collection('clients').doc(uid);
-        final orderRef =
-            FirebaseFirestore.instance.collection('orders').doc(id);
-
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap = await tx.get(clientRef);
-          final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
-          if (wallet < _totalPrice) throw Exception('SOLDE_INSUFFISANT');
-          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
-          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
-          // débit ne soit réutilisé pour valider plusieurs commandes.
-          tx.update(clientRef, {
-            'wallet': wallet - _totalPrice,
-            'lastPaidOrderId': id,
-          });
-          tx.set(orderRef, orderData);
-        });
-
-        await FirebaseFirestore.instance
-            .collection('clients')
-            .doc(uid)
-            .collection('wallet_transactions')
-            .add({
-          'type': 'purchase',
-          'amount': _totalPrice,
-          'description': 'Blanchisserie — $_serviceType × $_quantity kg',
-          'orderId': id,
-          'createdAt': Timestamp.now(),
-        });
-      } else {
-        await FirebaseFirestore.instance
-            .collection("orders")
-            .doc(id)
-            .set(orderData);
       }
-
-      if (mounted) {
+      if (!mounted) return;
+      final created = await runCatalogCheckout(
+        context,
+        checkout: _checkout,
+        service: 'blanchisserie',
+        paymentMethod: _paymentMethod,
+        walletBalance: _walletBalance,
+        choices: _choices,
+        details: {
+          'address': _addressCtrl.text.trim(),
+          'notes': _notesCtrl.text.trim(),
+        },
+        notify: (m, err) => _snack(m, err ? Colors.red : Colors.green),
+      );
+      if (created && mounted) {
         _snack("Demande envoyée ! Un livreur va vous contacter.", Colors.green);
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) Navigator.pop(context);
         });
       }
     } catch (e) {
-      final msg = e.toString();
-      if (msg.contains('SOLDE_INSUFFISANT')) {
-        _snack("Solde wallet insuffisant", Colors.red);
-      } else {
-        _snack("Erreur : $e", Colors.red);
-      }
+      _snack("Erreur : $e", Colors.red);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -427,7 +371,9 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                         ),
                         const SizedBox(width: 20),
                         IconButton(
-                          onPressed: () => setState(() => _quantity++),
+                          onPressed: _quantity < CatalogUiLimits.blanchisserieMaxKg
+                              ? () => setState(() => _quantity++)
+                              : null,
                           icon: const Icon(Icons.add_circle_outline),
                           color: Colors.blue.shade700,
                           iconSize: 32,

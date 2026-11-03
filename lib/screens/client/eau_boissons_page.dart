@@ -3,8 +3,9 @@ import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:uuid/uuid.dart';
+import '../../services/catalog_order_service.dart';
 import '../../services/wallet_payment_compatibility.dart';
+import '../../widgets/catalog_quote_dialog.dart';
 import '../../theme/app_theme.dart';
 
 class EauBoissonsPage extends StatefulWidget {
@@ -16,6 +17,7 @@ class EauBoissonsPage extends StatefulWidget {
 
 class _EauBoissonsPageState extends State<EauBoissonsPage> {
   final Map<String, int> _cart = {};
+  final _checkout = CatalogCheckout();
   final _addressCtrl = TextEditingController();
   bool _loading = false;
   String _paymentMethod = 'cash';
@@ -140,7 +142,28 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
 
   int get _totalToPay => _totalPrice + _deliveryFee;
 
+  // Choix envoyés au serveur : identifiants et quantités uniquement, jamais de prix.
+  Map<String, dynamic> get _choices => {
+        'items': [
+          for (final p in _products)
+            if ((_cart[p["id"]] ?? 0) > 0)
+              {'id': p["id"], 'qty': _cart[p["id"]]},
+        ],
+      };
+
+  // Plafonds d'affichage (le serveur fait foi) : 20 par produit, 5 casiers, panier de 50 000 FCFA.
+  int _maxFor(Map<String, dynamic> p) =>
+      p["id"] == 'casier_eau'
+          ? CatalogUiLimits.eauMaxCasiers
+          : CatalogUiLimits.eauMaxPerProduct;
+
+  bool _canAdd(Map<String, dynamic> p, int qty) =>
+      qty < _maxFor(p) &&
+      _totalPrice + (p["price"] as num? ?? 0).toInt() <=
+          CatalogUiLimits.eauMaxBasketFcfa;
+
   Future<void> _placeOrder() async {
+    if (_loading) return;
     if (_totalItems == 0) {
       _snack("Ajoutez au moins un article au panier", Colors.red);
       return;
@@ -149,120 +172,38 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
       _snack("Veuillez entrer votre adresse de livraison", Colors.red);
       return;
     }
-    if (_paymentMethod == 'wallet' && _walletBalance < _totalToPay) {
-      _snack(
-          "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $_totalToPay FCFA",
-          Colors.red);
-      return;
-    }
 
     setState(() => _loading = true);
     try {
-      var user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        await FirebaseAuth.instance.signInAnonymously();
-        user = FirebaseAuth.instance.currentUser;
-      }
-      final uid = user!.uid;
-      final id = const Uuid().v4();
-
-      final items = <Map<String, dynamic>>[];
-      final descParts = <String>[];
-      for (final p in _products) {
-        final qty = _cart[p["id"]] ?? 0;
-        if (qty > 0) {
-          items.add({
-            "id": p["id"],
-            "name": p["name"],
-            "price": p["price"],
-            "qty": qty,
-            "subtotal": qty * (p["price"] as num? ?? 0).toInt(),
-          });
-          descParts.add("${p['name']} ×$qty");
-        }
-      }
-
-      final orderData = {
-        "id": id,
-        "description":
-            "Eau & Boissons :\n${descParts.join('\n')}\nAdresse : ${_addressCtrl.text.trim()}",
-        // Montant de livraison réel (même valeur que celle ajoutée à
-        // _totalToPay) : la règle Firestore walletDebitMatchesPaidOrder exige
-        // budget + shoppingBudget == montant débité du wallet.
-        "budget": _deliveryFee,
-        "shoppingBudget": _totalPrice,
-        "status": "pending",
-        "type": "eau_boissons",
-        "items": items,
-        "address": _addressCtrl.text.trim(),
-        "latitude": 0,
-        "longitude": 0,
-        "clientId": uid,
-        "paymentMethod": _paymentMethod,
-        "isPaid": _paymentMethod == 'wallet',
-        "createdAt": FieldValue.serverTimestamp(),
-      };
-
       if (_paymentMethod == 'wallet') {
         // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
         if (!mounted) return;
         final compatible =
             await WalletPaymentCompatibilityService.ensureCompatible(context);
         if (!compatible) {
-          setState(() => _loading = false);
+          if (mounted) setState(() => _loading = false);
           return;
         }
-        final clientRef =
-            FirebaseFirestore.instance.collection('clients').doc(uid);
-        final orderRef =
-            FirebaseFirestore.instance.collection('orders').doc(id);
-
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap = await tx.get(clientRef);
-          final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
-          if (wallet < _totalToPay) throw Exception('SOLDE_INSUFFISANT');
-          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
-          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
-          // débit ne soit réutilisé pour valider plusieurs commandes.
-          tx.update(clientRef, {
-            'wallet': wallet - _totalToPay,
-            'lastPaidOrderId': id,
-          });
-          tx.set(orderRef, orderData);
-        });
-
-        // Log transaction client
-        await FirebaseFirestore.instance
-            .collection('clients')
-            .doc(uid)
-            .collection('wallet_transactions')
-            .add({
-          'type': 'purchase',
-          'amount': _totalToPay,
-          'description': 'Eau & Boissons (${descParts.join(', ')}) + livraison',
-          'orderId': id,
-          'createdAt': Timestamp.now(),
-        });
-      } else {
-        await FirebaseFirestore.instance
-            .collection("orders")
-            .doc(id)
-            .set(orderData);
       }
-
-      if (mounted) {
+      if (!mounted) return;
+      final created = await runCatalogCheckout(
+        context,
+        checkout: _checkout,
+        service: 'eau_boissons',
+        paymentMethod: _paymentMethod,
+        walletBalance: _walletBalance,
+        choices: _choices,
+        details: {'address': _addressCtrl.text.trim()},
+        notify: (m, err) => _snack(m, err ? Colors.red : Colors.green),
+      );
+      if (created && mounted) {
         _snack("Commande passée ! Livraison en cours...", Colors.green);
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) Navigator.pop(context);
         });
       }
     } catch (e) {
-      final msg = e.toString();
-      if (msg.contains('SOLDE_INSUFFISANT')) {
-        _snack("Solde wallet insuffisant", Colors.red);
-      } else {
-        _snack("Erreur : $e", Colors.red);
-      }
+      _snack("Erreur : $e", Colors.red);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -571,8 +512,10 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                                               fontSize: 16)),
                                     ),
                                     GestureDetector(
-                                      onTap: () => setState(
-                                          () => _cart[p["id"]] = qty + 1),
+                                      onTap: !_canAdd(p, qty)
+                                          ? null
+                                          : () => setState(
+                                              () => _cart[p["id"]] = qty + 1),
                                       child: Container(
                                         width: 30,
                                         height: 30,
