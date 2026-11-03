@@ -242,9 +242,9 @@ class _EkOrderFormState extends State<EkOrderForm> {
     if (!mounted) return;
     setState(() => _submitting = false);
 
-    // Firestore auto-IDs are exactly 20 alphanumeric chars — anything else is an error message
-    final isOrderId =
-        result != null && RegExp(r'^[A-Za-z0-9]{20}$').hasMatch(result);
+    // Identifiant serveur ('ek_' + 24 hex) ou historique (20 alphanumériques) — le reste est un message d'erreur
+    final isOrderId = result != null &&
+        RegExp(r'^(ek_[0-9a-f]{24}|[A-Za-z0-9]{20})$').hasMatch(result);
     if (!isOrderId) {
       _showErr(result ?? 'Erreur inconnue');
       return;

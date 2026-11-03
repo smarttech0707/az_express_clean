@@ -946,9 +946,15 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
     );
     if (ok == true) {
       setState(() => _cancelling = true);
-      await EkService.cancelOrder(
+      // Les erreurs réseau sont converties en message par le service (réessai sans risque de double remboursement).
+      final refusal = await EkService.cancelOrder(
           order.id, reason.isEmpty ? 'Annulé par le client' : reason);
-      if (mounted) setState(() => _cancelling = false);
+      if (mounted) {
+        setState(() => _cancelling = false);
+        if (refusal != null) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(refusal)));
+        }
+      }
     }
   }
 

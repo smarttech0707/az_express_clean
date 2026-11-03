@@ -123,6 +123,20 @@ service cloud.firestore {
     function notPresent(field) {
       return !(field in request.resource.data);
     }
+    // E-Kbine : champs financiers et preuves de débit/remboursement. Ils ne sont posés que par les Cloud Functions
+    // (ekCreateOrderCF / ekCancelOrderCF / ekClientConfirmOrder) : aucune écriture client ou agent ne peut les
+    // créer ni les modifier (sinon un client complice fabriquerait une « preuve » créditant un agent).
+    function ekFinancialUnchanged() {
+      return unchanged('amount') && unchanged('fee') && unchanged('totalPaid') && unchanged('commissionAZ')
+        && unchanged('agentEarning') && unchanged('paymentMethod') && unchanged('clientId')
+        && unchanged('walletDebited') && unchanged('debitedAmount') && unchanged('debitLedgerId')
+        && unchanged('refunded') && unchanged('refundedAmount') && unchanged('agentCredited')
+        && unchanged('creditReason') && unchanged('idempotencyKey') && unchanged('source');
+    }
+    function ekNoServerFields() {
+      return !request.resource.data.keys().hasAny(['walletDebited', 'debitedAmount', 'debitLedgerId',
+        'refunded', 'refundedAmount', 'agentCredited', 'creditReason', 'idempotencyKey', 'source']);
+    }
     // Montants explicites Marketplace/Boutique (amountsVersion == 1) : écrits
     // uniquement par le serveur. Les commandes historiques (boulangerie, etc.,
     // qui écrivent leurs propres itemsAmount/deliveryFee) ne sont pas concernées.
@@ -831,6 +845,7 @@ service cloud.firestore {
         && request.resource.data.clientId == uid()
         && request.resource.data.status == 'pending'
         && notPresent('agentId')
+        && ekNoServerFields()
         && request.resource.data.amount is int
         && request.resource.data.amount >= 100;
       allow update: if isAdmin() ||
@@ -840,18 +855,17 @@ service cloud.firestore {
           (resource.data.status == 'pending'
             && request.resource.data.status == 'server_assigned_only'
             && request.resource.data.agentId == uid()
-            && unchanged('clientId') && unchanged('amount') && unchanged('fee')
-            && unchanged('totalPaid') && unchanged('paymentMethod')) ||
+            && ekFinancialUnchanged()) ||
           (resource.data.status == 'assigned' && resource.data.agentId == uid()
             && request.resource.data.status == 'in_progress'
-            && unchanged('clientId') && unchanged('agentId')) ||
+            && unchanged('clientId') && unchanged('agentId') && ekFinancialUnchanged()) ||
           // Deposit confirmation is Cloud Function only; an agent cannot
           // directly promote awaiting_deposit to in_progress.
           (resource.data.status == 'deposit_confirmed' && resource.data.agentId == uid()
             && request.resource.data.status == 'in_progress'
             && unchanged('clientId') && unchanged('agentId') && unchanged('amount')
             && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
-            && unchanged('agentDepositAccountId')
+            && unchanged('agentDepositAccountId') && ekFinancialUnchanged()
             && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.isVerified == true
             && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.isSuspended != true
             && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.subscriptionStatus in ['trial', 'active']) ||
@@ -859,7 +873,7 @@ service cloud.firestore {
             && request.resource.data.status == 'proof_sent'
             && unchanged('clientId') && unchanged('agentId') && unchanged('amount')
             && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
-            && unchanged('agentDepositAccountId'))
+            && unchanged('agentDepositAccountId') && ekFinancialUnchanged())
         )) ||
         (isAuth() && resource.data.clientId == uid() && (
           // completed : interdit en direct — passe obligatoirement par ekClientConfirmOrder (CF)
@@ -872,16 +886,16 @@ service cloud.firestore {
             && request.resource.data.status == 'cancelled'
             && unchanged('agentId') && unchanged('amount')
             && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
-            && unchanged('agentDepositAccountId')) ||
+            && unchanged('agentDepositAccountId') && ekFinancialUnchanged()) ||
           // Deposit proof is written only by ekbineSubmitDepositProof.
           (resource.data.status == 'awaiting_deposit'
             && request.resource.data.status == 'server_deposit_proof_only'
-            && unchanged('agentId') && unchanged('amount') && unchanged('agentEarning')) ||
+            && unchanged('agentId') && unchanged('amount') && ekFinancialUnchanged()) ||
           (resource.data.status == 'proof_sent'
             && request.resource.data.status == 'disputed'
             && unchanged('agentId') && unchanged('amount')
             && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
-            && unchanged('agentDepositAccountId'))
+            && unchanged('agentDepositAccountId') && ekFinancialUnchanged())
         ));
       allow delete: if isAdmin();
     }

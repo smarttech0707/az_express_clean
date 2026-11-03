@@ -21,6 +21,7 @@ test.before(async () => {
   const { HttpsError } = require('firebase-functions/v2/https');
   const { buildAdminApproveRecharge, buildAdminApproveWithdrawal } = require('../adminWalletRequests');
   const { buildCancelOrder } = require('../orderActions');
+  const { buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder } = require('../ekbineOrders');
   const deps = {
     db, admin, onCall: (h) => ({ run: h }), HttpsError,
     checkRateLimit: async () => {}, logAudit: async () => {},
@@ -28,6 +29,9 @@ test.before(async () => {
   run = {
     recharge: buildAdminApproveRecharge(deps).run,
     withdraw: buildAdminApproveWithdrawal(deps).run,
+    ekCreate: buildEkCreateOrder(deps).run,
+    ekCancel: buildEkCancelOrder(deps).run,
+    ekConfirm: buildEkClientConfirmOrder(deps).run,
     cancel: buildCancelOrder({ ...deps, calculateCommission: async () => 100 }).run,
   };
 });
@@ -79,4 +83,63 @@ test('annulation : 6 appels simultanés sur une commande payée par wallet → r
   assert.equal((await db.doc('orders/o1').get()).data().status, 'cancelled');
   const refunds = (await db.collection('clients/c4/wallet_transactions').get()).docs.filter((d) => d.data().type === 'refund');
   assert.equal(refunds.length, 1);
+});
+
+// ── E-Kbine (Mission 5) ──────────────────────────────────────────────────
+const ekBase = { operator: 'orange', serviceId: 'credit', serviceLabel: 'Crédit', amount: 1000, beneficiaryNumber: '0700000000', paymentMethod: 'wallet' };
+
+test('E-Kbine création : 8 appels simultanés, même clé → un seul débit, une seule commande', options, async () => {
+  await db.doc('clients/e1').set({ wallet: 5000 });
+  const data = { ...ekBase, idempotencyKey: 'same-key-aaaaaaaaaaaa' };
+  const results = await settled(Array.from({ length: 8 }, () => run.ekCreate(as('e1', data))));
+  assert.equal(ok(results).length, 8);
+  assert.equal(results.filter((r) => r.value?.data?.alreadyDone === false).length, 1);
+  assert.equal(await wallet('clients/e1'), 4000);
+  assert.equal((await db.collection('ekbine_orders').where('clientId', '==', 'e1').get()).size, 1);
+});
+
+test('E-Kbine création : clés différentes en parallèle, solde pour 2 → jamais de solde négatif', options, async () => {
+  await db.doc('clients/e2').set({ wallet: 2000 });
+  const results = await settled(Array.from({ length: 6 }, (_, i) => run.ekCreate(as('e2', { ...ekBase, idempotencyKey: `diff-key-aaaaaaaaaa${i}` }))));
+  assert.equal(ok(results).length, 2);
+  assert.equal(await wallet('clients/e2'), 0);
+  assert.equal((await db.collection('ekbine_orders').where('clientId', '==', 'e2').get()).size, 2);
+});
+
+test('E-Kbine annulation : 6 appels simultanés → remboursé une seule fois', options, async () => {
+  await db.doc('clients/e3').set({ wallet: 1000 });
+  const created = await run.ekCreate(as('e3', { ...ekBase, idempotencyKey: 'cancel-key-aaaaaaaaaa' }));
+  const orderId = created.data.orderId;
+  assert.equal(await wallet('clients/e3'), 0);
+  const results = await settled(Array.from({ length: 6 }, () => run.ekCancel(as('e3', { orderId }))));
+  assert.equal(ok(results).length, 6);
+  assert.equal(results.filter((r) => r.value?.data?.alreadyDone === false).length, 1);
+  assert.equal(await wallet('clients/e3'), 1000);
+  const refunds = (await db.collection('clients/e3/wallet_transactions').get()).docs.filter((d) => d.data().type === 'refund');
+  assert.equal(refunds.length, 1);
+});
+
+test('E-Kbine : annulation et confirmation simultanées → annulée, remboursée, agent non crédité', options, async () => {
+  await db.doc('clients/e4').set({ wallet: 1000 });
+  await db.doc('ekbine_agents/ag4').set({ walletBalance: 0, totalCompleted: 0 });
+  const created = await run.ekCreate(as('e4', { ...ekBase, idempotencyKey: 'race-key-aaaaaaaaaaa' }));
+  const orderId = created.data.orderId;
+  // La confirmation exige proof_sent : elle échoue sur une commande pending, l'annulation aboutit.
+  await settled([run.ekConfirm(as('e4', { orderId })), run.ekCancel(as('e4', { orderId }))]);
+  const o = (await db.doc(`ekbine_orders/${orderId}`).get()).data();
+  assert.equal(o.status, 'cancelled');
+  assert.equal(await wallet('clients/e4'), 1000);
+  assert.equal((await db.doc('ekbine_agents/ag4').get()).data().walletBalance, 0);
+});
+
+test('E-Kbine confirmation : 6 appels simultanés → l\'agent est crédité une seule fois', options, async () => {
+  await db.doc('clients/e5').set({ wallet: 1000 });
+  await db.doc('ekbine_agents/ag5').set({ walletBalance: 10, totalCompleted: 0 });
+  const created = await run.ekCreate(as('e5', { ...ekBase, idempotencyKey: 'conf-key-aaaaaaaaaaa' }));
+  const orderId = created.data.orderId;
+  await db.doc(`ekbine_orders/${orderId}`).update({ status: 'proof_sent', agentId: 'ag5' });
+  const results = await settled(Array.from({ length: 6 }, () => run.ekConfirm(as('e5', { orderId }))));
+  assert.equal(results.filter((r) => r.status === 'fulfilled' && r.value.alreadyDone === false).length, 1);
+  const ag = (await db.doc('ekbine_agents/ag5').get()).data();
+  assert.deepEqual([ag.walletBalance, ag.totalCompleted], [1010, 1]);
 });

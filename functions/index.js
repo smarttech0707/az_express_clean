@@ -1970,58 +1970,10 @@ exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_request
 });
 
 // ─── E-KBINE — Confirmation commande client (remplace l'écriture Firestore directe) ──
-exports.ekClientConfirmOrder = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'Authentification requise');
-  }
-  const uid     = request.auth.uid;
-  const orderId = request.data.orderId;
-  if (!orderId || typeof orderId !== 'string') {
-    throw new HttpsError('invalid-argument', 'orderId manquant');
-  }
-
-  const orderRef = db.collection('ekbine_orders').doc(orderId);
-  await db.runTransaction(async (tx) => {
-    const orderSnap = await tx.get(orderRef);
-    if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
-    const order = orderSnap.data();
-    // Vérifier que c'est bien le client propriétaire
-    if (order.clientId !== uid) throw new HttpsError('permission-denied', 'Non autorisé');
-    // Vérifier le statut
-    if (order.status !== 'proof_sent') throw new HttpsError('failed-precondition', 'Statut invalide');
-    const agentId  = order.agentId;
-    const earning  = order.agentEarning;
-    if (!agentId || typeof earning !== 'number' || earning <= 0) {
-      throw new HttpsError('invalid-argument', 'Données commande invalides');
-    }
-    const agRef = db.collection('ekbine_agents').doc(agentId);
-    const agentSnap = await tx.get(agRef);
-    if (!agentSnap.exists) throw new HttpsError('not-found', 'Agent introuvable');
-
-    tx.update(orderRef, {
-      status:      'completed',
-      completedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    tx.update(agRef, {
-      walletBalance:  admin.firestore.FieldValue.increment(earning),
-      totalCompleted: admin.firestore.FieldValue.increment(1),
-      lastOrderId:    orderId,
-    });
-
-    // Audit log
-    const auditRef = db.collection('audit_logs').doc();
-    tx.set(auditRef, {
-      userId:    uid,
-      userType:  'client',
-      action:    'ekbine_confirm_order',
-      targetId:  orderId,
-      amount:    earning,
-      agentId:   agentId,
-      status:    'success',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  });
-  return { success: true };
+const { buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder } = require('./ekbineOrders');
+// Logique dans ekbineOrders.js : l'agent n'est credite que du montant prouve debite (voir docs/FINANCIAL_EKBINE_2026-11-03.md).
+exports.ekClientConfirmOrder = buildEkClientConfirmOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5 }, h), HttpsError, checkRateLimit,
 });
 
 exports.notifyEkAgentOnDepositProof = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
@@ -2797,4 +2749,15 @@ exports.adminApproveRechargeCF = buildAdminApproveRecharge({
 });
 exports.adminApproveWithdrawalCF = buildAdminApproveWithdrawal({
   db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+});
+
+// ═════════════════════════════════════════════════
+// E-KBINE — création / annulation serveur (débit et remboursement atomiques, idempotents). 0,5 CPU × 2 chacune.
+// Les chemins client directs restent ouverts tant que la nouvelle version de l'app n'est pas déployée.
+// ═════════════════════════════════════════════════
+exports.ekCreateOrderCF = buildEkCreateOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+});
+exports.ekCancelOrderCF = buildEkCancelOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
 });

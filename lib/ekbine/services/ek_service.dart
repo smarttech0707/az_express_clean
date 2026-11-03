@@ -8,6 +8,17 @@ import '../models/ek_agent.dart';
 import '../models/ek_deposit_account.dart';
 import '../ek_constants.dart';
 
+const ekCancelNetworkMessage =
+    'Connexion instable : annulation non confirmée. Réessayez, aucun double remboursement possible.';
+
+/// Résultat de ekCreateOrderCF.
+class EkCreateResult {
+  final bool success;
+  final String? orderId;
+  final String message;
+  const EkCreateResult({required this.success, this.orderId, required this.message});
+}
+
 class EkService {
   static final _db = FirebaseFirestore.instance;
   static final _storage = FirebaseStorage.instance;
@@ -15,11 +26,43 @@ class EkService {
   static final _agents = _db.collection('ekbine_agents');
   static final _functions = FirebaseFunctions.instanceFor(region: 'europe-west1');
 
+  /// Appel d'une Cloud Function renvoyant l'enveloppe {success, message, data}. Remplaçable dans les tests
+  /// (aucun accès réseau ni Firebase nécessaire pour vérifier la logique de reprise).
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function(String name, Map<String, dynamic> data) callFunction =
+      (name, data) async {
+    final res = await _functions.httpsCallable(name).call(data);
+    return Map<String, dynamic>.from(res.data as Map);
+  };
+
   // ── Orders ─────────────────────────────────────────────────────────────────
 
-  static Future<String> createOrder(Map<String, dynamic> data) async {
-    final ref = await _orders.add(data);
-    return ref.id;
+  /// Création serveur (ekCreateOrderCF) : débit wallet + commande en une transaction, montants recalculés côté
+  /// serveur. [idempotencyKey] identique = même commande (reprise après coupure réseau, double appui).
+  static Future<EkCreateResult> createOrder({
+    required String idempotencyKey,
+    required String operator,
+    required String serviceId,
+    required String serviceLabel,
+    required String beneficiaryNumber,
+    required int amount,
+    required String paymentMethod,
+  }) async {
+    final map = await callFunction('ekCreateOrderCF', {
+      'idempotencyKey': idempotencyKey,
+      'operator': operator,
+      'serviceId': serviceId,
+      'serviceLabel': serviceLabel,
+      'beneficiaryNumber': beneficiaryNumber,
+      'amount': amount,
+      'paymentMethod': paymentMethod,
+    });
+    final data = map['data'] is Map ? Map<String, dynamic>.from(map['data'] as Map) : const <String, dynamic>{};
+    return EkCreateResult(
+      success: map['success'] == true,
+      orderId: data['orderId'] as String?,
+      message: (map['message'] as String?) ?? 'Erreur inconnue',
+    );
   }
 
   static Stream<List<EkOrder>> streamClientOrders(String uid) => _orders
@@ -121,11 +164,20 @@ class EkService {
     await callable.call({'orderId': orderId});
   }
 
-  static Future<void> cancelOrder(String orderId, String reason) =>
-      _orders.doc(orderId).update({
-        'status': 'cancelled',
-        'cancellationReason': reason,
-      });
+  /// Annulation serveur (ekCancelOrderCF) : statut + remboursement du montant réellement débité, une seule fois.
+  /// Retourne le message de refus, ou null si la commande est annulée.
+  static Future<String?> cancelOrder(String orderId, String reason) async {
+    try {
+      final map = await callFunction('ekCancelOrderCF', {'orderId': orderId, 'reason': reason});
+      // Une commande déjà annulée répond success (alreadyDone) : jamais un second remboursement côté serveur.
+      return map['success'] == true ? null : ((map['message'] as String?) ?? 'Annulation impossible');
+    } on FirebaseFunctionsException catch (e) {
+      final transient = const {'unavailable', 'deadline-exceeded', 'internal', 'unknown'}.contains(e.code);
+      return transient ? ekCancelNetworkMessage : (e.message ?? 'Annulation impossible');
+    } catch (_) {
+      return ekCancelNetworkMessage;
+    }
+  }
 
   static Future<void> disputeOrder(String orderId) =>
       _orders.doc(orderId).update({'status': 'disputed'});
@@ -201,36 +253,6 @@ class EkService {
   static Future<int> getClientWallet(String uid) async {
     final doc = await _db.collection('clients').doc(uid).get();
     return (doc.data()?['wallet'] as num? ?? 0).toInt();
-  }
-
-  // Transaction atomique : vérifie le solde et débite en une seule opération
-  // Protège contre les double-débits simultanés (race condition)
-  static Future<bool> debitClientWallet(String uid, int amount) async {
-    bool success = false;
-    try {
-      await _db.runTransaction((tx) async {
-        final ref = _db.collection('clients').doc(uid);
-        final snap = await tx.get(ref);
-        final bal = (snap.data()?['wallet'] as num? ?? 0).toInt();
-        if (bal < amount) {
-          // Solde insuffisant — on lève une exception pour annuler la transaction
-          throw Exception('insufficient_funds');
-        }
-        tx.update(ref, {'wallet': FieldValue.increment(-amount)});
-      });
-      // Log hors transaction (non-critique, lecture uniquement)
-      await _db.collection('wallet_transactions').add({
-        'uid': uid,
-        'type': 'ekbine_payment',
-        'amount': -amount,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-      success = true;
-    } on Exception catch (e) {
-      if (e.toString().contains('insufficient_funds')) return false;
-      rethrow;
-    }
-    return success;
   }
 
   // ── Rating agent ───────────────────────────────────────────────────────────
