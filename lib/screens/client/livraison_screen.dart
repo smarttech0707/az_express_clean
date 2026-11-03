@@ -14,6 +14,8 @@ import '../../models/local_place.dart';
 import '../../models/route_model.dart';
 import '../../providers/active_city_provider.dart';
 import '../../services/delivery_order_service.dart';
+import '../../services/delivery_quote_service.dart';
+import '../../services/quoted_checkout.dart';
 import '../../services/google_routes_service.dart';
 import '../../services/places_search_service.dart';
 import '../../services/places_service.dart';
@@ -22,6 +24,7 @@ import '../../services/wallet_payment_compatibility.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/driver_marker.dart';
 import '../../widgets/glass_kit.dart';
+import '../../widgets/quoted_checkout_runner.dart';
 import '../../widgets/route_polyline.dart';
 import '../customer_tracking_screen.dart';
 
@@ -250,6 +253,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   /// Logique de creation de livraison partagee avec le web
   /// (voir lib/services/delivery_order_service.dart).
   final _deliveryOrders = DeliveryOrderService();
+  final _quotedCheckout = QuotedCheckout(DeliveryQuoteService());
   bool _routeLoading = false;
 
   // ── Commande ───────────────────────────────────────────────────────────────
@@ -957,6 +961,38 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         cityResolutionStatus: cityService.cityResolutionStatus,
       );
 
+      // Parcours « devis officiel » (--dart-define=AZ_QUOTED_ORDERS=true) : le prix
+      // est calculé par le serveur, confirmé par le client, puis la commande est
+      // créée et le wallet débité dans UNE transaction serveur. Inactif par défaut ;
+      // mobile money et comptes anonymes restent sur le parcours historique ci-dessous.
+      if (QuotedOrderConfig.eligible(
+          isAnonymous: user.isAnonymous,
+          service: 'livraison',
+          paymentMethod: _payment)) {
+        if (!mounted) return;
+        final result = await runQuotedCheckoutWithUi(
+          context,
+          checkout: _quotedCheckout,
+          uid: user.uid,
+          request: QuoteRequest(
+            serviceType: 'livraison',
+            mode: _deliveryMode,
+            pickupLat: _departure!.latitude,
+            pickupLng: _departure!.longitude,
+            destLat: _destination!.latitude,
+            destLng: _destination!.longitude,
+            routeDistanceKm: _route.distanceKm > 0 ? _route.distanceKm : null,
+          ),
+          paymentMethod: _payment,
+          walletBalance: _wallet,
+          draft: order,
+          shoppingBudget: shoppingBudget,
+        );
+        if (!mounted) return;
+        await _handleQuotedResult(result);
+        return;
+      }
+
       if (_payment == 'wallet') {
         // LOT 6.2 SECURITY : vérifie que ce build peut encore satisfaire la
         // règle Firestore durcie (lastPaidOrderId) avant de tenter le débit
@@ -992,6 +1028,44 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       if (!mounted) return;
       setState(() => _sending = false);
       _snack('Erreur : $e', Colors.red);
+    }
+  }
+
+  Future<void> _handleQuotedResult(QuotedCheckoutResult result) async {
+    switch (result) {
+      case CheckoutCreated(:final orderId):
+        final created = await finalizeQuotedOrder(orderId);
+        if (!mounted) return;
+        if (created == null) {
+          setState(() => _sending = false);
+          _snack('Commande enregistrée. Retrouvez-la dans « Mes commandes ».',
+              Colors.green);
+          return;
+        }
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+                builder: (_) => CustomerTrackingScreen(
+                      order: created,
+                      pickupLabel: _departure!.name,
+                      deliveryLabel: _destination!.name,
+                      orderDistanceKm: _route.distanceKm,
+                      orderEtaMinutes: _route.etaMinutes,
+                      orderEtaText: _etaRange,
+                      deliveryPrice: created.budget,
+                      deliveryMode: _deliveryMode,
+                      paymentMethod: _payment,
+                    )));
+      case CheckoutCancelled():
+        setState(() => _sending = false);
+      case CheckoutFailed():
+        setState(() => _sending = false);
+        _snack(quotedFailureMessage(result), Colors.red);
+      case CheckoutUncertain():
+        setState(() => _sending = false);
+        _snack(
+            'Réponse non reçue. Vérifiez « Mes commandes » avant de recommencer.',
+            Colors.orange);
     }
   }
 

@@ -72,7 +72,14 @@ function fakeDb(seed = {}) {
           if (!store.has(r.path)) throw new Error(`update sur document absent ${r.path}`);
           writes.push(['update', r.path, patch]);
         },
-        set: (r, data) => writes.push(['set', r.path, data]),
+        set: (r, data, opts) => writes.push([opts && opts.merge ? 'update' : 'set', r.path, data]),
+        // Comme l'Admin SDK : la transaction ENTIÈRE est annulée si le document existe déjà (code gRPC 6).
+        create: (r, data) => {
+          if (store.has(r.path) || writes.some(([t, p]) => t === 'create' && p === r.path)) {
+            throw Object.assign(new Error(`ALREADY_EXISTS ${r.path}`), { code: 6 });
+          }
+          writes.push(['create', r.path, data]);
+        },
       };
       const result = await callback(tx);
       for (const [type, path, data] of writes) applyPatch(path, data, type === 'update');

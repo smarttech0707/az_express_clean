@@ -9,11 +9,14 @@ import 'package:uuid/uuid.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/order_model.dart';
+import '../../services/delivery_quote_service.dart';
 import '../../services/firestore_service.dart';
+import '../../services/quoted_checkout.dart';
 import '../../services/tarif_service.dart';
 import '../../services/wallet_payment_compatibility.dart';
 import '../../providers/active_city_provider.dart';
 import '../../widgets/address_picker_widget.dart';
+import '../../widgets/quoted_checkout_runner.dart';
 import '../../widgets/scale_button.dart';
 import '../../widgets/premium_background.dart';
 import 'order_wait_screen.dart';
@@ -55,6 +58,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
   // ── Mode de livraison
   String _deliveryMode = 'standard';
+  final _quotedCheckout = QuotedCheckout(DeliveryQuoteService());
 
   // ── Paiement
   String _payment = 'cash';
@@ -516,6 +520,37 @@ class _CoursesScreenState extends State<CoursesScreen> {
         cityResolutionStatus: geography.cityResolutionStatus,
       );
 
+      // Parcours « devis officiel » (--dart-define=AZ_QUOTED_ORDERS=true) : prix des
+      // frais de livraison calculé par le serveur. Le budget d'achat reste LIBRE
+      // (jamais transformé en prix imposé). Inactif par défaut ; mobile money et
+      // comptes anonymes restent sur le parcours historique ci-dessous.
+      if (QuotedOrderConfig.eligible(
+          isAnonymous: user?.isAnonymous ?? true,
+          service: 'courses',
+          paymentMethod: _payment)) {
+        if (!mounted) return;
+        final result = await runQuotedCheckoutWithUi(
+          context,
+          checkout: _quotedCheckout,
+          uid: user!.uid,
+          request: QuoteRequest(
+            serviceType: 'courses',
+            mode: _deliveryMode,
+            pickupLat: point.latitude,
+            pickupLng: point.longitude,
+            destLat: point.latitude,
+            destLng: point.longitude,
+          ),
+          paymentMethod: _payment,
+          walletBalance: _wallet,
+          draft: order,
+          shoppingBudget: shoppingBudget,
+        );
+        if (!mounted) return;
+        await _handleQuotedResult(result);
+        return;
+      }
+
       if (_payment == 'wallet') {
         // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService — une
         // app trop ancienne voit un message clair plutôt qu'un
@@ -574,6 +609,42 @@ class _CoursesScreenState extends State<CoursesScreen> {
       if (!mounted) return;
       setState(() => _sending = false);
       _snack('Erreur : $e', Colors.red);
+    }
+  }
+
+  Future<void> _handleQuotedResult(QuotedCheckoutResult result) async {
+    switch (result) {
+      case CheckoutCreated(:final orderId):
+        final created = await finalizeQuotedOrder(orderId);
+        if (!mounted) return;
+        setState(() {
+          _items.clear();
+          _quantities.clear();
+          _prices.clear();
+          _listCtrl.clear();
+          _budgetCtrl.clear();
+          _notesCtrl.clear();
+          _mobilePhoneCtrl.clear();
+          _deliveryAddress = null;
+          _sending = false;
+        });
+        if (created == null) {
+          _snack('Commande enregistrée. Retrouvez-la dans « Mes commandes ».',
+              Colors.green);
+          return;
+        }
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => OrderWaitScreen(order: created)));
+      case CheckoutCancelled():
+        setState(() => _sending = false);
+      case CheckoutFailed():
+        setState(() => _sending = false);
+        _snack(quotedFailureMessage(result), Colors.red);
+      case CheckoutUncertain():
+        setState(() => _sending = false);
+        _snack(
+            'Réponse non reçue. Vérifiez « Mes commandes » avant de recommencer.',
+            Colors.orange);
     }
   }
 

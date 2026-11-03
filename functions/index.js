@@ -2770,3 +2770,19 @@ exports.upsertRealEstateLocation = realEstateLocation.upsertRealEstateLocation;
 const { buildLogAuthEvent, buildLogAdminAuditEvent } = require('./authEvents');
 exports.logAuthEvent      = buildLogAuthEvent({ onCall, HttpsError, checkRateLimit, logAudit });
 exports.logAdminAuditEvent = buildLogAdminAuditEvent({ db, onCall, HttpsError, checkRateLimit, logAudit });
+
+// ═════════════════════════════════════════════════
+// DEVIS TARIFAIRE OFFICIEL + CRÉATION DE COMMANDE PAR DEVIS (Livraison et Courses uniquement)
+// Barème côté serveur (tariffConfig.js / officialTariff.js) : le client ne fournit plus le prix. Le devis
+// (`tariff_quotes`, écrit par Admin SDK uniquement) est lié au client, au service, au mode, aux points, au
+// montant, à la version du barème et à une expiration, et ne sert qu'une fois. Fonctions ADDITIVES : les
+// parcours historiques de création directe côté client restent en place tant que le flux n'est pas activé.
+// Quota Cloud Run régional : 0,5 CPU × 2 instances chacune.
+// ═════════════════════════════════════════════════
+const { buildQuoteDeliveryCF, buildCreateOrderFromQuoteCF } = require('./deliveryQuote');
+exports.quoteDeliveryCF = buildQuoteDeliveryCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit,
+});
+exports.createOrderFromQuoteCF = buildCreateOrderFromQuoteCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+});

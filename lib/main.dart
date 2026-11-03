@@ -32,6 +32,8 @@ import 'providers/active_city_provider.dart';
 import 'event/providers/event_provider.dart';
 import 'widgets/az_ia/az_ia_floating_assistant.dart';
 import 'widgets/firebase_startup_failure.dart';
+import 'widgets/wrong_firebase_project_screen.dart';
+import 'services/firebase_project_guard.dart';
 
 // ignore: unused_element
 final _analytics = FirebaseAnalytics.instance;
@@ -64,6 +66,14 @@ void main() async {
   // explicitement et exposé à l'interface, mais il ne peut plus empêcher le
   // démarrage.
   final startupDiagnostic = await _initializeFirebase();
+  // Build de test relié au mauvais projet : arrêt IMMÉDIAT, avant App Check,
+  // Crashlytics, persistance Firestore, providers, notifications et connexion
+  // anonyme. Aucune opération métier ne peut partir. (Sans le define
+  // AZ_REQUIRED_FIREBASE_PROJECT — builds existants — cette branche est inerte.)
+  if (startupDiagnostic == FirebaseProjectGuard.blockedCode) {
+    runApp(const WrongFirebaseProjectScreen());
+    return;
+  }
   final firebaseInitialized = startupDiagnostic == null;
   if (startupDiagnostic != null) {
     debugPrint('DÉMARRAGE AZ EXPRESS — Firebase indisponible : '
@@ -147,6 +157,13 @@ void main() async {
 /// @return `null` si Firebase est prêt, sinon une description courte et non
 /// sensible du problème (aucune clé, aucune valeur de configuration).
 Future<String?> _initializeFirebase() async {
+  final diagnostic = await _initializeFirebaseApp();
+  if (diagnostic != null) return diagnostic;
+  // Vérifie le projet RÉELLEMENT initialisé (voir FirebaseProjectGuard).
+  return FirebaseProjectGuard.check();
+}
+
+Future<String?> _initializeFirebaseApp() async {
   // APK de test : émulateurs locaux uniquement, options factices (voir
   // FirebaseEmulatorConfig). Jamais de repli sur la production.
   if (FirebaseEmulatorConfig.enabled) return FirebaseEmulatorConfig.initialize();
