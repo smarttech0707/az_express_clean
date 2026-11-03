@@ -1,5 +1,6 @@
 'use strict';
 const crypto = require('crypto');
+const { partnerPickupBlock } = require('./partnerOrderAmounts');
 const PROOF_TTL_MS = 15 * 60 * 1000;
 const MAX_PROOF_GENERATIONS = 3;
 const MAX_PIN_ATTEMPTS = 5;
@@ -305,6 +306,10 @@ function buildConfirmPickupWithProof({
       if (order.deliveryProofMode !== 'qr_v1' || order.status !== 'accepted') {
         throw new HttpsError('failed-precondition', 'Cette commande ne peut pas être confirmée');
       }
+      // Commande Restaurant/Boulangerie v2 : pas de récupération avant « prête » (vérifié ici, avant toute
+      // consommation du code, pour ne pas brûler une tentative du livreur).
+      const notReady = partnerPickupBlock(order);
+      if (notReady) throw new HttpsError(notReady.code, notReady.message);
       const checked = await verifyProofInTransaction({
         tx, db, orderId, type: 'pickup', driverId: uid,
         assignmentVersion: Number(order.driverAssignmentVersion || 1),

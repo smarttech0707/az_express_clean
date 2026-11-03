@@ -156,7 +156,31 @@ service cloud.firestore {
           // le marqueur est posé par la Cloud Function de moyenne livreur.
           'rating', 'sellerRating', 'driverRatingApplied'])
         && (resource.data.get('amountsVersion', 0) != 1
-            || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']));
+            || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']))
+        && v2OrderFieldsUnchanged();
+    }
+    // Commandes Restaurant/Boulangerie version 2 (amountsVersion == 2, Mission 7B-3B-S) : montants, paiement, devis,
+    // bénéficiaires, état de préparation et reversement cash sont écrits par le SERVEUR uniquement. Sans ce verrou,
+    // un restaurateur ou un livreur pouvait gonfler productAmount/totalAmount (cohérents avec budget) avant la
+    // livraison : deliverOrderCF aurait crédité le partenaire d'un montant jamais payé. Le critère est l'état
+    // AVANT écriture (resource) : supprimer ou changer amountsVersion est lui-même interdit (champ protégé), et
+    // changer sellerType/sellerId est interdit dans le même diff. budget, clientId, isPaid et paymentMethod sont
+    // déjà verrouillés par unchanged() dans chaque branche appelante (inutile de les recompter ici). Les commandes sans amountsVersion 2 ne sont pas
+    // concernées. L'administrateur (branche isAdmin) reste libre. Un seul diff : la règle update d'orders est
+    // proche de la limite d'expressions de Firestore.
+    function v2OrderFieldsUnchanged() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return resource.data.get('amountsVersion', 0) != 2
+        || !changed.hasAny(['amountsVersion', 'productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount',
+          'shoppingBudget', 'tariffQuoteId', 'quotedAmount', 'quotedProductAmount',
+          'quotedDeliveryFee', 'tariffVersion', 'source', 'deliveryMode', 'items',
+          'sellerId', 'sellerType', 'sellerName', 'type',
+          // Commission/règlement : la branche partenaire historique ne les protégeait pas.
+          'commissionAmount', 'commissionPayerId', 'commissionTxId', 'commissionStatus',
+          'heldDriverEarning', 'settlementHold', 'settlementStatus', 'deliveryFeePaid', 'cashBreakdown',
+          'cashRemittance', 'merchantCashSettled', 'merchantCashSettledAt', 'merchantCashSettledBy',
+          'sellerStatus', 'partnerAcceptedAtMs', 'preparationStartedAtMs', 'readyAtMs', 'partnerRefusal',
+          'cancelRequestAfterPreparation']);
     }
     function explicitAmountsUnchanged() {
       // Un seul diff (coût d'évaluation faible) : la règle update d'orders est
@@ -165,7 +189,8 @@ service cloud.firestore {
       return !changed.hasAny(['amountsVersion', 'deliveryFeePaid', 'cashBreakdown',
           'deliveryFeeHold', 'adminReview'])
         && (resource.data.get('amountsVersion', 0) != 1
-            || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']));
+            || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']))
+        && v2OrderFieldsUnchanged();
     }
     // LOT 6 SECURITY (2026-09) — un `orderId` doit désormais être fourni et
     // correspondre exactement à la commande en cours de création. Avant ce
@@ -671,6 +696,10 @@ service cloud.firestore {
         // jamais payés via deliveryFeePaid).
         && notPresent('amountsVersion') && notPresent('deliveryFeePaid')
         && notPresent('cashBreakdown') && notPresent('deliveryFeeHold') && notPresent('adminReview')
+        // Reversement cash, état de préparation partenaire (version 2) : posés par le serveur uniquement.
+        && notPresent('cashRemittance') && notPresent('merchantCashSettled') && notPresent('merchantCashSettledAt')
+        && notPresent('merchantCashSettledBy') && notPresent('partnerAcceptedAtMs') && notPresent('preparationStartedAtMs')
+        && notPresent('readyAtMs') && notPresent('partnerRefusal') && notPresent('cancelRequestAfterPreparation')
         // isPaid ne peut être vrai à la création que pour un paiement wallet
         // (débit du client dans la même transaction Flutter que la création
         // de la commande — livraison_screen.dart/courses_screen.dart/
@@ -731,6 +760,8 @@ service cloud.firestore {
                 || get(/databases/$(database)/documents/account_deletions/$(uid())).data.consentVerified != true))
             || (resource.data.status == 'accepted'
                 && resource.data.get('deliveryProofMode', '') != 'qr_v1'
+                // Version 2 : la récupération n'est possible qu'une fois la commande prête chez le partenaire.
+                && (resource.data.get('amountsVersion', 0) != 2 || resource.data.get('sellerStatus', '') == 'ready')
                 && request.resource.data.status == 'picked_up')
             // isPaid ne peut plus être flippé directement ici (faille confirmée
             // et corrigée, Master Prompt 80, 2026-07-09) : le passage à "payé"
@@ -739,6 +770,8 @@ service cloud.firestore {
             // une écriture Firestore directe du livreur.
             || (resource.data.status == 'picked_up'
                 && resource.data.get('deliveryProofMode', '') != 'qr_v1'
+                // Version 2 : la livraison passe UNIQUEMENT par deliverOrderCF (crédits partenaire/livreur, cash).
+                && resource.data.get('amountsVersion', 0) != 2
                 && request.resource.data.status == 'delivered')
             || (resource.data.status == request.resource.data.status)
           )
@@ -750,6 +783,8 @@ service cloud.firestore {
         // boulangerie_dashboard.dart:_updateSellerStatus).
         (isAuth() && partnerActivated() && resource.data.sellerId == uid()
           && resource.data.get('sellerType', '') == 'boulangerie'
+          // Version 2 : la préparation est pilotée par le serveur (Mission 7B-3B), jamais par écriture directe.
+          && resource.data.get('amountsVersion', 0) != 2
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['sellerStatus'])
           && (
@@ -771,6 +806,8 @@ service cloud.firestore {
         // Client annule sa commande en attente
         (isOwner(resource.data.clientId)
           && resource.data.status == 'pending'
+          // Version 2 : l'annulation (et son remboursement) passe UNIQUEMENT par cancelOrderCF.
+          && resource.data.get('amountsVersion', 0) != 2
           && request.resource.data.status == 'cancelled'
           && unchanged('budget') && unchanged('driverId') && unchanged('isPaid')
           && serverOwnedOrderFieldsUnchanged()) ||

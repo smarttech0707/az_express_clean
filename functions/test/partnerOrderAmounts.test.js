@@ -67,3 +67,14 @@ test('partnerBreakdown cash : le livreur encaisse le total et doit reverser les 
   assert.equal(c.cashToRemitToPartner, 3000);
   assert.equal(c.cashCollectedByDriver - c.cashToRemitToPartner, c.driverGross);
 });
+
+test('partnerPickupBlock : v2 refuse tout sauf ready ; les autres commandes ne sont jamais bloquées', () => {
+  const { partnerPickupBlock } = require('../partnerOrderAmounts');
+  for (const s of [undefined, null, '', 'preparing', 'accepted', 'READY']) {
+    assert.equal(partnerPickupBlock({ amountsVersion: 2, sellerStatus: s }).code, 'failed-precondition');
+  }
+  assert.equal(partnerPickupBlock({ amountsVersion: 2, sellerStatus: 'ready' }), null);
+  for (const o of [{ sellerStatus: 'preparing' }, { amountsVersion: 1 }, { amountsVersion: '2' }, {}, null]) {
+    assert.equal(partnerPickupBlock(o), null);
+  }
+});

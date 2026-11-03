@@ -63,4 +63,15 @@ function partnerBreakdown(amounts, { commission = 0, paymentMethod } = {}) {
   return base;
 }
 
-module.exports = { PARTNER_AMOUNTS_VERSION, PARTNER_SELLER_TYPES, buildPartnerAmounts, readPartnerAmounts, partnerBreakdown };
+// Récupération chez le partenaire (commandes v2 uniquement) : la préparation est pilotée par le partenaire, jamais par
+// l'acceptation du livreur. Renvoie null si la récupération est permise, sinon { code, message }. Les commandes sans
+// amountsVersion 2 ne sont jamais concernées (flux historiques inchangés).
+function partnerPickupBlock(order) {
+  if (!order || order.amountsVersion !== PARTNER_AMOUNTS_VERSION) return null;
+  if (order.sellerStatus === 'ready') return null;
+  return { code: 'failed-precondition', message: 'La commande n’est pas encore prête chez le partenaire' };
+}
+
+module.exports = {
+  PARTNER_AMOUNTS_VERSION, PARTNER_SELLER_TYPES, buildPartnerAmounts, readPartnerAmounts, partnerBreakdown, partnerPickupBlock,
+};

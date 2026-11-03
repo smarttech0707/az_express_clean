@@ -611,3 +611,50 @@ test('accès invité émis avant un transfert refusé après le changement de li
   // L’ancien code (ancien accès) reste refusé même après émission du nouveau.
   await assert.rejects(api.redeem.run(guestRequest(old)));
 }));
+
+// Mission 7B-3B-S : commandes Restaurant/Boulangerie v2 — pas de récupération avant « prête ».
+for (const [label, patch, allowed] of [
+  ['v2 en préparation', { amountsVersion: 2, sellerStatus: 'preparing' }, false],
+  ['v2 sans statut de préparation', { amountsVersion: 2 }, false],
+  ['v2 prête', { amountsVersion: 2, sellerStatus: 'ready' }, true],
+  ['historique (sans amountsVersion), non prête', { sellerStatus: 'preparing' }, true],
+]) {
+  test(`pickup QR ${label} : ${allowed ? 'autorisé avec les vérifications habituelles' : 'refusé sans consommer le code'}`, async () => {
+    await withPepper(async () => {
+      const seed = makeProofSeed();
+      Object.assign(seed['orders/o1'], patch);
+      const { db, store } = makeFakeDb(seed);
+      const fn = buildConfirmPickupWithProof({
+        db, admin: fakeAdmin, onCall, HttpsError,
+        checkRateLimit: async () => {}, logAudit: makeLogAudit(),
+      });
+      const call = () => fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1', token: 'valid-one-time-token' } });
+      const proofPath = `delivery_proofs/${sessionId('o1', 'pickup')}/versions/proof-v1`;
+      if (allowed) {
+        assert.deepEqual(await call(), { success: true, status: 'picked_up' });
+        assert.equal(store.get(proofPath).status, 'used');
+      } else {
+        await assert.rejects(call(), (e) => e.code === 'failed-precondition');
+        assert.equal(store.get('orders/o1').status, 'accepted');
+        assert.equal(store.get(proofPath).status, 'active', 'le code du livreur n\'est pas brûlé');
+      }
+    });
+  });
+}
+
+test('pickup QR v2 prête : un mauvais code reste refusé (vérifications habituelles conservées)', async () => {
+  await withPepper(async () => {
+    const seed = makeProofSeed();
+    Object.assign(seed['orders/o1'], { amountsVersion: 2, sellerStatus: 'ready' });
+    const { db, store } = makeFakeDb(seed);
+    const fn = buildConfirmPickupWithProof({
+      db, admin: fakeAdmin, onCall, HttpsError,
+      checkRateLimit: async () => {}, logAudit: makeLogAudit(),
+    });
+    await assert.rejects(
+      fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1', token: 'mauvais-code' } }),
+      (e) => e.code === 'permission-denied' || e.code === 'failed-precondition' || e.code === 'invalid-argument',
+    );
+    assert.equal(store.get('orders/o1').status, 'accepted');
+  });
+});
