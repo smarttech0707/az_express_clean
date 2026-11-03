@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import '../ek_constants.dart';
+import '../ek_tracking.dart';
 import '../models/ek_order.dart';
 import '../services/ek_service.dart';
 
@@ -86,8 +87,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                   SliverToBoxAdapter(child: _buildOrderInfo(order)),
                   if (order.agentId != null)
                     SliverToBoxAdapter(child: _buildAgentCard(order)),
-                  if (order.depositProofUrl != null ||
-                      order.status == 'awaiting_deposit')
+                  if (ekShowDepositSection(order))
                     SliverToBoxAdapter(child: _buildDepositSection(order)),
                   if (order.proofUrl != null)
                     SliverToBoxAdapter(child: _buildProof(order)),
@@ -125,7 +125,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
           ),
           Expanded(
             child: Text(
-              ekStatusLabels[order.status] ?? order.status,
+              ekStatusText(order),
               style: GoogleFonts.urbanist(fontSize: 11, color: Colors.white70),
               overflow: TextOverflow.ellipsis,
             ),
@@ -147,19 +147,11 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
   }
 
   Widget _buildStatus(EkOrder order) {
-    // wallet has no deposit step; other payment methods require deposit proof
-    final statuses = order.paymentMethod == 'wallet'
-        ? ['pending', 'assigned', 'in_progress', 'proof_sent', 'completed']
-        : [
-            'pending',
-            'awaiting_deposit',
-            'in_progress',
-            'proof_sent',
-            'completed'
-          ];
+    // Wallet prépayé (débit prouvé par le serveur) : aucune étape de dépôt ; autres cas : parcours de dépôt.
+    final statuses = ekTrackingSteps(order);
     final isCancelled = order.status == 'cancelled';
     final isDisputed = order.status == 'disputed';
-    final currentIndex = statuses.indexOf(order.status);
+    final currentIndex = ekCurrentStepIndex(order);
 
     if (isCancelled || isDisputed) {
       return Container(
@@ -224,7 +216,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _shortStatus(s),
+                    ekStepLabel(order, s),
                     style: GoogleFonts.urbanist(
                       fontSize: 8,
                       fontWeight: curr ? FontWeight.w700 : FontWeight.normal,
@@ -247,25 +239,6 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
         }).toList(),
       ),
     );
-  }
-
-  String _shortStatus(String s) {
-    switch (s) {
-      case 'pending':
-        return 'Attente';
-      case 'assigned':
-        return 'Agent';
-      case 'awaiting_deposit':
-        return 'Dépôt';
-      case 'in_progress':
-        return 'En cours';
-      case 'proof_sent':
-        return 'Preuve';
-      case 'completed':
-        return 'Terminé';
-      default:
-        return s;
-    }
   }
 
   Widget _buildOrderInfo(EkOrder order) {
@@ -588,8 +561,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
 
     if (!isClient) return const SizedBox.shrink();
 
-    final canCancel = order.status == 'pending' ||
-        (order.status == 'awaiting_deposit' && order.depositProofUrl == null);
+    final canCancel = ekCanClientCancel(order);
     final canConfirm = order.status == 'proof_sent';
     final canDispute = order.status == 'proof_sent';
     final isCompleted = order.status == 'completed';

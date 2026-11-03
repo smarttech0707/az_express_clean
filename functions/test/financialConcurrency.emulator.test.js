@@ -21,7 +21,7 @@ test.before(async () => {
   const { HttpsError } = require('firebase-functions/v2/https');
   const { buildAdminApproveRecharge, buildAdminApproveWithdrawal } = require('../adminWalletRequests');
   const { buildCancelOrder } = require('../orderActions');
-  const { buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder } = require('../ekbineOrders');
+  const { buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder, buildEkbineAcceptOrder } = require('../ekbineOrders');
   const deps = {
     db, admin, onCall: (h) => ({ run: h }), HttpsError,
     checkRateLimit: async () => {}, logAudit: async () => {},
@@ -30,8 +30,10 @@ test.before(async () => {
     recharge: buildAdminApproveRecharge(deps).run,
     withdraw: buildAdminApproveWithdrawal(deps).run,
     ekCreate: buildEkCreateOrder(deps).run,
-    ekCancel: buildEkCancelOrder(deps).run,
+    // Interrupteur activé ici : ces tests prouvent le chemin sécurisé depuis deposit_confirmed (désactivé par défaut).
+    ekCancel: buildEkCancelOrder({ ...deps, allowCancelFromDepositConfirmed: true }).run,
     ekConfirm: buildEkClientConfirmOrder(deps).run,
+    ekAccept: buildEkbineAcceptOrder(deps).run,
     cancel: buildCancelOrder({ ...deps, calculateCommission: async () => 100 }).run,
   };
 });
@@ -142,4 +144,65 @@ test('E-Kbine confirmation : 6 appels simultanés → l\'agent est crédité une
   assert.equal(results.filter((r) => r.status === 'fulfilled' && r.value.alreadyDone === false).length, 1);
   const ag = (await db.doc('ekbine_agents/ag5').get()).data();
   assert.deepEqual([ag.walletBalance, ag.totalCompleted], [1010, 1]);
+});
+
+// ── Acceptation wallet et annulation avant exécution (concurrence réelle) ──
+const agentDoc = { name: 'Agent', phone: '0500000000', isVerified: true, isSuspended: false, subscriptionStatus: 'active', walletBalance: 0,
+  depositAccounts: [{ id: 'o1', operator: 'orange', phoneNumber: '0700000001', isPrimary: true, isActive: true }] };
+
+test('E-Kbine acceptation : 5 agents simultanés → un seul affecté, deposit_confirmed, aucun mouvement d\'argent', options, async () => {
+  await db.doc('clients/f1').set({ wallet: 1000 });
+  for (let i = 0; i < 5; i++) await db.doc(`ekbine_agents/fa${i}`).set(agentDoc);
+  const created = await run.ekCreate(as('f1', { ...ekBase, idempotencyKey: 'acc-key-aaaaaaaaaaaa' }));
+  const orderId = created.data.orderId;
+  const results = await settled(Array.from({ length: 5 }, (_, i) => run.ekAccept(as(`fa${i}`, { orderId }))));
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  const o = (await db.doc(`ekbine_orders/${orderId}`).get()).data();
+  assert.equal(o.status, 'deposit_confirmed');
+  assert.match(o.agentId, /^fa[0-4]$/);
+  assert.equal(await wallet('clients/f1'), 0, 'un seul débit, à la création');
+  for (let i = 0; i < 5; i++) assert.equal((await db.doc(`ekbine_agents/fa${i}`).get()).data().walletBalance, 0);
+});
+
+// Reproduit la transaction de démarrage de ekbineAgentDepositAction (deposit_confirmed → in_progress + startedAt).
+const startTx = (orderId) => db.runTransaction(async (tx) => {
+  const ref = db.doc(`ekbine_orders/${orderId}`);
+  const o = (await tx.get(ref)).data();
+  if (o.status !== 'deposit_confirmed') throw new Error('Dépôt non confirmé');
+  tx.update(ref, { status: 'in_progress', startedAt: admin.firestore.FieldValue.serverTimestamp() });
+});
+
+test('E-Kbine : annulation et démarrage simultanés → exactement un des deux, jamais remboursement + exécution', options, async () => {
+  for (let n = 0; n < 6; n++) {
+    const uid = `g${n}`;
+    await db.doc(`clients/${uid}`).set({ wallet: 1000 });
+    await db.doc(`ekbine_agents/ga${n}`).set(agentDoc);
+    const created = await run.ekCreate(as(uid, { ...ekBase, idempotencyKey: `race-acc-key-aaaaaa${n}` }));
+    const orderId = created.data.orderId;
+    await run.ekAccept(as(`ga${n}`, { orderId }));
+    const [cancelRes, startRes] = await settled([run.ekCancel(as(uid, { orderId })), startTx(orderId)]);
+    const cancelled = cancelRes.status === 'fulfilled' && cancelRes.value.success === true;
+    const started = startRes.status === 'fulfilled';
+    assert.notEqual(cancelled, started, `tour ${n} : un seul des deux doit aboutir`);
+    const o = (await db.doc(`ekbine_orders/${orderId}`).get()).data();
+    if (cancelled) {
+      assert.equal(o.status, 'cancelled');
+      assert.equal(await wallet(`clients/${uid}`), 1000);
+    } else {
+      assert.equal(o.status, 'in_progress');
+      assert.equal(await wallet(`clients/${uid}`), 0, 'aucun remboursement après démarrage');
+    }
+  }
+});
+
+test('E-Kbine : 6 annulations simultanées depuis deposit_confirmed → remboursé une seule fois', options, async () => {
+  await db.doc('clients/h1').set({ wallet: 1000 });
+  await db.doc('ekbine_agents/ha1').set(agentDoc);
+  const created = await run.ekCreate(as('h1', { ...ekBase, idempotencyKey: 'dc-cancel-key-aaaaaa' }));
+  const orderId = created.data.orderId;
+  await run.ekAccept(as('ha1', { orderId }));
+  const results = await settled(Array.from({ length: 6 }, () => run.ekCancel(as('h1', { orderId }))));
+  assert.equal(results.filter((r) => r.value?.data?.alreadyDone === false).length, 1);
+  assert.equal(await wallet('clients/h1'), 1000);
+  assert.equal((await db.doc('ekbine_agents/ha1').get()).data().walletBalance, 0);
 });

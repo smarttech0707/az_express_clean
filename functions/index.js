@@ -1970,7 +1970,7 @@ exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_request
 });
 
 // ─── E-KBINE — Confirmation commande client (remplace l'écriture Firestore directe) ──
-const { buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder } = require('./ekbineOrders');
+const { buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder, buildEkbineAcceptOrder } = require('./ekbineOrders');
 // Logique dans ekbineOrders.js : l'agent n'est credite que du montant prouve debite (voir docs/FINANCIAL_EKBINE_2026-11-03.md).
 exports.ekClientConfirmOrder = buildEkClientConfirmOrder({
   db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5 }, h), HttpsError, checkRateLimit,
@@ -1991,37 +1991,8 @@ exports.notifyEkAgentOnDepositProof = onDocumentUpdated({ document: 'ekbine_orde
 
 // E-Kbine deposit gate. These callables own every transition before service
 // execution so a client cannot self-confirm and an agent cannot start early.
-exports.ekbineAcceptOrder = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
-  const orderId = request.data?.orderId;
-  if (typeof orderId !== 'string') throw new HttpsError('invalid-argument', 'orderId manquant');
-  const agentId = request.auth.uid;
-  const orderRef = db.collection('ekbine_orders').doc(orderId);
-  const agentRef = db.collection('ekbine_agents').doc(agentId);
-  await db.runTransaction(async (tx) => {
-    const [orderSnap, agentSnap] = await Promise.all([tx.get(orderRef), tx.get(agentRef)]);
-    if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
-    if (!agentSnap.exists) throw new HttpsError('permission-denied', 'Agent introuvable');
-    const order = orderSnap.data();
-    const agent = agentSnap.data();
-    if (order.status !== 'pending') throw new HttpsError('failed-precondition', 'Commande non disponible');
-    if (!isEligibleAgent(agent)) throw new HttpsError('permission-denied', 'Agent non éligible');
-    const depositAccount = selectDepositAccount(agent, order.operator);
-    if (!depositAccount) throw new HttpsError('failed-precondition', 'Aucun numéro valide pour cet opérateur');
-    tx.update(orderRef, {
-      agentId,
-      agentName: String(agent.name || 'Agent E-Kbine'),
-      agentPhone: String(agent.phone || ''),
-      // Immutable snapshots: instructions cannot change when an agent edits profile.
-      agentDepositAccountId: depositAccount.id,
-      agentDepositNumber: depositAccount.phoneNumber,
-      agentDepositOperator: order.operator,
-      status: 'awaiting_deposit',
-      assignedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  });
-  return { success: true };
-});
+// Logique dans ekbineOrders.js : commande wallet à débit prouvé → 'deposit_confirmed' (aucun second paiement demandé).
+exports.ekbineAcceptOrder = buildEkbineAcceptOrder({ db, admin, onCall, HttpsError });
 
 // Only the authenticated agent can change deposit accounts. Historical
 // operatorNumbers are retained; this callable migrates them on first save.

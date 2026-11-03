@@ -35,6 +35,10 @@ class EkOrder {
   final DateTime? createdAt;
   final DateTime? assignedAt;
   final DateTime? completedAt;
+  final DateTime? startedAt; // posé quand l'agent commence réellement le service
+  // Preuve serveur du débit wallet (ekCreateOrderCF) : le client a déjà payé via AZ, aucun dépôt à demander.
+  final bool walletDebited;
+  final int debitedAmount;
 
   const EkOrder({
     required this.id,
@@ -68,6 +72,9 @@ class EkOrder {
     this.createdAt,
     this.assignedAt,
     this.completedAt,
+    this.startedAt,
+    this.walletDebited = false,
+    this.debitedAmount = 0,
   });
 
   factory EkOrder.fromDoc(DocumentSnapshot doc) {
@@ -104,6 +111,9 @@ class EkOrder {
       createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
       assignedAt: (d['assignedAt'] as Timestamp?)?.toDate(),
       completedAt: (d['completedAt'] as Timestamp?)?.toDate(),
+      startedAt: (d['startedAt'] as Timestamp?)?.toDate(),
+      walletDebited: d['walletDebited'] == true,
+      debitedAmount: (d['debitedAmount'] as num? ?? 0).toInt(),
     );
   }
 

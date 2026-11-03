@@ -78,3 +78,25 @@ Outils (lecture seule) : `functions/ekbineReconciliation.js` (analyse pure, 9 te
 
 ### Tests ajoutés
 Flutter : `test/ekbine/ek_order_server_flow_test.dart` (15) ; fonctions : `ekbineReconciliation.test.js` (9) et assertions `settlement` dans `ekbineOrders.test.js`.
+
+---
+
+## Correction du parcours wallet (décision 2, local, non commité)
+
+**`ekbineAcceptOrder`** (désormais `buildEkbineAcceptOrder`, `functions/ekbineOrders.js`) : dans la transaction, si la commande est `pending`, payée par wallet et à débit PROUVÉ (`walletDebited === true`, `debitedAmount === amount`, non remboursée), elle passe directement à `deposit_confirmed` (agent, nom, téléphone, `assignedAt`). Aucun débit, aucun crédit agent, aucune consigne de dépôt. Tous les autres cas (hors wallet, commande historique sans preuve, preuve incohérente) gardent `awaiting_deposit` et le numéro de dépôt de l'agent.
+
+**Annulation avant exécution** (`ekCancelOrderCF`) : depuis `deposit_confirmed` UNIQUEMENT si le débit est prouvé, `startedAt`/`proofUrl`/`completedAt`/`agentCredited` sont absents et aucun remboursement n'a eu lieu ; vérifié dans la transaction (remboursement du seul `debitedAmount`, une fois). Dès que l'agent démarre (`in_progress` + `startedAt`, transaction de `ekbineAgentDepositAction`), l'annulation est refusée. Course annulation/démarrage prouvée sur l'émulateur : un seul des deux aboutit. Interrupteur : **désactivé par défaut au lancement** (voir ci-dessous).
+Limite assumée : « commencé » = l'agent a appuyé sur « Commencer » dans l'application. Une exécution hors application avant cet appui n'est pas détectable ; le risque porte sur l'agent (service rendu puis commande annulée), jamais sur une création d'argent. À encadrer par la consigne donnée aux agents (appuyer sur « Commencer » avant d'exécuter).
+
+**Interface** (`lib/ekbine/ek_tracking.dart`, `ek_order_tracking.dart`) : plus de dépôt demandé aux clients wallet prépayés, frise sans étape de paiement (`Attente → Agent → En cours → Preuve → Terminé`), statut réel (« Agent affecté — paiement déjà effectué »), bouton d'annulation proposé selon la même règle que le serveur (qui reste seul juge). Parcours hors wallet et commandes historiques inchangés (frise enrichie de l'étape « Confirmé », jusque-là absente).
+
+**Règles** : inchangées (l'annulation depuis `deposit_confirmed` n'est possible que par la fonction ; testé).
+
+**Tests** : `ekbineOrders.test.js` (29), émulateur (12, dont acceptation simultanée et course annulation/démarrage), Flutter `ek_tracking_test.dart` (12).
+
+### Interrupteur d'annulation depuis deposit_confirmed — DÉSACTIVÉ au lancement
+- **Serveur** : `EK_CANCEL_FROM_DEPOSIT_CONFIRMED` (variable d'environnement, `functions/.env`). Seule la valeur exacte `true` l'active ; absente ou toute autre valeur = désactivé. Lue à chaque appel de `ekCancelOrderCF`. Le code de remboursement sécurisé est conservé intact.
+- **Flutter** : `kEkCancelFromDepositConfirmed` (`lib/ekbine/ek_tracking.dart`, `false`) masque le bouton. Les deux doivent rester alignés ; le serveur reste seul juge.
+- **Effet actuel** : l'annulation avec remboursement fonctionne tant que la commande est `pending` (avant acceptation) ou `awaiting_deposit` sans preuve ; une commande wallet acceptée (`deposit_confirmed`) ne peut plus être annulée par le client (refus `ORDER_NOT_CANCELLABLE`, aucun remboursement).
+- **Activation ultérieure** : (1) ajouter `EK_CANCEL_FROM_DEPOSIT_CONFIRMED=true` dans `functions/.env`, puis redéployer `ekCancelOrderCF` ; (2) passer `kEkCancelFromDepositConfirmed` à `true` dans la prochaine version de l'application ; (3) donner aux agents la consigne d'appuyer sur « Commencer » avant d'exécuter le service ; (4) rejouer les tests (`ekbineOrders.test.js`, émulateur, `ek_tracking_test.dart`).
+- **Tests** : désactivé par défaut (refus, aucun remboursement) ; annulation avant acceptation conservée ; valeurs d'environnement autres que `true` refusées ; activation lue à chaque appel ; chemin sécurisé testé avec l'interrupteur forcé (unitaires, émulateur, Flutter).

@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
 
 // E-Kbine — création, annulation et confirmation de commande CÔTÉ SERVEUR.
 //
@@ -26,6 +27,32 @@ const EK_SERVICES = Object.freeze({
 });
 // Annulable par le client tant que rien n'a été exécuté : avant toute preuve de dépôt.
 const CANCELLABLE = Object.freeze(['pending', 'awaiting_deposit']);
+// Commande wallet prépayée dont l'agent a accepté mais N'A PAS commencé : annulable tant que l'agent n'a pas appuyé
+// sur « Commencer » (status passe alors à in_progress).
+// DÉSACTIVÉ par défaut (décision de lancement) : activé seulement si EK_CANCEL_FROM_DEPOSIT_CONFIRMED=true dans
+// functions/.env (voir docs/FINANCIAL_EKBINE_2026-11-03.md). Le code de remboursement sécurisé reste en place.
+function cancelFromDepositConfirmedEnabled() {
+  return process.env.EK_CANCEL_FROM_DEPOSIT_CONFIRMED === 'true';
+}
+
+// Débit wallet PROUVÉ côté serveur : preuve écrite par ekCreateOrderCF / AZ IA, montant cohérent, jamais remboursé.
+function provenDebit(order) {
+  return order.paymentMethod === 'wallet' && order.walletDebited === true
+    && Number.isSafeInteger(order.debitedAmount) && order.debitedAmount > 0 && order.debitedAmount === order.amount
+    && order.refunded !== true && order.refundedAmount === undefined;
+}
+
+// Opération non commencée, de façon vérifiable : aucun démarrage, aucune preuve de service, aucun crédit agent.
+function executionNotStarted(order) {
+  return order.startedAt === undefined && order.proofUrl === undefined && order.agentCredited === undefined
+    && order.completedAt === undefined;
+}
+
+function cancellable(order, allowFromDepositConfirmed) {
+  if (CANCELLABLE.includes(order.status)) return true;
+  return allowFromDepositConfirmed && order.status === 'deposit_confirmed'
+    && provenDebit(order) && executionNotStarted(order);
+}
 
 const envelope = (success, code, message, data = null) => ({ success, error: success ? null : code, message, data, code });
 
@@ -165,7 +192,8 @@ function buildEkCreateOrder({ db, admin, onCall, HttpsError, checkRateLimit, log
 }
 
 // ── ekCancelOrderCF ────────────────────────────────────────────────────────
-function buildEkCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit }) {
+// allowCancelFromDepositConfirmed : forcé par les tests ; sinon lu à chaque appel depuis l'environnement (défaut : non).
+function buildEkCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, allowCancelFromDepositConfirmed }) {
   return onCall(async (request) => {
     const uid = requireAuth(request, HttpsError);
     const { orderId, reason } = request.data || {};
@@ -187,12 +215,12 @@ function buildEkCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, log
         const o = orderSnap.data();
         if (o.clientId !== uid) throw new HttpsError('permission-denied', 'Non autorisé');
         if (o.status === 'cancelled') { outcome = { alreadyDone: true, refunded: o.refundedAmount || 0 }; return; }
-        if (!CANCELLABLE.includes(o.status)) {
+        const allowDc = allowCancelFromDepositConfirmed ?? cancelFromDepositConfirmedEnabled();
+        if (!cancellable(o, allowDc)) {
           throw new Refusal('ORDER_NOT_CANCELLABLE', 'Cette commande est déjà en cours d\'exécution et ne peut plus être annulée');
         }
         // Remboursement : uniquement ce que le serveur a prouvé avoir débité, une seule fois.
-        const proven = o.walletDebited === true && Number.isSafeInteger(o.debitedAmount) && o.debitedAmount > 0
-          && o.refunded !== true && o.refundedAmount === undefined;
+        const proven = provenDebit(o);
         let refund = 0;
         let balanceAfter = null;
         if (proven) {
@@ -246,9 +274,7 @@ function buildEkCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, log
 // Montant crédité à l'agent : dérivé de la PREUVE de débit, jamais de `agentEarning` (champ modifiable côté client).
 function creditFor(order) {
   if (order.paymentMethod !== 'wallet') return { credit: 0, reason: 'non_wallet' };
-  const proven = order.walletDebited === true && Number.isSafeInteger(order.debitedAmount) && order.debitedAmount > 0
-    && order.debitedAmount === order.amount && order.refunded !== true;
-  return proven ? { credit: order.debitedAmount, reason: 'proven' } : { credit: 0, reason: 'unproven_debit' };
+  return provenDebit(order) ? { credit: order.debitedAmount, reason: 'proven' } : { credit: 0, reason: 'unproven_debit' };
 }
 
 function buildEkClientConfirmOrder({ db, admin, onCall, HttpsError, checkRateLimit }) {
@@ -304,7 +330,56 @@ function buildEkClientConfirmOrder({ db, admin, onCall, HttpsError, checkRateLim
   });
 }
 
+// ── ekbineAcceptOrder ──────────────────────────────────────────────────────
+// Acceptation par un agent. Commande wallet à débit PROUVÉ : le client a déjà payé via AZ, aucun dépôt ne lui est
+// demandé → directement 'deposit_confirmed' (l'agent peut commencer). Tout autre cas (hors wallet, commande
+// historique sans preuve) : parcours de dépôt inchangé ('awaiting_deposit'). Aucun crédit, aucun débit ici.
+function buildEkbineAcceptOrder({ db, admin, onCall, HttpsError }) {
+  return onCall(async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
+    const orderId = request.data?.orderId;
+    if (typeof orderId !== 'string') throw new HttpsError('invalid-argument', 'orderId manquant');
+    const agentId = request.auth.uid;
+    const orderRef = db.collection('ekbine_orders').doc(orderId);
+    const agentRef = db.collection('ekbine_agents').doc(agentId);
+    let nextStatus;
+    await db.runTransaction(async (tx) => {
+      const [orderSnap, agentSnap] = await Promise.all([tx.get(orderRef), tx.get(agentRef)]);
+      if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
+      if (!agentSnap.exists) throw new HttpsError('permission-denied', 'Agent introuvable');
+      const order = orderSnap.data();
+      const agent = agentSnap.data();
+      if (order.status !== 'pending') throw new HttpsError('failed-precondition', 'Commande non disponible');
+      if (!isEligibleAgent(agent)) throw new HttpsError('permission-denied', 'Agent non éligible');
+      const common = {
+        agentId,
+        agentName: String(agent.name || 'Agent E-Kbine'),
+        agentPhone: String(agent.phone || ''),
+        assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (provenDebit(order)) {
+        nextStatus = 'deposit_confirmed';
+        tx.update(orderRef, { ...common, status: nextStatus, depositConfirmedAt: admin.firestore.FieldValue.serverTimestamp() });
+        return;
+      }
+      const depositAccount = selectDepositAccount(agent, order.operator);
+      if (!depositAccount) throw new HttpsError('failed-precondition', 'Aucun numéro valide pour cet opérateur');
+      nextStatus = 'awaiting_deposit';
+      tx.update(orderRef, {
+        ...common,
+        // Instantanés immuables : les consignes ne changent pas si l'agent modifie son profil.
+        agentDepositAccountId: depositAccount.id,
+        agentDepositNumber: depositAccount.phoneNumber,
+        agentDepositOperator: order.operator,
+        status: nextStatus,
+      });
+    });
+    return { success: true, status: nextStatus };
+  });
+}
+
 module.exports = {
+  buildEkbineAcceptOrder, provenDebit, executionNotStarted, cancelFromDepositConfirmedEnabled,
   buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder, creditFor, orderIdFor,
   EK_SERVICES, MAX_EK_AMOUNT, CANCELLABLE,
 };

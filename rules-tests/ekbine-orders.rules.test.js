@@ -30,6 +30,7 @@ async function env(projectId) {
     await db.doc('ekbine_orders/pending1').set({ ...legacyOrder, ...proven });
     await db.doc('ekbine_orders/await1').set({ ...legacyOrder, ...proven, status: 'awaiting_deposit', agentId: 'a1' });
     await db.doc('ekbine_orders/prog1').set({ ...legacyOrder, ...proven, status: 'in_progress', agentId: 'a1' });
+    await db.doc('ekbine_orders/dc1').set({ ...legacyOrder, ...proven, status: 'deposit_confirmed', agentId: 'a1' });
     await db.doc('ekbine_orders/proof1').set({ ...legacyOrder, ...proven, status: 'proof_sent', agentId: 'a1' });
   });
   return e;
@@ -60,6 +61,8 @@ test('client : annulation légitime acceptée ; montant, gain agent, preuves, mo
     await assertSucceeds(db.doc('ekbine_orders/pending1').update({ status: 'cancelled', cancellationReason: 'x' }));
     await assertFails(db.doc('ekbine_orders/proof1').update({ status: 'disputed', agentEarning: 5 }));
     await assertSucceeds(db.doc('ekbine_orders/proof1').update({ status: 'disputed' }));
+    // Annulation d'une commande prépayée dont l'agent est affecté : uniquement par ekCancelOrderCF (remboursement).
+    await assertFails(db.doc('ekbine_orders/dc1').update({ status: 'cancelled', cancellationReason: 'x' }));
     // Jamais de completed en direct.
     await assertFails(db.doc('ekbine_orders/await1').update({ status: 'completed' }));
   } finally { await e.cleanup(); }
