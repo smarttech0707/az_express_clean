@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../models/order_model.dart';
+import '../../services/firestore_service.dart';
 import '../../services/notification_service.dart';
 import 'order_tracking_map.dart';
 import '../../theme/app_theme.dart';
@@ -41,6 +43,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
   OrderModel? _order;
   bool _driverFound = false;
   bool _navigating = false;
+  bool _cancelling = false;
 
   // 0 = recherche initiale · 1 = rayon élargi · 2 = toute la zone
   int _searchPhase = 0;
@@ -260,14 +263,36 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted || _cancelling) return;
+    // L'annulation passe par cancelOrderCF : seul le serveur rembourse (wallet,
+    // commission du livreur) et refuse une commande livrée, déjà annulée ou
+    // récupérée. Une écriture directe `status: cancelled` ne remboursait rien.
+    setState(() => _cancelling = true);
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      await FirebaseFirestore.instance
-          .collection('orders')
-          .doc(widget.order.id)
-          .update({'status': 'cancelled'});
+      await FirestoreService().cancelOrder(widget.order.id);
       if (mounted) Navigator.pop(context);
-    } catch (_) {}
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      setState(() => _cancelling = false);
+      // « failed-precondition » : annulée entre-temps (réponse perdue lors d'un
+      // essai précédent), récupérée ou livrée. Le flux de la commande ci-dessus
+      // reflète l'état réel ; on ne retente pas automatiquement.
+      messenger.showSnackBar(SnackBar(
+        content: Text(e.code == 'failed-precondition'
+            ? (e.message ?? "Cette commande ne peut plus être annulée.")
+            : "Échec de l'annulation. Vérifiez votre connexion puis réessayez."),
+        backgroundColor: Colors.red,
+      ));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _cancelling = false);
+      messenger.showSnackBar(const SnackBar(
+        content:
+            Text("Échec de l'annulation. Vérifiez votre connexion puis réessayez."),
+        backgroundColor: Colors.red,
+      ));
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════

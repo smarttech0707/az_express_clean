@@ -2765,10 +2765,9 @@ test('LOT 6.1 : une écriture wallet_transactions falsifiée (montant fantaisist
     wallet: 100, fakeOrderCount: 0, cashOnDeliveryEnabled: true,
   }));
   const clientDb = asClient('c1');
-  // Le client PEUT écrire une entrée d'historique fantaisiste sur son propre
-  // journal (déjà accepté comme risque cosmétique — voir CLAUDE.md, aucun
-  // consommateur ne s'appuie dessus pour créditer/rembourser) ...
-  await assertSucceeds(clientDb.doc('clients/c1/wallet_transactions/fake1').set({
+  // Phase A (F5) : le journal du client n'accepte plus de ligne fantaisiste (type, identifiant ou
+  // montant réservés au serveur) — voir rules-tests/wallet-ledger.rules.test.js ...
+  await assertFails(clientDb.doc('clients/c1/wallet_transactions/fake1').set({
     type: 'earning', amount: 999999999, description: 'faux gain', createdAt: new Date(),
   }));
   // ... mais ne peut PAS s'en servir pour augmenter son propre solde réel :

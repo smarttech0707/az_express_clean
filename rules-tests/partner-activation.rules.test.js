@@ -49,9 +49,8 @@ const seedJournal = (uid, mustChangePassword) => env.withSecurityRulesDisabled(
 
 const writes = [
   ['vendeur : modifier son profil', 's1', (db) => db.doc('sellers/s1').update({ name: 'Nouveau nom' })],
-  ['vendeur : journal de transactions', 's1', (db) => db.doc('sellers/s1/wallet_transactions/t1').set({
-    type: 'sale', amount: 100, description: 'x', orderId: 'o1', createdAt: new Date(),
-  })],
+  // Le journal du vendeur n'est plus inscriptible par son propriétaire, activé ou non (Phase A, F5) :
+  // vérifié dans wallet-ledger.rules.test.js.
   ['vendeur : écriture sur une commande', 's1', (db) => db.doc('orders/o1').update({ sellerStatus: 'preparing' })],
   ['boulangerie : modifier son profil', 'b1', (db) => db.doc('boulangeries/b1').update({ name: 'Nouveau nom' })],
   ['boulangerie : gérer ses articles', 'b1', (db) => db.doc('boulangeries/b1/menu_items/i2').set({ name: 'Pain', price: 200 })],

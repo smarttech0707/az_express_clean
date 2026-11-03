@@ -546,3 +546,37 @@ test('502.J succès : aucune qualification derreur produite', () => {
     { s: null, c: null, m: null },
   );
 });
+
+// ── F8 (Phase A) : document wallet_transactions forgé par un client ─────────────────────────────
+// Les règles n'autorisent côté client que { uid, type:'ekbine_payment', amount, createdAt } (voir
+// rules-tests/wallet-ledger.rules.test.js). Même si un webhook annonçait un succès sur un tel identifiant,
+// aucun crédit ne doit partir : pas de userId/userType, et FeexPay ne connaît pas la référence.
+const forgedDoc = () => ({ uid: 'u1', type: 'ekbine_payment', amount: 50000, createdAt: { toDate: () => new Date(NOW - HOUR) } });
+
+test('F8 : succès annoncé sur un identifiant forgé par un client, FeexPay ne le confirme pas → aucun crédit', async () => {
+  const db = makeDb({ 'clients/u1': { wallet: 100 }, 'wallet_transactions/FORGED': forgedDoc() });
+  const result = await processFeexPayWebhookEvent({
+    db, admin: fakeAdmin, body: { id: 'FORGED', status: 'SUCCESSFUL', amount: 50000 }, nowMs: NOW, collectionFor,
+    verifier: createFakeVerifier(async () => ({ confirmed: false, reason: 'unknown_reference' })),
+  });
+  assert.equal(result.outcome, 'verification_failed');
+  assert.equal(db.store.get('clients/u1').wallet, 100);
+  assert.notEqual(db.store.get('wallet_transactions/FORGED').credited, true);
+});
+
+test('F8 : même avec une confirmation, un document sans userId ne crédite aucun portefeuille', async () => {
+  const db = makeDb({ 'clients/u1': { wallet: 100 }, 'wallet_transactions/FORGED': forgedDoc() });
+  await assert.rejects(() => processFeexPayWebhookEvent({
+    db, admin: fakeAdmin, body: { id: 'FORGED', status: 'SUCCESSFUL', amount: 50000 }, nowMs: NOW, collectionFor,
+    verifier: createFakeVerifier(async () => ({ confirmed: true, amount: 50000, reference: 'FORGED' })),
+  }));
+  assert.equal(db.store.get('clients/u1').wallet, 100);
+  assert.notEqual(db.store.get('wallet_transactions/FORGED').credited, true);
+});
+
+test('F8 : identifiant inconnu (jamais créé par le serveur) → 404, aucun effet', async () => {
+  const db = makeDb({ 'clients/u1': { wallet: 100 } });
+  const result = await run(db, { id: 'INVENTE', status: 'SUCCESSFUL', amount: 1000 });
+  assert.equal(result.httpStatus, 404);
+  assert.equal(db.store.get('clients/u1').wallet, 100);
+});

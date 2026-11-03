@@ -1702,3 +1702,52 @@ test('RÉGRESSION cancelOrderCF: preuve absente → aucun crédit, signalement �
   assert.equal(store.get('livreurs/d1').wallet, 50);
   assert.equal(store.get('reconciliation_flags/o1_commission_untraced').proofRejectReason, 'proof_missing');
 });
+
+// ── F2 (Phase A) : annulation client par cancelOrderCF, remboursement unique ─────────────────────
+// L'écran d'attente n'écrit plus `status: cancelled` en direct : tout passe ici. Ces tests verrouillent ce
+// que l'écran suppose du serveur, y compris pour une commande créée par devis (createOrderFromQuoteCF).
+
+const quotedWalletOrder = (extra = {}) => ({
+  clientId: 'c1', status: 'pending', paymentMethod: 'wallet', isPaid: true, type: 'shopping',
+  budget: 1000, shoppingBudget: 3000, tariffQuoteId: 'q1', quotedAmount: 1000, ...extra,
+});
+
+test('F2 cancelOrderCF: commande créée par devis (wallet) → rembourse exactement ce qui a été débité, une seule fois', async () => {
+  const { db, store } = makeFakeDb({ 'orders/o1': quotedWalletOrder(), 'clients/c1': { wallet: 0 } });
+  assert.deepEqual(await cancelO1(db), { success: true });
+  assert.equal(store.get('clients/c1').wallet, 4000);
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+  // Rejeu (réponse perdue côté téléphone) : refusé, aucun second crédit.
+  await assert.rejects(() => cancelO1(db), (err) => err.code === 'failed-precondition');
+  assert.equal(store.get('clients/c1').wallet, 4000);
+});
+
+
+test('F2 cancelOrderCF: commande en espèces → aucun remboursement', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': quotedWalletOrder({ paymentMethod: 'cash', isPaid: false, shoppingBudget: 0 }),
+    'clients/c1': { wallet: 700 },
+  });
+  await cancelO1(db);
+  assert.equal(store.get('clients/c1').wallet, 700);
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+});
+
+test('F2 cancelOrderCF: wallet non encore payé (isPaid false) → aucun remboursement injustifié', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': quotedWalletOrder({ isPaid: false }),
+    'clients/c1': { wallet: 700 },
+  });
+  await cancelO1(db);
+  assert.equal(store.get('clients/c1').wallet, 700);
+});
+
+test('F2 cancelOrderCF: colis déjà récupéré → refusé sans remboursement (demande au support)', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': quotedWalletOrder({ status: 'picked_up', driverId: 'd1' }),
+    'clients/c1': { wallet: 0 }, 'livreurs/d1': { wallet: 0 },
+  });
+  await assert.rejects(() => cancelO1(db), (err) => err.code === 'failed-precondition');
+  assert.equal(store.get('clients/c1').wallet, 0);
+  assert.equal(store.get('orders/o1').status, 'picked_up');
+});

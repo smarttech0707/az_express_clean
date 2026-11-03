@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/storage_cleanup.dart';
 import '../../widgets/az_tab_bar.dart';
@@ -835,41 +836,24 @@ class _RechargesAdminTab extends StatelessWidget {
 
   Future<void> _approve(BuildContext context, DocumentSnapshot doc) async {
     final data = doc.data() as Map<String, dynamic>;
-    final clientId = data["clientId"] as String;
     final amount = (data["amount"] as num? ?? 0).toInt();
-    final method = data["method"] ?? "wave";
-
-    final clientRef =
-        FirebaseFirestore.instance.collection("clients").doc(clientId);
-
-    await FirebaseFirestore.instance.runTransaction((tx) async {
-      final snap = await tx.get(clientRef);
-      final wallet = (snap.data()?["wallet"] as num? ?? 0).toInt();
-      tx.update(clientRef, {"wallet": wallet + amount});
-      tx.update(doc.reference, {
-        "status": "approved",
-        "approvedAt": Timestamp.now(),
-      });
-    });
-
-    await FirebaseFirestore.instance
-        .collection("clients")
-        .doc(clientId)
-        .collection("wallet_transactions")
-        .add({
-      "type": "recharge",
-      "amount": amount,
-      "description":
-          "Recharge ${method == 'wave' ? 'Wave' : 'Orange Money'} — $amount FCFA",
-      "createdAt": Timestamp.now(),
-    });
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text("$amount FCFA crédités au client"),
-            backgroundColor: Colors.green),
-      );
+    final messenger = ScaffoldMessenger.of(context);
+    // Le crédit est fait par adminApproveRechargeCF : le serveur relit le statut, le compte et le
+    // montant dans la demande (une approbation répétée ne crédite pas deux fois). Les paramètres
+    // ci-dessous ne servent qu'à l'affichage.
+    try {
+      await FirestoreService().approveRecharge(
+          doc.id,
+          (data["userId"] ?? data["clientId"] ?? "") as String,
+          "client",
+          amount,
+          (data["method"] ?? "wave") as String);
+      messenger.showSnackBar(SnackBar(
+          content: Text("$amount FCFA crédités au client"),
+          backgroundColor: Colors.green));
+    } catch (e) {
+      messenger.showSnackBar(
+          SnackBar(content: Text("Erreur : $e"), backgroundColor: Colors.red));
     }
   }
 

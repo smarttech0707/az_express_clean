@@ -648,30 +648,13 @@ class FirestoreService {
     });
   }
 
+  /// Approuve une demande de recharge via `adminApproveRechargeCF` : le serveur relit le statut, le montant
+  /// et le compte dans la demande elle-même (les paramètres ci-dessous ne sont conservés que pour ne pas
+  /// casser l'appelant et ne sont PAS envoyés), ne crédite qu'une fois et journalise. Aucune écriture directe
+  /// du solde d'un autre utilisateur depuis l'application.
   Future<void> approveRecharge(String requestId, String userId, String userType,
       int amount, String method) async {
-    final colName = _col(userType);
-    final batch = db.batch();
-    batch.update(db.collection('recharge_requests').doc(requestId), {
-      'status': 'approved',
-      'approvedAt': FieldValue.serverTimestamp(),
-    });
-    batch.update(db.collection(colName).doc(userId), {
-      'wallet': FieldValue.increment(amount),
-    });
-    final txRef = db
-        .collection(colName)
-        .doc(userId)
-        .collection('wallet_transactions')
-        .doc();
-    batch.set(txRef, {
-      'type': 'recharge',
-      'amount': amount,
-      'description':
-          'Recharge ${method == "wave" ? "Wave" : "Orange Money"} — $amount FCFA',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-    await batch.commit();
+    await _callWalletRequestCF('adminApproveRechargeCF', requestId);
   }
 
   Future<void> rejectRecharge(String requestId) async {
@@ -681,28 +664,23 @@ class FirestoreService {
     });
   }
 
-  /// Admin confirme un retrait → débite le wallet et marque comme traité.
+  /// Admin confirme le règlement manuel d'un retrait (pending_manual → processed) via
+  /// adminApproveWithdrawalCF. Le wallet a DÉJÀ été débité à la création de la demande
+  /// (initiateWithdrawal) : l'ancienne version débitait une seconde fois. Le serveur ne touche à aucun solde.
   Future<void> approveWithdrawal(
       String requestId, String userId, String userType, int amount) async {
-    final colName = _col(userType);
-    final userRef = db.collection(colName).doc(userId);
+    await _callWalletRequestCF('adminApproveWithdrawalCF', requestId);
+  }
 
-    final batch = db.batch();
-    batch.update(db.collection('withdrawal_requests').doc(requestId), {
-      'status': 'processed',
-      'processedAt': FieldValue.serverTimestamp(),
-    });
-    // Débiter le wallet de l'utilisateur
-    batch.update(userRef, {'wallet': FieldValue.increment(-amount)});
-    // Logger la transaction
-    final txRef = userRef.collection('wallet_transactions').doc();
-    batch.set(txRef, {
-      'type': 'withdrawal',
-      'amount': amount,
-      'description': 'Retrait approuvé — $amount FCFA',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-    await batch.commit();
+  /// Appel commun des approbations admin ; l'enveloppe {success, code, message} est convertie en erreur lisible.
+  Future<void> _callWalletRequestCF(String name, String requestId) async {
+    final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable(name)
+        .call(<String, dynamic>{'requestId': requestId});
+    final body = result.data;
+    if (body is Map && body['success'] == false) {
+      throw StateError(body['message']?.toString() ?? 'Opération refusée');
+    }
   }
 
   /// Admin rejette un retrait pending_manual → rembourse le wallet (déjà débité).

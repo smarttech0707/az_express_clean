@@ -270,10 +270,24 @@ service cloud.firestore {
       allow delete: if isAdmin();
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(clientId) || isAdmin();
+        // Journal d'AFFICHAGE du client : remboursements, recharges et paiements serveur sont écrits par les
+        // Cloud Functions (Admin SDK, qui ignore ces règles). Seul flux client légitime (blanchisserie, colis,
+        // eau & boissons, restaurant) : une ligne `purchase` avec identifiant automatique du SDK (20 caractères
+        // alphanumériques, jamais un identifiant déterministe du serveur comme order_<id> ou
+        // recharge_request_<id>), champs historiques uniquement, sans provider/txId, montant entier borné.
         allow create: if isAdmin()
           || (isOwner(clientId)
-            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt','provider','txId'])
-            && request.resource.data.amount is int);
+            && txId.matches('[A-Za-z0-9]{20}')
+            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt'])
+            && request.resource.data.type == 'purchase'
+            && request.resource.data.amount is int
+            && request.resource.data.amount >= 0 && request.resource.data.amount <= 1000000
+            && (request.resource.data.get('description', null) == null
+                || (request.resource.data.description is string && request.resource.data.description.size() <= 300))
+            && (request.resource.data.get('orderId', null) == null
+                || (request.resource.data.orderId is string && request.resource.data.orderId.size() <= 128))
+            && (request.resource.data.get('createdAt', null) == null
+                || request.resource.data.createdAt is timestamp));
         allow update: if false;
         allow delete: if isAdmin();
       }
@@ -383,10 +397,10 @@ service cloud.firestore {
       allow delete: if isAdmin();
       match /wallet_transactions/{txId} {
         allow read:   if isOwner(sellerId) || isAdmin();
-        allow create: if isAdmin()
-          || (isOwner(sellerId) && partnerActivated()
-            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt'])
-            && request.resource.data.amount is int);
+        // Aucun écran ni service Flutter n'écrit ce journal (inventaire du code actuel et de l'historique
+        // marketplace) : crédits, reprises et retraits viennent des Cloud Functions. Le propriétaire ne peut donc
+        // plus fabriquer de fausses lignes de gain ou de retrait.
+        allow create: if isAdmin();
         allow update: if false;
         allow delete: if isAdmin();
       }

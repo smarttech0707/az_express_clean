@@ -2786,3 +2786,15 @@ exports.quoteDeliveryCF = buildQuoteDeliveryCF({
 exports.createOrderFromQuoteCF = buildCreateOrderFromQuoteCF({
   db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
 });
+
+// ═════════════════════════════════════════════════
+// APPROBATION ADMIN DES RECHARGES ET RETRAITS MANUELS (remplace les écritures wallet directes de l'écran admin)
+// Transactionnelles, idempotentes, super-admin uniquement. Quota Cloud Run : 0,5 CPU × 1 instance chacune.
+// ═════════════════════════════════════════════════
+const { buildAdminApproveRecharge, buildAdminApproveWithdrawal } = require('./adminWalletRequests');
+exports.adminApproveRechargeCF = buildAdminApproveRecharge({
+  db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+});
+exports.adminApproveWithdrawalCF = buildAdminApproveWithdrawal({
+  db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+});
