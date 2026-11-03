@@ -2732,3 +2732,15 @@ exports.ekCreateOrderCF = buildEkCreateOrder({
 exports.ekCancelOrderCF = buildEkCancelOrder({
   db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
 });
+
+// ═════════════════════════════════════════════════
+// DEVIS CATALOGUE — Colis, Blanchisserie, Eau & Boissons : prix calculés côté serveur (catalogTariff.js).
+// Nouveaux points d'entrée, non appelés par l'application actuelle. Quota Cloud Run : 0,5 CPU × 2 chacune (+2).
+// ═════════════════════════════════════════════════
+const { buildQuoteCatalogCF, buildCreateCatalogOrderFromQuoteCF } = require('./catalogQuote');
+exports.quoteCatalogCF = buildQuoteCatalogCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit,
+});
+exports.createCatalogOrderFromQuoteCF = buildCreateCatalogOrderFromQuoteCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+});
