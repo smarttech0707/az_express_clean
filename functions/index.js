@@ -2757,3 +2757,9 @@ exports.quotePartnerOrderCF = buildQuotePartnerOrderCF({
 exports.createPartnerOrderFromQuoteCF = buildCreatePartnerOrderFromQuoteCF({
   db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
 });
+// Préparation des commandes Restaurant/Boulangerie v2 (Mission 7B-3B-P, locale, non déployée). Pas d'interrupteur :
+// sans commande v2 elle n'a rien à traiter. Quota Cloud Run : 0,5 CPU × 2 (+1).
+const { buildPartnerOrderAction } = require('./partnerOrderActions');
+exports.partnerOrderActionCF = buildPartnerOrderAction({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission,
+});

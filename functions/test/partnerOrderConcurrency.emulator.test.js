@@ -318,3 +318,104 @@ test('A1 émulateur : confirmation administrative de livraison ET annulation exc
     }
   }
 });
+
+// ── Mission 7B-3B-P : préparation partenaire (partnerOrderActionCF) sur transactions réellement concurrentes ──
+
+let partnerAct; let driverAccept;
+function prepTools() {
+  if (partnerAct) return;
+  const { HttpsError } = require('firebase-functions/v2/https');
+  const { buildPartnerOrderAction } = require('../partnerOrderActions');
+  const { buildAcceptOrder } = require('../driverAcceptance');
+  const { withSelfie } = require('./selfieHelper');
+  const { calculateCommission } = require('../dispatch');
+  const base = { db, admin, HttpsError, checkRateLimit: async () => {}, logAudit: async () => {}, calculateCommission, onCall: (...a) => ({ run: a[a.length - 1] }) };
+  partnerAct = buildPartnerOrderAction(base).run;
+  driverAccept = withSelfie(buildAcceptOrder(base).run);
+}
+const act = (orderId, action, uid = 'pr1') => partnerAct(as(uid, { orderId, action }));
+const refundsOf = async (uid) => (await db.collection(`clients/${uid}/wallet_transactions`).where('type', '==', 'refund').get()).size;
+async function assignedOrder(uid, driverId) {
+  await db.doc(`clients/${uid}`).set({ wallet: 10000 });
+  await db.doc(`livreurs/${driverId}`).set({ wallet: 1000, isOnline: true, isAvailable: true });
+  const quote = await run.quote(as(uid, rReq));
+  const created = await run.order(as(uid, pay(quote)));
+  const orderId = created.data.orderId;
+  await db.doc(`orders/${orderId}`).update({ status: 'assigned', driverId });
+  return { orderId, quote };
+}
+
+test('préparation vs annulation client simultanées : jamais de remboursement après préparation commencée', options, async () => {
+  prepTools();
+  for (let i = 0; i < 6; i++) {
+    const uid = `s${i}`; const driver = `ds${i}`;
+    const { orderId, quote } = await paidOrder(uid, driver);
+    const c0 = await walletOf(uid);
+    await settled(i % 2
+      ? [run.cancel(as(uid, { orderId })), act(orderId, 'startPreparation')]
+      : [act(orderId, 'startPreparation'), run.cancel(as(uid, { orderId }))]);
+    // Une transaction abandonnée sous contention n'a aucun effet : rejouable sans risque.
+    let o = await orderOf(orderId);
+    if (o.status !== 'cancelled' && o.sellerStatus !== 'preparing') { await act(orderId, 'startPreparation'); o = await orderOf(orderId); }
+    if (o.status === 'cancelled') {
+      assert.equal(o.sellerStatus, undefined, `tour ${i} : annulée avant tout démarrage`);
+      assert.equal(await walletOf(uid), c0 + quote.data.total, `tour ${i} : remboursement intégral`);
+    } else {
+      assert.equal(o.sellerStatus, 'preparing');
+      assert.equal(await walletOf(uid), c0, `tour ${i} : pas de remboursement`);
+    }
+  }
+});
+
+test('refus du partenaire : 6 appels simultanés + annulation client → un seul remboursement exact, commission rendue une fois', options, async () => {
+  prepTools();
+  const { orderId, quote } = await paidOrder('t1', 'dt1');
+  const c0 = await walletOf('t1');
+  await settled([...Array.from({ length: 6 }, () => act(orderId, 'refusePartnerOrder')), run.cancel(as('t1', { orderId }))]);
+  if ((await orderOf(orderId)).status !== 'cancelled') await act(orderId, 'refusePartnerOrder');
+  const o = await orderOf(orderId);
+  assert.equal(o.status, 'cancelled');
+  assert.equal(await walletOf('t1'), c0 + quote.data.total, 'total payé rendu, une seule fois');
+  assert.equal((await db.doc('livreurs/dt1').get()).data().wallet, 1000, 'commission rendue une seule fois');
+  assert.equal(await refundsOf('t1'), 1);
+});
+
+test('refus du partenaire vs acceptation du livreur : état final cohérent dans tous les ordres', options, async () => {
+  prepTools();
+  for (let i = 0; i < 6; i++) {
+    const uid = `u${i}`; const driver = `du${i}`;
+    const { orderId, quote } = await assignedOrder(uid, driver);
+    const c0 = await walletOf(uid);
+    await settled(i % 2
+      ? [driverAccept(as(driver, { orderId })), act(orderId, 'refusePartnerOrder')]
+      : [act(orderId, 'refusePartnerOrder'), driverAccept(as(driver, { orderId }))]);
+    let o = await orderOf(orderId);
+    if (o.status !== 'cancelled' && o.status !== 'accepted') o = await orderOf(orderId);
+    const d = (await db.doc(`livreurs/${driver}`).get()).data();
+    if (o.status === 'cancelled') {
+      assert.equal(await walletOf(uid), c0 + quote.data.total, `tour ${i} : remboursé`);
+      assert.equal(d.wallet, 1000, `tour ${i} : livreur rendu à son solde initial (commission rendue ou jamais prélevée)`);
+      assert.equal(await refundsOf(uid), 1);
+    } else {
+      assert.equal(o.status, 'accepted');
+      assert.equal(await walletOf(uid), c0, `tour ${i} : le refus a échoué proprement, rien n'est remboursé`);
+      assert.equal(d.wallet, 900, `tour ${i} : commission prélevée une fois`);
+    }
+  }
+});
+
+test('préparation complète sur l\'émulateur : accepter, préparer, prête ; récupération seulement après ready', options, async () => {
+  prepTools();
+  const { partnerPickupBlock } = require('../partnerOrderAmounts');
+  const { orderId } = await paidOrder('v1', 'dv1');
+  assert.ok(partnerPickupBlock(await orderOf(orderId)));
+  assert.equal((await act(orderId, 'acceptPartnerOrder')).success, true);
+  assert.equal((await act(orderId, 'markReady')).code, 'INVALID_TRANSITION');
+  assert.equal((await act(orderId, 'startPreparation')).success, true);
+  assert.ok(partnerPickupBlock(await orderOf(orderId)));
+  assert.equal((await act(orderId, 'markReady')).success, true);
+  assert.equal(partnerPickupBlock(await orderOf(orderId)), null);
+  assert.equal((await act(orderId, 'refusePartnerOrder')).code, 'PREPARATION_STARTED');
+  assert.equal((await act(orderId, 'startPreparation')).code, 'INVALID_TRANSITION');
+  assert.equal((await act(orderId, 'startPreparation', 'someone-else')).code, 'ORDER_NOT_FOUND');
+});
