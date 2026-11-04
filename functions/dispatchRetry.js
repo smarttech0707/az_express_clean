@@ -55,7 +55,10 @@ function queuedAtMs(order) {
   const created = millisOf(order.createdAt);
   const requeued = millisOf(order.requeuedAt);
   if (created == null && requeued == null) return null;
-  return Math.max(created || 0, requeued || 0);
+  // Commande partenaire v2 : la file commence à l'ACCEPTATION du partenaire (les paliers 30 s/90 s... et l'abandon à 9 min
+  // se comptent depuis ce moment, pas depuis la création).
+  const accepted = order.amountsVersion === 2 ? millisOf(order.partnerAcceptedAtMs) : null;
+  return Math.max(created || 0, requeued || 0, accepted || 0);
 }
 
 // Réserve (ou refuse) le prochain essai. Une seule exécution gagne : la
@@ -68,6 +71,7 @@ async function reserveAttempt(db, { orderRef, retryRef, nowMs }) {
     const order = orderSnap.data();
     const broadcast = order.status === 'broadcast';
     if ((order.status !== 'pending' && !broadcast) || order.driverId) return { reserved: false, reason: 'not_pending' };
+    if (order.amountsVersion === 2 && !order.partnerAcceptedAtMs) return { reserved: false, reason: 'awaiting_partner' };
 
     const queued = queuedAtMs(order);
     if (queued == null) return { reserved: false, reason: 'no_timestamp' };

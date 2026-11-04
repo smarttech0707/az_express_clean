@@ -3,6 +3,10 @@ const {assertNewAccountActivity}=require('../../accountAdmission');
 
 const { createPendingAction } = require('../pendingActions');
 const { dispatchOrder } = require('../../dispatch');
+const { CONFIG_COLLECTION, CONFIG_DOC, parsePilotConfig, loadPilotConfig, legacyCreationBlocked } = require('../../partnerOrdersConfig');
+
+// Mission 7C-1 : un partenaire pilote dont la création v2 est active ne reçoit plus de commande au format historique.
+const LEGACY_BLOCKED_MSG = 'Ce restaurant utilise la nouvelle commande avec devis : passez par l’écran de commande de l’application.';
 
 const MAX_ITEMS = 30;
 const RESULT_LIMIT = 10;
@@ -126,6 +130,8 @@ function createRestaurantOrder({ db, admin, HttpsError }) {
 
       const paymentMethod = input?.paymentMethod === 'wallet' ? 'wallet' : 'cash';
 
+      if (legacyCreationBlocked(await loadPilotConfig(db), restaurantId)) return { error: LEGACY_BLOCKED_MSG };
+
       if (paymentMethod === 'wallet') {
         const snap = await db.collection('clients').doc(uid).get();
         const balance = (snap.exists ? snap.data().wallet : 0) || 0;
@@ -155,6 +161,11 @@ function createRestaurantOrder({ db, admin, HttpsError }) {
     confirmHandler: async (tx, uid, toolInput) => {
       const { restaurantId, restaurantName, items, budget, deliveryLat, deliveryLng, paymentMethod } = toolInput;
       await assertNewAccountActivity(tx,db,HttpsError,uid,[['restaurants',restaurantId]]);
+      // Relu dans la transaction : l'activation du pilote peut avoir eu lieu entre la proposition et la confirmation.
+      const pilotSnap = await tx.get(db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC));
+      if (legacyCreationBlocked(parsePilotConfig(pilotSnap.exists ? pilotSnap.data() : null), restaurantId)) {
+        throw new HttpsError('failed-precondition', LEGACY_BLOCKED_MSG);
+      }
 
       // Le restaurant est crédité plus tard par deliverOrderCF (côté serveur,
       // quand le livreur marque la commande livrée) — pas ici. Créditer le

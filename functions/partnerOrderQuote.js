@@ -24,6 +24,7 @@ const { DEFAULT_TARIFF_CONFIG } = require('./tariffConfig');
 const { computeOfficialTariff, validPoint } = require('./officialTariff');
 const { assertNewAccountActivity } = require('./accountAdmission');
 const { buildPartnerAmounts } = require('./partnerOrderAmounts');
+const { creationEnabled, loadPilotConfig, parsePilotConfig, v2CreationAllowed } = require('./partnerOrdersConfig');
 const {
   PARTNER_KINDS, PartnerRefusal, parseItems, partnerRefusal, partnerPoint, priceItems, itemsFingerprint,
 } = require('./partnerCatalog');
@@ -35,7 +36,8 @@ const envelope = (success, code, message, data = null) => ({ success, error: suc
 const coord = (n) => Math.round(n * 1e5) / 1e5;
 const canonicalPoint = (p) => ({ lat: coord(p.lat), lng: coord(p.lng) });
 const samePoint = (a, b) => !!a && !!b && coord(a.lat) === coord(b.lat) && coord(a.lng) === coord(b.lng);
-const defaultEnabled = () => process.env.PARTNER_ORDERS_V2 === 'on';
+// Interrupteur de CRÉATION (partnerOrdersConfig.js) : la gestion des commandes existantes est un autre interrupteur.
+const defaultEnabled = creationEnabled;
 const defaultGeography = (db, args) => require('./dispatch').resolveDispatchGeography(db, args);
 
 function text(value, { max, required = false, field }) {
@@ -91,7 +93,7 @@ async function readPartnerAndMenu(read, kind, sellerId, items) {
 // ── quotePartnerOrderCF ────────────────────────────────────────────────────
 function buildQuotePartnerOrderCF({
   db, admin, onCall, HttpsError, checkRateLimit, loadConfig = async () => DEFAULT_TARIFF_CONFIG,
-  now = () => Date.now(), randomId = () => crypto.randomUUID(), isEnabled = defaultEnabled,
+  now = () => Date.now(), randomId = () => crypto.randomUUID(), isEnabled = defaultEnabled, loadPilot = () => loadPilotConfig(db),
 }) {
   return onCall(async (request) => {
     const uid = requireClientAuth(request, HttpsError);
@@ -101,6 +103,8 @@ function buildQuotePartnerOrderCF({
     try {
       const c = parseChoices(d);
       assertActiveClient(await db.collection('clients').doc(uid).get());
+      // Activation progressive : si une liste pilote existe, seuls ces partenaires acceptent des commandes v2.
+      if (!v2CreationAllowed(await loadPilot(), c.sellerId)) throw new PartnerRefusal('PARTNER_NOT_IN_PILOT', 'Ce partenaire n’accepte pas encore ce type de commande');
       const read = (collection, id) => db.collection(collection).doc(id).get();
       const { partner, menu } = await readPartnerAndMenu(read, c.sellerType, c.sellerId, c.items);
       const nowMs = now();
@@ -202,6 +206,7 @@ function buildCreatePartnerOrderFromQuoteCF({
         const quoteSnap = await tx.get(quoteRef);
         const clientSnap = await tx.get(clientRef);
         const orderSnap = await tx.get(orderRef);
+        const pilotSnap = await tx.get(db.collection('config').doc('partnerOrdersV2'));
         if (!quoteSnap.exists) throw new PartnerRefusal('QUOTE_NOT_FOUND', 'Devis introuvable');
         const q = quoteSnap.data();
         // Même réponse qu'un devis absent : on ne révèle ni le devis d'un autre client ni celui d'un autre type.
@@ -211,6 +216,9 @@ function buildCreatePartnerOrderFromQuoteCF({
         if (q.status !== 'open') throw new PartnerRefusal('QUOTE_ALREADY_USED', 'Devis déjà utilisé');
         if (!(q.expiresAtMs > nowMs)) throw new PartnerRefusal('QUOTE_EXPIRED', 'Devis expiré');
         if (orderSnap.exists) throw new PartnerRefusal('ORDER_EXISTS', 'Commande déjà créée');
+        if (!v2CreationAllowed(parsePilotConfig(pilotSnap.exists ? pilotSnap.data() : null), q.sellerId)) {
+          throw new PartnerRefusal('PARTNER_NOT_IN_PILOT', 'Ce partenaire n’accepte pas encore ce type de commande');
+        }
         if (!geography) throw new PartnerRefusal('GEOGRAPHY_UNAVAILABLE', 'Zone de livraison indisponible, réessayez');
         // Le document de devis n'a pas été altéré (il n'est inscriptible que par le serveur ; défense en profondeur).
         if (!Array.isArray(q.lines) || itemsFingerprint(q.lines) !== q.fingerprint) throw new PartnerRefusal('QUOTE_CORRUPTED', 'Devis invalide');

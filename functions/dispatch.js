@@ -326,6 +326,11 @@ async function dispatchOrder(db, admin, {
       return { dispatched: false, mode: 'none' };
     }
     const current = orderSnap.data();
+    // Commande Restaurant/Boulangerie v2 : jamais proposée aux livreurs avant l'acceptation du partenaire. Relu ICI, dans la
+    // transaction d'attribution : aucun appel (client, scheduler, admin) ne peut contourner ce contrôle.
+    if (current.amountsVersion === 2 && !current.partnerAcceptedAtMs) {
+      return { dispatched: false, mode: 'awaiting_partner' };
+    }
     const expanding = expandBroadcast === true && current.status === 'broadcast' && !current.driverId;
     if (current.status !== 'pending' && !expanding) {
       return { dispatched: false, mode: 'already_assigned' };

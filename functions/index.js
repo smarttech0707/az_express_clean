@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { expireOrderTx, rateLimitCancelTx } = require('./orderRefunds');
 const { retryPendingDispatch, newlyNotifiedDriverIds } = require('./dispatchRetry');
 const { observeOrderTariff } = require('./tariffObservation');
-const { scanStuckOrders, scanOverdueCashRemittances } = require('./stuckOrderAlerts');
+const { scanStuckOrders, scanOverdueCashRemittances, scanPartnerOrderWaits } = require('./stuckOrderAlerts');
 const { buildAdminBilling } = require('./adminBilling');
 const { buildAdminOrderDispute } = require('./adminOrderDisputes');
 const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
@@ -2139,6 +2139,9 @@ exports.autoExpireOrders = onSchedule({
       // 7B-3B-C : alerte (sans sanction) sur les reversements cash v2 non confirmés après 24 h.
       await scanOverdueCashRemittances({ db, sendToToken, logAudit })
         .catch((err) => console.error('[cashRemittance]', err.message));
+      // 7C-1 : commandes v2 sans réponse du partenaire, ou préparées sans livreur (plus d'expiration automatique).
+      await scanPartnerOrderWaits({ db, sendToToken, logAudit })
+        .catch((err) => console.error('[partnerOrderWaits]', err.message));
     }
   }
 });
@@ -2161,10 +2164,14 @@ async function expireStaleOrders() {
     const order   = doc.data();
 
     try {
+      // Commande partenaire v2 pas encore acceptée : le partenaire a le temps de répondre, rien à expirer (alerte dédiée).
+      if (order.amountsVersion === 2 && !order.partnerAcceptedAtMs) continue;
       // Transaction atomique — protège contre la race condition avec acceptOrder().
       // Logique (annulation, remboursement client, reprise vendeur, métriques)
       // dans orderRefunds.js pour être testée.
-      await db.runTransaction((tx) => expireOrderTx(tx, { db, admin, orderRef: doc.ref, orderId }));
+      const expiry = await db.runTransaction((tx) => expireOrderTx(tx, { db, admin, orderRef: doc.ref, orderId }));
+      // Rien n'a été expiré (acceptée entre-temps, délai v2 non écoulé...) : ni règlement ni journal « annulée ».
+      if (expiry && expiry.expired === false) continue;
 
       // Re-read terminal state and compare each reference transactionally.
       // If acceptance won the race, this does nothing.
@@ -2761,8 +2768,11 @@ exports.createPartnerOrderFromQuoteCF = buildCreatePartnerOrderFromQuoteCF({
   db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
 });
 // Préparation et reversement cash des commandes Restaurant/Boulangerie v2 (Missions 7B-3B-P/C, locale, non déployée).
-// Désactivée par défaut comme les devis (PARTNER_ORDERS_V2 != 'on' → FEATURE_DISABLED). Quota Cloud Run : 0,5 CPU × 2 (+1).
+// Gestion des commandes v2 existantes : active par défaut, gel d'urgence PARTNER_ORDERS_V2_MANAGE=off. La CRÉATION (devis +
+// création) reste désactivée par défaut (PARTNER_ORDERS_V2 != 'on'). Quota Cloud Run : 0,5 CPU × 2 (+1).
 const { buildPartnerOrderAction } = require('./partnerOrderActions');
+const { dispatchAcceptedPartnerOrder } = require('./partnerDispatch');
 exports.partnerOrderActionCF = buildPartnerOrderAction({
   db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission, requireSuperAdmin,
+  dispatchAccepted: (orderId) => dispatchAcceptedPartnerOrder({ db, admin, dispatchOrder, orderId }),
 });

@@ -236,7 +236,7 @@ test('annulation après récupération : bloquée pour le client (inchangé), pa
 });
 
 test('expiration sans livreur (autoExpireOrders) : remboursement du total v2, rien au partenaire', async () => {
-  const t = world({ status: 'pending', driverId: null, commissionStatus: null, commissionPayerId: null, commissionAmount: null });
+  const t = world({ status: 'pending', driverId: null, partnerAcceptedAtMs: 1,commissionStatus: null, commissionPayerId: null, commissionAmount: null });
   const orderRef = t.db.collection('orders').doc('o1');
   const r = await t.db.runTransaction((tx) => expireOrderTx(tx, { db: t.db, admin, orderRef, orderId: 'o1' }));
   assert.equal(r.expired, true);

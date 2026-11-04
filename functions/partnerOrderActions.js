@@ -32,13 +32,20 @@
 // confirmation intégrale du partenaire ou une régularisation administrative pose merchantCashSettled = true. Un reliquat
 // n'est jamais débité automatiquement : il reste tracé (outstanding ; reconciliation_flags à la régularisation).
 //
-// INTERRUPTEUR : sans PARTNER_ORDERS_V2=on, TOUTES les actions sont refusées (FEATURE_DISABLED), comme quotePartnerOrderCF
-// et createPartnerOrderFromQuoteCF. Conséquence assumée : couper l'interrupteur fige aussi les commandes v2 en cours.
+// INTERRUPTEURS (partnerOrdersConfig.js) : la CRÉATION de commandes v2 (PARTNER_ORDERS_V2=on, désactivée par défaut) est
+// indépendante de leur GESTION. Cette fonction ne dépend que de PARTNER_ORDERS_V2_MANAGE, activée par défaut : arrêter les
+// nouvelles commandes laisse terminer, refuser et résoudre (cash, litiges) celles qui existent. PARTNER_ORDERS_V2_MANAGE=off
+// est un gel d'urgence : toutes les actions répondent alors FEATURE_DISABLED.
+//
+// DISPATCH : à la PREMIÈRE acceptation du partenaire (acceptPartnerOrder ou startPreparation), la commande est proposée aux
+// livreurs, une seule fois (la première transition est unique car sérialisée sur le document de commande), via
+// `dispatchAccepted` (partnerDispatch.js). Un échec n'affecte jamais l'acceptation : la reprise serveur prend le relais.
 
 const { PARTNER_AMOUNTS_VERSION, PARTNER_SELLER_TYPES, readPartnerAmounts } = require('./partnerOrderAmounts');
 const { PARTNER_KINDS } = require('./partnerCatalog');
 const { cancelOrderTx, cancelOrderPostTx, isPickedUp } = require('./orderActions');
 const { runLifecycleTransaction } = require('./driverLifecycle');
+const { managementEnabled } = require('./partnerOrdersConfig');
 
 const PREP_ACTIONS = Object.freeze(['acceptPartnerOrder', 'startPreparation', 'acceptAndPrepare', 'markReady', 'refusePartnerOrder']);
 const CASH_ACTIONS = Object.freeze(['declareCashHandover', 'confirmCashRemittance', 'disputeCashRemittance', 'resolveCashRemittance']);
@@ -48,7 +55,7 @@ const ACTIVE_STATUSES = Object.freeze(['pending', 'broadcast', 'assigned', 'acce
 const STARTED = Object.freeze(['preparing', 'ready']);
 
 const envelope = (success, code, message, data = null) => ({ success, error: success ? null : code, message, data, code });
-const defaultEnabled = () => process.env.PARTNER_ORDERS_V2 === 'on';
+const defaultEnabled = managementEnabled;
 
 class Refusal extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -67,7 +74,7 @@ function describeCash(c, due) {
 
 function buildPartnerOrderAction({
   db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission, requireSuperAdmin, now = Date.now,
-  isEnabled = defaultEnabled,
+  isEnabled = defaultEnabled, dispatchAccepted,
 }) {
   return onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
@@ -137,8 +144,14 @@ function buildPartnerOrderAction({
         metadata: { sellerStatus: outcome.sellerStatus, ...(outcome.refund ? { clientRefund: outcome.refund.clientRefund, driverRefund: outcome.refund.driverRefund } : {}) },
       });
     }
+    // Première acceptation seulement : proposer la commande aux livreurs (jamais bloquant pour le partenaire).
+    let dispatch;
+    if (outcome.dispatchNow && !outcome.replay && typeof dispatchAccepted === 'function') {
+      dispatch = await Promise.resolve(dispatchAccepted(d.orderId)).catch(() => ({ dispatched: false, mode: 'error' }));
+    }
     return envelope(true, null, outcome.message, {
       orderId: d.orderId, action, sellerStatus: outcome.sellerStatus, replay: outcome.replay === true,
+      ...(dispatch ? { dispatch: { dispatched: dispatch.dispatched === true, mode: dispatch.mode } } : {}),
       ...(outcome.refund ? { refund: { clientRefund: outcome.refund.clientRefund, driverRefund: outcome.refund.driverRefund } } : {}),
     });
   });
@@ -287,7 +300,7 @@ function buildPartnerOrderAction({
     if (action === 'acceptPartnerOrder') {
       if (order.partnerAcceptedAtMs || current) return replayOf(current, 'Commande déjà acceptée');
       tx.update(orderRef, { partnerAcceptedAtMs: nowMs });
-      return { ...base, sellerStatus: current, message: 'Commande acceptée' };
+      return { ...base, sellerStatus: current, message: 'Commande acceptée', dispatchNow: true };
     }
 
     if (action === 'startPreparation') {
@@ -297,7 +310,7 @@ function buildPartnerOrderAction({
         sellerStatus: 'preparing', preparationStartedAtMs: nowMs,
         ...(order.partnerAcceptedAtMs ? {} : { partnerAcceptedAtMs: nowMs }),
       });
-      return { ...base, sellerStatus: 'preparing', message: 'Préparation commencée' };
+      return { ...base, sellerStatus: 'preparing', message: 'Préparation commencée', dispatchNow: !order.partnerAcceptedAtMs };
     }
 
     if (action === 'markReady') {

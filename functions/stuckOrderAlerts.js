@@ -172,4 +172,69 @@ async function scanOverdueCashRemittances({
   return summary;
 }
 
-module.exports = { scanStuckOrders, scanOverdueCashRemittances, referenceMs, THRESHOLDS_MS, COLLECTION, CASH_REMITTANCE_DELAY_MS };
+// Mission 7C-1 — commandes Restaurant/Boulangerie v2 en attente. Une v2 n'expire plus tant que le partenaire n'a pas répondu
+// ni tant que la préparation est lancée : ces attentes sont rendues VISIBLES par une alerte administrative (aucune
+// annulation, aucun remboursement automatique). Deux types, une alerte par commande et par type (document déterministe) :
+//   partner_no_response : v2 pending, jamais acceptée, 10 min après la création.
+//   prepared_no_driver  : v2 acceptée, préparation commencée, aucun livreur, 10 min après l'acceptation (ou la remise en file).
+const PARTNER_WAIT_MS = 10 * 60 * 1000;
+
+async function scanPartnerOrderWaits({
+  db, sendToToken, logAudit, nowMs = Date.now(), logger = console,
+}) {
+  const summary = { scanned: 0, alerted: 0, duplicates: 0, errors: 0 };
+  let docs;
+  try {
+    const snap = await db.collection('orders').where('amountsVersion', '==', 2).where('status', 'in', ['pending', 'broadcast']).limit(BATCH_LIMIT).get();
+    docs = snap.docs;
+  } catch (err) {
+    summary.errors += 1;
+    logger.error(`[partnerWaits] lecture impossible : ${err.message}`);
+    return summary;
+  }
+  for (const doc of docs) {
+    summary.scanned += 1;
+    try {
+      const o = doc.data();
+      if (o.amountsVersion !== 2 || o.driverId) continue;
+      let type = null; let since = null;
+      if (!o.partnerAcceptedAtMs) {
+        since = millis(o.createdAt);
+        if (o.status === 'pending' && since != null && nowMs - since >= PARTNER_WAIT_MS) type = 'partner_no_response';
+      } else if (o.sellerStatus === 'preparing' || o.sellerStatus === 'ready') {
+        since = Math.max(millis(o.partnerAcceptedAtMs) || 0, millis(o.requeuedAt) || 0) || null;
+        if (since != null && nowMs - since >= PARTNER_WAIT_MS) type = 'prepared_no_driver';
+      }
+      if (!type) continue;
+      try {
+        await db.collection(COLLECTION).doc(`${doc.id}_${type}_${since}`).create({
+          orderId: doc.id, type, referenceMs: since, alertedAtMs: nowMs,
+          partnerId: o.sellerId || null, minutes: Math.round((nowMs - since) / 60000),
+        });
+      } catch (err) {
+        if (/already exists|ALREADY_EXISTS|existant|exists/i.test(String(err.message || err.code))) { summary.duplicates += 1; continue; }
+        throw err;
+      }
+      summary.alerted += 1;
+      const minutes = Math.round((nowMs - since) / 60000);
+      const body = type === 'partner_no_response'
+        ? `Le partenaire n’a pas répondu à une commande depuis ${minutes} min. Aucune annulation automatique.`
+        : `Commande préparée sans livreur depuis ${minutes} min. Aucune annulation automatique : contactez le partenaire et le client.`;
+      const admins = await db.collection('admins').where('isActive', '==', true).get();
+      const tokens = alertTokens(admins.docs);
+      await Promise.all(tokens.map((token) => sendToToken(token, 'Commande partenaire en attente', body,
+        { type, orderId: doc.id }).catch(() => {})));
+      await logAudit({
+        userId: 'system', userType: 'system', action: `${type}_alert`, targetId: doc.id,
+        status: 'success', metadata: { minutes, notified: tokens.length },
+      });
+    } catch (err) {
+      summary.errors += 1;
+      logger.error(`[partnerWaits] ${doc.id} : ${err.message}`);
+    }
+  }
+  if (summary.alerted || summary.errors) logger.log(`[partnerWaits] ${JSON.stringify(summary)}`);
+  return summary;
+}
+
+module.exports = { scanStuckOrders, scanOverdueCashRemittances, scanPartnerOrderWaits, PARTNER_WAIT_MS, referenceMs, THRESHOLDS_MS, COLLECTION, CASH_REMITTANCE_DELAY_MS };

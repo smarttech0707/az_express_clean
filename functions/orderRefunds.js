@@ -67,6 +67,15 @@ async function expireOrderTx(tx, { db, admin, orderRef, orderId }) {
   // Remise en file par un livreur : le délai de 10 min repart de la remise en file.
   const requeuedMs = order.requeuedAt?.toMillis?.();
   if (requeuedMs && Date.now() - requeuedMs < 10 * 60 * 1000) return { expired: false };
+  if (order.amountsVersion === 2) {
+    // Commande partenaire v2 : « aucun livreur » ne se mesure qu'à partir de l'acceptation du partenaire (avant, aucun
+    // livreur n'a été sollicité). Préparation commencée : plus d'annulation ni de remboursement automatiques, la décision
+    // est administrative (alerte stuckOrderAlerts).
+    const acceptedMs = Number(order.partnerAcceptedAtMs);
+    if (!Number.isFinite(acceptedMs) || acceptedMs <= 0) return { expired: false, reason: 'awaiting_partner' };
+    if (Date.now() - acceptedMs < 10 * 60 * 1000) return { expired: false, reason: 'awaiting_driver' };
+    if (['preparing', 'ready'].includes(order.sellerStatus)) return { expired: false, reason: 'preparation_started' };
+  }
 
   const willRefund = order.paymentMethod === 'wallet' && order.isPaid === true;
   // Toutes les lectures avant toute écriture.

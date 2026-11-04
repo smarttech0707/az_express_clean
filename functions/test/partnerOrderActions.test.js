@@ -370,20 +370,22 @@ test('interrupteur désactivé : l\'authentification reste exigée avant tout (a
   await assert.rejects(() => fn({ data: { orderId: 'o1', action: 'markReady' } }), (e) => e.code === 'unauthenticated');
 });
 
-test('interrupteur par défaut : désactivé sans PARTNER_ORDERS_V2=on', async () => {
-  const previous = process.env.PARTNER_ORDERS_V2;
+test('interrupteurs : la gestion reste active sans PARTNER_ORDERS_V2 ; PARTNER_ORDERS_V2_MANAGE=off la gèle', async () => {
+  const prev = { c: process.env.PARTNER_ORDERS_V2, m: process.env.PARTNER_ORDERS_V2_MANAGE };
   try {
-    delete process.env.PARTNER_ORDERS_V2;
+    delete process.env.PARTNER_ORDERS_V2; delete process.env.PARTNER_ORDERS_V2_MANAGE;
     const t = cw();
     const fn = buildPartnerOrderAction({
       db: t.db, admin, HttpsError, onCall: oc, checkRateLimit: async () => {}, logAudit: async () => {}, calculateCommission,
     }).run;
-    assert.equal((await fn({ auth: authOf('dA'), data: { orderId: 'o1', action: 'declareCashHandover', amount: 3500 } })).code, 'FEATURE_DISABLED');
-    process.env.PARTNER_ORDERS_V2 = 'off';
+    process.env.PARTNER_ORDERS_V2_MANAGE = 'off';
     assert.equal((await fn({ auth: authOf('dA'), data: { orderId: 'o1', action: 'declareCashHandover', amount: 3500 } })).code, 'FEATURE_DISABLED');
     assert.equal(t.order().cashRemittance.status, 'pending');
+    delete process.env.PARTNER_ORDERS_V2_MANAGE; // création coupée (défaut) : la commande existante reste gérable
+    assert.equal((await fn({ auth: authOf('dA'), data: { orderId: 'o1', action: 'declareCashHandover', amount: 3500 } })).success, true);
+    assert.equal(t.order().cashRemittance.status, 'declared');
   } finally {
-    if (previous === undefined) delete process.env.PARTNER_ORDERS_V2; else process.env.PARTNER_ORDERS_V2 = previous;
+    for (const [k, v] of [['PARTNER_ORDERS_V2', prev.c], ['PARTNER_ORDERS_V2_MANAGE', prev.m]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   }
 });
 

@@ -347,7 +347,7 @@ test('annulation administrative v2 après récupération : refundFee true = tota
 // ── 4. Remboursements automatiques (orderRefunds) ─────────────────────────────────────────────────────
 
 test('orderRefunds : expiration sans livreur et limite de débit remboursent le total v2, jamais le partenaire', async () => {
-  const pending = { status: 'pending', driverId: null, pickedUpAt: null, commissionStatus: null, commissionPayerId: null, commissionAmount: null };
+  const pending = { status: 'pending', driverId: null, partnerAcceptedAtMs: 1, pickedUpAt: null, commissionStatus: null, commissionPayerId: null, commissionAmount: null };
   const t = world(v2(pending));
   const orderRef = t.db.collection('orders').doc('o1');
   const e = await t.db.runTransaction((tx) => expireOrderTx(tx, { db: t.db, admin, orderRef, orderId: 'o1' }));
