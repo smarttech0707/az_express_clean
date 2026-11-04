@@ -123,6 +123,19 @@ service cloud.firestore {
     function notPresent(field) {
       return !(field in request.resource.data);
     }
+    // Commandes Restaurant/Boulangerie v2 (Mission 7C-1-S) : un partenaire listé dans config/partnerOrdersV2.pilotPartnerIds
+    // ne reçoit plus de commande créée directement par un client au format historique (sans devis serveur) ; sa commande
+    // passe par createPartnerOrderFromQuoteCF (Admin SDK, hors règles). MÊME définition que functions/partnerOrdersConfig.js :
+    // document ou liste absents/invalides = aucun pilote = aucun blocage. N'affecte que la CRÉATION (les commandes déjà
+    // créées restent lisibles et gérables) et les partenaires restaurant/boulangerie : le premier test court-circuite les
+    // autres types, donc aucune lecture supplémentaire pour eux. exists() évite l'erreur d'un document absent (refus global).
+    function legacyPartnerCreationBlocked() {
+      let cfg = /databases/$(database)/documents/config/partnerOrdersV2;
+      return request.resource.data.get('sellerType', '') in ['restaurant', 'boulangerie']
+        && exists(cfg)
+        && get(cfg).data.get('pilotPartnerIds', null) is list
+        && request.resource.data.get('sellerId', '') in get(cfg).data.pilotPartnerIds;
+    }
     // E-Kbine : champs financiers et preuves de débit/remboursement. Ils ne sont posés que par les Cloud Functions
     // (ekCreateOrderCF / ekCancelOrderCF / ekClientConfirmOrder) : aucune écriture client ou agent ne peut les
     // créer ni les modifier (sinon un client complice fabriquerait une « preuve » créditant un agent).
@@ -681,6 +694,7 @@ service cloud.firestore {
         isAdmin()
       );
       allow create: if isRealUser() && orderAdmissionOpen()
+        && !legacyPartnerCreationBlocked()
         && request.resource.data.clientId == uid()
         && request.resource.data.budget is int
         && request.resource.data.budget >= 500

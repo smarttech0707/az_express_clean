@@ -56,11 +56,15 @@ function refundClientAndSeller(tx, { db, admin, order, orderId, seller, clientId
   return { refunded: total };
 }
 
+// Commande v2 jamais acceptée par le partenaire : annulée et remboursée au bout de 60 minutes (Mission 7C-1-S).
+const PARTNER_RESPONSE_TIMEOUT_MS = 60 * 60 * 1000;
+
 // autoExpireOrders : 10 minutes sans livreur. Renvoie { expired, refunded }.
 async function expireOrderTx(tx, { db, admin, orderRef, orderId }) {
   const fresh = await tx.get(orderRef);
   if (!fresh.exists) return { expired: false };
   const order = fresh.data();
+  let cancelReason = 'no_driver_found';
 
   // Un livreur a peut-être accepté entre-temps.
   if (!WAITING_STATUSES.includes(order.status)) return { expired: false };
@@ -72,9 +76,17 @@ async function expireOrderTx(tx, { db, admin, orderRef, orderId }) {
     // livreur n'a été sollicité). Préparation commencée : plus d'annulation ni de remboursement automatiques, la décision
     // est administrative (alerte stuckOrderAlerts).
     const acceptedMs = Number(order.partnerAcceptedAtMs);
-    if (!Number.isFinite(acceptedMs) || acceptedMs <= 0) return { expired: false, reason: 'awaiting_partner' };
-    if (Date.now() - acceptedMs < 10 * 60 * 1000) return { expired: false, reason: 'awaiting_driver' };
-    if (['preparing', 'ready'].includes(order.sellerStatus)) return { expired: false, reason: 'preparation_started' };
+    if (!Number.isFinite(acceptedMs) || acceptedMs <= 0) {
+      // Jamais acceptée : alerte à 10 min (stuckOrderAlerts), annulation et remboursement intégral à 60 min. L'état est
+      // relu ici dans la transaction : une acceptation concurrente (partnerAcceptedAtMs posé) empêche cette annulation,
+      // et une annulation déjà faite (statut hors WAITING_STATUSES) empêche un second remboursement.
+      const createdMs = order.createdAt?.toMillis?.();
+      if (!createdMs || Date.now() - createdMs < PARTNER_RESPONSE_TIMEOUT_MS) return { expired: false, reason: 'awaiting_partner' };
+      cancelReason = 'partner_no_response';
+    } else {
+      if (Date.now() - acceptedMs < 10 * 60 * 1000) return { expired: false, reason: 'awaiting_driver' };
+      if (['preparing', 'ready'].includes(order.sellerStatus)) return { expired: false, reason: 'preparation_started' };
+    }
   }
 
   const willRefund = order.paymentMethod === 'wallet' && order.isPaid === true;
@@ -83,7 +95,7 @@ async function expireOrderTx(tx, { db, admin, orderRef, orderId }) {
 
   tx.update(orderRef, {
     status: 'cancelled',
-    cancelReason: 'no_driver_found',
+    cancelReason,
     cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
@@ -92,7 +104,7 @@ async function expireOrderTx(tx, { db, admin, orderRef, orderId }) {
     ({ refunded } = refundClientAndSeller(tx, {
       db, admin, order, orderId, seller, clientId: order.clientId,
       descriptions: {
-        client: 'Remboursement — aucun livreur disponible',
+        client: cancelReason === 'partner_no_response' ? 'Remboursement — le partenaire n’a pas répondu' : 'Remboursement — aucun livreur disponible',
         seller: 'Commande expirée (aucun livreur) — reprise du paiement',
       },
     }));
@@ -142,4 +154,4 @@ async function rateLimitCancelTx(tx, { db, admin, orderRef, orderId, order, clie
   return { cancelled: true, refunded };
 }
 
-module.exports = { expireOrderTx, rateLimitCancelTx, refundAmounts, WAITING_STATUSES };
+module.exports = { expireOrderTx, rateLimitCancelTx, refundAmounts, WAITING_STATUSES, PARTNER_RESPONSE_TIMEOUT_MS };

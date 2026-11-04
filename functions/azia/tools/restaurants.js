@@ -5,7 +5,7 @@ const { createPendingAction } = require('../pendingActions');
 const { dispatchOrder } = require('../../dispatch');
 const { CONFIG_COLLECTION, CONFIG_DOC, parsePilotConfig, loadPilotConfig, legacyCreationBlocked } = require('../../partnerOrdersConfig');
 
-// Mission 7C-1 : un partenaire pilote dont la création v2 est active ne reçoit plus de commande au format historique.
+// Mission 7C-1/7C-1-S : un partenaire pilote (config/partnerOrdersV2, comme les règles Firestore) ne reçoit plus de commande au format historique.
 const LEGACY_BLOCKED_MSG = 'Ce restaurant utilise la nouvelle commande avec devis : passez par l’écran de commande de l’application.';
 
 const MAX_ITEMS = 30;

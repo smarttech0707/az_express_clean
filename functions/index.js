@@ -8,7 +8,7 @@ const { defineSecret } = require('firebase-functions/params');
 const admin  = require('firebase-admin');
 const axios  = require('axios');
 const crypto = require('crypto');
-const { expireOrderTx, rateLimitCancelTx } = require('./orderRefunds');
+const { expireOrderTx, rateLimitCancelTx, PARTNER_RESPONSE_TIMEOUT_MS } = require('./orderRefunds');
 const { retryPendingDispatch, newlyNotifiedDriverIds } = require('./dispatchRetry');
 const { observeOrderTariff } = require('./tariffObservation');
 const { scanStuckOrders, scanOverdueCashRemittances, scanPartnerOrderWaits } = require('./stuckOrderAlerts');
@@ -1056,6 +1056,16 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
     const clientDoc = await db.collection('clients').doc(after.clientId).get();
     const token     = clientDoc.data()?.fcmToken;
     if (!token) return;
+
+    // Commande Restaurant/Boulangerie v2 jamais acceptée par le partenaire (annulée à 60 min, remboursée intégralement)
+    if (after.status === 'cancelled' && after.cancelReason === 'partner_no_response') {
+      await sendToToken(token,
+        '😔 Commande annulée',
+        'Le partenaire n’a pas répondu à votre commande. Elle est annulée et, si vous aviez payé avec le wallet, vous êtes remboursé intégralement.',
+        { type: 'partner_no_response', orderId: event.params.orderId, status: 'cancelled' }
+      );
+      return;
+    }
 
     // Annulation automatique "aucun livreur" — message spécifique
     if (after.status === 'cancelled' && after.cancelReason === 'no_driver_found') {
@@ -2164,8 +2174,10 @@ async function expireStaleOrders() {
     const order   = doc.data();
 
     try {
-      // Commande partenaire v2 pas encore acceptée : le partenaire a le temps de répondre, rien à expirer (alerte dédiée).
-      if (order.amountsVersion === 2 && !order.partnerAcceptedAtMs) continue;
+      // Commande partenaire v2 pas encore acceptée : le partenaire a 60 min pour répondre (alerte admin à 10 min) ; la
+      // décision finale (annulation + remboursement) est reprise dans la transaction d'expiration.
+      if (order.amountsVersion === 2 && !order.partnerAcceptedAtMs
+        && Date.now() - (order.createdAt?.toMillis?.() || Date.now()) < PARTNER_RESPONSE_TIMEOUT_MS) continue;
       // Transaction atomique — protège contre la race condition avec acceptOrder().
       // Logique (annulation, remboursement client, reprise vendeur, métriques)
       // dans orderRefunds.js pour être testée.

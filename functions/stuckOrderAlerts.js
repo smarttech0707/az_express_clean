@@ -174,8 +174,8 @@ async function scanOverdueCashRemittances({
 
 // Mission 7C-1 — commandes Restaurant/Boulangerie v2 en attente. Une v2 n'expire plus tant que le partenaire n'a pas répondu
 // ni tant que la préparation est lancée : ces attentes sont rendues VISIBLES par une alerte administrative (aucune
-// annulation, aucun remboursement automatique). Deux types, une alerte par commande et par type (document déterministe) :
-//   partner_no_response : v2 pending, jamais acceptée, 10 min après la création.
+// annulation automatique avant 60 min). Deux types, une alerte par commande et par type (document déterministe) :
+//   partner_no_response : v2 pending, jamais acceptée, 10 min après la création (annulée et remboursée à 60 min, orderRefunds).
 //   prepared_no_driver  : v2 acceptée, préparation commencée, aucun livreur, 10 min après l'acceptation (ou la remise en file).
 const PARTNER_WAIT_MS = 10 * 60 * 1000;
 
@@ -218,7 +218,7 @@ async function scanPartnerOrderWaits({
       summary.alerted += 1;
       const minutes = Math.round((nowMs - since) / 60000);
       const body = type === 'partner_no_response'
-        ? `Le partenaire n’a pas répondu à une commande depuis ${minutes} min. Aucune annulation automatique.`
+        ? `Le partenaire n’a pas répondu à une commande depuis ${minutes} min. Annulation et remboursement automatiques à 60 min sans réponse.`
         : `Commande préparée sans livreur depuis ${minutes} min. Aucune annulation automatique : contactez le partenaire et le client.`;
       const admins = await db.collection('admins').where('isActive', '==', true).get();
       const tokens = alertTokens(admins.docs);

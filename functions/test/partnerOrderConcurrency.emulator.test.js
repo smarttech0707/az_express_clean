@@ -35,6 +35,8 @@ test.before(async () => {
   };
   await db.doc('restaurants/pr1').set({ name: 'Chez Test', lat: PLACE.lat, lng: PLACE.lng, isOpen: true });
   await db.doc('restaurants/pr1/menu/m1').set({ name: 'Plat test', price: 1500, available: true });
+  // Sécurité par défaut (7C-1-S) : sans liste pilote, aucune création v2.
+  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['pr1'] });
 });
 
 const as = (uid, data) => ({ auth: { uid, token: { firebase: { sign_in_provider: 'password' } } }, data });
@@ -512,4 +514,64 @@ test('cash : commande wallet ou non livrée → actions cash refusées sur l\'é
   assert.equal((await cashAct(wallet.orderId, 'declareCashHandover', 'dcf1', { amount: 100 })).code, 'CASH_ORDER_NOT_CASH');
   const pending = await paidOrder('cf2', 'dcf2', { method: 'cash' });
   assert.equal((await cashAct(pending.orderId, 'confirmCashRemittance', 'pr1', { amount: 100 })).code, 'CASH_ORDER_NOT_DELIVERED');
+});
+
+// ── Mission 7C-1-S : annulation à 60 minutes d’une v2 jamais acceptée, sur transactions réellement concurrentes ──
+
+async function pendingStaleOrder(uid) {
+  await db.doc(`clients/${uid}`).set({ wallet: 10000 });
+  const quote = await run.quote(as(uid, rReq));
+  const created = await run.order(as(uid, pay(quote)));
+  const orderId = created.data.orderId;
+  await db.doc(`orders/${orderId}`).update({ createdAt: admin.firestore.Timestamp.fromMillis(Date.now() - 61 * 60_000) });
+  return { orderId, quote };
+}
+const expireNow = (orderId) => {
+  const { expireOrderTx } = require('../orderRefunds');
+  return db.runTransaction((tx) => expireOrderTx(tx, { db, admin, orderRef: db.doc(`orders/${orderId}`), orderId }));
+};
+
+test('60 min : expiration répétée et simultanée (8 appels) → annulée une fois, remboursement exact unique, partenaire intact', options, async () => {
+  prepTools();
+  const { orderId, quote } = await pendingStaleOrder('x60a');
+  const before = await partnerWallet();
+  await settled(Array.from({ length: 8 }, () => expireNow(orderId)));
+  const o = await orderOf(orderId);
+  assert.deepEqual([o.status, o.cancelReason], ['cancelled', 'partner_no_response']);
+  assert.equal(await refundsOf('x60a'), 1);
+  assert.equal(await walletOf('x60a'), 10000, 'débit de la création restitué en totalité (' + quote.data.total + ')');
+  assert.equal(await partnerWallet(), before);
+});
+
+test('60 min : acceptation du partenaire ET expiration simultanées (10 tours) → soit annulée remboursée une fois, soit acceptée sans remboursement', options, async () => {
+  prepTools();
+  for (let i = 0; i < 5; i++) {
+    const uid = `x60b${i}`;
+    const { orderId } = await pendingStaleOrder(uid);
+    const calls = [act(orderId, i % 2 ? 'startPreparation' : 'acceptPartnerOrder'), expireNow(orderId), expireNow(orderId)];
+    await settled(i % 2 ? calls.reverse() : calls);
+    const o = await orderOf(orderId);
+    if (o.status === 'cancelled') {
+      assert.equal(o.partnerAcceptedAtMs, undefined, `tour ${i}`);
+      assert.equal(await refundsOf(uid), 1, `tour ${i}`);
+      assert.equal(await walletOf(uid), 10000, `tour ${i} : solde restitué exactement`);
+    } else {
+      assert.ok(o.partnerAcceptedAtMs, `tour ${i}`);
+      assert.equal(await refundsOf(uid), 0, `tour ${i}`);
+      assert.ok((await walletOf(uid)) < 10000, `tour ${i} : débit conservé`);
+    }
+  }
+});
+
+test('60 min : refus du partenaire, annulation client et expiration simultanés → un seul remboursement', options, async () => {
+  prepTools();
+  for (let i = 0; i < 3; i++) {
+    const uid = `x60c${i}`;
+    const { orderId } = await pendingStaleOrder(uid);
+    const calls = [partnerAct(as('pr1', { orderId, action: 'refusePartnerOrder', reason: 'Rupture de stock' })), run.cancel(as(uid, { orderId })), expireNow(orderId)];
+    await settled(i % 2 ? calls.reverse() : calls);
+    assert.equal((await orderOf(orderId)).status, 'cancelled');
+    assert.equal(await refundsOf(uid), 1, `tour ${i}`);
+    assert.equal(await walletOf(uid), 10000, `tour ${i}`);
+  }
 });

@@ -12,7 +12,9 @@ const { admin } = require('./billingWorld');
 const { buildPartnerOrderAction } = require('../partnerOrderActions');
 const { buildCancelOrder } = require('../orderActions');
 const { calculateCommission, dispatchOrder: rawDispatchOrder } = require('../dispatch');
-const { expireOrderTx } = require('../orderRefunds');
+const { expireOrderTx, PARTNER_RESPONSE_TIMEOUT_MS } = require('../orderRefunds');
+const fs = require('node:fs');
+const path = require('node:path');
 const { reserveAttempt, queuedAtMs } = require('../dispatchRetry');
 const { dispatchAcceptedPartnerOrder } = require('../partnerDispatch');
 const cfg = require('../partnerOrdersConfig');
@@ -79,21 +81,19 @@ test('interrupteurs : création désactivée par défaut, gestion activée par d
   }
 });
 
-test('liste pilote : absente = pas de restriction ; présente = seulement ces partenaires ; vide = aucun ; ancien parcours bloqué seulement si création active', () => {
-  const none = cfg.parsePilotConfig(null);
-  assert.equal(cfg.v2CreationAllowed(none, 'r1'), true);
-  assert.equal(cfg.legacyCreationBlocked(none, 'r1', true), false);
-  assert.equal(cfg.parsePilotConfig({ pilotPartnerIds: 'r1' }).restricted, false, 'liste invalide ignorée');
+test('liste pilote (sécurité par défaut) : document absent, liste absente/invalide/vide = aucune création v2 ; seuls les partenaires listés', () => {
+  for (const data of [null, {}, { pilotPartnerIds: 'r1' }, { pilotPartnerIds: [] }, { pilotPartnerIds: [5, '', 'a/b'] }]) {
+    const c = cfg.parsePilotConfig(data);
+    assert.equal(cfg.v2CreationAllowed(c, 'r1'), false, JSON.stringify(data));
+    assert.equal(cfg.legacyCreationBlocked(c, 'r1'), false, 'aucun pilote : ancien parcours intact');
+  }
   const pilot = cfg.parsePilotConfig({ pilotPartnerIds: ['r1', '', 5, 'a/b'] });
   assert.deepEqual([...pilot.ids], ['r1']);
   assert.equal(cfg.v2CreationAllowed(pilot, 'r1'), true);
   assert.equal(cfg.v2CreationAllowed(pilot, 'r2'), false);
-  assert.equal(cfg.legacyCreationBlocked(pilot, 'r1', true), true);
-  assert.equal(cfg.legacyCreationBlocked(pilot, 'r2', true), false, 'partenaire hors pilote : ancien parcours intact');
-  assert.equal(cfg.legacyCreationBlocked(pilot, 'r1', false), false, 'création v2 coupée : le pilote garde l’ancien parcours');
-  const empty = cfg.parsePilotConfig({ pilotPartnerIds: [] });
-  assert.equal(cfg.v2CreationAllowed(empty, 'r1'), false);
-  assert.equal(cfg.legacyCreationBlocked(empty, 'r1', true), false);
+  // Même définition pour le parcours historique (et pour firestore.rules) : exactement les partenaires listés.
+  assert.equal(cfg.legacyCreationBlocked(pilot, 'r1'), true);
+  assert.equal(cfg.legacyCreationBlocked(pilot, 'r2'), false, 'partenaire hors pilote : ancien parcours intact');
 });
 
 // ── Dispatch uniquement après acceptation ─────────────────────────────────────────────────────────────
@@ -199,9 +199,10 @@ test('reprise serveur : v2 non acceptée jamais relancée ; v2 acceptée compté
 
 // ── Expiration ────────────────────────────────────────────────────────────────────────────────────────
 
-test('expiration : v2 non acceptée, acceptée depuis < 10 min, ou préparation commencée → jamais expirée', async () => {
+test('expiration : v2 non acceptée < 60 min, acceptée depuis < 10 min, ou préparation commencée → jamais expirée', async () => {
   for (const [extra, reason] of [
-    [{}, 'awaiting_partner'],
+    [{ createdAt: { toMillis: () => Date.now() - PARTNER_RESPONSE_TIMEOUT_MS + 120_000 } }, 'awaiting_partner'],
+    [{ createdAt: undefined }, 'awaiting_partner'],
     [{ partnerAcceptedAtMs: Date.now() - 60_000 }, 'awaiting_driver'],
     [{ partnerAcceptedAtMs: 1, sellerStatus: 'preparing' }, 'preparation_started'],
     [{ partnerAcceptedAtMs: 1, sellerStatus: 'ready' }, 'preparation_started'],
@@ -299,28 +300,104 @@ function aziaDb(seed) {
 }
 const fakeAdmin = { firestore: { FieldValue: { serverTimestamp: () => 'ts', increment: (n) => ({ __increment: n }), arrayUnion: (...a) => a } } };
 
-test('AZ IA create_restaurant_order : refusé pour un partenaire pilote quand la création v2 est active, intact sinon', async () => {
-  const prev = process.env.PARTNER_ORDERS_V2;
-  try {
-    const db = aziaDb({
-      'clients/c1': { wallet: 5000 }, 'restaurants/r1': { name: 'Chez Awa', wallet: 0 }, 'restaurants/r2': { name: 'Autre', wallet: 0 },
-      'config/partnerOrdersV2': { pilotPartnerIds: ['r1'] },
-    });
-    const tool = createRestaurantOrder({ db, admin: fakeAdmin, HttpsError });
-    const input = (id) => ({ restaurantId: id, items: [{ name: 'Plat', price: 1000, quantity: 1 }], deliveryLat: 6.7, deliveryLng: -3.5, paymentMethod: 'cash' });
-    const conf = (id, name) => ({ restaurantId: id, restaurantName: name, items: [{ name: 'Plat', price: 1000, quantity: 1 }], budget: 1000, deliveryLat: 6.7, deliveryLng: -3.5, paymentMethod: 'cash' });
+test('AZ IA create_restaurant_order : refusé pour un partenaire pilote, intact hors pilote, sans liste et après retrait de la liste', async () => {
+  const db = aziaDb({
+    'clients/c1': { wallet: 5000 }, 'restaurants/r1': { name: 'Chez Awa', wallet: 0 }, 'restaurants/r2': { name: 'Autre', wallet: 0 },
+    'config/partnerOrdersV2': { pilotPartnerIds: ['r1'] },
+  });
+  const tool = createRestaurantOrder({ db, admin: fakeAdmin, HttpsError });
+  const input = (id) => ({ restaurantId: id, items: [{ name: 'Plat', price: 1000, quantity: 1 }], deliveryLat: 6.7, deliveryLng: -3.5, paymentMethod: 'cash' });
+  const conf = (id, name) => ({ restaurantId: id, restaurantName: name, items: [{ name: 'Plat', price: 1000, quantity: 1 }], budget: 1000, deliveryLat: 6.7, deliveryLng: -3.5, paymentMethod: 'cash' });
 
-    process.env.PARTNER_ORDERS_V2 = 'on';
-    assert.ok((await tool.handler('c1', input('r1'))).error, 'pilote : proposition refusée');
-    await assert.rejects(() => db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', conf('r1', 'Chez Awa'))), (e) => e.code === 'failed-precondition');
-    assert.equal([...db.store.keys()].filter((k) => k.startsWith('orders/')).length, 0, 'aucune commande historique créée');
-    const ok = await db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', conf('r2', 'Autre')));
-    assert.equal(ok.budget, 1000, 'partenaire hors pilote : ancien parcours intact');
+  assert.ok((await tool.handler('c1', input('r1'))).error, 'pilote : proposition refusée');
+  await assert.rejects(() => db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', conf('r1', 'Chez Awa'))), (e) => e.code === 'failed-precondition');
+  assert.equal([...db.store.keys()].filter((k) => k.startsWith('orders/')).length, 0, 'aucune commande historique créée');
+  const ok = await db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', conf('r2', 'Autre')));
+  assert.equal(ok.budget, 1000, 'partenaire hors pilote : ancien parcours intact');
 
-    delete process.env.PARTNER_ORDERS_V2; // création v2 coupée : le pilote retrouve l’ancien parcours
-    const back = await db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', conf('r1', 'Chez Awa')));
-    assert.equal(back.budget, 1000);
-  } finally {
-    if (prev === undefined) delete process.env.PARTNER_ORDERS_V2; else process.env.PARTNER_ORDERS_V2 = prev;
+  db.store.set('config/partnerOrdersV2', { pilotPartnerIds: [] }); // retiré de la liste : l’ancien parcours revient
+  assert.equal((await db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', conf('r1', 'Chez Awa')))).budget, 1000);
+  db.store.delete('config/partnerOrdersV2'); // document absent : aucun pilote
+  assert.equal((await db.runTransaction((tx) => tool.confirmHandler(tx, 'c1', conf('r1', 'Chez Awa')))).budget, 1000);
+});
+
+// ── Mission 7C-1-S : annulation à 60 minutes d’une v2 jamais acceptée ────────────────────────────────────
+
+const stale = (extra = {}) => pendingV2({ createdAt: { toMillis: () => Date.now() - PARTNER_RESPONSE_TIMEOUT_MS - 60_000 }, ...extra });
+
+test('expiration 60 min : v2 jamais acceptée → annulée, remboursement intégral unique, rien au partenaire, rejeu sans effet', async () => {
+  const t = world(stale());
+  const e = await expire(t);
+  assert.deepEqual([e.expired, e.refunded], [true, 4000]);
+  assert.equal(t.order().status, 'cancelled');
+  assert.equal(t.order().cancelReason, 'partner_no_response');
+  assert.deepEqual(t.refunds().map((x) => [x.type, x.amount]), [['refund', 4000]]);
+  assert.equal(t.s.get('restaurants/r1').wallet, 1000, 'partenaire jamais touché');
+  for (let i = 0; i < 3; i++) assert.equal((await expire(t)).expired, false);
+  assert.equal(t.refunds().length, 1);
+  assert.equal((await t.clientCancel().catch((e2) => ({ success: false, e: e2 }))).success === true, false, 'annulation client rejouée : pas de second remboursement');
+  assert.equal(t.refunds().length, 1);
+});
+
+test('expiration 60 min : paiement cash → annulée sans aucun mouvement de wallet', async () => {
+  const t = world(stale({ paymentMethod: 'cash', isPaid: false }));
+  assert.equal((await expire(t)).expired, true);
+  assert.equal(t.refunds().length, 0);
+  assert.equal(t.s.get('clients/c1').wallet, 16000);
+});
+
+test('expiration 60 min : aucune annulation si le partenaire a accepté ou commencé la préparation', async () => {
+  for (const extra of [{ partnerAcceptedAtMs: Date.now() - 1000 }, { partnerAcceptedAtMs: 1, sellerStatus: 'preparing' }]) {
+    const t = world(stale(extra));
+    assert.equal((await expire(t)).expired, false);
+    assert.equal(t.order().status, 'pending');
+    assert.equal(t.refunds().length, 0);
   }
+});
+
+test('expiration 60 min : acceptation et expiration simultanées → un seul état final cohérent, jamais de remboursement après acceptation', async () => {
+  for (let i = 0; i < 6; i++) {
+    const t = world(stale());
+    const jobs = [t.call(i % 2 ? 'startPreparation' : 'acceptPartnerOrder'), expire(t), expire(t)];
+    await Promise.allSettled(i % 3 ? jobs.reverse() : jobs);
+    const o = t.order();
+    if (o.status === 'cancelled') {
+      assert.equal(o.cancelReason, 'partner_no_response', `tour ${i}`);
+      assert.equal(o.partnerAcceptedAtMs, undefined, `tour ${i} : annulée donc jamais acceptée`);
+      assert.equal(t.refunds().length, 1);
+    } else {
+      assert.ok(o.partnerAcceptedAtMs, `tour ${i} : acceptée donc non annulée`);
+      assert.equal(t.refunds().length, 0);
+    }
+  }
+});
+
+test('expiration 60 min : refus du partenaire, annulation client et expiration en concurrence → un seul remboursement', async () => {
+  for (let i = 0; i < 6; i++) {
+    const t = world(stale());
+    const jobs = [t.call('refusePartnerOrder', 'r1', { reason: 'Fermé aujourd’hui' }), t.clientCancel(), expire(t)];
+    await Promise.allSettled(i % 2 ? jobs.reverse() : jobs);
+    assert.equal(t.order().status, 'cancelled');
+    assert.equal(t.refunds().length, 1, `tour ${i}`);
+    assert.equal(t.refunds()[0].amount, 4000);
+    assert.equal(t.s.get('clients/c1').wallet.__inc ?? 4000, 4000);
+  }
+});
+
+test('expiration 60 min : acceptation tardive après annulation refusée ; commande historique inchangée', async () => {
+  const t = world(stale());
+  await expire(t);
+  const late = await t.call('acceptPartnerOrder');
+  assert.equal(late.success, false);
+  assert.equal(t.calls.length, 0, 'aucun dispatch d’une commande annulée');
+  assert.equal(t.order().status, 'cancelled');
+  assert.equal(t.refunds().length, 1);
+});
+
+test('branchements serveur : filtre 60 min dans le scheduler, notification client dédiée, constante partagée', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+  assert.ok(src.includes('< PARTNER_RESPONSE_TIMEOUT_MS) continue;'), 'filtre 60 min du scheduler');
+  const at = src.indexOf("cancelReason === 'partner_no_response'");
+  assert.ok(at > 0 && src.slice(at, at + 500).includes("type: 'partner_no_response'"), 'notification client dédiée');
+  assert.equal(PARTNER_RESPONSE_TIMEOUT_MS, 60 * 60 * 1000);
 });

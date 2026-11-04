@@ -21,6 +21,7 @@ function world({ wallet = 20000, seed = {}, enabled = true } = {}) {
   const db = fakeDb({
     'clients/alice': { wallet, name: 'Alice Test', phone: '+2250000000001' },
     'clients/bob': { wallet: 9000 },
+    'config/partnerOrdersV2': { pilotPartnerIds: ['r1', 'b1', 'nope'] },
     'restaurants/r1': { name: 'Chez Test', lat: PLACE.lat, lng: PLACE.lng, isOpen: true },
     'restaurants/r1/menu/m1': { name: 'Attiéké poisson', price: 1500, available: true },
     'restaurants/r1/menu/m2': { name: 'Jus', price: 500 },
@@ -97,6 +98,31 @@ test('interrupteur : désactivées par défaut, aucune lecture ni écriture', as
   delete process.env.PARTNER_ORDERS_V2;
   const fn = buildQuotePartnerOrderCF({ ...w.deps, isEnabled: undefined }).run;
   assert.equal((await fn({ auth: auth('alice'), data: rReq })).code, 'FEATURE_DISABLED');
+});
+
+test('liste pilote (7C-1-S) : document absent, liste vide ou partenaire hors liste → aucun devis ni commande v2, aucune écriture', async () => {
+  for (const cfgDoc of [null, {}, { pilotPartnerIds: [] }, { pilotPartnerIds: ['autre'] }]) {
+    const w = world();
+    if (cfgDoc === null) w.store.delete('config/partnerOrdersV2'); else w.store.set('config/partnerOrdersV2', cfgDoc);
+    const r = await w.q(rReq);
+    assert.equal(r.code, 'PARTNER_NOT_IN_PILOT', JSON.stringify(cfgDoc));
+    assert.equal([...w.store.keys()].some((k) => k.startsWith('tariff_quotes/')), false);
+    assert.equal(wallet(w), 20000);
+  }
+});
+
+test('liste pilote : retrait entre le devis et la création → création refusée sans débit ; partenaire listé inchangé', async () => {
+  const w = world();
+  const quote = await w.q(rReq);
+  assert.equal(quote.success, true);
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'] });
+  const refused = await w.o(create(quote, rReq));
+  assert.equal(refused.code, 'PARTNER_NOT_IN_PILOT');
+  assert.equal(wallet(w), 20000);
+  assert.equal(orders(w).length, 0);
+  assert.equal(ledger(w).length, 0);
+  const bq = await w.q(bReq);
+  assert.equal((await w.o(create(bq, bReq))).success, true, 'boulangerie listée : création v2 possible');
 });
 
 test('authentification : anonyme ou absente refusée', async () => {
