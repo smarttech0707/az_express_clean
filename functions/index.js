@@ -4,6 +4,7 @@ const { onCall: rawOnCall, onRequest, HttpsError } = require('firebase-functions
 const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
+const { capInstances, pilotOnlyInstanceOptions } = require('./pilotCap');
 const { defineSecret } = require('firebase-functions/params');
 const admin  = require('firebase-admin');
 const axios  = require('axios');
@@ -2282,7 +2283,7 @@ const {
   assertValidDispatchPoint,
 } = require('./dispatch');
 
-exports.dispatchOrderToDriver = onCall({ maxInstances: 3 }, async (request) => {
+exports.dispatchOrderToDriver = onCall({ maxInstances: capInstances(3) }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
   }
@@ -2386,10 +2387,10 @@ const {
 } = require('./deliveryProofs');
 
 exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
-exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission });
-exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
+exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall: (h) => onCall({ maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission });
+exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit });
 exports.acceptOrderCF        = buildAcceptOrder({
-  db, admin, onCall: (h) => onCall({ maxInstances: 5 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission,
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(5) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission,
   selfieExists: async (path) => (await admin.storage().bucket().file(path).exists())[0],
 });
 exports.adminDriverRechargeCF = buildAdminDriverRecharge({
@@ -2443,19 +2444,19 @@ exports.adminConfirmDeliveryCF = buildDeliverOrder({
   adminConfirm: true, requireSuperAdmin,
 });
 exports.releaseOrderBeforePickupCF = buildReleaseOrderBeforePickup({
-  db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit,
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2) }, h), HttpsError, checkRateLimit, logAudit,
   calculateCommission, dispatchOrder, DispatchError,
 });
 exports.prepareOrderProof    = buildPrepareOrderProof({
-  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  db, admin, onCall: (o, h) => onCall({ ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
   deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
 });
 exports.confirmOrderPickupWithProof = buildConfirmPickupWithProof({
-  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  db, admin, onCall: (o, h) => onCall({ ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
   deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
 });
 exports.confirmOrderDeliveryWithProof = buildDeliverOrderWithProof({
-  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  db, admin, onCall: (o, h) => onCall({ ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
   deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
 });
 const recipientProofAccess = require('./deliveryProofGuests').buildRecipientProofAccess({
@@ -2781,10 +2782,10 @@ exports.createCatalogOrderFromQuoteCF = buildCreateCatalogOrderFromQuoteCF({
 // ═════════════════════════════════════════════════
 const { buildQuotePartnerOrderCF, buildCreatePartnerOrderFromQuoteCF } = require('./partnerOrderQuote');
 exports.quotePartnerOrderCF = buildQuotePartnerOrderCF({
-  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit,
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2), cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit,
 });
 exports.createPartnerOrderFromQuoteCF = buildCreatePartnerOrderFromQuoteCF({
-  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2), cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
 });
 // Préparation et reversement cash des commandes Restaurant/Boulangerie v2 (Missions 7B-3B-P/C, locale, non déployée).
 // Gestion des commandes v2 existantes : active par défaut, gel d'urgence PARTNER_ORDERS_V2_MANAGE=off. La CRÉATION (devis +
@@ -2792,6 +2793,6 @@ exports.createPartnerOrderFromQuoteCF = buildCreatePartnerOrderFromQuoteCF({
 const { buildPartnerOrderAction } = require('./partnerOrderActions');
 const { dispatchAcceptedPartnerOrder } = require('./partnerDispatch');
 exports.partnerOrderActionCF = buildPartnerOrderAction({
-  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission, requireSuperAdmin,
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2), cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission, requireSuperAdmin,
   dispatchAccepted: (orderId) => dispatchAcceptedPartnerOrder({ db, admin, dispatchOrder, orderId }),
 });
