@@ -307,7 +307,7 @@ class FirestoreService {
   /// restent dans la signature pour ne pas casser l'appelant
   /// (driver_dashboard.dart) mais sont ignorés côté serveur.
   Future<void> deliverOrder(String orderId, String driverId, int price,
-      {bool markCashPaid = false,
+      {bool? markCashPaid = false,
       double? deliveredLat,
       double? deliveredLng,
       String? deliveryPhotoUrl}) async {
@@ -315,7 +315,8 @@ class FirestoreService {
         .httpsCallable('deliverOrderCF');
     await callable.call(<String, dynamic>{
       'orderId': orderId,
-      'markCashPaid': markCashPaid,
+      // null = aucune déclaration de paiement (commande v2 : le non-paiement se signale ensuite avec un motif).
+      if (markCashPaid != null) 'markCashPaid': markCashPaid,
       if (deliveredLat != null) 'deliveredLat': deliveredLat,
       if (deliveredLng != null) 'deliveredLng': deliveredLng,
       if (deliveryPhotoUrl != null) 'deliveryPhotoUrl': deliveryPhotoUrl,

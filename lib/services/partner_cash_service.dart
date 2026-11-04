@@ -13,7 +13,15 @@ enum CashAction {
   dispute('disputeCashRemittance'),
 
   /// Super-administrateur uniquement : décision finale (requestId idempotent, justification de 10 à 500 caractères).
-  resolve('resolveCashRemittance');
+  resolve('resolveCashRemittance'),
+
+  /// Livreur final, commande DÉJÀ livrée : signale que le client n'a pas payé (motif de 10 à 300 caractères). Rejouable sans effet.
+  /// Ne modifie ni le dû au restaurant ni aucun wallet : une vérification administrative est ouverte.
+  declareNonPayment('declareCashNonPayment'),
+
+  /// Super-administrateur uniquement : confirme ou infirme un non-paiement déclaré ([requestId] idempotent, [decision]
+  /// `confirm_unpaid` | `refute`, justification de 10 à 500 caractères). Ne règle PAS le reversement (resolve).
+  reviewNonPayment('reviewCashNonPayment');
 
   final String wireName;
   const CashAction(this.wireName);
@@ -53,6 +61,14 @@ class CashActionException implements Exception {
         return 'Justification requise (10 à 500 caractères).';
       case 'REQUEST_ID_REQUIRED':
         return 'Identifiant de décision manquant, réessayez.';
+      case 'PAYMENT_ALREADY_DECLARED_PAID':
+        return 'Vous avez déclaré le paiement reçu à la livraison : en cas de désaccord, utilisez la contestation du reversement.';
+      case 'NO_NON_PAYMENT_DECLARED':
+        return 'Aucun non-paiement n’est déclaré sur cette commande.';
+      case 'PAYMENT_ALREADY_REVIEWED':
+        return 'Ce non-paiement a déjà été examiné.';
+      case 'INVALID_DECISION':
+        return 'Décision invalide.';
       case 'CASH_ORDER_NOT_DELIVERED':
         return 'La commande n\'est pas encore livrée.';
       case 'CASH_ORDER_NOT_CASH':
@@ -99,7 +115,8 @@ class PartnerCashService {
 
   /// Paramètres selon l'action (contrat serveur) :
   ///  - declare / confirm : [amount] entier > 0, cumulé, ≤ dû ;
-  ///  - dispute : [reason] ;
+  ///  - dispute / declareNonPayment : [reason] ;
+  ///  - reviewNonPayment : [requestId], [decision] (`confirm_unpaid` | `refute`), [justification] ;
   ///  - resolve : [requestId] (16-128 car., réutilisé à l'identique pour tout rejeu), [finalAmount] entier ≥ 0 ≤ dû, [justification].
   static Future<CashActionResult> run({
     required String orderId,
@@ -109,6 +126,7 @@ class PartnerCashService {
     String? requestId,
     int? finalAmount,
     String? justification,
+    String? decision,
   }) async {
     final Map<String, dynamic> map;
     try {
@@ -117,10 +135,17 @@ class PartnerCashService {
         'action': action.wireName,
         if (action == CashAction.declare || action == CashAction.confirm)
           'amount': amount,
-        if (action == CashAction.dispute) 'reason': reason?.trim() ?? '',
+        if (action == CashAction.dispute ||
+            action == CashAction.declareNonPayment)
+          'reason': reason?.trim() ?? '',
         if (action == CashAction.resolve) ...{
           'requestId': requestId,
           'finalAmount': finalAmount,
+          'justification': justification?.trim() ?? '',
+        },
+        if (action == CashAction.reviewNonPayment) ...{
+          'requestId': requestId,
+          'decision': decision,
           'justification': justification?.trim() ?? '',
         },
       });

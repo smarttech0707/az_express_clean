@@ -20,6 +20,7 @@ Map<String, dynamic> cashOrder({
   bool isPaid = true,
   int amountsVersion = 2,
   Map<String, dynamic>? dispute,
+  Map<String, dynamic>? cashPayment,
 }) =>
     {
       'amountsVersion': amountsVersion,
@@ -30,6 +31,7 @@ Map<String, dynamic> cashOrder({
       'totalAmount': 6000,
       'isPaid': isPaid,
       'sellerStatus': 'ready',
+      if (cashPayment != null) 'cashPayment': cashPayment,
       'cashRemittance': {
         'status': status,
         'amountDue': 5500,
@@ -49,7 +51,8 @@ class Call {
   final String? requestId;
   final int? finalAmount;
   final String? justification;
-  Call(this.action, this.amount, this.reason, this.requestId, this.finalAmount, this.justification);
+  final String? decision;
+  Call(this.action, this.amount, this.reason, this.requestId, this.finalAmount, this.justification, [this.decision]);
 }
 
 CashActionResult okResult(CashAction a, {bool replay = false}) =>
@@ -70,8 +73,8 @@ Future<void> pumpPanel(
     ));
 
 CashActionRunner recorder(List<Call> calls, {Future<CashActionResult> Function()? result}) =>
-    (orderId, action, {amount, reason, requestId, finalAmount, justification}) async {
-      calls.add(Call(action, amount, reason, requestId, finalAmount, justification));
+    (orderId, action, {amount, reason, requestId, finalAmount, justification, decision}) async {
+      calls.add(Call(action, amount, reason, requestId, finalAmount, justification, decision));
       if (result != null) return await result();
       return okResult(action);
     };
@@ -337,7 +340,7 @@ void main() {
 
     testWidgets('refus d\'autorisation du serveur (non super-administrateur) : message, rien d\'annoncé', (tester) async {
       await pumpPanel(tester, cashOrder(status: 'declared', handedOver: 3000), CashRole.admin,
-          (orderId, action, {amount, reason, requestId, finalAmount, justification}) async {
+          (orderId, action, {amount, reason, requestId, finalAmount, justification, decision}) async {
         throw const CashActionException('permission-denied', '');
       });
       await tester.tap(find.widgetWithText(AppButton, 'Régulariser'));
@@ -484,7 +487,7 @@ void main() {
     // Les écrans livreur/admin dépendent de Firestore (flux) et ne sont pas montables ici : gardes statiques.
     test('page livreur : seules les v2 en espèces non closes, requête sans index composite', () {
       final src = File('lib/screens/driver/driver_cash_remittance_page.dart').readAsStringSync();
-      expect(src.contains('CashRemittanceView.tryParse(data)'), isTrue);
+      expect(src.contains('CashRemittanceView.tryParse(r.data)'), isTrue);
       expect(src.contains("'merchantCashSettled', isEqualTo: false"), isTrue);
       expect(src.contains('.orderBy('), isFalse);
       expect(src.contains('.update('), isFalse);
@@ -525,17 +528,24 @@ void main() {
     test('signalement « non payé » : échec non bloquant, la livraison confirmée n\'est plus présentée comme un échec', () {
       final src = File('lib/screens/driver/driver_dashboard.dart').readAsStringSync();
       final compact = src.replaceAll(RegExp(r'\s+'), ' ');
-      expect(compact.contains('try { await _firestore .reportFakeOrder(order.clientId!); } catch (_) {}'), isTrue);
+      // Parcours historique : le succès n'est annoncé que si l'appel a réellement abouti ; jamais pour une v2.
+      expect(compact.contains('await _firestore .reportFakeOrder(order.clientId!); legacyReported = true; } catch (_) {}'), isTrue);
+      expect(compact.contains('if (!v2Unpaid && !clientPaid &&'), isTrue);
+      expect(compact.contains('NonPaymentReportDialog('), isTrue);
     });
   });
 
   group('7D-4-S : « Non payé » et contestation du livreur', () {
     testWidgets('non-paiement signalé : avertissement, montant THÉORIQUE, aucun montant encaissé inventé', (tester) async {
-      final order = cashOrder(isPaid: false);
+      final order = cashOrder(isPaid: false, cashPayment: {
+        'status': 'non_payment_declared',
+        'verification': 'pending_review',
+        'reason': 'Client parti sans payer',
+      });
       expect(view(order).unpaidReported, isTrue);
       for (final role in [CashRole.driver, CashRole.partner, CashRole.admin]) {
         await pumpPanel(tester, order, role, recorder([]));
-        expect(find.textContaining('Non payé'), findsOneWidget, reason: '$role');
+        expect(find.textContaining('Non-paiement déclaré'), findsOneWidget, reason: '$role');
         expect(find.textContaining('THÉORIQUE'), findsOneWidget, reason: '$role');
         expect(find.text('Dû au restaurant (théorique)'), findsOneWidget, reason: '$role');
         expect(find.text('5500 FCFA'), findsWidgets); // la dette n'est pas effacée
@@ -552,7 +562,7 @@ void main() {
 
     testWidgets('paiement confirmé : aucun avertissement, libellé « encaissé »', (tester) async {
       await pumpPanel(tester, cashOrder(), CashRole.driver, recorder([]));
-      expect(find.textContaining('Non payé'), findsNothing);
+      expect(find.textContaining('Non-paiement'), findsNothing);
       expect(find.text('Total encaissé auprès du client'), findsOneWidget);
     });
 
@@ -655,7 +665,7 @@ void main() {
 
     testWidgets('erreurs serveur de contestation : message clair (déjà clos, refus)', (tester) async {
       await pumpPanel(tester, cashOrder(), CashRole.driver,
-          (orderId, action, {amount, reason, requestId, finalAmount, justification}) async {
+          (orderId, action, {amount, reason, requestId, finalAmount, justification, decision}) async {
         throw const CashActionException('CASH_ALREADY_FINAL', '');
       });
       await tester.tap(find.widgetWithText(AppButton, 'Contester'));
@@ -690,9 +700,11 @@ void main() {
       expect(sent.single, {'orderId': 'o1', 'action': 'disputeCashRemittance', 'reason': 'Le client n\'a pas payé'});
     });
 
-    test('compatibilité historique : sans isPaid, une v2 cash est traitée comme non confirmée ; v1 et wallet restent hors périmètre', () {
+    test('compatibilité historique : sans cashPayment ni isPaid, une v2 cash est INCONNUE (jamais « non payée ») ; v1 et wallet hors périmètre', () {
       final noFlag = Map<String, dynamic>.from(cashOrder())..remove('isPaid');
-      expect(CashRemittanceView.tryParse(noFlag)!.unpaidReported, isTrue);
+      expect(CashRemittanceView.tryParse(noFlag)!.payment, CashPaymentState.unknown);
+      expect(CashRemittanceView.tryParse(noFlag)!.unpaidReported, isFalse);
+      expect(CashRemittanceView.tryParse(noFlag)!.amountsTheoretical, isTrue);
       expect(CashRemittanceView.tryParse(cashOrder(amountsVersion: 1, isPaid: false)), isNull);
       expect(CashRemittanceView.tryParse(cashOrder(payment: 'wallet', isPaid: false)), isNull);
     });

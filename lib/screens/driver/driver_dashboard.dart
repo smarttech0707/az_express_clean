@@ -24,6 +24,8 @@ import '../../services/location_service.dart';
 import '../../models/order_model.dart';
 import '../../models/partner_v2_info.dart';
 import '../../widgets/driver_partner_order_panel.dart';
+import '../../services/partner_cash_service.dart' show CashActionResult;
+import '../../widgets/cash_remittance_panel.dart' show NonPaymentReportDialog;
 import '../../services/notification_service.dart';
 import '../driver_tracking_screen.dart';
 import 'driver_wallet.dart';
@@ -635,14 +637,22 @@ class _DriverDashboardState extends State<DriverDashboard>
                         ? null
                         : () async {
                             setS(() => confirming = true);
+                            // Commande v2 en espèces « Non payé » : aucune déclaration de paiement n'est envoyée avec la
+                            // livraison ; le non-paiement se signale APRÈS la confirmation serveur, avec un motif
+                            // (declareCashNonPayment). Les autres commandes gardent le comportement historique.
+                            final v2Unpaid = order.partnerV2 != null &&
+                                order.paymentMethod == 'cash' &&
+                                !clientPaid;
+                            final bool? markPaid = v2Unpaid
+                                ? null
+                                : order.paymentMethod == 'cash' && clientPaid;
                             try {
                               if (qrProof != null) {
                                 await DeliveryProofService().confirm(
                                     order.id, 'delivery', qrProof,
                                     delivery: {
-                                      'markCashPaid':
-                                          order.paymentMethod == 'cash' &&
-                                              clientPaid,
+                                      if (markPaid != null)
+                                        'markCashPaid': markPaid,
                                       'deliveredLat': gpsLat,
                                       'deliveredLng': gpsLng,
                                       'deliveryPhotoUrl': photoUrl,
@@ -652,30 +662,51 @@ class _DriverDashboardState extends State<DriverDashboard>
                                   order.id,
                                   widget.driverId,
                                   order.budget,
-                                  markCashPaid: order.paymentMethod == 'cash' &&
-                                      clientPaid,
+                                  markCashPaid: markPaid,
                                   deliveredLat: gpsLat,
                                   deliveredLng: gpsLng,
                                   deliveryPhotoUrl: photoUrl,
                                 );
                               }
-                              if ((order.clientId?.isNotEmpty ?? false) &&
-                                  !clientPaid) {
-                                // Signalement secondaire : la livraison est DÉJÀ confirmée par le serveur. Son échec
-                                // (les règles interdisent au livreur d'écrire sur le profil client) ne doit pas faire
-                                // croire à un échec de la livraison ni inviter à la rejouer.
+                              // Parcours historique (hors v2) : signalement secondaire, la livraison est DÉJÀ confirmée par
+                              // le serveur. Les règles interdisent au livreur d'écrire sur le profil client : en cas d'échec,
+                              // on n'annonce PAS de signalement et on n'invite pas à rejouer la livraison.
+                              var legacyReported = false;
+                              if (!v2Unpaid &&
+                                  !clientPaid &&
+                                  (order.clientId?.isNotEmpty ?? false)) {
                                 try {
                                   await _firestore
                                       .reportFakeOrder(order.clientId!);
+                                  legacyReported = true;
                                 } catch (_) {}
                               }
                               if (ctx.mounted) Navigator.pop(ctx);
                               if (!mounted) return;
+                              // Commande v2 : motif demandé seulement maintenant que la livraison est confirmée.
+                              var v2Reported = false;
+                              if (v2Unpaid) {
+                                // Le résultat n'existe qu'après la réponse du serveur : « Plus tard » ou fermeture = non signalé.
+                                v2Reported = await showDialog<CashActionResult>(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder: (_) => NonPaymentReportDialog(
+                                          orderId: order.id),
+                                    ) !=
+                                    null;
+                                if (!mounted) return;
+                              }
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(clientPaid
                                       ? 'Livraison confirmée !'
-                                      : 'Livraison confirmée. Non-paiement signalé.'),
+                                      : v2Unpaid
+                                          ? (v2Reported
+                                              ? 'Livraison confirmée. Non-paiement signalé : vérification en attente.'
+                                              : 'Livraison confirmée. Le non-paiement n’est pas encore signalé : utilisez « Signaler un non-paiement » dans Espèces à reverser.')
+                                          : (legacyReported
+                                              ? 'Livraison confirmée. Non-paiement signalé.'
+                                              : 'Livraison confirmée. Paiement non reçu noté sur la livraison.')),
                                   backgroundColor:
                                       clientPaid ? Colors.green : Colors.orange,
                                 ),

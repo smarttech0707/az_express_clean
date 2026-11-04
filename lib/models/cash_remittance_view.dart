@@ -4,6 +4,25 @@
 /// Les montants sont CUMULATIFS (comme côté serveur) : `handedOver` = total déclaré par le livreur, `confirmed` = total
 /// confirmé par le partenaire. Une déclaration du livreur n'est jamais une confirmation. Le règlement n'est intégral que si
 /// le partenaire a confirmé la totalité du dû, ou si l'administration a régularisé (avec un éventuel reliquat arrêté).
+/// État du PAIEMENT du client en espèces (`orders/{id}.cashPayment`, écrit par le serveur seulement). Toujours une
+/// déclaration du livreur ou une décision administrative : jamais une preuve d'encaissement, et jamais un montant encaissé.
+enum CashPaymentState {
+  /// Le livreur a déclaré avoir encaissé (déclaration, pas une preuve).
+  declaredPaid,
+
+  /// Rien n'est établi : ancienne application, commande antérieure au suivi, ou aucune déclaration. `isPaid:false` seul ne prouve rien.
+  unknown,
+
+  /// Le livreur déclare un non-paiement ; l'administration ne l'a pas encore examiné.
+  nonPaymentPending,
+
+  /// L'administration a confirmé le non-paiement (le reversement reste à régulariser par décision distincte).
+  nonPaymentConfirmed,
+
+  /// L'administration a infirmé le signalement de non-paiement.
+  nonPaymentRefuted,
+}
+
 class CashRemittanceView {
   final String status;
   final int due;
@@ -13,9 +32,11 @@ class CashRemittanceView {
   final String? disputeReason;
   final String? disputeByRole;
 
-  /// `orders.isPaid` : pour une commande en espèces, il ne passe à true que si le livreur a déclaré l'encaissement à la
-  /// livraison. false = « Non payé » déclaré (ou encaissement jamais déclaré) : le serveur crée pourtant le dû théorique.
-  final bool paymentConfirmed;
+  final CashPaymentState payment;
+
+  /// Motif saisi par le livreur et justification de l'examen administratif (si présents).
+  final String? paymentReason;
+  final String? paymentReviewJustification;
 
   const CashRemittanceView({
     required this.status,
@@ -25,7 +46,9 @@ class CashRemittanceView {
     required this.resolvedFinalAmount,
     required this.disputeReason,
     required this.disputeByRole,
-    this.paymentConfirmed = true,
+    this.payment = CashPaymentState.declaredPaid,
+    this.paymentReason,
+    this.paymentReviewJustification,
   });
 
   static int? _int(Object? v) => v is num && v == v.toInt() ? v.toInt() : null;
@@ -43,6 +66,7 @@ class CashRemittanceView {
     if (due == null || due < 0 || status is! String) return null;
     final resolution = r['resolution'];
     final dispute = r['dispute'];
+    final cp = order['cashPayment'];
     return CashRemittanceView(
       status: status,
       due: due,
@@ -52,13 +76,70 @@ class CashRemittanceView {
           resolution is Map ? _int(resolution['finalAmount']) : null,
       disputeReason: dispute is Map ? dispute['reason'] as String? : null,
       disputeByRole: dispute is Map ? dispute['byRole'] as String? : null,
-      paymentConfirmed: order['isPaid'] == true,
+      payment: _parsePayment(cp, order['isPaid']),
+      paymentReason: cp is Map ? cp['reason'] as String? : null,
+      paymentReviewJustification: cp is Map && cp['review'] is Map
+          ? (cp['review'] as Map)['justification'] as String?
+          : null,
     );
   }
 
-  /// Paiement client non confirmé à la livraison : [due] est un montant THÉORIQUE, l'encaissement réel n'est pas établi
-  /// (le serveur n'enregistre aucun montant encaissé distinct). Ne jamais le présenter comme une somme encaissée.
-  bool get unpaidReported => !paymentConfirmed;
+  /// Sans `cashPayment` (commande v2 antérieure au suivi) : `isPaid:true` = encaissement déclaré ; sinon INCONNU, jamais
+  /// « non payé » (`isPaid:false` ne prouve rien).
+  static CashPaymentState _parsePayment(Object? cp, Object? isPaid) {
+    if (cp is! Map) {
+      return isPaid == true
+          ? CashPaymentState.declaredPaid
+          : CashPaymentState.unknown;
+    }
+    switch (cp['status']) {
+      case 'confirmed':
+        return CashPaymentState.declaredPaid;
+      case 'non_payment_declared':
+        switch (cp['verification']) {
+          case 'confirmed_unpaid':
+            return CashPaymentState.nonPaymentConfirmed;
+          case 'refuted':
+            return CashPaymentState.nonPaymentRefuted;
+          default:
+            return CashPaymentState.nonPaymentPending;
+        }
+      default:
+        return CashPaymentState.unknown;
+    }
+  }
+
+  /// Un non-paiement est déclaré (en attente ou confirmé) : [due] est un montant THÉORIQUE, l'encaissement réel n'est pas
+  /// établi (le serveur n'enregistre aucun montant encaissé distinct). Ne jamais le présenter comme une somme encaissée.
+  bool get unpaidReported =>
+      payment == CashPaymentState.nonPaymentPending ||
+      payment == CashPaymentState.nonPaymentConfirmed;
+
+  /// Montants à présenter comme théoriques : non-paiement déclaré ou encaissement inconnu.
+  bool get amountsTheoretical =>
+      unpaidReported || payment == CashPaymentState.unknown;
+
+  /// Le livreur peut encore signaler un non-paiement (seulement si rien n'est déclaré et que le dossier n'est pas clos).
+  bool get canReportNonPayment =>
+      payment == CashPaymentState.unknown && !closed;
+
+  /// L'administration peut examiner un non-paiement en attente (le serveur exige le rôle super-administrateur).
+  bool get canReviewPayment => payment == CashPaymentState.nonPaymentPending;
+
+  String get paymentLabel {
+    switch (payment) {
+      case CashPaymentState.declaredPaid:
+        return 'Paiement déclaré encaissé par le livreur (déclaration, non vérifiée)';
+      case CashPaymentState.unknown:
+        return 'Paiement du client non renseigné (inconnu)';
+      case CashPaymentState.nonPaymentPending:
+        return 'Non-paiement déclaré par le livreur — en attente d’examen';
+      case CashPaymentState.nonPaymentConfirmed:
+        return 'Non-paiement confirmé par l’administration';
+      case CashPaymentState.nonPaymentRefuted:
+        return 'Signalement de non-paiement infirmé par l’administration';
+    }
+  }
 
   bool get resolved => status == 'resolved';
   bool get disputed => status == 'disputed';
