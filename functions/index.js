@@ -2775,8 +2775,9 @@ exports.createCatalogOrderFromQuoteCF = buildCreateCatalogOrderFromQuoteCF({
 
 // ═════════════════════════════════════════════════
 // DEVIS COMMANDES STANDARD Restaurant / Boulangerie (Mission 7B-1) — montants calculés et vérifiés côté serveur.
-// DÉSACTIVÉES par défaut (PARTNER_ORDERS_V2 != 'on' → FEATURE_DISABLED) : deliverOrderCF et cancelOrderTx ne gèrent pas
-// encore les commandes amountsVersion 2 (Mission 7B-2). Ne pas activer avant. Quota Cloud Run : 0,5 CPU × 2 chacune (+2).
+// DÉSACTIVÉES par défaut (PARTNER_ORDERS_V2 != 'on' → FEATURE_DISABLED). deliverOrderCF et cancelOrderTx gèrent désormais les
+// commandes amountsVersion 2 (Mission 7B-2) : la création reste fermée tant que PARTNER_ORDERS_V2=on, config/partnerOrdersV2.creationOpen
+// et la liste pilote ne sont pas tous réunis. Quota Cloud Run : 0,5 CPU × 2 chacune (+2).
 // ═════════════════════════════════════════════════
 const { buildQuotePartnerOrderCF, buildCreatePartnerOrderFromQuoteCF } = require('./partnerOrderQuote');
 exports.quotePartnerOrderCF = buildQuotePartnerOrderCF({

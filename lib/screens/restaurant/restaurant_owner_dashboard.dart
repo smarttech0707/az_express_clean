@@ -18,6 +18,7 @@ import '../../widgets/single_photo_editor.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import '../../widgets/stream_error_state.dart';
 import '../../widgets/partner_v2_order_card.dart';
+import '../../widgets/min_version_dialog.dart';
 import '../../utils/storage_cleanup.dart';
 
 class RestaurantOwnerDashboard extends StatefulWidget {
@@ -61,6 +62,10 @@ class _RestaurantOwnerDashboardState extends State<RestaurantOwnerDashboard>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
+    // Version minimale du rôle restaurateur (config/app_versions.restaurant) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleRestaurant,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer vos commandes.'));
     _isOpen = widget.restaurantData['isOpen'] == true;
     _photoUrl = widget.restaurantData['logoUrl'] as String?;
     _coverUrl = widget.restaurantData['coverImageUrl'] as String?;

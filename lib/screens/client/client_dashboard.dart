@@ -12,6 +12,7 @@ import 'notification_center.dart';
 import 'suivi_commande.dart';
 import 'profil_client.dart';
 import 'livraison_screen.dart';
+import '../../widgets/min_version_dialog.dart';
 
 class ClientDashboard extends StatefulWidget {
   const ClientDashboard({super.key});
@@ -70,6 +71,10 @@ class _ClientDashboardState extends State<ClientDashboard>
       'recharge',
       'vehicle_chat_message',
     });
+    // Version minimale du rôle client (config/app_versions.client) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleClient,
+        blockedMessage: 'Installez la dernière version pour continuer à passer des commandes.'));
   }
 
   @override
