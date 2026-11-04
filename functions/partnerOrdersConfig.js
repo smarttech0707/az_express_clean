@@ -54,10 +54,12 @@ async function loadPilotConfig(db) {
 // Création v2 autorisée pour ce partenaire ? (hors variable d'environnement, évaluée séparément)
 const v2CreationAllowed = (config, sellerId) => config.creationOpen === true && config.ids.has(sellerId);
 
-// Motif de refus lisible : distingue l'arrêt global (creationOpen) de l'absence du partenaire dans la liste.
+// Motif de refus lisible. L'APPARTENANCE au pilote est vérifiée EN PREMIER : PARTNER_NOT_IN_PILOT est la seule réponse qui
+// prouve au client que le partenaire reste sur l'ancien parcours (ce que les règles Firestore confirment : liste seule).
+// CREATION_CLOSED ne concerne donc que les partenaires pilotes : un arrêt d'urgence ne touche pas les autres partenaires.
 function creationRefusal(config, sellerId) {
-  if (config.creationOpen !== true) return { code: 'CREATION_CLOSED', message: 'Ces commandes sont momentanément indisponibles' };
   if (!config.ids.has(sellerId)) return { code: 'PARTNER_NOT_IN_PILOT', message: 'Ce partenaire n’accepte pas encore ce type de commande' };
+  if (config.creationOpen !== true) return { code: 'CREATION_CLOSED', message: 'Ces commandes sont momentanément indisponibles' };
   return null;
 }
 

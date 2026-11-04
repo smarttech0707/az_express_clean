@@ -97,8 +97,19 @@ function buildQuotePartnerOrderCF({
 }) {
   return onCall(async (request) => {
     const uid = requireClientAuth(request, HttpsError);
-    if (!isEnabled()) return envelope(false, 'FEATURE_DISABLED', 'Fonction non activée');
     const d = request.data || {};
+    if (!isEnabled()) {
+      // Fonction coupée : le client doit pouvoir distinguer un partenaire HORS pilote (ancien parcours conservé) d'un partenaire
+      // pilote (aucune commande, aucun repli). Seule la liste pilote tranche ; toute lecture impossible ou réponse ambiguë reste
+      // FEATURE_DISABLED / erreur serveur, que le client traite comme un blocage.
+      await checkRateLimit(uid, 'quote_partner_order', 30, 60);
+      const identified = typeof d.sellerType === 'string' && Object.prototype.hasOwnProperty.call(PARTNER_KINDS, d.sellerType)
+        && typeof d.sellerId === 'string' && d.sellerId && d.sellerId.length <= 128 && !d.sellerId.includes('/');
+      if (identified && !(await loadPilot()).ids.has(d.sellerId)) {
+        return envelope(false, 'PARTNER_NOT_IN_PILOT', 'Ce partenaire n’accepte pas encore ce type de commande');
+      }
+      return envelope(false, 'FEATURE_DISABLED', 'Fonction non activée');
+    }
     await checkRateLimit(uid, 'quote_partner_order', 30, 60);
     try {
       const c = parseChoices(d);

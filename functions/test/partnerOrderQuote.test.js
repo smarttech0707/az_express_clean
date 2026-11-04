@@ -88,10 +88,17 @@ test('partenaire : restaurant ouvert par défaut ; boulangerie doit être active
 
 // ── Interrupteur ──────────────────────────────────────────────────────────
 
-test('interrupteur : désactivées par défaut, aucune lecture ni écriture', async () => {
+test('interrupteur : désactivées par défaut, aucune écriture ; pilote → FEATURE_DISABLED, hors pilote → PARTNER_NOT_IN_PILOT', async () => {
   const w = world({ enabled: false });
   const r = await w.q(rReq);
-  assert.equal(r.code, 'FEATURE_DISABLED');
+  assert.equal(r.code, 'FEATURE_DISABLED'); // r1 est pilote : jamais de repli historique
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], creationOpen: true });
+  assert.equal((await w.q(rReq)).code, 'PARTNER_NOT_IN_PILOT'); // restaurant hors pilote : ancien parcours préservé
+  w.store.delete('config/partnerOrdersV2');
+  assert.equal((await w.q(rReq)).code, 'PARTNER_NOT_IN_PILOT'); // configuration absente : aucun pilote
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['r1'], creationOpen: true });
+  assert.equal((await w.q({ ...rReq, sellerType: 'inconnu' })).code, 'FEATURE_DISABLED'); // requête ambiguë : blocage
+  assert.equal((await w.q({ ...rReq, sellerId: 'a/b' })).code, 'FEATURE_DISABLED');
   const r2 = await w.o({ quoteId: 'x', paymentMethod: 'wallet' });
   assert.equal(r2.code, 'FEATURE_DISABLED');
   assert.equal([...w.store.keys()].some((k) => k.startsWith('tariff_quotes/')), false);
@@ -100,10 +107,25 @@ test('interrupteur : désactivées par défaut, aucune lecture ni écriture', as
   assert.equal((await fn({ auth: auth('alice'), data: rReq })).code, 'FEATURE_DISABLED');
 });
 
+test('fonction coupée + configuration illisible : erreur serveur (le client bloque), jamais PARTNER_NOT_IN_PILOT', async () => {
+  const w = world({ enabled: false });
+  const fn = buildQuotePartnerOrderCF({ ...w.deps, loadPilot: async () => { throw new Error('config inaccessible'); } }).run;
+  await assert.rejects(fn({ auth: auth('alice'), data: rReq }), /config inaccessible/);
+  assert.equal(wallet(w), 20000);
+});
+
+test('client anonyme : refusé avant toute lecture de configuration, fonction coupée ou non', async () => {
+  for (const enabled of [true, false]) {
+    const w = world({ enabled });
+    await assert.rejects(w.qAs(auth('anon', 'anonymous'), rReq), (e) => e.code === 'unauthenticated');
+  }
+});
+
 test('liste pilote (7C-1-S) : document absent, liste vide ou partenaire hors liste → aucun devis ni commande v2, aucune écriture', async () => {
   const cases = [
-    [null, 'CREATION_CLOSED'], [{}, 'CREATION_CLOSED'], [{ pilotPartnerIds: ['r1'] }, 'CREATION_CLOSED'],
+    [null, 'PARTNER_NOT_IN_PILOT'], [{}, 'PARTNER_NOT_IN_PILOT'], [{ pilotPartnerIds: ['r1'] }, 'CREATION_CLOSED'],
     [{ pilotPartnerIds: ['r1'], creationOpen: false }, 'CREATION_CLOSED'], [{ pilotPartnerIds: ['r1'], creationOpen: 'true' }, 'CREATION_CLOSED'],
+    [{ pilotPartnerIds: 'r1', creationOpen: true }, 'PARTNER_NOT_IN_PILOT'], [{ pilotPartnerIds: ['autre'], creationOpen: false }, 'PARTNER_NOT_IN_PILOT'],
     [{ creationOpen: true }, 'PARTNER_NOT_IN_PILOT'], [{ pilotPartnerIds: [], creationOpen: true }, 'PARTNER_NOT_IN_PILOT'],
     [{ pilotPartnerIds: ['autre'], creationOpen: true }, 'PARTNER_NOT_IN_PILOT'],
   ];

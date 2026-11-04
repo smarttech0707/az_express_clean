@@ -123,6 +123,7 @@ test('creationOpen=false : commandes existantes toujours gérables, liste pilote
   const c = cfg.parsePilotConfig(w.config());
   assert.equal(cfg.v2CreationAllowed(c, 'r1'), false, 'plus aucune création v2');
   assert.equal(cfg.creationRefusal(c, 'r1').code, 'CREATION_CLOSED');
+  assert.equal(cfg.creationRefusal(c, 'autre').code, 'PARTNER_NOT_IN_PILOT', 'hors pilote : jamais CREATION_CLOSED');
   assert.equal(cfg.legacyCreationBlocked(c, 'r1'), true, 'le blocage historique du pilote subsiste');
   assert.deepEqual([...c.ids], ['r1'], 'la liste pilote n’a pas été vidée');
   // Gestion d’une commande existante : accepter, préparer, prête, tout fonctionne.
