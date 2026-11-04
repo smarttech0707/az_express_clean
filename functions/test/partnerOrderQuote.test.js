@@ -21,7 +21,7 @@ function world({ wallet = 20000, seed = {}, enabled = true } = {}) {
   const db = fakeDb({
     'clients/alice': { wallet, name: 'Alice Test', phone: '+2250000000001' },
     'clients/bob': { wallet: 9000 },
-    'config/partnerOrdersV2': { pilotPartnerIds: ['r1', 'b1', 'nope'] },
+    'config/partnerOrdersV2': { pilotPartnerIds: ['r1', 'b1', 'nope'], creationOpen: true },
     'restaurants/r1': { name: 'Chez Test', lat: PLACE.lat, lng: PLACE.lng, isOpen: true },
     'restaurants/r1/menu/m1': { name: 'Attiéké poisson', price: 1500, available: true },
     'restaurants/r1/menu/m2': { name: 'Jus', price: 500 },
@@ -101,11 +101,17 @@ test('interrupteur : désactivées par défaut, aucune lecture ni écriture', as
 });
 
 test('liste pilote (7C-1-S) : document absent, liste vide ou partenaire hors liste → aucun devis ni commande v2, aucune écriture', async () => {
-  for (const cfgDoc of [null, {}, { pilotPartnerIds: [] }, { pilotPartnerIds: ['autre'] }]) {
+  const cases = [
+    [null, 'CREATION_CLOSED'], [{}, 'CREATION_CLOSED'], [{ pilotPartnerIds: ['r1'] }, 'CREATION_CLOSED'],
+    [{ pilotPartnerIds: ['r1'], creationOpen: false }, 'CREATION_CLOSED'], [{ pilotPartnerIds: ['r1'], creationOpen: 'true' }, 'CREATION_CLOSED'],
+    [{ creationOpen: true }, 'PARTNER_NOT_IN_PILOT'], [{ pilotPartnerIds: [], creationOpen: true }, 'PARTNER_NOT_IN_PILOT'],
+    [{ pilotPartnerIds: ['autre'], creationOpen: true }, 'PARTNER_NOT_IN_PILOT'],
+  ];
+  for (const [cfgDoc, expected] of cases) {
     const w = world();
     if (cfgDoc === null) w.store.delete('config/partnerOrdersV2'); else w.store.set('config/partnerOrdersV2', cfgDoc);
     const r = await w.q(rReq);
-    assert.equal(r.code, 'PARTNER_NOT_IN_PILOT', JSON.stringify(cfgDoc));
+    assert.equal(r.code, expected, JSON.stringify(cfgDoc));
     assert.equal([...w.store.keys()].some((k) => k.startsWith('tariff_quotes/')), false);
     assert.equal(wallet(w), 20000);
   }
@@ -115,14 +121,20 @@ test('liste pilote : retrait entre le devis et la création → création refus�
   const w = world();
   const quote = await w.q(rReq);
   assert.equal(quote.success, true);
-  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'] });
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], creationOpen: true });
   const refused = await w.o(create(quote, rReq));
   assert.equal(refused.code, 'PARTNER_NOT_IN_PILOT');
   assert.equal(wallet(w), 20000);
   assert.equal(orders(w).length, 0);
   assert.equal(ledger(w).length, 0);
   const bq = await w.q(bReq);
-  assert.equal((await w.o(create(bq, bReq))).success, true, 'boulangerie listée : création v2 possible');
+  // Arrêt d'urgence entre le devis et la création : refusé sans débit, la liste pilote n'a pas été vidée.
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], creationOpen: false });
+  assert.equal((await w.o(create(bq, bReq))).code, 'CREATION_CLOSED');
+  assert.equal(wallet(w), 20000);
+  assert.equal(orders(w).length, 0);
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], creationOpen: true });
+  assert.equal((await w.o(create(bq, bReq))).success, true, 'boulangerie listée et création ouverte : création v2 possible');
 });
 
 test('authentification : anonyme ou absente refusée', async () => {

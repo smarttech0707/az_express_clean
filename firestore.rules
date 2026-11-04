@@ -1482,7 +1482,10 @@ service cloud.firestore {
     // document public doit être ajouté ici ET à rules-tests/config-financial.rules.test.js.
     match /config/{configId} {
       allow read:  if configId in ['commission', 'app_versions', 'app_version'] || isAdmin();
-      allow write: if isAdmin();
+      // config/partnerOrdersV2 (pilote Restaurant/Boulangerie v2, arrêt d'urgence) : AUCUNE écriture client, même super-administrateur.
+      // Seule setPartnerOrdersConfig (Admin SDK) la modifie, avec validation, version et audit. Les règles et les fonctions
+      // continuent de la LIRE (get() dans legacyPartnerCreationBlocked n'est pas soumis à ces règles de lecture).
+      allow write: if isAdmin() && configId != 'partnerOrdersV2';
     }
 
     // ── Config business (commissions, seuils) — réservée aux admins ─────────

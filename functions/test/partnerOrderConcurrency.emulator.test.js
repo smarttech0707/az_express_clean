@@ -36,7 +36,7 @@ test.before(async () => {
   await db.doc('restaurants/pr1').set({ name: 'Chez Test', lat: PLACE.lat, lng: PLACE.lng, isOpen: true });
   await db.doc('restaurants/pr1/menu/m1').set({ name: 'Plat test', price: 1500, available: true });
   // Sécurité par défaut (7C-1-S) : sans liste pilote, aucune création v2.
-  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['pr1'] });
+  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['pr1'], creationOpen: true });
 });
 
 const as = (uid, data) => ({ auth: { uid, token: { firebase: { sign_in_provider: 'password' } } }, data });
@@ -574,4 +574,24 @@ test('60 min : refus du partenaire, annulation client et expiration simultanés 
     assert.equal(await refundsOf(uid), 1, `tour ${i}`);
     assert.equal(await walletOf(uid), 10000, `tour ${i}`);
   }
+});
+
+// ── Correctif 7C-2 : setPartnerOrdersConfig via l'Admin SDK, transactions réellement concurrentes ──
+
+test('configuration pilote : 6 modifications simultanées sur la même version → une seule réussit, version +1, audit cohérent', options, async () => {
+  const { applyConfigChange, ConfigRefusal } = require('../partnerOrdersConfig');
+  await db.doc('config/partnerOrdersV2').delete();
+  const attempt = (patch) => applyConfigChange({ db, uid: 'rootCfg', input: { patch, expectedVersion: 0, reason: 'Essai de modification concurrente' } })
+    .then(() => 'ok', (e) => (e instanceof ConfigRefusal ? e.code : `erreur:${e.message}`));
+  const res = await settled([
+    attempt({ creationOpen: true }), attempt({ managementFrozen: true }), attempt({ pilotPartnerIds: ['pr1'] }),
+    attempt({ creationOpen: false }), attempt({ pilotPartnerIds: ['pr1', 'pr2'] }), attempt({ managementFrozen: false }),
+  ]);
+  const values = res.map((r) => r.value);
+  assert.equal(values.filter((v) => v === 'ok').length, 1, JSON.stringify(values));
+  assert.equal(values.filter((v) => v === 'CONFIG_CONFLICT').length, 5, JSON.stringify(values));
+  const c = (await db.doc('config/partnerOrdersV2').get()).data();
+  assert.deepEqual([c.version, c.updatedBy, c.lastChange.before.version, c.lastChange.after.version], [1, 'rootCfg', 0, 1]);
+  // Remise à l'état du jeu d'essai des autres tests (création ouverte pour pr1).
+  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['pr1'], creationOpen: true });
 });

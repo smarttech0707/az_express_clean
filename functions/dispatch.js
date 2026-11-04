@@ -356,7 +356,8 @@ async function dispatchOrder(db, admin, {
     }
     if (!eligibleIds.length) return { dispatched:false, mode:'none' };
     if (eligibleIds.length === 1) {
-      tx.update(orderRef, { driverId: eligibleIds[0], status: 'assigned' });
+      // assignedAtMs : horodatage de la proposition, pour détecter un livreur assigné qui ne répond pas (assignedTimeout.js).
+      tx.update(orderRef, { driverId: eligibleIds[0], status: 'assigned', assignedAtMs: Date.now() });
       return { dispatched: true, mode: 'assigned' };
     }
 

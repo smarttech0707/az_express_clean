@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { expireOrderTx, rateLimitCancelTx, PARTNER_RESPONSE_TIMEOUT_MS } = require('./orderRefunds');
 const { retryPendingDispatch, newlyNotifiedDriverIds } = require('./dispatchRetry');
 const { observeOrderTariff } = require('./tariffObservation');
-const { scanStuckOrders, scanOverdueCashRemittances, scanPartnerOrderWaits } = require('./stuckOrderAlerts');
+const { scanStuckOrders, scanOverdueCashRemittances, scanPartnerOrderWaits, alertDispatchExhausted } = require('./stuckOrderAlerts');
 const { buildAdminBilling } = require('./adminBilling');
 const { buildAdminOrderDispute } = require('./adminOrderDisputes');
 const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
@@ -2141,7 +2141,8 @@ exports.autoExpireOrders = onSchedule({
   try {
     await expireStaleOrders();
   } finally {
-    await retryPendingDispatch({ db, admin, dispatchOrder, DispatchError, observe: (id, o) => observeOrderTariff(db, id, o) });
+    await retryPendingDispatch({ db, admin, dispatchOrder, DispatchError, observe: (id, o) => observeOrderTariff(db, id, o),
+      onExhausted: (orderId, order, reason) => alertDispatchExhausted({ db, sendToToken, logAudit, orderId, order, reason }) });
     // I3 : alertes (lecture seule, aucune action sur les commandes), toutes les 5 minutes.
     if (Math.floor(Date.now() / 60000) % 5 === 0) {
       await scanStuckOrders({ db, admin, sendToToken, logAudit })
@@ -2311,6 +2312,11 @@ exports.dispatchOrderToDriver = onCall({ maxInstances: 3 }, async (request) => {
   if (!isOwner && !isCallerAdmin) {
     throw new HttpsError('permission-denied', 'Non autorisé');
   }
+
+  // Commande Restaurant/Boulangerie v2 : le dispatch est piloté par le SERVEUR (acceptation du partenaire, puis reprise bornée
+  // dispatchRetry.js : plafonds d'essais et fenêtre absolue). Les relances du client (minuteries de l'application) n'y ajoutent
+  // rien et ne doivent pas contourner ces plafonds ; seul un administrateur peut forcer une proposition.
+  if (order.amountsVersion === 2 && !isCallerAdmin) return { dispatched: false, mode: 'server_managed' };
 
   // C2 phase 0 : journal des écarts de tarif, jamais bloquant (aucun refus, aucune modification).
   await observeOrderTariff(db, String(orderId), order);

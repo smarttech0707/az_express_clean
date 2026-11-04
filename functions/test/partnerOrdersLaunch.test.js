@@ -82,12 +82,12 @@ test('interrupteurs : création désactivée par défaut, gestion activée par d
 });
 
 test('liste pilote (sécurité par défaut) : document absent, liste absente/invalide/vide = aucune création v2 ; seuls les partenaires listés', () => {
-  for (const data of [null, {}, { pilotPartnerIds: 'r1' }, { pilotPartnerIds: [] }, { pilotPartnerIds: [5, '', 'a/b'] }]) {
+  for (const data of [null, {}, { creationOpen: true }, { pilotPartnerIds: 'r1', creationOpen: true }, { pilotPartnerIds: [], creationOpen: true }, { pilotPartnerIds: [5, '', 'a/b'], creationOpen: true }, { pilotPartnerIds: ['r1'] }, { pilotPartnerIds: ['r1'], creationOpen: 'true' }]) {
     const c = cfg.parsePilotConfig(data);
     assert.equal(cfg.v2CreationAllowed(c, 'r1'), false, JSON.stringify(data));
-    assert.equal(cfg.legacyCreationBlocked(c, 'r1'), false, 'aucun pilote : ancien parcours intact');
+    assert.equal(cfg.legacyCreationBlocked(c, 'r1'), c.ids.has('r1'), 'blocage historique = identité pilote seule, indépendant de creationOpen');
   }
-  const pilot = cfg.parsePilotConfig({ pilotPartnerIds: ['r1', '', 5, 'a/b'] });
+  const pilot = cfg.parsePilotConfig({ pilotPartnerIds: ['r1', '', 5, 'a/b'], creationOpen: true });
   assert.deepEqual([...pilot.ids], ['r1']);
   assert.equal(cfg.v2CreationAllowed(pilot, 'r1'), true);
   assert.equal(cfg.v2CreationAllowed(pilot, 'r2'), false);

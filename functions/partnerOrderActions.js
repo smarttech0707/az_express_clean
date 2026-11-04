@@ -45,11 +45,13 @@ const { PARTNER_AMOUNTS_VERSION, PARTNER_SELLER_TYPES, readPartnerAmounts } = re
 const { PARTNER_KINDS } = require('./partnerCatalog');
 const { cancelOrderTx, cancelOrderPostTx, isPickedUp } = require('./orderActions');
 const { runLifecycleTransaction } = require('./driverLifecycle');
-const { managementEnabled } = require('./partnerOrdersConfig');
+const { managementEnabled, loadPilotConfig, applyConfigChange, ConfigRefusal } = require('./partnerOrdersConfig');
 
 const PREP_ACTIONS = Object.freeze(['acceptPartnerOrder', 'startPreparation', 'acceptAndPrepare', 'markReady', 'refusePartnerOrder']);
 const CASH_ACTIONS = Object.freeze(['declareCashHandover', 'confirmCashRemittance', 'disputeCashRemittance', 'resolveCashRemittance']);
 const ACTIONS = Object.freeze([...PREP_ACTIONS, ...CASH_ACTIONS]);
+// Opération super-administrateur (sans commande) : exemptée du gel de gestion, sinon on ne pourrait plus dégeler.
+const CONFIG_ACTION = 'setPartnerOrdersConfig';
 // Statuts où le partenaire peut encore agir ; tout autre statut (delivered, cancelled, picked_up, inconnu) est refusé.
 const ACTIVE_STATUSES = Object.freeze(['pending', 'broadcast', 'assigned', 'accepted']);
 const STARTED = Object.freeze(['preparing', 'ready']);
@@ -76,12 +78,36 @@ function buildPartnerOrderAction({
   db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission, requireSuperAdmin, now = Date.now,
   isEnabled = defaultEnabled, dispatchAccepted,
 }) {
+  // Modification de config/partnerOrdersV2 : super-administrateur, validation stricte, version (concurrence), audit avant/après.
+  async function changeConfig({ request, uid, d }) {
+    await requireSuperAdmin({ request, db });
+    await checkRateLimit(uid, 'partner_orders_config', 10, 600);
+    let result;
+    try {
+      result = await applyConfigChange({ db, uid, input: d, nowMs: now() });
+    } catch (err) {
+      if (err instanceof ConfigRefusal) {
+        await logAudit({ userId: uid, userType: 'admin', action: 'partner_orders_config_update', targetId: 'partnerOrdersV2', status: 'denied', metadata: { code: err.code } });
+        return envelope(false, err.code, err.message);
+      }
+      throw err;
+    }
+    await logAudit({
+      userId: uid, userType: 'admin', action: 'partner_orders_config_update', targetId: 'partnerOrdersV2',
+      metadata: { before: result.before, after: result.after, reason: result.reason },
+    });
+    return envelope(true, null, 'Configuration mise à jour', { config: result.after });
+  }
+
   return onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     if (request.auth.token?.firebase?.sign_in_provider === 'anonymous') throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
-    if (!isEnabled()) return envelope(false, 'FEATURE_DISABLED', 'Fonction non activée');
     const d = request.data || {};
+    if (d.action === CONFIG_ACTION) return changeConfig({ request, uid, d });
+    if (!isEnabled()) return envelope(false, 'FEATURE_DISABLED', 'Fonction non activée');
+    // Gel exceptionnel (config/partnerOrdersV2.managementFrozen), lu à CHAQUE appel : effet immédiat, sans redéploiement.
+    if ((await loadPilotConfig(db)).managementFrozen) return envelope(false, 'MANAGEMENT_FROZEN', 'Gestion temporairement suspendue par l’administration');
     if (typeof d.orderId !== 'string' || !d.orderId || d.orderId.length > 128 || d.orderId.includes('/')) {
       throw new HttpsError('invalid-argument', 'orderId manquant');
     }

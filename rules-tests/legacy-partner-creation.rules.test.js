@@ -110,7 +110,7 @@ test('commandes existantes d’un partenaire pilote : toujours lisibles ; la con
     await assertFails(e.authenticatedContext('c1', password).firestore().doc('config/partnerOrdersV2').set({ pilotPartnerIds: [] }));
     await assertFails(e.authenticatedContext('r1', password).firestore().doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['r1', 'r2'] }));
     await assertFails(e.authenticatedContext('c1', password).firestore().doc('config/partnerOrdersV2').get());
-    await assertSucceeds(e.authenticatedContext('root', password).firestore().doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['r1', 'r2'] }));
+    await assertFails(e.authenticatedContext('root', password).firestore().doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['r1', 'r2'] }), 'même le super-administrateur : écriture réservée à setPartnerOrdersConfig');
   } finally { await e.cleanup(); }
 });
 
@@ -119,5 +119,57 @@ test('les clients anonymes restent refusés et la création d’une commande v2 
   try {
     await assertFails(e.authenticatedContext('c1', { firebase: { sign_in_provider: 'anonymous' } }).firestore().doc('orders/z1').set(legacy('c1', 'restaurant', 'r2')));
     await assertFails(e.authenticatedContext('c1', password).firestore().doc('orders/z2').set(legacy('c1', 'restaurant', 'r2', { amountsVersion: 2 })));
+  } finally { await e.cleanup(); }
+});
+
+// Mission 7C-2 : creationOpen / managementFrozen / version n'ont AUCUN effet sur les règles. L'arrêt des créations v2
+// (creationOpen=false) ne doit jamais rouvrir l'ancien parcours d'un partenaire pilote ; la liste pilote seule décide.
+test('creationOpen=false ne rouvre pas l’ancien parcours ; creationOpen=true sans liste ne bloque personne', async () => {
+  const closed = await env('az-legacy-closed', { pilotPartnerIds: ['r1', 'b1'], creationOpen: false, managementFrozen: true, version: 7 });
+  try {
+    await assertFails(cashCreate(closed, 'c1', 'k1', 'restaurant', 'r1'));
+    await assertFails(walletCreate(closed, 'c1', 'k2', 'restaurant', 'r1'));
+    await assertFails(cashCreate(closed, 'c2', 'k3', 'boulangerie', 'b1'));
+    await assertSucceeds(cashCreate(closed, 'c2', 'k4', 'restaurant', 'r2'));
+    assert.equal(await walletOf(closed, 'c1'), 5000);
+  } finally { await closed.cleanup(); }
+  const open = await env('az-legacy-open', { pilotPartnerIds: [], creationOpen: true });
+  try {
+    await assertSucceeds(cashCreate(open, 'c1', 'k5', 'restaurant', 'r1'));
+  } finally { await open.cleanup(); }
+});
+
+// Mission 7C-2 (correctif) : config/partnerOrdersV2 n'est modifiable QUE par setPartnerOrdersConfig (Admin SDK : validation,
+// version, audit). Aucune écriture directe, quel que soit le rôle ; la lecture reste réservée aux administrateurs, et les
+// règles/fonctions la lisent sans être soumises à ces règles.
+test('config/partnerOrdersV2 : aucune écriture directe (client, partenaire, sous-admin, super-admin, anonyme) ; lecture super-admin conservée', async () => {
+  const e = await env('az-legacy-config-lock', { pilotPartnerIds: ['r1'], creationOpen: true, managementFrozen: false, version: 3 });
+  try {
+    await e.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('admins/sub').set({ role: 'sub', isActive: true, permissions: ['commandes'] }));
+    const actors = {
+      client: e.authenticatedContext('c1', password),
+      partenaire: e.authenticatedContext('r1', password),
+      'sous-admin': e.authenticatedContext('sub', password),
+      'super-admin': e.authenticatedContext('root', password),
+      anonyme: e.authenticatedContext('anon1', { firebase: { sign_in_provider: 'anonymous' } }),
+      'non connecté': e.unauthenticatedContext(),
+    };
+    for (const [who, ctx] of Object.entries(actors)) {
+      const ref = ctx.firestore().doc('config/partnerOrdersV2');
+      await assertFails(ref.set({ pilotPartnerIds: ['r1', 'r2'], creationOpen: true }), 'set refusé : ' + who);
+      await assertFails(ref.update({ managementFrozen: true }), 'update refusé : ' + who);
+      await assertFails(ref.update({ creationOpen: false }), 'creationOpen refusé : ' + who);
+      await assertFails(ref.delete(), 'delete refusé : ' + who);
+    }
+    const stored = await readAdmin(e, async (db) => (await db.doc('config/partnerOrdersV2').get()).data());
+    assert.deepEqual([stored.pilotPartnerIds, stored.creationOpen, stored.managementFrozen, stored.version], [['r1'], true, false, 3], 'document inchangé');
+    // Lecture : super-administrateur seulement (inchangé) ; l'évaluation des règles sur les commandes lit le document sans cette règle.
+    await assertSucceeds(actors['super-admin'].firestore().doc('config/partnerOrdersV2').get());
+    await assertFails(actors.client.firestore().doc('config/partnerOrdersV2').get());
+    await assertFails(actors.partenaire.firestore().doc('config/partnerOrdersV2').get());
+    await assertFails(cashCreate(e, 'c1', 'lock1', 'restaurant', 'r1'));
+    await assertSucceeds(cashCreate(e, 'c2', 'lock2', 'restaurant', 'r2'));
+    // Régression : les autres documents de config restent écrivables par le super-administrateur.
+    await assertSucceeds(actors['super-admin'].firestore().doc('config/autre_reglage').set({ valeur: 1 }));
   } finally { await e.cleanup(); }
 });

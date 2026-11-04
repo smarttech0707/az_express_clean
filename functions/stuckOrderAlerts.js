@@ -178,6 +178,37 @@ async function scanOverdueCashRemittances({
 //   partner_no_response : v2 pending, jamais acceptée, 10 min après la création (annulée et remboursée à 60 min, orderRefunds).
 //   prepared_no_driver  : v2 acceptée, préparation commencée, aucun livreur, 10 min après l'acceptation (ou la remise en file).
 const PARTNER_WAIT_MS = 10 * 60 * 1000;
+const { PARTNER_WINDOW_MS } = require('./dispatchRetry');
+
+// Recherche de livreur épuisée pour une v2 préparée (fenêtre absolue de 45 min, plafond d'essais ou livreur assigné silencieux
+// sans reprise possible). UNE alerte par commande et par acceptation (document déterministe créé atomiquement), qu'elle vienne
+// de la reprise de dispatch (onExhausted) ou du balayage ci-dessous. Aucune annulation, aucun remboursement automatique.
+async function alertDispatchExhausted({ db, sendToToken, logAudit, orderId, order, reason, nowMs = Date.now() }) {
+  const accepted = Number(order.partnerAcceptedAtMs) || 0;
+  // Livreur ASSIGNÉ mais silencieux à la fin de la fenêtre : alerte distincte et explicite. Une assignation n'est PAS une
+  // acceptation (statut assigned, aucune commission prélevée, aucun acceptedAt) : le document le dit en toutes lettres.
+  const unanswered = order.status === 'assigned' && !!order.driverId;
+  const type = unanswered ? 'assignment_unanswered' : 'dispatch_exhausted';
+  try {
+    await db.collection(COLLECTION).doc(unanswered ? `${orderId}_assignment_unanswered_${accepted}_${order.driverId}` : `${orderId}_dispatch_exhausted_${accepted}`).create({
+      orderId, type, reason, referenceMs: accepted, alertedAtMs: nowMs,
+      partnerId: order.sellerId || null, driverId: order.driverId || null,
+      ...(unanswered ? { orderStatus: 'assigned', driverAccepted: false, commissionCharged: order.commissionStatus === 'charged' } : {}),
+    });
+  } catch (err) {
+    if (/already exists|ALREADY_EXISTS|existant|exists/i.test(String(err.message || err.code))) return { alerted: false, duplicate: true };
+    throw err;
+  }
+  const admins = await db.collection('admins').where('isActive', '==', true).get();
+  const tokens = alertTokens(admins.docs);
+  await Promise.all(tokens.map((token) => sendToToken(token, unanswered ? 'Livreur assigné sans réponse' : 'Recherche de livreur épuisée',
+    unanswered
+      ? 'Une commande préparée est assignée à un livreur qui n’a pas répondu, et le délai de recherche est écoulé. L’assignation n’est pas une acceptation : aucune commission prélevée. Décision administrative nécessaire.'
+      : 'Une commande préparée n’a trouvé aucun livreur dans le délai prévu. Aucune annulation automatique : décision administrative nécessaire.',
+    { type, orderId }).catch(() => {})));
+  await logAudit({ userId: 'system', userType: 'system', action: `${type}_alert`, targetId: orderId, status: 'success', metadata: { reason, notified: tokens.length } });
+  return { alerted: true, duplicate: false };
+}
 
 async function scanPartnerOrderWaits({
   db, sendToToken, logAudit, nowMs = Date.now(), logger = console,
@@ -204,6 +235,11 @@ async function scanPartnerOrderWaits({
       } else if (o.sellerStatus === 'preparing' || o.sellerStatus === 'ready') {
         since = Math.max(millis(o.partnerAcceptedAtMs) || 0, millis(o.requeuedAt) || 0) || null;
         if (since != null && nowMs - since >= PARTNER_WAIT_MS) type = 'prepared_no_driver';
+      }
+      // Fenêtre de recherche de livreur close (45 min après l'acceptation) : alerte d'épuisement, même si la reprise n'a plus rien observé.
+      if (o.partnerAcceptedAtMs && (o.sellerStatus === 'preparing' || o.sellerStatus === 'ready') && nowMs - Number(o.partnerAcceptedAtMs) >= PARTNER_WINDOW_MS) {
+        const ex = await alertDispatchExhausted({ db, sendToToken, logAudit, orderId: doc.id, order: o, reason: 'window_closed', nowMs });
+        if (ex.alerted) summary.alerted += 1; else summary.duplicates += 1;
       }
       if (!type) continue;
       try {
@@ -237,4 +273,4 @@ async function scanPartnerOrderWaits({
   return summary;
 }
 
-module.exports = { scanStuckOrders, scanOverdueCashRemittances, scanPartnerOrderWaits, PARTNER_WAIT_MS, referenceMs, THRESHOLDS_MS, COLLECTION, CASH_REMITTANCE_DELAY_MS };
+module.exports = { scanStuckOrders, scanOverdueCashRemittances, scanPartnerOrderWaits, alertDispatchExhausted, PARTNER_WAIT_MS, referenceMs, THRESHOLDS_MS, COLLECTION, CASH_REMITTANCE_DELAY_MS };

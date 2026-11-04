@@ -25,6 +25,8 @@
 // commande ; le bail vit dans `order_dispatch_retries/{orderId}` (jamais sur
 // `orders`, pour ne déclencher aucun trigger de commande).
 
+const { requeueUnansweredAssignment } = require('./assignedTimeout');
+
 const COLLECTION = 'order_dispatch_retries';
 // Essai n° k autorisé quand la commande est en file depuis au moins minAgeMs.
 // Rayons identiques à ceux de l'application (2 km, 5 km, puis 30 km).
@@ -61,6 +63,22 @@ function queuedAtMs(order) {
   return Math.max(created || 0, requeued || 0, accepted || 0);
 }
 
+// Mission 7C-2 — commandes Restaurant/Boulangerie v2 PRÉPARÉES ou PRÊTES : la recherche d'un livreur ne s'arrête plus à
+// 9 minutes (l'expiration ne les annule jamais, une commande bloquée restait sans issue). Phase 2 BORNÉE, après l'échelle
+// initiale : au plus PHASE2_MAX_ATTEMPTS essais supplémentaires espacés d'au moins PHASE2_GAP_MS, toujours au rayon maximal et
+// par élargissement (uniquement de NOUVEAUX livreurs, jamais de rappel ni de remplacement), dans une fenêtre absolue de
+// PARTNER_WINDOW_MS depuis l'acceptation du partenaire et au plus MAX_LIFETIME_ATTEMPTS essais cumulés par commande, y compris
+// après remises en file (compteurs conservés dans le bail, pas remis à zéro par une nouvelle file). Fin de fenêtre ou plafond :
+// alerte administrative unique (onExhausted), aucune annulation ni remboursement automatique.
+const PHASE2_MAX_ATTEMPTS = 8;
+const PHASE2_GAP_MS = 3 * 60 * 1000;
+const PARTNER_WINDOW_MS = 45 * 60 * 1000;
+const MAX_LIFETIME_ATTEMPTS = 20;
+const PREPARING = Object.freeze(['preparing', 'ready']);
+
+const isPreparedPartnerOrder = (order) => order.amountsVersion === 2 && PREPARING.includes(order.sellerStatus)
+  && Number(order.partnerAcceptedAtMs) > 0;
+
 // Réserve (ou refuse) le prochain essai. Une seule exécution gagne : la
 // lecture de `orders/{id}` et du bail dans la même transaction fait rejouer
 // la perdante sur l'état à jour.
@@ -76,13 +94,33 @@ async function reserveAttempt(db, { orderRef, retryRef, nowMs }) {
     const queued = queuedAtMs(order);
     if (queued == null) return { reserved: false, reason: 'no_timestamp' };
     const ageMs = nowMs - queued;
-    if (ageMs > GIVE_UP_AGE_MS) return { reserved: false, reason: 'too_old' };
+    const prepared = isPreparedPartnerOrder(order);
+    if (ageMs > GIVE_UP_AGE_MS && !prepared) return { reserved: false, reason: 'too_old' };
 
     const retrySnap = await tx.get(retryRef);
-    let lease = retrySnap.exists ? retrySnap.data() : null;
-    // Nouvelle mise en file (refus / libération) : on repart de zéro.
+    const prev = retrySnap.exists ? retrySnap.data() : null;
+    let lease = prev;
+    // Nouvelle mise en file (refus / libération) : l'échelle repart de zéro, mais les compteurs cumulés sont conservés.
     if (lease && lease.queuedAtMs !== queued) lease = null;
     if (lease && lease.stopped) return { reserved: false, reason: 'stopped' };
+    const lifetime = Number(prev?.lifetimeAttempts || 0);
+    const phase2Done = Number(prev?.phase2Attempts || 0);
+
+    if (prepared) {
+      if (nowMs - Number(order.partnerAcceptedAtMs) > PARTNER_WINDOW_MS) return { reserved: false, reason: 'window_closed', exhausted: true };
+      if (lifetime >= MAX_LIFETIME_ATTEMPTS) return { reserved: false, reason: 'attempts_exhausted', exhausted: true };
+    }
+
+    // Phase 2 : commande préparée en file depuis plus longtemps que l'échelle initiale.
+    if (prepared && ageMs > GIVE_UP_AGE_MS) {
+      if (phase2Done >= PHASE2_MAX_ATTEMPTS) return { reserved: false, reason: 'phase2_exhausted', exhausted: true };
+      if (nowMs - Number(prev?.lastAttemptAtMs || 0) < PHASE2_GAP_MS) return { reserved: false, reason: 'gap' };
+      tx.set(retryRef, {
+        orderId: orderRef.id, queuedAtMs: queued, attempts: Number(lease?.attempts || 0), lastAttemptAtMs: nowMs, stopped: false,
+        lifetimeAttempts: lifetime + 1, phase2Attempts: phase2Done + 1,
+      });
+      return { reserved: true, order, radiusKm: STAGES[STAGES.length - 1].radiusKm, attempt: lifetime + 1, expand: broadcast, phase: 2 };
+    }
 
     const attempts = lease ? Number(lease.attempts || 0) : 0;
     // Une diffusion a déjà eu lieu au rayon initial : l'élargissement démarre au palier suivant.
@@ -101,6 +139,7 @@ async function reserveAttempt(db, { orderRef, retryRef, nowMs }) {
     tx.set(retryRef, {
       orderId: orderRef.id, queuedAtMs: queued, attempts: attempts + 1,
       lastAttemptAtMs: nowMs, stopped: false,
+      lifetimeAttempts: lifetime + 1, phase2Attempts: phase2Done,
     });
     // Scheduler en retard : le rayon suit l'ÂGE de la commande, pas seulement le
     // numéro d'essai (un premier essai tardif ne repart pas de 2 km).
@@ -117,24 +156,79 @@ async function stopRetries(db, retryRef, reason) {
   } catch (_) { /* non bloquant : le plafond d'essais borne de toute façon la reprise */ }
 }
 
+// Sélection des commandes v2 préparées à relancer. Requête DÉDIÉE (le lot général de 50 ne doit pas être occupé par de vieilles
+// commandes bloquées) et BORNÉE dans le temps : acceptation datant de moins de la fenêtre absolue, donc une commande dont la
+// fenêtre est close sort d'elle-même de la requête. Cette requête (égalité + in + intervalle sur trois champs différents)
+// exige l'index composite amountsVersion/status/partnerAcceptedAtMs (firestore.indexes.json). Index absent (non déployé) :
+// repli sur la requête sans intervalle, qui n'a besoin d'aucun index composite.
+async function loadPreparedPartnerOrders(db, nowMs, logger) {
+  const base = () => db.collection('orders').where('amountsVersion', '==', 2).where('status', 'in', ['pending', 'broadcast']);
+  let snap;
+  try {
+    snap = await base().where('partnerAcceptedAtMs', '>=', nowMs - PARTNER_WINDOW_MS).limit(BATCH_LIMIT).get();
+  } catch (err) {
+    logger.error(`[dispatchRetry] requête v2 bornée indisponible (index ?) : ${err.message} — repli sans intervalle`);
+    snap = await base().limit(BATCH_LIMIT).get();
+  }
+  return snap.docs.filter((d) => isPreparedPartnerOrder(d.data()));
+}
+
+// Livreurs assignés qui ne répondent pas (v2 préparées) : remise en file, voir assignedTimeout.js.
+async function requeueSilentAssignments(db, admin, nowMs, summary, logger, onExhausted) {
+  let docs;
+  try {
+    const snap = await db.collection('orders').where('amountsVersion', '==', 2).where('status', '==', 'assigned').limit(BATCH_LIMIT).get();
+    docs = snap.docs.filter((d) => PREPARING.includes(d.data().sellerStatus));
+  } catch (err) {
+    summary.errors += 1;
+    logger.error(`[dispatchRetry] lecture des assignations impossible : ${err.message}`);
+    return;
+  }
+  for (const doc of docs) {
+    try {
+      const r = await requeueUnansweredAssignment({
+        db, admin, orderId: doc.id, nowMs, windowMs: PARTNER_WINDOW_MS, maxLifetimeAttempts: MAX_LIFETIME_ATTEMPTS, retryCollection: COLLECTION,
+      });
+      if (r.requeued) summary.requeued += 1;
+      else if (r.exhausted && typeof onExhausted === 'function') await Promise.resolve(onExhausted(doc.id, doc.data(), r.reason)).catch(() => {});
+    } catch (err) {
+      summary.errors += 1;
+      logger.error(`[dispatchRetry] assignation orderId=${doc.id} : ${err.message}`);
+    }
+  }
+}
+
 // Passe unique, appelée une fois par minute. Ne lève jamais : un échec ici ne
 // doit pas empêcher l'expiration / le remboursement qui s'exécutent avant.
 async function retryPendingDispatch({
-  db, admin, dispatchOrder, DispatchError, observe, nowMs = Date.now(), logger = console,
+  db, admin, dispatchOrder, DispatchError, observe, onExhausted, nowMs = Date.now(), logger = console,
 }) {
-  const summary = { scanned: 0, attempted: 0, dispatched: 0, skipped: 0, errors: 0 };
+  const summary = { scanned: 0, attempted: 0, dispatched: 0, skipped: 0, errors: 0, requeued: 0 };
+  // Livreurs assignés silencieux d'abord : la commande remise en file est reprise par la passe de la minute suivante.
+  await requeueSilentAssignments(db, admin, nowMs, summary, logger, onExhausted);
   let docs;
   try {
     const cutoff = admin.firestore.Timestamp.fromMillis(nowMs - STAGES[0].minAgeMs);
+    // Plus récentes d'abord : de vieilles commandes restées bloquées ne peuvent pas occuper les 50 places devant les nouvelles
+    // (l'expiration retire de toute façon les commandes historiques ; les v2 préparées ont leur propre requête ci-dessous).
+    // Index existant : orders (status, createdAt DESCENDING).
     const snap = await db.collection('orders')
       .where('status', 'in', ['pending', 'broadcast'])
       .where('createdAt', '<=', cutoff)
+      .orderBy('createdAt', 'desc')
       .limit(BATCH_LIMIT)
       .get();
     docs = snap.docs;
   } catch (err) {
     logger.error(`[dispatchRetry] lecture impossible : ${err.message}`);
     return { ...summary, errors: 1 };
+  }
+  try {
+    const seen = new Set(docs.map((d) => d.id));
+    for (const d of await loadPreparedPartnerOrders(db, nowMs, logger)) if (!seen.has(d.id)) docs.push(d);
+  } catch (err) {
+    summary.errors += 1;
+    logger.error(`[dispatchRetry] lecture des v2 préparées impossible : ${err.message}`);
   }
 
   for (const doc of docs) {
@@ -143,7 +237,11 @@ async function retryPendingDispatch({
     const retryRef = db.collection(COLLECTION).doc(doc.id);
     try {
       const slot = await reserveAttempt(db, { orderRef, retryRef, nowMs });
-      if (!slot.reserved) { summary.skipped += 1; continue; }
+      if (!slot.reserved) {
+        summary.skipped += 1;
+        if (slot.exhausted && typeof onExhausted === 'function') await Promise.resolve(onExhausted(doc.id, doc.data(), slot.reason)).catch(() => {});
+        continue;
+      }
       summary.attempted += 1;
       const order = slot.order;
       if (typeof observe === 'function') await Promise.resolve(observe(doc.id, order)).catch(() => {});
@@ -174,7 +272,7 @@ async function retryPendingDispatch({
       logger.error(`[dispatchRetry] orderId=${doc.id} : ${err.message}`);
     }
   }
-  if (summary.attempted > 0 || summary.errors > 0) {
+  if (summary.attempted > 0 || summary.errors > 0 || summary.requeued > 0) {
     logger.log(`[dispatchRetry] ${JSON.stringify(summary)}`);
   }
   return summary;
@@ -191,4 +289,5 @@ function newlyNotifiedDriverIds(before, after) {
 module.exports = {
   newlyNotifiedDriverIds, BROADCAST_WAIT_MS,
   retryPendingDispatch, reserveAttempt, queuedAtMs, STAGES, MIN_GAP_MS, GIVE_UP_AGE_MS, COLLECTION,
+  PHASE2_MAX_ATTEMPTS, PHASE2_GAP_MS, PARTNER_WINDOW_MS, MAX_LIFETIME_ATTEMPTS, isPreparedPartnerOrder,
 };

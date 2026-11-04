@@ -193,3 +193,62 @@ test('émulateur : élargissement du rayon — livreur à ~3 km trouvé au 2ᵉ 
   assert.equal(o.driverId, 'dRetryF');
   await db.doc('livreurs/dRetryF').delete();
 });
+
+// ── Mission 7C-2 : phase 2 bornée et livreur assigné sans réponse, transactions réellement concurrentes ──
+
+const v2prepared = (ageMs, extra = {}) => order(ageMs, {
+  amountsVersion: 2, sellerStatus: 'preparing', sellerType: 'restaurant', sellerId: 'rRetry', type: 'restaurant',
+  partnerAcceptedAtMs: Date.now() - ageMs + 20_000, ...extra,
+});
+
+test('émulateur 7C-2 : trois passes simultanées en phase 2 → un seul essai, élargissement sans rappel des premiers livreurs', options, async () => {
+  const oid = `retry_${Date.now()}_p2`;
+  await db.doc(`orders/${oid}`).set(v2prepared(14 * 60_000, { status: 'broadcast', notifiedDriverIds: ['dP1'], lastDispatchAtMs: Date.now() - 13 * 60_000 }));
+  await db.doc('livreurs/dP1').set(driver({ pendingOrderId: oid }));
+  await db.doc('livreurs/dP2').set(driver({ lat: 6.76, lng: -3.49 }));
+  await Promise.all([run(), run(), run()]);
+  const lease = await read(`order_dispatch_retries/${oid}`);
+  assert.deepEqual([lease.phase2Attempts, lease.lifetimeAttempts], [1, 1]);
+  const o = await read(`orders/${oid}`);
+  assert.equal(o.status, 'broadcast');
+  assert.deepEqual([...o.notifiedDriverIds].sort(), ['dP1', 'dP2'], 'dP1 conservé, dP2 ajouté une seule fois');
+  // Nouvelle passe immédiate : espacement de 3 min, aucun nouvel essai.
+  await run();
+  assert.equal((await read(`order_dispatch_retries/${oid}`)).phase2Attempts, 1);
+  await db.doc('livreurs/dP1').delete(); await db.doc('livreurs/dP2').delete();
+});
+
+test('émulateur 7C-2 : fenêtre de 45 min close → aucun essai, aucune annulation, commande intacte', options, async () => {
+  const oid = `retry_${Date.now()}_win`;
+  await db.doc(`orders/${oid}`).set(v2prepared(50 * 60_000, { partnerAcceptedAtMs: Date.now() - 46 * 60_000 }));
+  await db.doc('livreurs/dP1').set(driver());
+  const seen = [];
+  await run({ onExhausted: async (id, _o, reason) => { seen.push([id, reason]); } });
+  assert.ok(seen.some(([id, reason]) => id === oid && reason === 'window_closed'));
+  const o = await read(`orders/${oid}`);
+  assert.equal(o.status, 'pending');
+  assert.equal(o.driverId, undefined);
+  await db.doc('livreurs/dP1').delete();
+});
+
+test('émulateur 7C-2 : livreur assigné silencieux — acceptation et remise en file simultanées (8 tours) : un seul gagnant', options, async () => {
+  for (let i = 0; i < 4; i++) {
+    const oid = `retry_${Date.now()}_as${i}`;
+    await db.doc(`orders/${oid}`).set(v2prepared(10 * 60_000, { status: 'assigned', driverId: 'dS1', assignedAtMs: Date.now() - 4 * 60_000 }));
+    await db.doc('livreurs/dS1').set(driver({ pendingOrderId: oid }));
+    const calls = [accept(req('dS1', { orderId: oid })), run(), run()];
+    await Promise.allSettled(i % 2 ? calls.reverse() : calls);
+    const o = await read(`orders/${oid}`);
+    const wallet = (await read('livreurs/dS1')).wallet;
+    if (o.status === 'accepted') {
+      assert.equal(o.driverId, 'dS1', `tour ${i}`);
+      assert.equal(wallet, 800, `tour ${i} : commission prélevée une fois`);
+      assert.equal(o.excludedDriverIds, undefined);
+    } else {
+      assert.ok(['pending', 'broadcast', 'assigned'].includes(o.status), `tour ${i} : ${o.status}`);
+      assert.ok(Array.isArray(o.excludedDriverIds) && o.excludedDriverIds.includes('dS1'), `tour ${i}`);
+      assert.equal(wallet, 1000, `tour ${i} : aucune commission`);
+    }
+    await db.doc('livreurs/dS1').delete();
+  }
+});

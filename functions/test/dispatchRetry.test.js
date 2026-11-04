@@ -30,7 +30,7 @@ function makeDb(seed) {
   db.collection = (name) => {
     const c = base(name);
     if (name !== 'orders') return c;
-    const query = (filters) => {
+    const query = (filters, desc = false) => {
       const get = async () => {
         if (db.failReads) throw new Error('réseau indisponible');
         const docs = [...db.store.entries()]
@@ -40,9 +40,10 @@ function makeDb(seed) {
             return op === '==' ? x === y : op === 'in' ? y.includes(x) : op === '<=' ? x <= y : op === '>=' ? x >= y : false;
           }))
           .map(([k, v]) => ({ id: k.split('/').pop(), data: () => v }));
+        if (desc) docs.sort((a, b) => (b.data().createdAt?.toMillis?.() || 0) - (a.data().createdAt?.toMillis?.() || 0));
         return { docs, empty: docs.length === 0 };
       };
-      return { where: (f, op, v) => query([...filters, [f, op, v]]), limit: () => ({ get }), get };
+      return { where: (f, op, v) => query([...filters, [f, op, v]], desc), orderBy: (_f, dir) => query(filters, dir === 'desc'), limit: () => ({ get }), get };
     };
     return { ...c, where: (f, op, v) => query([[f, op, v]]) };
   };

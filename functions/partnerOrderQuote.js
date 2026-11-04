@@ -24,7 +24,7 @@ const { DEFAULT_TARIFF_CONFIG } = require('./tariffConfig');
 const { computeOfficialTariff, validPoint } = require('./officialTariff');
 const { assertNewAccountActivity } = require('./accountAdmission');
 const { buildPartnerAmounts } = require('./partnerOrderAmounts');
-const { creationEnabled, loadPilotConfig, parsePilotConfig, v2CreationAllowed } = require('./partnerOrdersConfig');
+const { creationEnabled, loadPilotConfig, parsePilotConfig, creationRefusal } = require('./partnerOrdersConfig');
 const {
   PARTNER_KINDS, PartnerRefusal, parseItems, partnerRefusal, partnerPoint, priceItems, itemsFingerprint,
 } = require('./partnerCatalog');
@@ -103,8 +103,9 @@ function buildQuotePartnerOrderCF({
     try {
       const c = parseChoices(d);
       assertActiveClient(await db.collection('clients').doc(uid).get());
-      // Activation progressive : si une liste pilote existe, seuls ces partenaires acceptent des commandes v2.
-      if (!v2CreationAllowed(await loadPilot(), c.sellerId)) throw new PartnerRefusal('PARTNER_NOT_IN_PILOT', 'Ce partenaire n’accepte pas encore ce type de commande');
+      // Activation progressive (sécurité par défaut) : création ouverte (creationOpen) ET partenaire listé, sinon refus.
+      const closed = creationRefusal(await loadPilot(), c.sellerId);
+      if (closed) throw new PartnerRefusal(closed.code, closed.message);
       const read = (collection, id) => db.collection(collection).doc(id).get();
       const { partner, menu } = await readPartnerAndMenu(read, c.sellerType, c.sellerId, c.items);
       const nowMs = now();
@@ -216,9 +217,8 @@ function buildCreatePartnerOrderFromQuoteCF({
         if (q.status !== 'open') throw new PartnerRefusal('QUOTE_ALREADY_USED', 'Devis déjà utilisé');
         if (!(q.expiresAtMs > nowMs)) throw new PartnerRefusal('QUOTE_EXPIRED', 'Devis expiré');
         if (orderSnap.exists) throw new PartnerRefusal('ORDER_EXISTS', 'Commande déjà créée');
-        if (!v2CreationAllowed(parsePilotConfig(pilotSnap.exists ? pilotSnap.data() : null), q.sellerId)) {
-          throw new PartnerRefusal('PARTNER_NOT_IN_PILOT', 'Ce partenaire n’accepte pas encore ce type de commande');
-        }
+        const closedNow = creationRefusal(parsePilotConfig(pilotSnap.exists ? pilotSnap.data() : null), q.sellerId);
+        if (closedNow) throw new PartnerRefusal(closedNow.code, closedNow.message);
         if (!geography) throw new PartnerRefusal('GEOGRAPHY_UNAVAILABLE', 'Zone de livraison indisponible, réessayez');
         // Le document de devis n'a pas été altéré (il n'est inscriptible que par le serveur ; défense en profondeur).
         if (!Array.isArray(q.lines) || itemsFingerprint(q.lines) !== q.fingerprint) throw new PartnerRefusal('QUOTE_CORRUPTED', 'Devis invalide');
