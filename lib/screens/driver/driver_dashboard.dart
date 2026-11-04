@@ -22,6 +22,8 @@ import '../../services/firestore_service.dart';
 import '../../services/driver_location_service.dart';
 import '../../services/location_service.dart';
 import '../../models/order_model.dart';
+import '../../models/partner_v2_info.dart';
+import '../../widgets/driver_partner_order_panel.dart';
 import '../../services/notification_service.dart';
 import '../driver_tracking_screen.dart';
 import 'driver_wallet.dart';
@@ -164,7 +166,108 @@ class _DriverDashboardState extends State<DriverDashboard>
     );
   }
 
-  Future<bool?> _showCashConfirmDialog() {
+  /// Verrou contre les doubles appuis : une seule action principale (récupération ou livraison) à la fois, y compris
+  /// pendant l'ouverture du scanner ou de la feuille de livraison. Le succès n'est annoncé qu'après confirmation serveur.
+  final SingleFlight _mainActionFlight = SingleFlight();
+
+  Future<void> _guardedMainAction(OrderModel order, bool isPickedUp) async {
+    if (!isPickedUp && !DriverPartnerPickup.canPickUp(order)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(DriverPartnerPickup.blockedMessage)));
+      return;
+    }
+    await _mainActionFlight.run(() => _mainAction(order, isPickedUp));
+  }
+
+  Future<void> _mainAction(OrderModel order, bool isPickedUp) async {
+                          ProofCredential? qrProof;
+                          if (deliveryProofUiEnabled) {
+                            try {
+                              final snap = await FirebaseFirestore.instance
+                                  .collection('orders')
+                                  .doc(order.id)
+                                  .get();
+                              if (!mounted) return;
+                              if (snap.data()?['deliveryProofMode'] ==
+                                  'qr_v1') {
+                                qrProof = await Navigator.push<ProofCredential>(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => ProofScannerPage(
+                                            orderId: order.id,
+                                            type: isPickedUp
+                                                ? 'delivery'
+                                                : 'pickup')));
+                                if (qrProof == null || !mounted) return;
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(proofError(e))));
+                              }
+                              return;
+                            }
+                          }
+                          if (isPickedUp) {
+                            bool clientPaid = true;
+                            if (order.paymentMethod == 'cash' &&
+                                order.clientId != null) {
+                              final result = await _showCashConfirmDialog(v2: order.partnerV2);
+                              if (result == null) return;
+                              clientPaid = result;
+                            }
+                            await _showDeliveryProofSheet(order, clientPaid,
+                                qrProof: qrProof);
+                          } else {
+                            if (qrProof != null) {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (dialogContext) => AlertDialog(
+                                  title:
+                                      const Text('Confirmer la récupération'),
+                                  content: const Text(
+                                      'Avez-vous reçu la commande de l’expéditeur ou du partenaire ?'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialogContext, false),
+                                        child: const Text('Annuler')),
+                                    FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialogContext, true),
+                                        child: const Text('Confirmer')),
+                                  ],
+                                ),
+                              );
+                              if (confirmed != true || !mounted) return;
+                              try {
+                                await DeliveryProofService()
+                                    .confirm(order.id, 'pickup', qrProof);
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(proofError(e))));
+                                }
+                              }
+                            } else {
+                              try {
+                                await _firestore.pickUpOrder(order.id);
+                              } catch (_) {
+                                // Refus serveur ou réseau : aucune récupération annoncée, l'état vient du flux Firestore.
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content: Text(
+                                              'Récupération non confirmée. Vérifiez votre connexion et que la commande est prête, puis réessayez.')));
+                                }
+                              }
+                            }
+                          }
+  }
+
+  Future<bool?> _showCashConfirmDialog({PartnerV2Info? v2}) {
+    // Commande v2 : montants du serveur (jamais recalculés ici). Sinon texte historique inchangé.
+    final cash = v2 == null ? null : DriverPartnerPickup.cashBreakdown(v2);
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -177,9 +280,13 @@ class _DriverDashboardState extends State<DriverDashboard>
             Text('Paiement espèces'),
           ],
         ),
-        content: const Text(
-          'Le client vous a-t-il remis les espèces pour cette commande ?',
-          style: TextStyle(fontSize: 15),
+        content: Text(
+          cash == null
+              ? 'Le client vous a-t-il remis les espèces pour cette commande ?'
+              : 'Le client vous a-t-il remis ${cash.collect} FCFA en espèces ?\n\n'
+                  '${cash.toRestaurant} FCFA reviennent au restaurant ; '
+                  '${cash.deliveryFee} FCFA de frais de livraison sont votre rémunération brute.',
+          style: const TextStyle(fontSize: 15),
         ),
         actions: [
           TextButton(
@@ -1199,10 +1306,16 @@ class _DriverDashboardState extends State<DriverDashboard>
                         Icons.person, "Client : ${order.clientName ?? '—'}"),
                     if (order.clientPhone != null)
                       _infoRow(Icons.phone, "Tél : ${order.clientPhone!}"),
-                    _infoRow(
-                        Icons.attach_money,
-                        "Budget : ${order.budget} FCFA"
-                        " (Gain : ${_firestore.calculateDriverGain(order.budget)} FCFA)"),
+                    if (order.partnerV2 != null)
+                      DriverPartnerOrderPanel(
+                          order: order,
+                          estimatedGain:
+                              _firestore.calculateDriverGain(order.budget))
+                    else
+                      _infoRow(
+                          Icons.attach_money,
+                          "Budget : ${order.budget} FCFA"
+                          " (Gain : ${_firestore.calculateDriverGain(order.budget)} FCFA)"),
                     if (_driverLat != null)
                       _infoRow(Icons.straighten,
                           "Distance : ${LocationService.calculateDistance(_driverLat!, _driverLng!, order.latitude, order.longitude).toStringAsFixed(1)} km"),
@@ -1266,87 +1379,17 @@ class _DriverDashboardState extends State<DriverDashboard>
                               borderRadius: AppRadius.lgR),
                           elevation: 0,
                         ),
-                        onPressed: () async {
-                          ProofCredential? qrProof;
-                          if (deliveryProofUiEnabled) {
-                            try {
-                              final snap = await FirebaseFirestore.instance
-                                  .collection('orders')
-                                  .doc(order.id)
-                                  .get();
-                              if (!mounted) return;
-                              if (snap.data()?['deliveryProofMode'] ==
-                                  'qr_v1') {
-                                qrProof = await Navigator.push<ProofCredential>(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (_) => ProofScannerPage(
-                                            orderId: order.id,
-                                            type: isPickedUp
-                                                ? 'delivery'
-                                                : 'pickup')));
-                                if (qrProof == null || !mounted) return;
-                              }
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text(proofError(e))));
-                              }
-                              return;
-                            }
-                          }
-                          if (isPickedUp) {
-                            bool clientPaid = true;
-                            if (order.paymentMethod == 'cash' &&
-                                order.clientId != null) {
-                              final result = await _showCashConfirmDialog();
-                              if (result == null) return;
-                              clientPaid = result;
-                            }
-                            await _showDeliveryProofSheet(order, clientPaid,
-                                qrProof: qrProof);
-                          } else {
-                            if (qrProof != null) {
-                              final confirmed = await showDialog<bool>(
-                                context: context,
-                                builder: (dialogContext) => AlertDialog(
-                                  title:
-                                      const Text('Confirmer la récupération'),
-                                  content: const Text(
-                                      'Avez-vous reçu la commande de l’expéditeur ou du partenaire ?'),
-                                  actions: [
-                                    TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dialogContext, false),
-                                        child: const Text('Annuler')),
-                                    FilledButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dialogContext, true),
-                                        child: const Text('Confirmer')),
-                                  ],
-                                ),
-                              );
-                              if (confirmed != true || !mounted) return;
-                              try {
-                                await DeliveryProofService()
-                                    .confirm(order.id, 'pickup', qrProof);
-                              } catch (e) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text(proofError(e))));
-                                }
-                              }
-                            } else {
-                              await _firestore.pickUpOrder(order.id);
-                            }
-                          }
-                        },
+                        // Récupération bloquée tant que le restaurant n'a pas déclaré la commande prête (v2) ;
+                        // le serveur et les règles Firestore revérifient.
+                        onPressed: (!isPickedUp &&
+                                !DriverPartnerPickup.canPickUp(order))
+                            ? null
+                            : () => _guardedMainAction(order, isPickedUp),
                         child: Text(
                           isPickedUp
                               ? "Confirmer la livraison"
-                              : deliveryProofUiEnabled
-                                  ? "Scanner le QR code / récupérer"
-                                  : "Colis récupéré",
+                              : DriverPartnerPickup.pickupButtonLabel(order,
+                                  proofUi: deliveryProofUiEnabled),
                           style: const TextStyle(
                               fontSize: 16,
                               color: Colors.white,
@@ -1954,10 +1997,15 @@ class OrderRequestDialogState extends State<OrderRequestDialog> {
                         "Destination : ${widget.order.deliveryAddress!}"),
                   _row(Icons.straighten,
                       "Distance : ${distance.toStringAsFixed(1)} km"),
-                  _row(Icons.attach_money,
-                      "Budget : ${widget.order.budget} FCFA"),
-                  _row(Icons.wallet, "Votre gain estimé : $gain FCFA",
-                      bold: true, color: Colors.green),
+                  if (widget.order.partnerV2 != null)
+                    DriverPartnerOrderPanel(
+                        order: widget.order, estimatedGain: gain)
+                  else ...[
+                    _row(Icons.attach_money,
+                        "Budget : ${widget.order.budget} FCFA"),
+                    _row(Icons.wallet, "Votre gain estimé : $gain FCFA",
+                        bold: true, color: Colors.green),
+                  ],
                   if (widget.order.recipientPhone != null)
                     _row(Icons.phone_forwarded_rounded,
                         "Destinataire : ${widget.order.recipientPhone!}"),

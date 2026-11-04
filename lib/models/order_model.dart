@@ -1,3 +1,4 @@
+import 'partner_v2_info.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'shopping_item.dart';
@@ -70,6 +71,9 @@ class OrderModel {
   /// Prix des produits (Marketplace/Boutique, montants explicites) : `budget`
   /// y vaut alors les frais de livraison. Lecture seule, jamais réécrit (toMap).
   final int? productAmount;
+
+  /// Commande Restaurant/Boulangerie v2 : montants et état de préparation du serveur (lecture seule, jamais réécrit par toMap).
+  final PartnerV2Info? partnerV2;
   final List<ShoppingItem>?
       items; // liste d'articles courses (ex. AZ IA) — nullable, additif
 
@@ -131,6 +135,7 @@ class OrderModel {
     this.deliveredAt,
     this.items,
     this.productAmount,
+    this.partnerV2,
   });
 
   factory OrderModel.fromMap(String id, Map<String, dynamic> data) {
@@ -141,6 +146,7 @@ class OrderModel {
       productAmount: data['amountsVersion'] == 1
           ? (data['productAmount'] as num?)?.toInt()
           : null,
+      partnerV2: PartnerV2Info.tryParse(data),
       status: data['status'] ?? 'pending',
       latitude: (data['latitude'] ?? data['deliveryLatitude'] ?? 0).toDouble(),
       longitude:
@@ -336,6 +342,7 @@ class OrderModel {
     DateTime? deliveredAt,
     List<ShoppingItem>? items,
     int? productAmount,
+    PartnerV2Info? partnerV2,
   }) {
     return OrderModel(
       id: id ?? this.id,
@@ -399,6 +406,7 @@ class OrderModel {
       deliveredAt: deliveredAt ?? this.deliveredAt,
       items: items ?? this.items,
       productAmount: productAmount ?? this.productAmount,
+      partnerV2: partnerV2 ?? this.partnerV2,
     );
   }
 
@@ -462,6 +470,7 @@ class OrderModel {
           deliveredLat == other.deliveredLat &&
           deliveredLng == other.deliveredLng &&
           deliveredAt == other.deliveredAt &&
+          partnerV2 == other.partnerV2 &&
           listEquals(items, other.items);
 
   @override
