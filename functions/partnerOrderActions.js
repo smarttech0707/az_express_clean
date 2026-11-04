@@ -46,9 +46,13 @@ const { PARTNER_KINDS } = require('./partnerCatalog');
 const { cancelOrderTx, cancelOrderPostTx, isPickedUp } = require('./orderActions');
 const { runLifecycleTransaction } = require('./driverLifecycle');
 const { managementEnabled, loadPilotConfig, applyConfigChange, ConfigRefusal } = require('./partnerOrdersConfig');
+const { declareNonPayment, reviewNonPayment, PaymentRefusal, VERIFICATION, STATUS } = require('./cashPayment');
 
 const PREP_ACTIONS = Object.freeze(['acceptPartnerOrder', 'startPreparation', 'acceptAndPrepare', 'markReady', 'refusePartnerOrder']);
-const CASH_ACTIONS = Object.freeze(['declareCashHandover', 'confirmCashRemittance', 'disputeCashRemittance', 'resolveCashRemittance']);
+// declareCashNonPayment (livreur final) et reviewCashNonPayment (super-administrateur) : état du PAIEMENT (cashPayment, 7D-5),
+// sans effet sur le dû ni sur aucun wallet.
+const PAYMENT_ACTIONS = Object.freeze(['declareCashNonPayment', 'reviewCashNonPayment']);
+const CASH_ACTIONS = Object.freeze(['declareCashHandover', 'confirmCashRemittance', 'disputeCashRemittance', 'resolveCashRemittance', ...PAYMENT_ACTIONS]);
 const ACTIONS = Object.freeze([...PREP_ACTIONS, ...CASH_ACTIONS]);
 // Opération super-administrateur (sans commande) : exemptée du gel de gestion, sinon on ne pourrait plus dégeler.
 const CONFIG_ACTION = 'setPartnerOrdersConfig';
@@ -115,8 +119,11 @@ function buildPartnerOrderAction({
     const action = d.action === 'acceptAndPrepare' ? 'startPreparation' : d.action;
     const reason = typeof d.reason === 'string' ? d.reason.trim().slice(0, 200) : '';
     await checkRateLimit(uid, 'partner_order_action', 60, 60);
-    // La résolution d'un litige cash est réservée au super-administrateur : contrôle AVANT toute lecture de commande.
-    if (action === 'resolveCashRemittance') await requireSuperAdmin({ request, db });
+    // Une déclaration de non-paiement engage une vérification administrative : limite stricte contre les signalements en rafale.
+    if (action === 'declareCashNonPayment') await checkRateLimit(uid, 'cash_non_payment_declaration', 10, 3600);
+    // La résolution d'un litige cash et l'examen d'un non-paiement sont réservés au super-administrateur : contrôle AVANT
+    // toute lecture de commande.
+    if (action === 'resolveCashRemittance' || action === 'reviewCashNonPayment') await requireSuperAdmin({ request, db });
 
     const orderRef = db.collection('orders').doc(d.orderId);
     let outcome;
@@ -139,7 +146,7 @@ function buildPartnerOrderAction({
         return applyAction({ tx, order, orderRef, action, reason, uid });
       });
     } catch (err) {
-      if (err instanceof Refusal) {
+      if (err instanceof Refusal || err instanceof PaymentRefusal) {
         await logAudit({
           userId: uid, userType: 'partner', action: `partner_order_${action}`, targetId: d.orderId,
           status: 'denied', metadata: { code: err.code },
@@ -159,7 +166,10 @@ function buildPartnerOrderAction({
           },
         });
       }
-      return envelope(true, null, outcome.message, { orderId: d.orderId, action, replay: outcome.replay === true, cash: outcome.cash });
+      return envelope(true, null, outcome.message, {
+        orderId: d.orderId, action, replay: outcome.replay === true, cash: outcome.cash,
+        ...(outcome.payment ? { payment: outcome.payment } : {}),
+      });
     }
     if (outcome.refund && !outcome.replay) {
       await cancelOrderPostTx(db, admin, { orderId: d.orderId, uid: outcome.clientId, ...outcome.refund });
@@ -196,13 +206,15 @@ function buildPartnerOrderAction({
       confirmCashRemittance: isPartner,
       disputeCashRemittance: isPartner || isDriver,
       resolveCashRemittance: true, // super-administrateur déjà vérifié
+      declareCashNonPayment: isDriver,
+      reviewCashNonPayment: true, // super-administrateur déjà vérifié
     }[action];
     // Même réponse pour « inexistante » et « à un autre » : rien n'est révélé sur les commandes d'autrui.
     if (!permitted) throw new Refusal('ORDER_NOT_FOUND', 'Commande introuvable');
     if (order.amountsVersion !== PARTNER_AMOUNTS_VERSION) {
       throw new Refusal('ORDER_NOT_PARTNER_V2', 'Cette commande ne se gère pas avec cette fonction');
     }
-    if (action !== 'resolveCashRemittance') {
+    if (action !== 'resolveCashRemittance' && action !== 'reviewCashNonPayment') {
       const actorRef = isPartner
         ? db.collection(PARTNER_KINDS[order.sellerType].collection).doc(uid)
         : db.collection('livreurs').doc(uid);
@@ -227,6 +239,14 @@ function buildPartnerOrderAction({
       if (data.amount > due) throw new Refusal('AMOUNT_EXCEEDS_DUE', 'Le montant dépasse le montant dû au partenaire');
       return data.amount;
     };
+    const flagRef = () => db.collection('reconciliation_flags').doc(`${orderRef.id}_cash_payment_review`);
+    // Les refus de cashPayment.js sont convertis en Refusal (même enveloppe, même audit « denied »).
+    const applyPayment = (fn) => {
+      try { return fn(); } catch (err) {
+        if (err instanceof PaymentRefusal) throw new Refusal(err.code, err.message);
+        throw err;
+      }
+    };
     const write = (patch, extra = {}) => {
       const next = { ...r, ...patch };
       const view = describeCash(next, due);
@@ -234,6 +254,48 @@ function buildPartnerOrderAction({
       tx.update(orderRef, { cashRemittance: next, ...(view.merchantCashSettled ? { merchantCashSettled: true } : {}), ...extra });
       return { cash: view };
     };
+
+    // État du paiement : n'écrit QUE cashPayment (+ un signalement de rapprochement). Le dû, les montants cumulés, le statut
+    // du reversement et les wallets ne sont jamais touchés ; un reversement contesté ou régularisé reste lisible tel quel.
+    if (action === 'declareCashNonPayment') {
+      // Rejeu identique d'abord : une déclaration déjà enregistrée (même après examen ou clôture du reversement) reste un
+      // rejeu, jamais un refus trompeur ni un nouvel incident ; la décision administrative n'est donc jamais réécrite.
+      const already = order.cashPayment && order.cashPayment.status === STATUS.NON_PAYMENT;
+      if (!already && (resolved || fullyConfirmed)) throw new Refusal('CASH_ALREADY_FINAL', 'Le reversement est déjà clos');
+      const decision = applyPayment(() => declareNonPayment(order.cashPayment, {
+        uid, nowMs, reason: data.reason, totalAmount: amounts.totalAmount,
+      }));
+      if (decision.replay) return { replay: true, message: 'Non-paiement déjà déclaré', cash: describeCash(r, due), payment: order.cashPayment, userType: 'none' };
+      tx.update(orderRef, { cashPayment: decision.next });
+      tx.set(flagRef(), {
+        orderId: orderRef.id, type: 'cash_payment_review', status: 'open', partnerId: order.sellerId, driverId: uid,
+        clientId: order.clientId || null, theoreticalAmount: amounts.totalAmount, amountDueToPartner: due, createdAtMs: nowMs,
+      }, { merge: true });
+      return {
+        cash: describeCash(r, due), payment: decision.next, userType: 'driver',
+        message: 'Non-paiement déclaré : vérification administrative en attente. Le montant dû au restaurant n’est pas modifié.',
+        audit: { paymentStatus: decision.next.status, verification: decision.next.verification },
+      };
+    }
+
+    if (action === 'reviewCashNonPayment') {
+      const decision = applyPayment(() => reviewNonPayment(order.cashPayment, {
+        uid, nowMs, requestId: data.requestId, decision: data.decision, justification: data.justification,
+      }));
+      if (decision.replay) return { replay: true, message: 'Décision déjà enregistrée', cash: describeCash(r, due), payment: order.cashPayment, userType: 'none' };
+      tx.update(orderRef, { cashPayment: decision.next });
+      tx.set(flagRef(), {
+        status: 'reviewed', reviewedBy: uid, reviewedAtMs: nowMs, decision: data.decision, requestId: data.requestId,
+        verification: decision.next.verification,
+      }, { merge: true });
+      return {
+        cash: describeCash(r, due), payment: decision.next, userType: 'admin',
+        message: decision.next.verification === VERIFICATION.CONFIRMED_UNPAID
+          ? 'Non-paiement confirmé : le montant dû reste à régulariser par décision administrative'
+          : 'Non-paiement infirmé : le circuit normal de reversement continue',
+        audit: { decision: data.decision, verification: decision.next.verification },
+      };
+    }
 
     if (action === 'declareCashHandover') {
       if (resolved || fullyConfirmed) throw new Refusal('CASH_ALREADY_FINAL', 'Le reversement est déjà clos');

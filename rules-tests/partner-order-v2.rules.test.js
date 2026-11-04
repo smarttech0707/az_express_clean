@@ -52,6 +52,7 @@ const FORGED = [
   { clientId: 'x' }, { type: 'courses' }, { items: [] },
   { productAmount: 99999, totalAmount: 100499, itemsAmount: 99999 }, // gonflement cohérent multi-champs
   { cashRemittance: { status: 'confirmed', amountDue: 3500, partnerConfirmedAtMs: 1 } },
+  { cashPayment: { status: 'confirmed', verification: 'refuted' } },
   { merchantCashSettled: true }, { merchantCashSettledAt: 1 }, { merchantCashSettledBy: 'x' },
   { partnerAcceptedAtMs: 1 }, { preparationStartedAtMs: 1 }, { readyAtMs: 1 }, { partnerRefusal: { reason: 'x' } },
   { commissionStatus: 'refunded' }, { commissionAmount: 0 }, { deliveryFeePaid: false },
@@ -110,7 +111,7 @@ test('client : ne peut ni gonfler, ni annuler directement (remboursement = cance
     // Création : ni v2 ni champs serveur.
     const base = { clientId: 'c1', budget: 500, isPaid: false, paymentMethod: 'cash', status: 'pending', type: 'livraison', description: 'x' };
     await assertSucceeds(db.doc('orders/ctl').set(base));
-    for (const extra of [{ amountsVersion: 2 }, { cashRemittance: { status: 'confirmed' } }, { merchantCashSettled: true },
+    for (const extra of [{ amountsVersion: 2 }, { cashRemittance: { status: 'confirmed' } }, { cashPayment: { status: 'confirmed' } }, { merchantCashSettled: true },
       { partnerAcceptedAtMs: 1 }, { preparationStartedAtMs: 1 }, { readyAtMs: 1 }, { partnerRefusal: { reason: 'x' } },
       { cancelRequestAfterPreparation: {} }]) {
       await assertFails(db.doc(`orders/new_${Object.keys(extra)[0]}`).set({ ...base, ...extra }));
@@ -130,6 +131,7 @@ test('utilisateur non autorisé (autre client, autre livreur, autre partenaire, 
       await assertFails(db.doc('orders/ready').update({ status: 'picked_up' }));
       await assertFails(db.doc('orders/pending').update({ status: 'cancelled' }));
       await assertFails(db.doc('orders/cash').update({ cashRemittance: { status: 'confirmed' } }));
+      await assertFails(db.doc('orders/cash').update({ cashPayment: { status: 'confirmed', verification: 'refuted' } }));
     }
     await assertFails(anon.doc('orders/ready').update({ totalAmount: 1 }));
   } finally { await e.cleanup(); }

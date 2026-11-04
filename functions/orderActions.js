@@ -8,6 +8,7 @@ const { settlementDocument } = require('./earningsSettlement');
 const { buildAmounts, readAmounts, cashBreakdown } = require('./orderAmounts');
 const { getBillingMode, decideBilling, assertAcceptedTotal } = require('./billingPolicy');
 const { isLegacyPartnerOrder, getLegacyPartnerPolicy } = require('./legacyPartnerPolicy');
+const { initialCashPayment } = require('./cashPayment');
 
 // Fabriques pour payOrderFromWalletCF / cancelOrderCF / deliverOrderCF —
 // séparées de index.js pour rester testables sans initialiser Firebase Admin
@@ -989,8 +990,18 @@ function buildDeliverOrder({
                 amountDue: amounts.productAmount, amountHandedOver: null, deliveredAtMs: Date.now(),
                 handedOverAtMs: null, partnerConfirmedAtMs: null,
               },
+              // État du paiement (7D-5) : la déclaration « Non payé » est CONSERVÉE (auteur, date, vérification) mais ne
+              // supprime ni ne confirme aucun dû ; isPaid:false n'est pas une preuve de non-paiement.
+              cashPayment: initialCashPayment({ markCashPaid, totalAmount: amounts.totalAmount, uid, nowMs: Date.now() }),
             } : {}),
           });
+          if (partnerV2 && markCashPaid === false) {
+            tx.set(db.collection('reconciliation_flags').doc(`${orderId}_cash_payment_review`), {
+              orderId: String(orderId), type: 'cash_payment_review', status: 'open', partnerId: sid, driverId: uid,
+              clientId: order.clientId || null, theoreticalAmount: amounts.totalAmount, amountDueToPartner: amounts.productAmount,
+              createdAtMs: Date.now(),
+            });
+          }
         }
       }
 

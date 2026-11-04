@@ -239,6 +239,15 @@ function analyzeV2Order(o, amounts, { clientLedger, partnerLedger, driverLedger,
               : 'Reversement cash au partenaire en attente de confirmation.', { amountDueToPartner: productAmount, owedTo: 'partner' });
         }
       }
+      // État du paiement (7D-5) : une déclaration « Non payé » n'établit AUCUNE dette ; elle exige une vérification.
+      const p = o.cashPayment;
+      if (p && p.verification === 'pending_review') {
+        add('V2_CASH_PAYMENT_UNVERIFIED', 'medium', 'Non-paiement déclaré par le livreur : vérification du super-administrateur en attente (le montant dû est conservé, aucune dette établie, aucun débit).',
+          { amountDueToPartner: productAmount, owedTo: 'to_verify' });
+      } else if (p && p.verification === 'confirmed_unpaid' && (!r || r.status !== 'resolved')) {
+        add('V2_CASH_UNPAID_CONFIRMED_UNSETTLED', 'high', 'Non-paiement confirmé par l’administration mais reversement non régularisé : décision sur le montant final attendue.',
+          { amountDueToPartner: productAmount, owedTo: 'to_decide' });
+      }
     }
   }
 

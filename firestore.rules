@@ -191,7 +191,7 @@ service cloud.firestore {
           // Commission/règlement : la branche partenaire historique ne les protégeait pas.
           'commissionAmount', 'commissionPayerId', 'commissionTxId', 'commissionStatus',
           'heldDriverEarning', 'settlementHold', 'settlementStatus', 'deliveryFeePaid', 'cashBreakdown',
-          'cashRemittance', 'merchantCashSettled', 'merchantCashSettledAt', 'merchantCashSettledBy',
+          'cashRemittance', 'cashPayment', 'merchantCashSettled', 'merchantCashSettledAt', 'merchantCashSettledBy',
           'sellerStatus', 'partnerAcceptedAtMs', 'preparationStartedAtMs', 'readyAtMs', 'partnerRefusal',
           'cancelRequestAfterPreparation']);
     }
@@ -711,7 +711,7 @@ service cloud.firestore {
         && notPresent('amountsVersion') && notPresent('deliveryFeePaid')
         && notPresent('cashBreakdown') && notPresent('deliveryFeeHold') && notPresent('adminReview')
         // Reversement cash, état de préparation partenaire (version 2) : posés par le serveur uniquement.
-        && notPresent('cashRemittance') && notPresent('merchantCashSettled') && notPresent('merchantCashSettledAt')
+        && notPresent('cashRemittance') && notPresent('cashPayment') && notPresent('merchantCashSettled') && notPresent('merchantCashSettledAt')
         && notPresent('merchantCashSettledBy') && notPresent('partnerAcceptedAtMs') && notPresent('preparationStartedAtMs')
         && notPresent('readyAtMs') && notPresent('partnerRefusal') && notPresent('cancelRequestAfterPreparation')
         // isPaid ne peut être vrai à la création que pour un paiement wallet
