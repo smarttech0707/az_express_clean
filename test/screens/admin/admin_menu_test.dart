@@ -29,6 +29,7 @@ const _allPerms = [
 
 const _superOnly = {
   'deletions', 'vehicles', 'partner_qr', 'transfers', 'billing', 'sub_admins',
+  'cash_reviews', 'partner_pilot',
   'security',
 };
 
@@ -41,7 +42,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   GoogleFonts.config.allowRuntimeFetching = false;
 
-  test('super-admin : 8 catégories, 41 fonctions, identifiants uniques', () {
+  test('super-admin : 8 catégories, 43 fonctions, identifiants uniques', () {
     final cats = buildAdminMenu(isSuper: true, permissions: const []);
     expect(cats.map((c) => c.title), [
       'Tableau de bord et statistiques',
@@ -54,7 +55,7 @@ void main() {
       'Paramètres et sécurité',
     ]);
     final ids = _items(true, const []).map((i) => i.id).toList();
-    expect(ids.length, 41);
+    expect(ids.length, 43);
     expect(ids.toSet().length, ids.length);
   });
 
@@ -62,7 +63,7 @@ void main() {
     final types = _items(true, const [])
         .map((i) => i.page().runtimeType.toString())
         .toList();
-    expect(types.toSet().length, 41, reason: 'une page distincte par entrée');
+    expect(types.toSet().length, 43, reason: 'une page distincte par entrée');
     for (final required in [
       'AdminOrders', 'AdminMap', 'AdminLiveTrackingPage', 'AdminRechargePage',
       'AdminPharmaciesPage', 'DriverRequestsPage',
@@ -100,7 +101,7 @@ void main() {
       () {
     final ids = _items(false, _allPerms).map((i) => i.id).toSet();
     expect(ids.intersection(_superOnly), isEmpty);
-    expect(ids.length, 41 - _superOnly.length);
+    expect(ids.length, 43 - _superOnly.length);
   });
 
   test('carte QR des établissements : réservée au super-admin', () {

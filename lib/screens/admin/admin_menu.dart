@@ -12,6 +12,8 @@ import 'admin_boulangerie_requests_page.dart';
 import 'admin_boulangeries_page.dart';
 import 'admin_boutique_page.dart';
 import 'admin_cash_settlement_page.dart';
+import 'admin_cash_payment_review_page.dart';
+import 'admin_partner_pilot_page.dart';
 import 'admin_cod_page.dart';
 import 'admin_commissions_page.dart';
 import 'admin_drivers_ranking.dart';
@@ -453,6 +455,26 @@ List<AdminMenuCategory> buildAdminMenu({
             page: () => const AdminCashSettlementPage(),
           ),
           'cash_marchand'
+        ),
+        (
+          AdminMenuItem(
+            id: 'cash_reviews',
+            title: 'Incidents paiement cash',
+            subtitle: 'Non-paiements déclarés à examiner',
+            icon: Icons.fact_check_rounded,
+            page: () => const AdminCashPaymentReviewPage(),
+          ),
+          null
+        ),
+        (
+          AdminMenuItem(
+            id: 'partner_pilot',
+            title: 'Pilote restaurants v2',
+            subtitle: 'Restaurants pilotes, ouverture, gel',
+            icon: Icons.tune_rounded,
+            page: () => const AdminPartnerPilotPage(),
+          ),
+          null
         ),
         (
           AdminMenuItem(

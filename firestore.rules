@@ -747,7 +747,11 @@ service cloud.firestore {
       // depuis le livreur (acceptOrder()/deliverOrderCF ne touchent jamais
       // shoppingBudget/sellerId/sellerType/pharmacieId) — élargissement de
       // sécurité pur.
-      allow update: if isAdmin() ||
+      // Mission 7E-2-S : cashPayment (non-paiement déclaré et son examen) est écrit par le SERVEUR uniquement (Admin SDK),
+      // pour TOUS les rôles — super-administrateur compris — et quelle que soit la version des montants : ajout,
+      // modification et suppression sont refusés au client. Gardé en tête de règle (et non dans chaque branche) :
+      // les branches livreur/client/partenaire ne le protégeaient que pour amountsVersion == 2.
+      allow update: if unchanged('cashPayment') && (isAdmin() ||
         (isAuth() && resource.data.driverId == uid()
           && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
           && unchanged('paymentMethod') && unchanged('driverId')
@@ -832,7 +836,7 @@ service cloud.firestore {
           && unchanged('isPaid') && unchanged('paymentMethod')
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['rating', 'sellerRating'])
-          && ratingFieldOk('rating') && ratingFieldOk('sellerRating'));
+          && ratingFieldOk('rating') && ratingFieldOk('sellerRating')));
       // Phase 1: disable destructive purge, including from older Admin clients.
       allow delete: if false;
     }
