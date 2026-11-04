@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/partner_order_action_service.dart';
 import '../theme/app_theme.dart';
+import '../models/cash_remittance_view.dart';
 import 'app_button.dart';
+import 'cash_remittance_panel.dart';
 
 /// Ligne d'article d'une commande v2 (lue dans `items`, jamais recalculée).
 class PartnerV2Line {
@@ -29,6 +31,9 @@ class PartnerV2OrderView {
   final String description;
   final DateTime? createdAt;
 
+  /// Suivi du reversement des espèces (commande v2 livrée et payée en espèces), sinon null.
+  final CashRemittanceView? cash;
+
   const PartnerV2OrderView({
     required this.id,
     required this.status,
@@ -42,6 +47,7 @@ class PartnerV2OrderView {
     required this.lines,
     required this.description,
     required this.createdAt,
+    this.cash,
   });
 
   static bool isV2(Map<String, dynamic> d) => d['amountsVersion'] == 2;
@@ -77,6 +83,7 @@ class PartnerV2OrderView {
       lines: lines,
       description: (d['description'] as String?) ?? 'Commande',
       createdAt: createdAt,
+      cash: CashRemittanceView.tryParse(d),
     );
   }
 
@@ -143,7 +150,8 @@ Future<PartnerActionResult> _defaultRunner(String orderId, PartnerAction action,
 class PartnerV2OrderCard extends StatefulWidget {
   final PartnerV2OrderView order;
   final PartnerActionRunner? runner;
-  const PartnerV2OrderCard({super.key, required this.order, this.runner});
+  final CashActionRunner? cashRunner;
+  const PartnerV2OrderCard({super.key, required this.order, this.runner, this.cashRunner});
 
   @override
   State<PartnerV2OrderCard> createState() => _PartnerV2OrderCardState();
@@ -299,6 +307,13 @@ class _PartnerV2OrderCardState extends State<PartnerV2OrderCard> {
                     color: AppColors.errorStrong,
                     fontWeight: FontWeight.w600)),
           ],
+          if (o.cash != null)
+            CashRemittancePanel(
+              orderId: o.id,
+              view: o.cash!,
+              role: CashRole.partner,
+              runner: widget.cashRunner,
+            ),
           if (o.canStartPreparation || o.canMarkReady)
             const SizedBox(height: 12),
           if (o.canStartPreparation)

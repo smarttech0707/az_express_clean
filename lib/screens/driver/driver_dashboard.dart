@@ -28,6 +28,7 @@ import '../../services/notification_service.dart';
 import '../driver_tracking_screen.dart';
 import 'driver_wallet.dart';
 import 'driver_transfer_page.dart';
+import 'driver_cash_remittance_page.dart';
 import 'driver_rides_page.dart';
 import '../../constants/app_constants.dart';
 import '../../services/min_version_service.dart';
@@ -660,8 +661,13 @@ class _DriverDashboardState extends State<DriverDashboard>
                               }
                               if ((order.clientId?.isNotEmpty ?? false) &&
                                   !clientPaid) {
-                                await _firestore
-                                    .reportFakeOrder(order.clientId!);
+                                // Signalement secondaire : la livraison est DÉJÀ confirmée par le serveur. Son échec
+                                // (les règles interdisent au livreur d'écrire sur le profil client) ne doit pas faire
+                                // croire à un échec de la livraison ni inviter à la rejouer.
+                                try {
+                                  await _firestore
+                                      .reportFakeOrder(order.clientId!);
+                                } catch (_) {}
                               }
                               if (ctx.mounted) Navigator.pop(ctx);
                               if (!mounted) return;
@@ -773,6 +779,17 @@ class _DriverDashboardState extends State<DriverDashboard>
             ),
           ),
           actions: [
+            IconButton(
+              tooltip: 'Espèces à reverser aux restaurants',
+              icon: const Icon(Icons.payments_rounded, color: Colors.white),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      DriverCashRemittancePage(driverId: widget.driverId),
+                ),
+              ),
+            ),
             if (AppConfig.deliveryTransferEnabled)
             IconButton(
               tooltip: 'Remplacements de livreur',
