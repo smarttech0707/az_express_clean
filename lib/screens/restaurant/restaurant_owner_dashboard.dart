@@ -17,6 +17,7 @@ import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/single_photo_editor.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import '../../widgets/stream_error_state.dart';
+import '../../widgets/partner_v2_order_card.dart';
 import '../../utils/storage_cleanup.dart';
 
 class RestaurantOwnerDashboard extends StatefulWidget {
@@ -873,6 +874,15 @@ class _OrdersTab extends StatelessWidget {
           itemCount: docs.length,
           itemBuilder: (context, i) {
             final d = docs[i].data() as Map<String, dynamic>;
+            // Commandes v2 (amountsVersion 2) : montants séparés et actions via partnerOrderActionCF. Les commandes
+            // historiques gardent l'affichage ci-dessous, inchangé.
+            if (PartnerV2OrderView.isV2(d)) {
+              return PartnerV2OrderCard(
+                key: ValueKey(docs[i].id),
+                order: PartnerV2OrderView.fromMap(docs[i].id, d,
+                    createdAt: (d['createdAt'] as Timestamp?)?.toDate()),
+              );
+            }
             final status = d['status'] as String? ?? 'pending';
             final color = _statusColors[status] ?? Colors.grey;
             final label = _statusLabels[status] ?? status;
@@ -1117,7 +1127,8 @@ class _RestaurantAnalyticsSheetState extends State<_RestaurantAnalyticsSheet> {
             .difference(DateTime(date.year, date.month, date.day))
             .inDays;
         if (daysAgo >= 0 && daysAgo < 7) {
-          final amount = (data['budget'] as num? ?? 0).toInt();
+          // v2 : budget = frais de livraison (livreur) ; le chiffre d'affaires du restaurant est productAmount.
+          final amount = PartnerV2OrderView.partnerRevenueOf(data);
           revenues[6 - daysAgo] += amount;
           total += amount;
         }
