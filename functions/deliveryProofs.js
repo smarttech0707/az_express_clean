@@ -34,7 +34,7 @@ function validType(type) {
 }
 function requireProofRollout(HttpsError) {
   if (process.env.DELIVERY_PROOFS_ENABLED !== 'true') {
-    throw new HttpsError('failed-precondition', 'Validation QR non activ?e');
+    throw new HttpsError('failed-precondition', 'Validation QR non activée');
   }
 }
 function authUid(request, HttpsError) {
@@ -222,13 +222,13 @@ async function verifyProofInTransaction({
       !['active', 'used', 'expired'].includes(proof.status)) {
     return { ...invalid };
   }
-  if (proof.status === 'used') return { ...invalid, message: 'Code d?j? utilis?' };
+  if (proof.status === 'used') return { ...invalid, message: 'Code déjà utilisé' };
   const expiresAt = proof.expiresAt?.toMillis?.() || 0;
   if (expiresAt <= now) {
     return {
       ok: false,
       code: invalid.code,
-      message: 'Code expir?',
+      message: 'Code expiré',
       proofRef,
       failureUpdate: { status: 'expired', updatedAt: admin.firestore.Timestamp.fromMillis(now) },
     };

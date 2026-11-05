@@ -658,3 +658,83 @@ test('pickup QR v2 prête : un mauvais code reste refusé (vérifications habitu
     assert.equal(store.get('orders/o1').status, 'accepted');
   });
 });
+
+// ── Mission 7E-33 : audit de la livraison avec preuve (QR/PIN) avant déploiement ─────────────────────────────────────────────────
+function deliveryHarness({ order = {}, proof = {}, wallets = {} } = {}) {
+  const token = 'delivery-token-for-audit-0123456789';
+  const seed = {
+    ...makeProofSeed({ type: 'delivery', token, pin: '654321', ...proof }),
+    'orders/o1': { clientId: 'c1', driverId: 'd1', sellerId: 'r1', sellerType: 'restaurant', status: 'picked_up',
+      deliveryProofMode: 'qr_v1', driverAssignmentVersion: 1, paymentMethod: 'wallet', isPaid: true, budget: 1000, ...order },
+    'livreurs/d1': { wallet: 300, isOnDelivery: true, ...wallets.driver },
+    'restaurants/r1': { wallet: 100 },
+  };
+  const { db, store } = makeFakeDb(seed);
+  const fn = buildDeliverOrderWithProof({ db, admin: fakeAdmin, onCall, HttpsError, checkRateLimit: async () => {},
+    logAudit: makeLogAudit(), calculateCommission: async () => 100, deliveryProofPepper: { name: 'deliveryProofPepper' } });
+  const call = (data, uid = 'd1') => fn.run({ auth: { uid }, data: { orderId: 'o1', ...data } });
+  return { db, store, call, token };
+}
+const proofDoc = (store) => store.get(`delivery_proofs/${sessionId('o1', 'delivery')}/versions/proof-v1`);
+
+test('delivery proof : commande annulée ou déjà livrée refusée, aucun mouvement d’argent', async () => withPepper(async () => {
+  for (const status of ['cancelled', 'delivered']) {
+    const h = deliveryHarness({ order: { status } });
+    await assert.rejects(h.call({ proofToken: h.token }), (e) => e.code === 'failed-precondition');
+    assert.equal(h.store.get('restaurants/r1').wallet, 100, status);
+    assert.equal(h.store.get('livreurs/d1').wallet, 300, status);
+    assert.equal(proofDoc(h.store).status, 'active', `${status} : la preuve n’est pas consommée`);
+  }
+}));
+
+test('delivery proof : commande historique (sans qr_v1) refusée par la voie QR/PIN', async () => withPepper(async () => {
+  const h = deliveryHarness({ order: { deliveryProofMode: undefined } });
+  await assert.rejects(h.call({ proofToken: h.token }), (e) => e.code === 'failed-precondition');
+  assert.equal(h.store.get('orders/o1').status, 'picked_up');
+}));
+
+test('delivery proof : PIN valide une fois, réutilisation du même PIN et du même QR refusée sans second crédit', async () => withPepper(async () => {
+  const h = deliveryHarness();
+  assert.deepEqual(await h.call({ proofPin: '654321' }), { success: true });
+  assert.equal(h.store.get('restaurants/r1').wallet, 1100);
+  await assert.rejects(h.call({ proofPin: '654321' }), (e) => e.code === 'failed-precondition');
+  await assert.rejects(h.call({ proofToken: h.token }), (e) => e.code === 'failed-precondition');
+  assert.equal(h.store.get('restaurants/r1').wallet, 1100);
+  assert.equal(h.store.get('livreurs/d1').wallet, 300);
+  assert.equal(proofDoc(h.store).status, 'used');
+}));
+
+test('delivery proof : PIN expiré refusé et marqué expiré ; mauvais livreur ; QR et PIN fournis ensemble', async () => withPepper(async () => {
+  const expired = deliveryHarness({ proof: { expiresAt: Date.now() - 1000 } });
+  await assert.rejects(expired.call({ proofPin: '654321' }), (e) => e.code === 'failed-precondition');
+  assert.equal(proofDoc(expired.store).status, 'expired');
+  assert.equal(expired.store.get('orders/o1').status, 'picked_up');
+  const other = deliveryHarness();
+  await assert.rejects(other.call({ proofPin: '654321' }, 'd2'), (e) => e.code === 'permission-denied');
+  assert.equal(proofDoc(other.store).status, 'active');
+  const both = deliveryHarness();
+  await assert.rejects(both.call({ proofPin: '654321', proofToken: both.token }), (e) => e.code === 'failed-precondition');
+  assert.equal(both.store.get('orders/o1').status, 'picked_up');
+}));
+
+test('delivery proof : panne Firestore pendant la confirmation → rien n’est modifié ; le rejeu aboutit une seule fois', async () => withPepper(async () => {
+  const h = deliveryHarness();
+  const realRun = h.db.runTransaction;
+  h.db.runTransaction = () => Promise.reject(Object.assign(new Error('UNAVAILABLE'), { code: 14 }));
+  await assert.rejects(h.call({ proofToken: h.token }), /UNAVAILABLE/);
+  assert.equal(h.store.get('orders/o1').status, 'picked_up');
+  assert.equal(proofDoc(h.store).status, 'active');
+  assert.equal(h.store.get('restaurants/r1').wallet, 100);
+  h.db.runTransaction = realRun;
+  assert.deepEqual(await h.call({ proofToken: h.token }), { success: true }); // réponse perdue : le client réessaie
+  await assert.rejects(h.call({ proofToken: h.token }), (e) => e.code === 'failed-precondition'); // et un troisième essai ne rejoue rien
+  assert.equal(h.store.get('restaurants/r1').wallet, 1100);
+}));
+
+test('delivery proof : cinq PIN faux verrouillent la preuve, même le bon PIN est ensuite refusé ; le QR reste lié à la preuve courante', async () => withPepper(async () => {
+  const h = deliveryHarness();
+  for (let i = 0; i < 5; i += 1) await assert.rejects(h.call({ proofPin: '000000' }), (e) => e.code === 'failed-precondition');
+  await assert.rejects(h.call({ proofPin: '654321' }), (e) => e.code === 'resource-exhausted');
+  assert.equal(h.store.get('orders/o1').status, 'picked_up');
+  assert.equal(h.store.get('restaurants/r1').wallet, 100);
+}));
