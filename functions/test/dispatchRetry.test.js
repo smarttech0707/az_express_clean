@@ -200,7 +200,8 @@ test('plusieurs commandes : traitées indépendamment, uniquement celles en reta
 });
 
 test('branchement : l’expiration passe avant la reprise et ne peut pas être bloquée par elle', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+  // Fins de ligne normalisées : sous Windows le dépôt est extrait en CRLF, le comportement vérifié reste le même.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8').replace(/\r\n/g, '\n');
   const m = src.match(/exports\.autoExpireOrders = onSchedule\([\s\S]*?\n\}\);\n/);
   assert.ok(m, 'autoExpireOrders introuvable');
   assert.match(m[0], /try \{\s*await expireStaleOrders\(\);\s*\} finally \{\s*await retryPendingDispatch\(/);

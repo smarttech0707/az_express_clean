@@ -111,10 +111,13 @@ async function diagnoseDriver(db, driverId) {
 
 module.exports = { readDriverState, terminalDriverPatch, settleTerminalOrder, diagnoseDriver, runLifecycleTransaction };
 
-async function clearAcceptedOffers(db, admin, orderId, previous = {}) {
+// `expectedDriverId` (optionnel) : l'appelant vient de valider l'acceptation de CE livreur ; si la commande a changé de main entre-temps,
+// rien n'est nettoyé. Seul `pendingOrderId === orderId` est supprimé : jamais isOnDelivery, ni l'offre d'une autre commande.
+async function clearAcceptedOffers(db, admin, orderId, previous = {}, expectedDriverId = null) {
   return runLifecycleTransaction(db, async tx => {
     const snap = await tx.get(db.collection('orders').doc(orderId));
     if (!snap.exists || snap.data().status !== 'accepted') return;
+    if (expectedDriverId && snap.data().driverId !== expectedDriverId) return;
     const ids = new Set([snap.data().driverId, ...(previous.notifiedDriverIds || [])]
       .filter(id => typeof id === 'string' && id && !id.includes('/')));
     const updates = [];

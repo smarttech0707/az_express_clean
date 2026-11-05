@@ -1,6 +1,6 @@
 'use strict';
 
-const { readDriverState, runLifecycleTransaction } = require('./driverLifecycle');
+const { readDriverState, runLifecycleTransaction, clearAcceptedOffers } = require('./driverLifecycle');
 const { isLegacyPartnerOrder, getLegacyPartnerPolicy } = require('./legacyPartnerPolicy');
 const { storageObjectOfUrl } = require('./proofStorage');
 
@@ -32,12 +32,21 @@ function selfieUrlMatches(url, orderId, uid, bucketName) {
   return storageObjectOfUrl(url, bucketName) === selfiePath(orderId, uid);
 }
 
+// Nettoyage des offres après acceptation : budget de temps pour ne jamais retarder la réponse au livreur, et plafond de livreurs
+// traités ici (le déclencheur syncDriverOrderLifecycle reprend le reste à partir de l'état « avant » de la commande).
+const OFFER_CLEANUP_TIMEOUT_MS = 4000;
+const OFFER_CLEANUP_MAX_DRIVERS = 100;
+
 function buildAcceptOrder({
   db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission,
   // (chemin) => Promise<boolean> : l'objet Storage existe réellement. Absent = contrôle d'URL seul (tests).
   selfieExists,
   // () => nom du bucket par défaut ; absent ou en échec = bucket de l'URL non vérifié (jamais un motif de refus de l'acceptation).
   selfieBucketName,
+  // (orderId, offeredIds, winnerUid) => Promise : nettoyage post-acceptation ; injectable pour les tests.
+  clearOffers = (orderId, offeredIds, winnerUid) =>
+    clearAcceptedOffers(db, admin, orderId, { notifiedDriverIds: offeredIds }, winnerUid),
+  offerCleanupTimeoutMs = OFFER_CLEANUP_TIMEOUT_MS,
 }) {
   return onCall(async (request) => {
     if (!request.auth?.uid ||
@@ -62,6 +71,7 @@ function buildAcceptOrder({
     const driverRef = db.collection('livreurs').doc(uid);
     const legacyPolicy = await getLegacyPartnerPolicy(db);
     let outcome;
+    let offeredIds = [];
 
     await runLifecycleTransaction(db, async (tx) => {
       const [orderSnap, driverSnap, deletionSnap] = await Promise.all([
@@ -164,6 +174,9 @@ function buildAcceptOrder({
         ...(driverPhotoUrl ? { driverPhotoUrl } : {}),
       });
       outcome = { success: true, alreadyAccepted: false, commission };
+      // `notifiedDriverIds` est supprimé de la commande par cette transaction : on garde la liste pour le nettoyage.
+      offeredIds = (Array.isArray(order.notifiedDriverIds) ? order.notifiedDriverIds : [])
+        .filter((id) => typeof id === 'string' && id && !id.includes('/')).slice(0, OFFER_CLEANUP_MAX_DRIVERS);
     });
 
     if (!outcome.alreadyAccepted) {
@@ -173,8 +186,25 @@ function buildAcceptOrder({
         metadata: { commission: outcome.commission },
       });
     }
+    if (!outcome.alreadyAccepted) await cleanupOffers(orderId, offeredIds, uid);
     return outcome;
   });
+
+  // Après l'acceptation VALIDÉE (transaction terminée) : ne peut ni l'annuler, ni échouer l'appel, ni durer plus que le budget.
+  // Idempotent ; un échec laisse le travail au déclencheur syncDriverOrderLifecycle.
+  async function cleanupOffers(orderId, ids, winnerUid) {
+    let timer;
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => clearOffers(orderId, ids, winnerUid)),
+        new Promise((resolve) => { timer = setTimeout(resolve, offerCleanupTimeoutMs); }),
+      ]);
+    } catch (error) {
+      console.error('[acceptOrder] offer cleanup failed', orderId, error && error.message);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
 
 module.exports = { buildAcceptOrder };
