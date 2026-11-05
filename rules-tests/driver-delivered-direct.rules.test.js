@@ -25,7 +25,8 @@ const CURRENT = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), '
 // Le découpage est strict : si le texte de la règle change, ce test échoue au
 // lieu de valider une transformation vide.
 function closedRules(source) {
-  const re = /\|\|\s*\(resource\.data\.status == 'picked_up'\s*&&\s*resource\.data\.get\('deliveryProofMode', ''\) != 'qr_v1'\s*&&\s*request\.resource\.data\.status == 'delivered'\)/g;
+  // Tolère le commentaire et la clause `amountsVersion != 2` (la livraison v2 passe uniquement par deliverOrderCF) insérés depuis 7B-3B.
+  const re = /\|\|\s*\(resource\.data\.status == 'picked_up'\s*&&\s*resource\.data\.get\('deliveryProofMode', ''\) != 'qr_v1'\s*(?:\/\/[^\n]*\s*)?(?:&&\s*resource\.data\.get\('amountsVersion', 0\) != 2\s*)?&&\s*request\.resource\.data\.status == 'delivered'\)/g;
   const found = source.match(re);
   if (!found || found.length !== 1) throw new Error('branche picked_up->delivered introuvable (ou ambiguë) dans firestore.rules');
   return source.replace(re, '|| false');

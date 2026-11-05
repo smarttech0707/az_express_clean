@@ -336,17 +336,28 @@ service firebase.storage {
     // peut écrire que SON PROPRE selfie ; acceptOrder() (Cloud
     // Function/transaction Firestore) revalide de toute façon
     // indépendamment l'éligibilité réelle du livreur avant d'accepter.
+    //
+    // Mission 7E-11-S : LECTURE (et liste) réservée au livreur propriétaire du fichier (il lit son URL juste après l'envoi) et au
+    // super-administrateur. Les clients, restaurateurs et administrateurs affichent l'image par l'URL de téléchargement stockée dans
+    // la commande (jeton intégré, sans règle). Aucune lecture Firestore ajoutée sur ce chemin critique d'acceptation (budget de 2
+    // documents) : les deux clauses de lecture sont distinctes pour que le lecteur administrateur ne s'ajoute pas au tombstone.
     match /acceptance_selfies/{orderId}/{file} {
-      allow read:  if isAuth();
+      allow read:  if isRealUser() && file == request.auth.uid + '.jpg';
+      allow read:  if isSuperAdminReader();
       allow create, update: if isRealUser() && isImage() && maxSize(5)
         && file == request.auth.uid + '.jpg';
       allow delete: if isRealUser() && file == request.auth.uid + '.jpg';
     }
 
     // ── PHOTOS PREUVES LIVRAISON ───────────────────────────────────────────
+    // Mission 7E-11-S : lecture et liste réservées au livreur propriétaire et au super-administrateur (l'identifiant d'un livreur est
+    // lisible par tout utilisateur connecté : l'ancienne règle « isAuth() » permettait d'énumérer et de lire toutes ses preuves) ;
+    // nom de fichier imposé « <identifiant de commande>.jpg » (caractères sûrs, 128 maximum) comme le fait l'application.
     match /delivery_photos/{driverId}/{file} {
-      allow read:  if isAuth();
-      allow create, update: if isRealUser() && isOwnerPath(driverId) && isImage() && maxSize(10);
+      allow read:  if isRealUser() && isOwnerPath(driverId);
+      allow read:  if isSuperAdminReader();
+      allow create, update: if isRealUser() && isOwnerPath(driverId) && file.matches('[A-Za-z0-9_-]{1,128}[.]jpg')
+        && isImage() && maxSize(10);
       allow delete: if isRealUser() && isOwnerPath(driverId);
     }
 

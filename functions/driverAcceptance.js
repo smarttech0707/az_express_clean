@@ -2,6 +2,7 @@
 
 const { readDriverState, runLifecycleTransaction } = require('./driverLifecycle');
 const { isLegacyPartnerOrder, getLegacyPartnerPolicy } = require('./legacyPartnerPolicy');
+const { storageObjectOfUrl } = require('./proofStorage');
 
 // Acceptation d'une course par un livreur — côté SERVEUR.
 //
@@ -24,22 +25,19 @@ const ACCEPTABLE = new Set(['assigned', 'broadcast']);
 // imposé par storage.rules : acceptance_selfies/<commande>/<uid du livreur>.jpg.
 function selfiePath(orderId, uid) { return `acceptance_selfies/${orderId}/${uid}.jpg`; }
 
-function selfieUrlMatches(url, orderId, uid) {
-  if (typeof url !== 'string' || !url) return false;
-  let decoded;
-  try { decoded = decodeURIComponent(url); } catch (_) { return false; }
-  // Le chemin doit être suivi de la fin de l'URL ou d'un paramètre : pas de préfixe trompeur (…/<uid>.jpg.evil).
-  const marker = `/${selfiePath(orderId, uid)}`;
-  const at = decoded.indexOf(marker);
-  if (at < 0) return false;
-  const next = decoded.charAt(at + marker.length);
-  return next === '' || next === '?';
+// URL de téléchargement Firebase (hôte, bucket et chemin vérifiés par proofStorage.js) : une URL étrangère contenant le bon chemin
+// (https://autre-site/…/acceptance_selfies/<commande>/<uid>.jpg) ne passe plus ; le client afficherait sinon une image arbitraire.
+// bucketName absent = bucket non vérifié (tests, bucket inconnu) ; l'existence du fichier est contrôlée à part (selfieExists).
+function selfieUrlMatches(url, orderId, uid, bucketName) {
+  return storageObjectOfUrl(url, bucketName) === selfiePath(orderId, uid);
 }
 
 function buildAcceptOrder({
   db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission,
   // (chemin) => Promise<boolean> : l'objet Storage existe réellement. Absent = contrôle d'URL seul (tests).
   selfieExists,
+  // () => nom du bucket par défaut ; absent ou en échec = bucket de l'URL non vérifié (jamais un motif de refus de l'acceptation).
+  selfieBucketName,
 }) {
   return onCall(async (request) => {
     if (!request.auth?.uid ||
@@ -85,7 +83,9 @@ function buildAcceptOrder({
         throw new HttpsError('failed-precondition', 'Cette commande n’est plus disponible');
       }
       // Placé après le rejeu : une reprise réseau sans photo ne doit pas échouer une acceptation déjà faite.
-      if (!selfieUrlMatches(acceptanceSelfieUrl, orderId, uid) ||
+      let bucketName;
+      try { bucketName = selfieBucketName ? selfieBucketName() : undefined; } catch (_) { bucketName = undefined; }
+      if (!selfieUrlMatches(acceptanceSelfieUrl, orderId, uid, bucketName) ||
           (selfieExists && !(await selfieExists(selfiePath(orderId, uid))))) {
         throw new HttpsError('failed-precondition', 'SELFIE_REQUIRED');
       }

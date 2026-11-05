@@ -167,7 +167,10 @@ service cloud.firestore {
           'cancelRequestAfterPickup', 'disputeDecision', 'adminDeliveryConfirmation', 'deliveryClosedBy',
           // Notes : posées par le client propriétaire uniquement (branche dédiée) ;
           // le marqueur est posé par la Cloud Function de moyenne livreur.
-          'rating', 'sellerRating', 'driverRatingApplied'])
+          'rating', 'sellerRating', 'driverRatingApplied',
+          // Preuves (Mission 7E-11-T) : URL validées par le serveur (acceptOrderCF, deliverOrderCF : livreur, commande, chemin,
+          // existence). Une écriture directe du livreur contournerait cette validation.
+          'driverAcceptanceSelfie', 'deliveryPhoto'])
         && (resource.data.get('amountsVersion', 0) != 1
             || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']))
         && v2OrderFieldsUnchanged();
@@ -200,7 +203,7 @@ service cloud.firestore {
       // proche de la limite de 1000 expressions de Firestore.
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return !changed.hasAny(['amountsVersion', 'deliveryFeePaid', 'cashBreakdown',
-          'deliveryFeeHold', 'adminReview'])
+          'deliveryFeeHold', 'adminReview', 'driverAcceptanceSelfie', 'deliveryPhoto'])
         && (resource.data.get('amountsVersion', 0) != 1
             || !changed.hasAny(['productAmount', 'deliveryFee', 'totalAmount', 'itemsAmount']))
         && v2OrderFieldsUnchanged();

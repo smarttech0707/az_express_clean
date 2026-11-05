@@ -8,6 +8,8 @@ const admin = require('../functions/node_modules/firebase-admin');
 const { settleTerminalOrder, diagnoseDriver, runLifecycleTransaction } = require('../functions/driverLifecycle');
 const { cancelOrderTx } = require('../functions/orderActions');
 const { buildDeliverOrder } = require('../functions/orderActions');
+const { buildAcceptOrder } = require('../functions/driverAcceptance');
+const { withSelfie } = require('../functions/test/selfieHelper');
 const functionsRequire = require('node:module').createRequire(path.join(__dirname, '../functions/package.json'));
 const { onCall, HttpsError } = functionsRequire('firebase-functions/v2/https');
 
@@ -47,7 +49,9 @@ test('purge denies every order status even to admin and preserves financial refe
 test('real transaction: cancellation refunds once and preserves newer pending reference', async () => {
   await db.doc('livreurs/d').set({ wallet: 400, isOnDelivery: true, pendingOrderId: 'new' });
   await db.doc('orders/new').set({ status: 'broadcast' });
-  await db.doc('orders/old').set({ status: 'accepted', driverId: 'd', paymentMethod: 'cash', budget: 500 });
+  // Trace posée par acceptOrderCF : sans elle (ni preuve au journal), l'annulation ne rembourse rien (commissionProof.js, voir le test suivant).
+  await db.doc('orders/old').set({ status: 'accepted', driverId: 'd', paymentMethod: 'cash', budget: 500,
+    commissionStatus: 'charged', commissionPayerId: 'd', commissionAmount: 100 });
   const cancel = () => runLifecycleTransaction(db, async tx => {
     const ref = db.doc('orders/old');
     const snap = await tx.get(ref);
@@ -92,23 +96,22 @@ test('diagnostic on emulator never mutates an orphaned driver', async () => {
 test('real transaction: acceptance racing cancellation has balanced commission and releases driver', async () => {
   await db.doc('livreurs/d').set({ wallet: 400, isOnDelivery: false });
   await db.doc('orders/o').set({ status: 'assigned', clientId: 'c', sellerId: '', isPaid: false, driverId: 'd', paymentMethod: 'cash', budget: 500 });
-  // Use the actual client transaction model used by Flutter (optimistic),
-  // against the server cancellation transaction (pessimistic).
-  const client = env.authenticatedContext('d').firestore();
-  const accept = () => client.runTransaction(async tx => {
-    const order = await tx.get(client.doc('orders/o'));
-    const driver = await tx.get(client.doc('livreurs/d'));
-    if (order.data().status !== 'assigned' || driver.data().isOnDelivery) return;
-    tx.update(client.doc('orders/o'), { status: 'accepted' });
-    tx.update(client.doc('livreurs/d'), { isOnDelivery: true, wallet: driver.data().wallet - 100 });
-  });
+  // Acceptation réelle de production : acceptOrderCF (Admin SDK, trace de commission posée sur la commande) contre l'annulation serveur.
+  // L'ancien modèle (transaction cliente) n'existe plus dans l'application : il ne laissait aucune trace de commission (donc aucun
+  // remboursement) et, face à l'annulation, la règle refusait son écriture sur la commande annulée.
+  const acceptFn = withSelfie(buildAcceptOrder({ db, admin, onCall: (h) => ({ run: h }), HttpsError,
+    checkRateLimit: async () => {}, logAudit: async () => {}, calculateCommission: async () => 100 }).run);
+  const accept = () => acceptFn({ auth: { uid: 'd', token: { firebase: { sign_in_provider: 'password' } } }, data: { orderId: 'o' } });
   const cancel = () => runLifecycleTransaction(db, async tx => {
     const ref = db.doc('orders/o');
     const order = await tx.get(ref);
     await cancelOrderTx(tx, { db, admin, orderRef: ref, order: order.data(), uid: 'c',
       calculateCommission: async () => 100, reason: 'test' });
   });
-  await completeConcurrent([accept(), cancel()]);
+  const [accepted, cancelled] = await Promise.allSettled([accept(), cancel()]);
+  assert.equal(cancelled.status, 'fulfilled');
+  // Deux issues légitimes : acceptation puis annulation (commission rendue) ou annulation d'abord (acceptation refusée proprement).
+  if (accepted.status === 'rejected') assert.equal(accepted.reason.code, 'failed-precondition');
   assert.equal((await db.doc('orders/o').get()).data().status, 'cancelled');
   assert.deepEqual((await db.doc('livreurs/d').get()).data(), { wallet: 400, isOnDelivery: false });
 });

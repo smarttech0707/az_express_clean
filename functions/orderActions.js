@@ -5,6 +5,7 @@ const { verifyLegacyCommissionProof, expectedLegacyCommission } = require('./com
 const { readDriverState, terminalDriverPatch, runLifecycleTransaction } = require('./driverLifecycle');
 const { verifyProofInTransaction, getProofRefs } = require('./deliveryProofs');
 const { settlementDocument } = require('./earningsSettlement');
+const { deliveryPhotoPath, deliveryPhotoUrlMatches } = require('./proofStorage');
 const { buildAmounts, readAmounts, cashBreakdown } = require('./orderAmounts');
 const { getBillingMode, decideBilling, assertAcceptedTotal } = require('./billingPolicy');
 const { isLegacyPartnerOrder, getLegacyPartnerPolicy } = require('./legacyPartnerPolicy');
@@ -567,6 +568,9 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
 function buildDeliverOrder({
   db, admin, onCall, HttpsError, checkRateLimit, logAudit,
   requireProof = false, deliveryProofPepper, adminConfirm = false, requireSuperAdmin,
+  // { bucketName, exists(chemin) => Promise<boolean> } : validation de la photo de livraison (Mission 7E-11-T). Absent = photo
+  // non vérifiée (tests unitaires) ; index.js l'injecte dans les trois fonctions de livraison (test de câblage).
+  deliveryPhotoCheck,
 }) {
   const options = deliveryProofPepper ? { secrets: [deliveryProofPepper] } : {};
   return onCall(options, async (request) => {
@@ -605,6 +609,19 @@ function buildDeliverOrder({
       adminInfo = { byUid: actorUid, requestId, justification: text, evidence };
     } else {
       await checkRateLimit(uid, 'deliver_order', 30, 60);
+    }
+    // Photo de livraison facultative (anciennes applications, livraison sans photo) mais, si elle est fournie, elle doit être celle
+    // du livreur de la commande, au chemin attendu, et exister. Contrôle AVANT la transaction : un refus ne consomme ni preuve
+    // QR/PIN ni quota, et une panne Storage (réessayable) ne laisse aucune livraison à moitié faite.
+    if (deliveryPhotoUrl !== undefined && deliveryPhotoUrl !== null && deliveryPhotoUrl !== '' && deliveryPhotoCheck) {
+      if (!deliveryPhotoUrlMatches(deliveryPhotoUrl, String(orderId), uid, deliveryPhotoCheck.bucketName)) {
+        throw new HttpsError('invalid-argument', 'Photo de livraison invalide');
+      }
+      let present;
+      try { present = await deliveryPhotoCheck.exists(deliveryPhotoPath(String(orderId), uid)); } catch (_) {
+        throw new HttpsError('unavailable', 'Vérification de la photo impossible, réessayez');
+      }
+      if (!present) throw new HttpsError('failed-precondition', 'Photo de livraison introuvable');
     }
     const opRef = adminInfo
       ? db.collection('order_dispute_decisions').doc(

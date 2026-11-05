@@ -2388,10 +2388,13 @@ const {
 
 exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
 exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall: (h) => onCall({ maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission });
-exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit });
+// Photo de livraison : même contrôle d'existence Storage que le selfie d'acceptation (Mission 7E-11-T).
+const deliveryPhotoCheck = { get bucketName() { return admin.storage().bucket().name; }, exists: async (path) => (await admin.storage().bucket().file(path).exists())[0] };
+exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, deliveryPhotoCheck });
 exports.acceptOrderCF        = buildAcceptOrder({
   db, admin, onCall: (h) => onCall({ maxInstances: capInstances(5) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission,
   selfieExists: async (path) => (await admin.storage().bucket().file(path).exists())[0],
+  selfieBucketName: () => deliveryPhotoCheck.bucketName,
 });
 exports.adminDriverRechargeCF = buildAdminDriverRecharge({
   db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit, requireAdminPermission,
@@ -2441,7 +2444,7 @@ exports.adminOrderDisputeCF = buildAdminOrderDispute({
 // financier que deliverOrderCF (mode adminConfirm), requestId idempotent, justification et preuve obligatoires.
 exports.adminConfirmDeliveryCF = buildDeliverOrder({
   db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
-  adminConfirm: true, requireSuperAdmin,
+  adminConfirm: true, requireSuperAdmin, deliveryPhotoCheck,
 });
 exports.releaseOrderBeforePickupCF = buildReleaseOrderBeforePickup({
   db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2) }, h), HttpsError, checkRateLimit, logAudit,
@@ -2458,6 +2461,7 @@ exports.confirmOrderPickupWithProof = buildConfirmPickupWithProof({
 exports.confirmOrderDeliveryWithProof = buildDeliverOrderWithProof({
   db, admin, onCall: (o, h) => onCall({ ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
   deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+  deliveryPhotoCheck,
 });
 const recipientProofAccess = require('./deliveryProofGuests').buildRecipientProofAccess({
   db, admin, onCall, HttpsError, checkRateLimit,
