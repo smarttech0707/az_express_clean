@@ -423,11 +423,12 @@ test('orders: un autre client ne peut PAS lire une commande qui ne lui appartien
   await assertFails(asClient('c2').doc('orders/o1').get());
 });
 
-test('orders: le livreur assigné peut faire avancer assigned→accepted', async () => {
+// Mission 7E-17 : l'acceptation passe par acceptOrderCF (commission prélevée côté serveur) ; l'écriture directe est refusée.
+test('orders: le livreur assigné ne peut PAS écrire lui-même assigned→accepted (acceptOrderCF seulement)', async () => {
   await seed((db) => db.doc('orders/o1').set({
     clientId: 'c1', driverId: 'd1', budget: 1000, isPaid: false, paymentMethod: 'cash', status: 'assigned',
   }));
-  await assertSucceeds(asClient('d1').doc('orders/o1').update({ status: 'accepted' }));
+  await assertFails(asClient('d1').doc('orders/o1').update({ status: 'accepted' }));
 });
 
 test('orders: les transitions legacy restent possibles, mais le mode QR exige le serveur', async () => {

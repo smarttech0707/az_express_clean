@@ -154,7 +154,8 @@ test('historique : livreur et restaurateur gardent leurs transitions sur une com
   try {
     const driver = e.authenticatedContext('d1', password).firestore();
     await assertSucceeds(driver.doc('orders/legacy_resto').update({ status: 'picked_up' }));
-    await assertSucceeds(driver.doc('orders/legacy_resto').update({ status: 'delivered' }));
+    // Mission 7E-17 : la clôture passe par deliverOrderCF, jamais par une écriture directe (même historique).
+    await assertFails(driver.doc('orders/legacy_resto').update({ status: 'delivered' }));
     const resto = e.authenticatedContext('r1', password).firestore();
     await assertSucceeds(resto.doc('orders/legacy_resto').update({ sellerStatus: 'ready' }));
   } finally { await e.cleanup(); }

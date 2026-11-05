@@ -1,36 +1,20 @@
-// Brèche « picked_up -> delivered écrit directement par le livreur ».
+// Clôture directe INTERDITE : picked_up -> delivered n'est plus une écriture du livreur (Mission 7E-17).
 //
-// firestore.rules autorise le livreur assigné à passer lui-même une commande
-// `picked_up` à `delivered` (hors preuve QR). Or le crédit du livreur, la
-// commission journalisée (`commissions`, `config/az_wallet`) et le compteur de
-// livraisons ne sont produits QUE par deliverOrderCF, qui refuse une commande
-// déjà `delivered`. Une écriture directe clôt donc la commande SANS jamais
-// créditer personne : l'argent payé par le client reste sans bénéficiaire.
-// L'application actuelle appelle deliverOrderCF (firestore_service.dart) et
-// n'écrit plus `delivered` : la branche ne sert qu'aux très anciennes versions.
+// Le crédit du livreur, la commission journalisée (`commissions`, `config/az_wallet`) et le compteur de livraisons ne sont
+// produits QUE par deliverOrderCF, qui refuse une commande déjà `delivered`. Une écriture directe clôturait la commande SANS
+// créditer personne : l'argent payé par le client restait sans bénéficiaire. Ces tests s'exécutent contre firestore.rules TEL
+// QUEL (plus de transformation de règle) et échouent si la branche est rétablie.
 //
-// Ce fichier (même méthode que driver-accept-closed.rules.test.js) :
-//  1. documente la brèche telle qu'elle est dans firestore.rules aujourd'hui ;
-//  2. valide la règle CIBLE (branche remplacée par `false`) sans modifier
-//     firestore.rules : refus de l'écriture directe, transitions légitimes inchangées.
+// ATTENTION production : les très anciennes versions de l'application livreur clôturaient ainsi
+// (docs/DRIVER_ACCEPT_RULE_MIGRATION.md). Ne pas publier ce fichier de règles en production avant leur retrait.
 //
-// Exécution : firebase emulators:exec --only firestore "node --test rules-tests/driver-delivered-direct.rules.test.js"
+// Exécution : npm run test:rules
 const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 
 const CURRENT = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
-
-// Le découpage est strict : si le texte de la règle change, ce test échoue au
-// lieu de valider une transformation vide.
-function closedRules(source) {
-  // Tolère le commentaire et la clause `amountsVersion != 2` (la livraison v2 passe uniquement par deliverOrderCF) insérés depuis 7B-3B.
-  const re = /\|\|\s*\(resource\.data\.status == 'picked_up'\s*&&\s*resource\.data\.get\('deliveryProofMode', ''\) != 'qr_v1'\s*(?:\/\/[^\n]*\s*)?(?:&&\s*resource\.data\.get\('amountsVersion', 0\) != 2\s*)?&&\s*request\.resource\.data\.status == 'delivered'\)/g;
-  const found = source.match(re);
-  if (!found || found.length !== 1) throw new Error('branche picked_up->delivered introuvable (ou ambiguë) dans firestore.rules');
-  return source.replace(re, '|| false');
-}
 
 const password = { firebase: { sign_in_provider: 'password' } };
 
@@ -56,36 +40,8 @@ async function envFor(rules, projectId) {
   return env;
 }
 
-test('ÉTAT ACTUEL (brèche documentée) : le livreur clôt seul une commande wallet payée', async () => {
-  const env = await envFor(CURRENT, 'az-delivered-current');
-  try {
-    const db = env.authenticatedContext('d1', password).firestore();
-    await assertSucceeds(db.doc('orders/paid1').update({ status: 'delivered' }));
-    // Conséquence : aucun crédit, aucun journal, aucun compteur n'a été produit par cette écriture.
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      const d = ctx.firestore();
-      const order = (await d.doc('orders/paid1').get()).data();
-      const driver = (await d.doc('livreurs/d1').get()).data();
-      const client = (await d.doc('clients/c1').get()).data();
-      if (order.status !== 'delivered') throw new Error('statut non clos');
-      if (driver.wallet !== 4900 || driver.deliveries !== 0 || client.wallet !== 19500) throw new Error('solde modifié');
-      if ((await d.collection('commissions').get()).size !== 0) throw new Error('commission inattendue');
-    });
-  } finally { await env.cleanup(); }
-});
-
-test('ÉTAT ACTUEL : les champs financiers serveur restent protégés (la brèche est le statut seul)', async () => {
-  const env = await envFor(CURRENT, 'az-delivered-current-fields');
-  try {
-    const db = env.authenticatedContext('d1', password).firestore();
-    await assertFails(db.doc('orders/paid1').update({ status: 'delivered', commissionStatus: 'refunded' }));
-    await assertFails(db.doc('orders/paid1').update({ status: 'delivered', isPaid: false }));
-    await assertFails(db.doc('orders/paid1').update({ status: 'delivered', budget: 5000 }));
-  } finally { await env.cleanup(); }
-});
-
-test('RÈGLE CIBLE : l’écriture directe picked_up -> delivered est refusée pour le livreur, le client et un tiers', async () => {
-  const env = await envFor(closedRules(CURRENT), 'az-delivered-closed');
+test('l’écriture directe picked_up -> delivered est refusée pour le livreur, le client et un tiers', async () => {
+  const env = await envFor(CURRENT, 'az-delivered-closed');
   try {
     const driver = env.authenticatedContext('d1', password).firestore();
     await assertFails(driver.doc('orders/paid1').update({ status: 'delivered' }));
@@ -97,8 +53,8 @@ test('RÈGLE CIBLE : l’écriture directe picked_up -> delivered est refusée p
   } finally { await env.cleanup(); }
 });
 
-test('RÈGLE CIBLE : transitions légitimes inchangées (picked_up, mise à jour sans statut, QR, administrateur)', async () => {
-  const env = await envFor(closedRules(CURRENT), 'az-delivered-closed-ok');
+test('transitions légitimes inchangées (picked_up, mise à jour sans statut, QR, administrateur)', async () => {
+  const env = await envFor(CURRENT, 'az-delivered-closed-ok');
   try {
     const driver = env.authenticatedContext('d1', password).firestore();
     await assertSucceeds(driver.doc('orders/accepted1').update({ status: 'picked_up' }));
@@ -106,5 +62,57 @@ test('RÈGLE CIBLE : transitions légitimes inchangées (picked_up, mise à jour
     await assertFails(driver.doc('orders/qr1').update({ status: 'delivered' })); // QR : par fonction
     const admin = env.authenticatedContext('root', password).firestore();
     await assertSucceeds(admin.doc('orders/paid2').update({ status: 'delivered' }));
+  } finally { await env.cleanup(); }
+});
+
+// Mission 7E-17 : preuves négatives exhaustives des DEUX transitions fermées, toutes formes de commande et tous les rôles.
+// Le contrôle passe par acceptOrderCF / deliverOrderCF (Admin SDK) ; l'administrateur garde son accès pour le support.
+test('transitions directes assigned->accepted et picked_up->delivered refusées : toutes formes de commande, tous les rôles, avec ou sans champs forgés', async () => {
+  const env = await initializeTestEnvironment({ projectId: 'az-direct-closed-all', firestore: { rules: CURRENT } });
+  const bases = {
+    cash: { paymentMethod: 'cash', isPaid: false },
+    wallet: { paymentMethod: 'wallet', isPaid: true, commissionStatus: 'charged', commissionPayerId: 'd1', commissionAmount: 100 },
+    v2: { paymentMethod: 'cash', isPaid: false, amountsVersion: 2, sellerStatus: 'ready', sellerId: 's1', sellerType: 'restaurant' },
+    traced: { paymentMethod: 'cash', isPaid: false, commissionStatus: 'charged', commissionPayerId: 'd1', commissionAmount: 100, acceptedAt: 1 },
+  };
+  try {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('admins/root').set({ role: 'super', isActive: true });
+      await db.doc('admins/sub').set({ role: 'sub', isActive: true, permissions: ['commandes'] });
+      for (const [name, b] of Object.entries(bases)) {
+        for (const status of ['assigned', 'accepted', 'picked_up']) {
+          await db.doc(`orders/${name}_${status}`).set({ clientId: 'c1', driverId: 'd1', budget: 500, shoppingBudget: 0, status, ...b });
+        }
+      }
+    });
+    const as = (uid) => env.authenticatedContext(uid, password).firestore();
+    for (const name of Object.keys(bases)) {
+      for (const uid of ['d1', 'd2', 'c1', 's1', 'sub']) {
+        await assertFails(as(uid).doc(`orders/${name}_assigned`).update({ status: 'accepted' }), `${name} ${uid} assigned->accepted`);
+        await assertFails(as(uid).doc(`orders/${name}_picked_up`).update({ status: 'delivered' }), `${name} ${uid} picked_up->delivered`);
+      }
+      const d1 = as('d1');
+      // Champs forgés ajoutés à la transition (commission, paiement, preuve, horodatage) : toujours refusés.
+      await assertFails(d1.doc(`orders/${name}_assigned`).update({ status: 'accepted', commissionStatus: 'charged', commissionPayerId: 'd1', commissionAmount: 0, acceptedAt: 5 }));
+      await assertFails(d1.doc(`orders/${name}_picked_up`).update({ status: 'delivered', isPaid: true, deliveredAt: 5, deliveryPhoto: 'https://x/p.jpg', driverAcceptanceSelfie: 'https://x/s.jpg' }));
+      // Sauts d'étape.
+      await assertFails(d1.doc(`orders/${name}_assigned`).update({ status: 'delivered' }));
+      await assertFails(d1.doc(`orders/${name}_accepted`).update({ status: 'delivered' }));
+      await assertFails(d1.doc(`orders/${name}_accepted`).update({ status: 'assigned' }));
+      await assertFails(d1.doc(`orders/${name}_picked_up`).update({ status: 'accepted' }));
+      // Les commandes n'ont pas été modifiées par les tentatives refusées.
+      await env.withSecurityRulesDisabled(async (ctx) => {
+        const a = (await ctx.firestore().doc(`orders/${name}_assigned`).get()).data();
+        const p = (await ctx.firestore().doc(`orders/${name}_picked_up`).get()).data();
+        if (a.status !== 'assigned' || p.status !== 'picked_up') throw new Error(`${name} : statut modifié malgré le refus`);
+      });
+    }
+    // Les mises à jour légitimes du livreur subsistent (GPS sur le même statut, accepted -> picked_up hors v2 non prêt).
+    await assertSucceeds(as('d1').doc('orders/cash_picked_up').update({ driverLat: 6.7, driverLng: -3.4 }));
+    await assertSucceeds(as('d1').doc('orders/cash_accepted').update({ status: 'picked_up' }));
+    await assertSucceeds(as('d1').doc('orders/v2_accepted').update({ status: 'picked_up' })); // v2 prête (sellerStatus ready)
+    // Support : le super-administrateur peut toujours intervenir.
+    await assertSucceeds(as('root').doc('orders/wallet_picked_up').update({ status: 'delivered' }));
   } finally { await env.cleanup(); }
 });

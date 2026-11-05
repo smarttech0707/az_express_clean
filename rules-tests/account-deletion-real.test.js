@@ -96,7 +96,8 @@ for(const blocker of ['mission','balance'])test('real driver '+blocker+' preserv
   await assert.rejects(updateDoc(doc(sdkDb,'livreurs',uid),{deletionRequested:false}),e=>e.code==='permission-denied');
   await assert.rejects(updateDoc(doc(sdkDb,'orders',uid+'-new'),{status:'accepted'}),e=>e.code==='permission-denied');
   await updateDoc(doc(sdkDb,'orders',uid+'-active'),{status:'picked_up'});
-  await updateDoc(doc(sdkDb,'orders',uid+'-active'),{status:'delivered'});
+  // Mission 7E-17 : la clôture passe par deliverOrderCF (serveur) ; l'écriture directe est refusée par les règles.
+  await assert.rejects(updateDoc(doc(sdkDb,'orders',uid+'-active'),{status:'delivered'}),e=>e.code==='permission-denied');
  }finally{await terminate(sdkDb);await deleteApp(app);}
 });
 

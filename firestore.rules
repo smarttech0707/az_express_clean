@@ -776,10 +776,12 @@ service cloud.firestore {
           // expressions de Firestore (16 unchanged() séparés la dépassaient).
           && serverOwnedOrderFieldsUnchanged()
           && (
-            (resource.data.status == 'assigned' && request.resource.data.status == 'accepted'
-              && (!exists(/databases/$(database)/documents/account_deletions/$(uid()))
-                || get(/databases/$(database)/documents/account_deletions/$(uid())).data.consentVerified != true))
-            || (resource.data.status == 'accepted'
+            // assigned -> accepted : PLUS d'écriture directe (Mission 7E-17). L'acceptation passe par acceptOrderCF
+            // (commission, selfie, solde et suppression de compte contrôlés côté serveur). Une écriture directe
+            // contournait le prélèvement de commission. ATTENTION production : les anciennes versions de l'application
+            // livreur acceptaient par écriture directe (docs/DRIVER_ACCEPT_RULE_MIGRATION.md) ; ne pas publier ce
+            // fichier en production avant leur retrait.
+            (resource.data.status == 'accepted'
                 && resource.data.get('deliveryProofMode', '') != 'qr_v1'
                 // Version 2 : la récupération n'est possible qu'une fois la commande prête chez le partenaire.
                 && (resource.data.get('amountsVersion', 0) != 2 || resource.data.get('sellerStatus', '') == 'ready')
@@ -789,11 +791,9 @@ service cloud.firestore {
             // (cash ou wallet) doit obligatoirement transiter par deliverOrderCF/
             // payOrderFromWalletCF (Admin SDK, validation serveur), jamais par
             // une écriture Firestore directe du livreur.
-            || (resource.data.status == 'picked_up'
-                && resource.data.get('deliveryProofMode', '') != 'qr_v1'
-                // Version 2 : la livraison passe UNIQUEMENT par deliverOrderCF (crédits partenaire/livreur, cash).
-                && resource.data.get('amountsVersion', 0) != 2
-                && request.resource.data.status == 'delivered')
+            // picked_up -> delivered : PLUS d'écriture directe (Mission 7E-17). Une clôture hors deliverOrderCF
+            // laissait la commande payée sans crédit livreur, sans commission journalisée et sans réparation
+            // possible (deliverOrderCF refuse une commande déjà delivered). Même contrainte production que ci-dessus.
             || (resource.data.status == request.resource.data.status)
           )
         ) ||

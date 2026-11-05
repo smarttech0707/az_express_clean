@@ -26,10 +26,9 @@ const v2 = {
   driverHistory: [{ driverId: 'd' }], partnerAcceptedAtMs: 1, readyAtMs: 2, deliveryFeePaid: 500, cashBreakdown: { a: 1 }, driverAcceptanceSelfie: 'u', deliveryPhoto: 'p',
 };
 const v1 = { clientId: 'c', driverId: 'd', sellerId: 's', isPaid: true, paymentMethod: 'wallet', budget: 500, shoppingBudget: 0, amountsVersion: 1, productAmount: 300, deliveryFee: 200, totalAmount: 500 };
+// Mission 7E-17 : assigned->accepted et picked_up->delivered ne sont plus des chemins légitimes du client (acceptOrderCF / deliverOrderCF).
 const CASES = [
-  ['livreur v1 assigned->accepted (exists+get)', 'd', { ...v1, status: 'assigned' }, { status: 'accepted' }],
   ['livreur v1 accepted->picked_up', 'd', { ...v1, status: 'accepted' }, { status: 'picked_up' }],
-  ['livreur v1 picked_up->delivered (anciennes versions)', 'd', { ...v1, status: 'picked_up' }, { status: 'delivered' }],
   ['livreur v1 meme statut', 'd', { ...v1, status: 'picked_up' }, { driverLat: 6.7 }],
   ['livreur v2 meme statut (commande pleine)', 'd', { ...v2, status: 'picked_up' }, { driverLat: 6.7 }],
   ['livreur v2 accepted->picked_up (pret, pleine)', 'd', { ...v2, status: 'accepted', deliveryProofMode: undefined }, { status: 'picked_up' }],

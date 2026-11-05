@@ -122,7 +122,8 @@ test('opérations légitimes inchangées : lecture admin, actions admin hors cas
     await assertSucceeds(as(e, 'root').doc('orders/p1').update({ adminNote: 'vu' }));
     await assertSucceeds(as(e, 'root').doc('orders/legacy-delivered').update({ adminNote: 'vu' }));
     // Commandes historiques (sans cashPayment) : transitions habituelles préservées.
-    await assertSucceeds(as(e, 'd1').doc('orders/legacy-assigned').update({ status: 'accepted' }));
+    // Mission 7E-17 : l'acceptation passe par acceptOrderCF ; l'écriture directe est refusée.
+    await assertFails(as(e, 'd1').doc('orders/legacy-assigned').update({ status: 'accepted' }));
     await assertSucceeds(as(e, 'c1').doc('orders/legacy-pending').update({ status: 'cancelled' }));
     await assertSucceeds(as(e, 'r1').doc('orders/legacy-accepted').update({ sellerStatus: 'preparing' }));
   } finally { await e.cleanup(); }

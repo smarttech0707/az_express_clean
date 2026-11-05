@@ -69,14 +69,15 @@ test('real transaction: terminal cleanup racing acceptance never releases new mi
   await db.doc('livreurs/d').set({ wallet: 400, isOnDelivery: false });
   await db.doc('orders/old').set({ status: 'cancelled', driverId: 'd' });
   await db.doc('orders/new').set({ status: 'assigned', clientId: 'c', sellerId: '', isPaid: false, driverId: 'd' });
-  const client = env.authenticatedContext('d').firestore();
-  const accept = () => client.runTransaction(async tx => {
-    const driver = await tx.get(client.doc('livreurs/d'));
-    const order = await tx.get(client.doc('orders/new'));
+  // Mission 7E-17 : l'acceptation est une transaction SERVEUR (acceptOrderCF, Admin SDK) ; l'écriture directe du livreur est
+  // refusée par les règles (rules-tests/driver-accept-closed.rules.test.js). Même ordre lecture/écriture que le serveur.
+  const accept = () => runLifecycleTransaction(db, async tx => {
+    const driver = await tx.get(db.doc('livreurs/d'));
+    const order = await tx.get(db.doc('orders/new'));
     assert.equal(driver.data().isOnDelivery, false);
     assert.equal(order.data().status, 'assigned');
-    tx.update(client.doc('livreurs/d'), { isOnDelivery: true, wallet: driver.data().wallet - 100 });
-    tx.update(client.doc('orders/new'), { status: 'accepted' });
+    tx.update(db.doc('livreurs/d'), { isOnDelivery: true, wallet: driver.data().wallet - 100 });
+    tx.update(db.doc('orders/new'), { status: 'accepted' });
   });
   await completeConcurrent([settleTerminalOrder(db, admin, 'old'), accept()]);
   await settleTerminalOrder(db, admin, 'old');

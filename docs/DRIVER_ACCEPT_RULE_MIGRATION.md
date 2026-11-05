@@ -1,7 +1,10 @@
 # Fermeture de l'acceptation directe (assigned → accepted) — plan de migration
 
-Statut : **préparé, non appliqué**. `firestore.rules` n'est pas modifié pour cette
-fermeture et rien n'est déployé.
+Statut (mise à jour 2026-11-05, Mission 7E-17) : **appliqué dans `firestore.rules` local** pour
+`assigned → accepted` ET `picked_up → delivered` (écritures directes du livreur supprimées ; tests négatifs
+dans `driver-accept-closed` et `driver-delivered-direct`). Les règles déployées en **préproduction** avaient déjà
+cette fermeture. **PRODUCTION : ne PAS publier ce fichier de règles avant la fin des étapes 2 à 4 ci-dessous**
+(retrait des anciennes versions de l'application livreur), sous peine de `permission-denied` à l'acceptation et à la clôture.
 
 ## La faille
 
