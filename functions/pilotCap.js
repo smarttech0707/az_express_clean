@@ -25,4 +25,10 @@ function pilotOnlyInstanceOptions(env = process.env) {
   return limit === null ? {} : { maxInstances: limit };
 }
 
-module.exports = { PREPROD_PROJECT, pilotInstanceLimit, capInstances, pilotOnlyInstanceOptions };
+// Réessai automatique d'un déclencheur : la préproduction garde la politique sans réessai déjà déployée (Mission 7E-25) ; tout autre
+// projet conserve la valeur d'origine du code. Un réessai relancerait aussi sans fin un échec permanent, facturé à chaque tentative.
+function pilotRetry(original, env = process.env) {
+  return env.GCLOUD_PROJECT === PREPROD_PROJECT ? false : original;
+}
+
+module.exports = { PREPROD_PROJECT, pilotInstanceLimit, capInstances, pilotOnlyInstanceOptions, pilotRetry };

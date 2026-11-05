@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { pilotInstanceLimit, capInstances, pilotOnlyInstanceOptions, PREPROD_PROJECT } = require('../pilotCap');
+const { pilotInstanceLimit, capInstances, pilotOnlyInstanceOptions, pilotRetry, PREPROD_PROJECT } = require('../pilotCap');
 
 const PROD = 'az-express-b0469';
 
@@ -74,4 +74,37 @@ test('préproduction (analyse de index.js) : fonctions du pilote à 1, hors pilo
   assert.equal(e.acceptOrderCF.cpu, null);
   for (const n of PROOFS) assert.deepEqual(e[n].secrets, ['DELIVERY_PROOF_PEPPER'], n);
   for (const [n, v] of Object.entries(e)) assert.deepEqual(v.region, ['europe-west1'], n);
+});
+
+// Mission 7E-25 : syncDriverOrderLifecycle reste sans réessai en préproduction (politique déjà déployée, sinon la CLI exige --force) ;
+// la production et les autres déclencheurs conservent retry: true.
+test('pilotRetry : false uniquement pour la préproduction', () => {
+  assert.equal(pilotRetry(true, { GCLOUD_PROJECT: PREPROD_PROJECT }), false);
+  for (const env of [{}, { GCLOUD_PROJECT: PROD }, { GCLOUD_PROJECT: 'demo-test' }, { GCLOUD_PROJECT: 'az-express-preprod-1' }]) {
+    assert.equal(pilotRetry(true, env), true, JSON.stringify(env));
+  }
+});
+
+function retryPolicies(project) {
+  const names = ['syncDriverOrderLifecycle', 'applyDriverRatingOnOrderUpdate', 'syncPartnerQr_restaurant', 'prepareOrderProof'];
+  const code = `const m=require(${JSON.stringify(path.join(__dirname, '..', 'index.js'))});const out={};
+    for(const n of Object.keys(m)){const e=m[n]&&m[n].__endpoint;if(e&&e.eventTrigger)out[n]={retry:e.eventTrigger.retry,max:e.maxInstances};}
+    process.stdout.write('@@'+JSON.stringify(out));`;
+  const env = { ...process.env, GCLOUD_PROJECT: project, FIREBASE_CONFIG: JSON.stringify({ projectId: project }), PILOT_MAX_INSTANCES: '1' };
+  const out = execFileSync(process.execPath, ['-e', code], { env, encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] });
+  return JSON.parse(out.slice(out.lastIndexOf('@@') + 2));
+}
+
+test('syncDriverOrderLifecycle : sans réessai en préproduction, retry: true en production ; les autres déclencheurs inchangés', () => {
+  const prod = retryPolicies(PROD);
+  const pre = retryPolicies(PREPROD_PROJECT);
+  assert.equal(prod.syncDriverOrderLifecycle.retry, true);
+  assert.equal(pre.syncDriverOrderLifecycle.retry, false);
+  assert.equal(pre.syncDriverOrderLifecycle.max, 1);
+  // Tous les autres déclencheurs : même politique dans les deux projets.
+  for (const n of Object.keys(prod)) {
+    if (n === 'syncDriverOrderLifecycle') continue;
+    assert.equal(pre[n].retry, prod[n].retry, n);
+  }
+  assert.equal(prod.applyDriverRatingOnOrderUpdate.retry, true);
 });

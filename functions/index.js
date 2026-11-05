@@ -4,7 +4,7 @@ const { onCall: rawOnCall, onRequest, HttpsError } = require('firebase-functions
 const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
-const { capInstances, pilotOnlyInstanceOptions } = require('./pilotCap');
+const { capInstances, pilotOnlyInstanceOptions, pilotRetry } = require('./pilotCap');
 const { defineSecret } = require('firebase-functions/params');
 const admin  = require('firebase-admin');
 const axios  = require('axios');
@@ -113,7 +113,7 @@ const { shouldProcess: shouldApplyDriverRating, applyDriverRating } = require('.
 
 // Forward-only lifecycle repair: never handles deletions or scans old drivers.
 exports.syncDriverOrderLifecycle = onDocumentUpdated({
-  document: 'orders/{orderId}', maxInstances: 1, retry: true,
+  document: 'orders/{orderId}', maxInstances: 1, retry: pilotRetry(true),
 }, async event => {
   const before = event.data.before.data();
   const after = event.data.after.data();
