@@ -27,8 +27,8 @@ const V2 = { clientId: 'c1', sellerType: 'restaurant', sellerId: 'r1', amountsVe
 const LEGACY = { clientId: 'c1', sellerType: 'restaurant', sellerId: 'r1', status: 'pending', description: 'Menu', budget: 1500 };
 const update = (eventId, order = V2, status = 'accepted') => ({ fn: 'notifyClientOnOrderUpdate', eventId, update: true, before: { ...order, status: 'assigned' }, after: { ...order, status } });
 
-function run(env, calls, data = DATA) {
-  const out = execFileSync(process.execPath, [path.join(__dirname, 'notificationHarness.js'), JSON.stringify({ env, calls, data })], {
+function run(env, calls, data = DATA, extra = {}) {
+  const out = execFileSync(process.execPath, [path.join(__dirname, 'notificationHarness.js'), JSON.stringify({ env, calls, data, ...extra })], {
     env: { ...process.env, FIREBASE_CONFIG: JSON.stringify({ projectId: env.GCLOUD_PROJECT }), ...env }, encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'],
   });
   return JSON.parse(out.slice(out.lastIndexOf('@@') + 2));
@@ -86,14 +86,16 @@ test('événement Firestore livré deux fois : une seule notification ; un autre
   const env = preprod({ NOTIFICATIONS_SEND: 'on', NOTIFICATIONS_ALLOWED_RECIPIENTS: `client:c1:${fp(T_CLIENT)}` });
   const r = run(env, [update('same'), update('same'), update('autre', V2, 'picked_up')]);
   assert.equal(sentTokens(r).length, 2);
-  assert.deepEqual(r.dedupe.sort(), ['notification_dedupe/notifyClientOnOrderUpdate_autre_client_c1', 'notification_dedupe/notifyClientOnOrderUpdate_same_client_c1']);
+  assert.deepEqual(Object.keys(r.markers).sort(), ['notifyClientOnOrderUpdate_autre_client_c1', 'notifyClientOnOrderUpdate_same_client_c1']);
+  assert.deepEqual(Object.values(r.markers).map((m) => m.state), ['sent', 'sent']);
+  assert.ok(!JSON.stringify(r.markers).includes(T_CLIENT), 'jamais de token dans un marqueur');
 });
 
 test('commande hors périmètre (héritée, non v2) : aucun envoi, même pour un destinataire autorisé', () => {
   const env = preprod({ NOTIFICATIONS_SEND: 'on', NOTIFICATIONS_ALLOWED_RECIPIENTS: `client:c1:${fp(T_CLIENT)},restaurant:r1:${fp(T_REST)}` });
   const r = run(env, [update('e1', LEGACY), { fn: 'notifyRestaurantOnOrder', eventId: 'e2', order: LEGACY }]);
   assert.deepEqual(r.sends, []);
-  assert.deepEqual(r.dedupe, []);
+  assert.deepEqual(r.markers, {});
   const ok = run(env, [{ fn: 'notifyRestaurantOnOrder', eventId: 'e3', order: V2 }]);
   assert.deepEqual(sentTokens(ok), [T_REST]);
 });
@@ -124,7 +126,8 @@ test('production : comportement inchangé (mêmes envois, aucune liste, aucune �
     { kind: 'send', token: T_CLIENT }, { kind: 'send', token: T_CLIENT }, { kind: 'send', token: T_REST },
     { kind: 'multi', tokens: [T_DRIVER1, T_DRIVER2] }, { kind: 'send', token: T_CLIENT },
   ]);
-  assert.deepEqual(r.dedupe, []);
+  assert.deepEqual(r.markers, {});
+  assert.deepEqual(r.writes, []);
   // Les variables de préproduction n'ont aucun effet en production.
   assert.equal(run({ ...env, NOTIFICATIONS_SEND: 'off' }, [update('e9', LEGACY)]).sends.length, 1);
 });
@@ -136,4 +139,81 @@ test('le garde n\'accepte pas une autorisation fabriquée par un appelant', asyn
   const { tokens, authorization } = await guard.authorize({ fn: 'notifyClientOnOrderUpdate', eventId: 'e', order: V2 }, [{ role: 'client', id: 'c1', token: 'tok' }]);
   assert.deepEqual(tokens, []);
   assert.equal(authorization, null);
+});
+
+// ── Mission 7E-31 : réservation atomique, états, erreurs Firestore et FCM ─────────────────────────────────────────────────────────
+const ON = (list) => preprod({ NOTIFICATIONS_SEND: 'on', NOTIFICATIONS_ALLOWED_RECIPIENTS: list });
+const CLIENT_OK = `client:c1:${fp(T_CLIENT)}`;
+const markerStates = (r) => Object.values(r.markers).map((m) => m.state);
+
+test('deux exécutions simultanées du même événement : une seule notification, un seul marqueur', () => {
+  const r = run(ON(CLIENT_OK), [{ ...update('dup'), parallel: true }, { ...update('dup'), parallel: true }, { ...update('dup'), parallel: true }]);
+  assert.equal(sentTokens(r).length, 1);
+  assert.deepEqual(markerStates(r), ['sent']);
+});
+
+test('réservation Firestore impossible : aucun envoi en préproduction (jamais d’envoi sans marqueur)', () => {
+  const r = run(ON(CLIENT_OK), [update('e1')].concat([{ fn: 'notifyDriversOnNewOrder', eventId: 'e2', order: { status: 'pending', budget: 500 } }]), DATA);
+  assert.equal(sentTokens(r).length, 1); // contrôle : sans panne, l'envoi a lieu
+  const down = run(ON(`${CLIENT_OK},driver:d1:${fp(T_DRIVER1)}`), [update('e1'), { fn: 'notifyDriversOnNewOrder', eventId: 'e2', order: { status: 'pending', budget: 500 } }], DATA, { failCreate: true });
+  assert.deepEqual(down.sends, []);
+  assert.deepEqual(down.markers, {});
+  // Événement sans identifiant : réservation impossible, donc aucun envoi.
+  assert.deepEqual(run(ON(CLIENT_OK), [update(undefined)]).sends, []);
+});
+
+test('refus définitif de FCM après réservation : marqueur « failed » avec le code, aucun renvoi automatique au rejeu', () => {
+  const env = ON(CLIENT_OK);
+  const r = run(env, [update('e1'), update('e1')], DATA, { sendError: 'messaging/registration-token-not-registered' });
+  assert.equal(sentTokens(r).length, 1);
+  assert.deepEqual(markerStates(r), ['failed']);
+  assert.equal(Object.values(r.markers)[0].errorCode, 'messaging/registration-token-not-registered');
+});
+
+test('résultat FCM incertain (erreur serveur/réseau) : marqueur « uncertain », jamais renvoyé seul', () => {
+  const r = run(ON(CLIENT_OK), [update('e1'), update('e1')], DATA, { sendError: 'messaging/internal-error' });
+  assert.equal(sentTokens(r).length, 1);
+  assert.deepEqual(markerStates(r), ['uncertain']);
+  const unknown = run(ON(CLIENT_OK), [update('e2')], DATA, { sendError: 'ECONNRESET' });
+  assert.deepEqual(markerStates(unknown), ['uncertain']);
+});
+
+test('redémarrage pendant l’envoi (marqueur resté « reserved ») ou événement rejoué : aucun nouvel envoi, état conservé pour diagnostic', () => {
+  const seeded = { notifyClientOnOrderUpdate_e1_client_c1: { fn: 'notifyClientOnOrderUpdate', role: 'client', recipientId: 'c1', eventId: 'e1', state: 'reserved', reservedAt: 1 } };
+  const r = run(ON(CLIENT_OK), [update('e1')], DATA, { markers: seeded });
+  assert.deepEqual(r.sends, []);
+  assert.deepEqual(r.markers, seeded);
+});
+
+test('multicast livreurs : l’issue de chaque livreur est enregistrée séparément', () => {
+  const env = ON(`driver:d1:${fp(T_DRIVER1)},driver:d2:${fp(T_DRIVER2)}`);
+  const r = run(env, [{ fn: 'notifyDriversOnNewOrder', eventId: 'e1', order: { status: 'pending', budget: 500 } }], DATA, { tokenErrors: { [T_DRIVER2]: 'messaging/invalid-registration-token' } });
+  assert.deepEqual(sentTokens(r).sort(), [T_DRIVER1, T_DRIVER2].sort());
+  assert.equal(r.markers.notifyDriversOnNewOrder_e1_driver_d1.state, 'sent');
+  assert.equal(r.markers.notifyDriversOnNewOrder_e1_driver_d2.state, 'failed');
+});
+
+test('production : une panne de réservation ou de FCM ne change rien (aucun marqueur, mêmes envois)', () => {
+  const r = run({ GCLOUD_PROJECT: PROD }, [update('e1', LEGACY)], DATA, { failCreate: true, sendError: 'messaging/internal-error' });
+  assert.equal(sentTokens(r).length, 1);
+  assert.deepEqual(r.markers, {});
+  assert.deepEqual(r.writes, []);
+});
+
+// Expiration automatique avec notification bloquée : l'annulation et ses écritures ont lieu, seule l'alerte FCM est retenue.
+const NOW = 1_800_000_000_000 - (1_800_000_000_000 % 300000); // minute multiple de 5 : les alertes « commandes bloquées » s'exécutent
+const STALE = { status: 'pending', createdAtMs: NOW - 40 * 60 * 1000, clientId: 'c1', paymentMethod: 'cash', isPaid: false, budget: 500, description: 'Colis' };
+const EXPIRY_DATA = { ...DATA, orders: { stale1: STALE, v2wait: { ...STALE, amountsVersion: 2, sellerType: 'restaurant', sellerId: 'r1', createdAtMs: NOW - 15 * 60 * 1000 } }, admins: { a1: { isActive: true, role: 'super', fcmToken: 'token-admin-0123456789-abcdefghij' } } };
+
+test('expiration de commande : jamais empêchée par le blocage FCM (préproduction), alertes envoyées en production', () => {
+  const pre = run(preprod({ NOTIFICATIONS_SEND: 'off' }), [], EXPIRY_DATA, { run: { fn: 'autoExpireOrders' }, now: NOW });
+  const prod = run({ GCLOUD_PROJECT: PROD }, [], EXPIRY_DATA, { run: { fn: 'autoExpireOrders' }, now: NOW });
+  // Même cheminement métier dans les deux projets : l'annulation (écriture sur la commande) a lieu quoi qu'il arrive.
+  assert.ok(pre.writes.includes('orders/stale1'), 'préproduction : commande expirée');
+  assert.deepEqual(pre.writes.filter((w) => w.startsWith('orders/')), prod.writes.filter((w) => w.startsWith('orders/')));
+  assert.deepEqual(pre.sends, [], 'préproduction : aucune alerte FCM, y compris vers un administrateur');
+  const allowed = run(ON(CLIENT_OK), [], EXPIRY_DATA, { run: { fn: 'autoExpireOrders' }, now: NOW });
+  assert.deepEqual(allowed.sends, [], 'avec « on » et un client autorisé, l’administrateur n’est toujours pas notifié');
+  assert.ok(allowed.writes.includes('orders/stale1'));
+  assert.ok(prod.sends.length > 0, 'production : l’alerte « partenaire sans réponse » part vers l’administrateur');
 });

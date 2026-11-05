@@ -13,7 +13,15 @@
 //      token) ; une entrée mal formée est ignorée ;
 //   3. le token lu sur le document du destinataire a cette empreinte (un token renouvelé exige une nouvelle autorisation) ;
 //   4. la fonction appelante est dans la liste des fonctions autorisées pour ce rôle, et la commande est dans son périmètre ;
-//   5. l'événement n'a pas déjà notifié ce destinataire (livraison répétée d'un événement Firestore).
+//   5. l'événement n'a pas déjà notifié ce destinataire (livraison répétée d'un événement Firestore) : réservation ATOMIQUE
+//      (create(), refusé si le marqueur existe) AVANT l'envoi. Réservation impossible (panne Firestore, événement sans identifiant)
+//      = pas d'envoi. Le marqueur garde l'état de la notification, jamais le token :
+//        reserved  : réservée, issue inconnue (exécution interrompue, redémarrage Cloud Run) → à diagnostiquer, jamais renvoyée seule ;
+//        sent      : FCM a accepté le message (ce n'est pas une preuve de réception sur l'appareil) ;
+//        failed    : FCM a refusé définitivement (token invalide...) ;
+//        uncertain : erreur réseau/serveur FCM, le message a pu partir ou non.
+//      Aucun réessai automatique : un événement livré de nouveau trouve le marqueur et n'envoie rien (garantie « au plus une fois »,
+//      pas « exactement une fois »).
 // La couche basse (sendToToken / sendToMultipleTokens) refuse en plus tout envoi qui n'a pas été autorisé ici : une autre
 // fonction qui appellerait FCM directement est bloquée par défaut en préproduction.
 const crypto = require('node:crypto');
@@ -21,6 +29,16 @@ const crypto = require('node:crypto');
 const PREPROD_PROJECT = 'az-express-preprod';
 const DEDUPE_COLLECTION = 'notification_dedupe';
 const MIN_FINGERPRINT = 8;
+// Refus définitifs de FCM (le message n'a pas été remis et ne le sera pas) ; toute autre erreur laisse l'issue incertaine.
+const DEFINITE_FCM_FAILURES = new Set([
+  'messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument',
+  'messaging/invalid-recipient', 'messaging/mismatched-credential', 'messaging/third-party-auth-error',
+]);
+
+function classifyOutcome(outcome) {
+  if (outcome && outcome.ok === true) return 'sent';
+  return outcome && DEFINITE_FCM_FAILURES.has(outcome.code) ? 'failed' : 'uncertain';
+}
 
 // fonction -> rôle de destinataire qu'elle peut joindre. Toute autre combinaison est refusée.
 const FUNCTION_ROLES = Object.freeze({
@@ -76,17 +94,17 @@ function createNotificationGuard({ db, env = process.env, logger = console } = {
     return null;
   }
 
-  // Marque l'événement pour ce destinataire : false si déjà traité (livraison répétée). Panne du magasin = on envoie
-  // (une notification légitime ne doit pas être perdue ; seuls les destinataires déjà autorisés arrivent ici).
+  // Réserve l'événement pour ce destinataire : renvoie la référence du marqueur, ou null (déjà réservé, ou réservation impossible).
   async function claim(fn, eventId, role, id) {
-    if (!eventId || !db) return true;
+    if (!eventId || !db) { log(fn, 'réservation impossible (événement sans identifiant)'); return null; }
+    const ref = db.collection(DEDUPE_COLLECTION).doc(`${fn}_${eventId}_${role}_${id}`.slice(0, 500));
     try {
-      await db.collection(DEDUPE_COLLECTION).doc(`${fn}_${eventId}_${role}_${id}`.slice(0, 500)).create({ fn, role, at: Date.now() });
-      return true;
+      await ref.create({ fn, role, recipientId: id, eventId: String(eventId), state: 'reserved', reservedAt: Date.now() });
+      return ref;
     } catch (err) {
-      if (err && (err.code === 6 || /ALREADY_EXISTS/.test(String(err.message)))) return false;
-      logger.warn(`[notificationGuard] déduplication indisponible : ${err && err.message}`);
-      return true;
+      if (err && (err.code === 6 || /ALREADY_EXISTS/.test(String(err.message)))) log(fn, 'événement déjà notifié');
+      else logger.warn(`[notificationGuard] réservation impossible, aucun envoi : ${err && err.message}`);
+      return null;
     }
   }
 
@@ -94,21 +112,40 @@ function createNotificationGuard({ db, env = process.env, logger = console } = {
   // ; authorization est exigée par la couche basse. Hors préproduction : tous les tokens, sans écriture.
   async function authorize(ctx, recipients) {
     const all = recipients.filter((r) => r && r.token);
-    if (mode === 'unrestricted') return { tokens: all.map((r) => r.token), authorization: UNRESTRICTED };
-    if (mode === 'blocked') { if (all.length) log(ctx.fn, 'NOTIFICATIONS_SEND non activé'); return { tokens: [], authorization: null }; }
+    if (mode === 'unrestricted') return { tokens: all.map((r) => r.token), authorization: UNRESTRICTED, markers: null };
+    if (mode === 'blocked') { if (all.length) log(ctx.fn, 'NOTIFICATIONS_SEND non activé'); return { tokens: [], authorization: null, markers: null }; }
     const scope = ORDER_SCOPE[ctx.fn];
-    if (!scope || !scope(ctx.order)) { if (all.length) log(ctx.fn, 'commande hors périmètre'); return { tokens: [], authorization: null }; }
+    if (!scope || !scope(ctx.order)) { if (all.length) log(ctx.fn, 'commande hors périmètre'); return { tokens: [], authorization: null, markers: null }; }
     const tokens = [];
+    const markers = new Map();
     for (const r of all) {
       const why = allowedFor(ctx.fn, r.role, r.id, r.token);
       if (why) { log(ctx.fn, why); continue; }
-      if (!(await claim(ctx.fn, ctx.eventId, r.role, r.id))) { log(ctx.fn, 'événement déjà notifié'); continue; }
+      const marker = await claim(ctx.fn, ctx.eventId, r.role, r.id);
+      if (!marker) continue;
       tokens.push(r.token);
+      markers.set(r.token, marker);
     }
-    if (!tokens.length) return { tokens, authorization: null };
+    if (!tokens.length) return { tokens, authorization: null, markers };
     const authorization = Object.freeze({ tokens: new Set(tokens) });
     granted.add(authorization);
-    return { tokens, authorization };
+    return { tokens, authorization, markers };
+  }
+
+  // Enregistre l'issue de chaque envoi réservé : outcomes = [{ token, ok, code }]. Jamais bloquant ; un token sans issue reste
+  // « reserved » (à diagnostiquer). Sans effet hors préproduction.
+  async function settle(authorized, outcomes) {
+    if (!authorized || !authorized.markers) return;
+    for (const o of outcomes || []) {
+      const marker = authorized.markers.get(o && o.token);
+      if (!marker) continue;
+      const state = classifyOutcome(o);
+      try {
+        await marker.update({ state, settledAt: Date.now(), ...(state === 'sent' ? {} : { errorCode: String(o.code || 'unknown').slice(0, 80) }) });
+      } catch (err) {
+        logger.warn(`[notificationGuard] état de notification non enregistré (${state}) : ${err && err.message}`);
+      }
+    }
   }
 
   // Couche basse : ce token peut-il partir avec cette autorisation ?
@@ -117,7 +154,7 @@ function createNotificationGuard({ db, env = process.env, logger = console } = {
     return !!authorization && granted.has(authorization) && authorization.tokens.has(token);
   }
 
-  return { mode, authorize, permits };
+  return { mode, authorize, settle, permits };
 }
 
-module.exports = { createNotificationGuard, sendMode, parseAllowlist, fingerprint, FUNCTION_ROLES, DEDUPE_COLLECTION, PREPROD_PROJECT };
+module.exports = { createNotificationGuard, sendMode, parseAllowlist, fingerprint, classifyOutcome, FUNCTION_ROLES, DEDUPE_COLLECTION, PREPROD_PROJECT };

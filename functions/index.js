@@ -860,15 +860,21 @@ exports.checkWithdrawalStatus = onCall({
 const notificationGuard = createNotificationGuard({ db });
 // Envoi à des destinataires identifiés [{ role, id, token }] : le garde décide qui reçoit (ctx = { fn, eventId, order }).
 async function guardedSend(ctx, recipients, title, body, data) {
-  const { tokens, authorization } = await notificationGuard.authorize(ctx, recipients);
+  const authorized = await notificationGuard.authorize(ctx, recipients);
+  const { tokens, authorization } = authorized;
   if (!tokens.length) return;
-  if (tokens.length === 1 && !ctx.multicast) return sendToToken(tokens[0], title, body, data, authorization);
-  return sendToMultipleTokens(tokens, title, body, data, null, authorization);
+  if (tokens.length === 1 && !ctx.multicast) {
+    const outcome = await sendToToken(tokens[0], title, body, data, authorization);
+    await notificationGuard.settle(authorized, [{ token: tokens[0], ...outcome }]);
+    return;
+  }
+  const outcomes = await sendToMultipleTokens(tokens, title, body, data, null, authorization);
+  await notificationGuard.settle(authorized, outcomes);
 }
 
 async function sendToToken(token, title, body, data = {}, authorization = null) {
-  if (!token) return;
-  if (!notificationGuard.permits(token, authorization)) return;
+  if (!token) return { ok: false, code: 'no-token' };
+  if (!notificationGuard.permits(token, authorization)) return { ok: false, code: 'blocked' };
   try {
     await admin.messaging().send({
       token,
@@ -877,6 +883,7 @@ async function sendToToken(token, title, body, data = {}, authorization = null) 
       apns:    { payload: { aps: { sound: 'default', badge: 1 } } },
       data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
     });
+    return { ok: true };
   } catch (err) {
     console.warn(`FCM failed token ${token?.slice(0, 20)} : ${err.message}`);
     // Même détection que sendToMultipleTokens (Prompt 30) — sans ça, les
@@ -888,11 +895,14 @@ async function sendToToken(token, title, body, data = {}, authorization = null) 
         token, detectedAt: admin.firestore.FieldValue.serverTimestamp(),
       }).catch(() => {});
     }
+    return { ok: false, code: err.code || 'unknown' };
   }
 }
 
+// Renvoie l'issue par token [{ token, ok, code }] (ignorée par les appelants historiques ; utilisée par le garde de préproduction).
 async function sendToMultipleTokens(tokens, title, body, data = {}, collectionHint = null, authorization = null) {
-  if (!tokens?.length) return;
+  if (!tokens?.length) return [];
+  const outcomes = [];
   const uniqueTokens = [...new Set(tokens.filter((t) => t && notificationGuard.permits(t, authorization)))];
   const dataStr = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
   for (let start = 0; start < uniqueTokens.length; start += 500) {
@@ -907,6 +917,7 @@ async function sendToMultipleTokens(tokens, title, body, data = {}, collectionHi
       });
       // Nettoyer les tokens invalides
       result.responses.forEach((resp, i) => {
+        outcomes.push({ token: tokenBatch[i], ok: !!resp.success, code: resp.error?.code });
         if (!resp.success) {
           const code = resp.error?.code;
           if (code === 'messaging/registration-token-not-registered' ||
@@ -921,8 +932,10 @@ async function sendToMultipleTokens(tokens, title, body, data = {}, collectionHi
       });
     } catch (err) {
       console.warn('Multicast FCM error:', err.message);
+      for (const t of tokenBatch) outcomes.push({ token: t, ok: false, code: err.code || 'exception' });
     }
   }
+  return outcomes;
 }
 
 // ── Détection du type de service ─────────────────────────────────────────────
