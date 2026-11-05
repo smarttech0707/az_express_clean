@@ -5,6 +5,7 @@ const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('fir
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { capInstances, pilotOnlyInstanceOptions, pilotRetry } = require('./pilotCap');
+const { createNotificationGuard } = require('./notificationGuard');
 const { defineSecret } = require('firebase-functions/params');
 const admin  = require('firebase-admin');
 const axios  = require('axios');
@@ -855,8 +856,19 @@ exports.checkWithdrawalStatus = onCall({
 
 // ── Helpers FCM ─────────────────────────────────────────────────────────────
 
-async function sendToToken(token, title, body, data = {}) {
+// Préproduction : aucun envoi sans autorisation explicite (notificationGuard.js). Production : garde transparent.
+const notificationGuard = createNotificationGuard({ db });
+// Envoi à des destinataires identifiés [{ role, id, token }] : le garde décide qui reçoit (ctx = { fn, eventId, order }).
+async function guardedSend(ctx, recipients, title, body, data) {
+  const { tokens, authorization } = await notificationGuard.authorize(ctx, recipients);
+  if (!tokens.length) return;
+  if (tokens.length === 1 && !ctx.multicast) return sendToToken(tokens[0], title, body, data, authorization);
+  return sendToMultipleTokens(tokens, title, body, data, null, authorization);
+}
+
+async function sendToToken(token, title, body, data = {}, authorization = null) {
   if (!token) return;
+  if (!notificationGuard.permits(token, authorization)) return;
   try {
     await admin.messaging().send({
       token,
@@ -879,9 +891,9 @@ async function sendToToken(token, title, body, data = {}) {
   }
 }
 
-async function sendToMultipleTokens(tokens, title, body, data = {}, collectionHint = null) {
+async function sendToMultipleTokens(tokens, title, body, data = {}, collectionHint = null, authorization = null) {
   if (!tokens?.length) return;
-  const uniqueTokens = [...new Set(tokens.filter(Boolean))];
+  const uniqueTokens = [...new Set(tokens.filter((t) => t && notificationGuard.permits(t, authorization)))];
   const dataStr = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
   for (let start = 0; start < uniqueTokens.length; start += 500) {
     const tokenBatch = uniqueTokens.slice(start, start + 500);
@@ -1032,6 +1044,8 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
     const before = event.data.before.data();
     const after  = event.data.after.data();
     if (!before || !after) return;
+    const ctx = { fn: 'notifyClientOnOrderUpdate', eventId: event.id, order: after };
+    const toClient = (t) => [{ role: 'client', id: after.clientId, token: t }];
 
     // Changement de livreur sans changement de statut (transfert après
     // récupération) ou remise en file après abandon : le client est prévenu,
@@ -1044,7 +1058,7 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
       const cDoc = await db.collection('clients').doc(after.clientId).get();
       const cToken = cDoc.data()?.fcmToken;
       if (!cToken) return;
-      await sendToToken(cToken,
+      await guardedSend(ctx, toClient(cToken),
         driverSwapped ? '🔁 Nouveau livreur' : '🔎 Nouveau livreur en recherche',
         driverSwapped
           ? 'Votre colis a été confié à un autre livreur. Suivez-le en direct : un nouveau code de livraison sera demandé.'
@@ -1060,7 +1074,7 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
 
     // Commande Restaurant/Boulangerie v2 jamais acceptée par le partenaire (annulée à 60 min, remboursée intégralement)
     if (after.status === 'cancelled' && after.cancelReason === 'partner_no_response') {
-      await sendToToken(token,
+      await guardedSend(ctx, toClient(token),
         '😔 Commande annulée',
         'Le partenaire n’a pas répondu à votre commande. Elle est annulée et, si vous aviez payé avec le wallet, vous êtes remboursé intégralement.',
         { type: 'partner_no_response', orderId: event.params.orderId, status: 'cancelled' }
@@ -1070,7 +1084,7 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
 
     // Annulation automatique "aucun livreur" — message spécifique
     if (after.status === 'cancelled' && after.cancelReason === 'no_driver_found') {
-      await sendToToken(token,
+      await guardedSend(ctx, toClient(token),
         '😔 Aucun livreur disponible',
         'Nous n\'avons trouvé aucun livreur disponible pour le moment. Vous pouvez réessayer dans quelques minutes.',
         { type: 'no_driver_found', orderId: event.params.orderId, status: 'cancelled' }
@@ -1087,7 +1101,7 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
       ? 'driver_found'
       : after.status === 'cancelled' ? 'order_cancelled' : 'order_update';
 
-    await sendToToken(token, notif.title, notif.body, {
+    await guardedSend(ctx, toClient(token), notif.title, notif.body, {
       type:    notifType,
       orderId: event.params.orderId,
       status:  after.status,
@@ -1283,7 +1297,9 @@ exports.notifyRestaurantOnOrder = onDocumentCreated({ document: 'orders/{orderId
   if (!token) return;
 
   const desc = (order.description ?? 'Commande').substring(0, 60);
-  await sendToToken(token,
+  // Le token vient du propriétaire ou, à défaut, du restaurant : dans les deux cas le destinataire est le restaurant sellerId.
+  await guardedSend({ fn: 'notifyRestaurantOnOrder', eventId: event.id, order },
+    [{ role: 'restaurant', id: order.sellerId, token }],
     '🍽️ Nouvelle commande !',
     `${desc} — ${order.budget ?? 0} FCFA`,
     { type: 'new_seller_order', orderId: event.params.orderId, sellerType: 'restaurant' }
@@ -1386,12 +1402,14 @@ exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId
   if (partnerOrder) return;
 
   const snapshot = await db.collection('livreurs').where('isOnline', '==', true).limit(50).get();
-  const tokens   = snapshot.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
-  if (!tokens.length) return;
+  const recipients = snapshot.docs
+    .map(d => ({ role: 'driver', id: d.id, token: d.data().fcmToken }))
+    .filter(r => r.token?.length > 10);
+  if (!recipients.length) return;
 
   const budget = order.budget ?? 0;
   const desc   = (order.description ?? 'Livraison').substring(0, 60);
-  await sendToMultipleTokens(tokens,
+  await guardedSend({ fn: 'notifyDriversOnNewOrder', eventId: event.id, order, multicast: true }, recipients,
     '🛵 Nouvelle course disponible !',
     `${desc} — ${budget} FCFA`,
     { type: 'new_order', orderId: event.params.orderId, budget: String(budget) }
