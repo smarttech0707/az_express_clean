@@ -216,3 +216,41 @@ test('6. exécution complète : Storage supprimé avec précondition, lot suppri
   assert.equal((await db.doc('orders/hist-1').get()).exists, true);
   assert.equal(JSON.parse(JSON.stringify((await db.doc('clients/real-client').get()).data())).fcmToken, 'PLACEHOLDER-NOT-A-REAL-TOKEN');
 });
+
+// Mission 7E-55 : seule l'exception exacte de l'annexe (clients/t7e-client:fcmToken, empreinte vérifiée) cesse d'être un conflit.
+test('7. annexe des changements connus : exception reconnue, jeton renouvelé ou autre champ sensible = conflit, garde-fous intacts', options, async () => {
+  await setup();
+  const kc = require(path.join(dir, 'knownChanges'));
+  const TOKEN = 'SIMULATED-TOKEN-NOT-REAL';
+  const annex = { version: 1, lot: lot.LOT_ID, entries: [{ path: `clients/${CLIENT}`, field: 'fcmToken', fingerprint: kc.fingerprintOf(TOKEN), observedAt: '2026-11-06T10:43:06Z', justification: 'test simulé' }] };
+  const conflictsOf = async (a) => (await cleanup.collectInventory({ ...ctx(), annex: a })).conflicts.map((c) => `${c.id}:${c.reason}`);
+
+  await db.doc(`clients/${CLIENT}`).update({ fcmToken: TOKEN });
+  assert.match((await conflictsOf(null)).join('|'), /champ sensible présent \(fcmToken\)/, 'sans annexe : conflit');
+  assert.deepEqual(await conflictsOf(annex), [], 'avec annexe et empreinte identique : plus de conflit');
+  // L'inventaire (donc son empreinte) est identique avec ou sans l'exception : rien n'est ajouté ni retiré.
+  const noToken = await (async () => { await db.doc(`clients/${CLIENT}`).update({ fcmToken: admin.firestore.FieldValue.delete() }); return cleanup.collectInventory(ctx()); })();
+  await db.doc(`clients/${CLIENT}`).update({ fcmToken: TOKEN });
+  assert.equal((await cleanup.collectInventory({ ...ctx(), annex })).hash, noToken.hash);
+
+  await db.doc(`clients/${CLIENT}`).update({ fcmToken: `${TOKEN}-RENEWED` });
+  assert.match((await conflictsOf(annex)).join('|'), /champ sensible présent \(fcmToken\)/, 'empreinte changée : conflit');
+
+  await db.doc(`clients/${CLIENT}`).update({ fcmToken: TOKEN, phoneNumber: '0100000000' });
+  assert.match((await conflictsOf(annex)).join('|'), /phoneNumber/, 'autre champ sensible : conflit');
+  await db.doc(`clients/${CLIENT}`).update({ phoneNumber: admin.firestore.FieldValue.delete() });
+
+  // Le même champ sur un autre document du lot n'est pas couvert.
+  await db.doc(`livreurs/${DRIVER}`).update({ fcmToken: TOKEN });
+  assert.match((await conflictsOf(annex)).join('|'), new RegExp(`livreurs/${DRIVER}`));
+
+  // Livreur étranger dans la liste des livreurs pilotes : conflit (le pilote n'est plus celui du lot).
+  await db.doc('config/partnerOrdersV2').update({ pilotDriverIds: [DRIVER, 'real-driver'] });
+  assert.match((await conflictsOf(annex)).join('|'), /d’autres livreurs/);
+  await db.doc('config/partnerOrdersV2').update({ pilotDriverIds: [DRIVER] });
+
+  // Annexe invalide : refus net, et exécution impossible tant qu'un conflit subsiste.
+  await assert.rejects(cleanup.collectInventory({ ...ctx(), annex: { ...annex, entries: [{ ...annex.entries[0], field: 'password' }] } }), { code: 'INVALID_KNOWN_CHANGES' });
+  await assert.rejects(cleanup.executeCleanup({ ...ctx(), annex, expectedHash: noToken.hash, confirm: DELETE() }), { code: 'CONFLICTS' });
+  assert.equal((await db.doc('orders/hist-1').get()).exists, true);
+});

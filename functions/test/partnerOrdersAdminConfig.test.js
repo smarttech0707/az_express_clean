@@ -87,10 +87,10 @@ test('modification : version incrémentée, trace dans le document, audit avant/
   const w = world();
   const r = await w.set('root', { pilotPartnerIds: ['r2', 'r1'], creationOpen: true }, 0);
   assert.equal(r.success, true);
-  assert.deepEqual(r.data.config, { pilotPartnerIds: ['r1', 'r2'], pilotClientIds: [], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 1 });
+  assert.deepEqual(r.data.config, { pilotPartnerIds: ['r1', 'r2'], pilotClientIds: [], pilotDriverIds: [], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 1 });
   const c = w.config();
   assert.deepEqual([c.version, c.updatedBy, c.updatedAtMs, c.managementFrozen], [1, 'root', NOW, false]);
-  assert.deepEqual(c.lastChange.before, { pilotPartnerIds: [], pilotClientIds: [], clientAccess: 'restricted', creationOpen: false, managementFrozen: false, version: 0 });
+  assert.deepEqual(c.lastChange.before, { pilotPartnerIds: [], pilotClientIds: [], pilotDriverIds: [], clientAccess: 'restricted', creationOpen: false, managementFrozen: false, version: 0 });
   assert.equal(c.lastChange.after.creationOpen, true);
   const audit = w.audits.find((a) => a.action === 'partner_orders_config_update' && !a.status);
   assert.equal(audit.userId, 'root');
@@ -100,7 +100,7 @@ test('modification : version incrémentée, trace dans le document, audit avant/
   assert.deepEqual(w.limits[w.limits.length - 1].slice(1), ['partner_orders_config', 10, 600]);
   // Modification partielle : les champs absents du patch sont conservés.
   const r2 = await w.set('root', { creationOpen: false }, 1);
-  assert.deepEqual(r2.data.config, { pilotPartnerIds: ['r1', 'r2'], pilotClientIds: [], clientAccess: 'restricted', creationOpen: false, managementFrozen: false, version: 2 });
+  assert.deepEqual(r2.data.config, { pilotPartnerIds: ['r1', 'r2'], pilotClientIds: [], pilotDriverIds: [], clientAccess: 'restricted', creationOpen: false, managementFrozen: false, version: 2 });
 });
 
 test('modifications concurrentes : même version attendue → une seule réussit, l’autre CONFIG_CONFLICT, version +1', async () => {

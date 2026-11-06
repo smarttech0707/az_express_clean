@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
-import 'firebase_emulator_config.dart';
+import 'fcm_policy.dart';
 import 'notification_tap_coordinator.dart';
 
 // ── Handler background — doit être top-level (hors classe) ───────────
@@ -80,6 +80,8 @@ class NotificationService {
 
   // ── Initialisation principale ─────────────────────────────────────
   Future<void> init() async {
+    // Build de test (DISABLE_FCM) : ni permission, ni écouteur, ni handler d'arrière-plan, ni suivi du jeton.
+    if (FcmPolicy.disabled) return;
     // Enregistrer le handler background
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
@@ -109,6 +111,7 @@ class NotificationService {
 
   // ── Sauvegarder le token d'un utilisateur dans Firestore ──────────
   Future<void> saveToken(String userId, String collection) async {
+    if (FcmPolicy.disabled) return; // aucun jeton écrit sur le compte (voir FcmPolicy)
     try {
       _userId = userId;
       _userCollection = collection;
@@ -131,7 +134,7 @@ class NotificationService {
   Future<String?> getTokenWhenReady() async {
     // APK de test : FCM dialoguerait avec les serveurs Google (jeton, Installations), ce que le mode
     // émulateurs interdit ; hors réseau, ces demandes bouclent et épuisent les threads du processus.
-    if (FirebaseEmulatorConfig.enabled) return null;
+    if (!FcmPolicy.allowsRegistration()) return null;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       for (var attempt = 0; attempt < _apnsTokenWaitAttempts; attempt++) {
         final apnsToken = await _fcm.getAPNSToken();
@@ -235,6 +238,7 @@ class NotificationService {
 
   // ── Token rafraîchi → mettre à jour Firestore ─────────────────────
   void _onTokenRefresh(String token) {
+    if (FcmPolicy.disabled) return;
     if (_userId == null || _userCollection == null) return;
     FirebaseFirestore.instance
         .collection(_userCollection!)

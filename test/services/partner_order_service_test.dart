@@ -13,7 +13,7 @@ class FakePartnerServer {
   int clock = 1000000;
   final menu = <String, int>{'a': 2000, 'b': 1500};
   int deliveryFee = 500;
-  // 'v2' | 'closed' | 'notInPilot' | 'disabled'
+  // 'v2' | 'closed' | 'notInPilot' | 'clientNotInPilot' | 'disabled'
   String mode = 'v2';
   final quotes = <String, Map<String, dynamic>>{};
   final orders = <String, Map<String, dynamic>>{};
@@ -51,6 +51,10 @@ class FakePartnerServer {
     if (mode == 'notInPilot') {
       return _fail('PARTNER_NOT_IN_PILOT',
           'Ce partenaire n’accepte pas encore ce type de commande');
+    }
+    if (mode == 'clientNotInPilot') {
+      return _fail('CLIENT_NOT_IN_PILOT',
+          'Ce service n’est pas encore ouvert à votre compte');
     }
     if (mode == 'garbage') {
       return _fail('WEIRD_CODE', 'Configuration illisible');
@@ -307,6 +311,21 @@ void main() {
     }
   });
 
+  test('CLIENT_NOT_IN_PILOT : message dédié, ni ancien parcours ni relance', () async {
+    server.mode = 'clientNotInPilot';
+    await expectLater(
+        prepare(),
+        throwsA(isA<PartnerOrderException>()
+            .having((e) => e.clientNotInPilot, 'clientNotInPilot', isTrue)
+            .having((e) => e.notInPilot, 'notInPilot', isFalse)
+            .having((e) => e.retryable, 'retryable', isFalse)
+            .having((e) => e.userMessage, 'userMessage',
+                "Ce restaurant n'est pas encore disponible pour votre compte pendant la phase de test.")));
+    expect(server.calls.length, 1);
+    expect(server.orders, isEmpty);
+    expect(server.wallet, 20000);
+  });
+
   test('erreur réseau au devis : retryable, la nouvelle tentative fonctionne',
       () async {
     server.failBeforeServer = true;
@@ -518,6 +537,20 @@ void main() {
       expect(outcome.status, PartnerCheckoutStatus.useLegacy);
       expect(messages, isEmpty);
       expect(server.orders, isEmpty);
+    });
+
+    testWidgets(
+        'CLIENT_NOT_IN_PILOT : message explicite, aucun repli historique, aucune commande, aucun débit, un seul appel',
+        (tester) async {
+      server.mode = 'clientNotInPilot';
+      final (outcome, messages) = await pump(tester, interact: () async {});
+      expect(outcome.status, PartnerCheckoutStatus.stopped);
+      expect(messages, [
+        "Ce restaurant n'est pas encore disponible pour votre compte pendant la phase de test."
+      ]);
+      expect(server.calls.length, 1);
+      expect(server.orders, isEmpty);
+      expect(server.wallet, 20000);
     });
 
     for (final m in ['disabled', 'garbage']) {

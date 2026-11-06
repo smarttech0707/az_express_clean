@@ -65,7 +65,7 @@ test('applyConfigChange : versionné, audité, ancien document complété en mod
   };
   const set = (patch, expectedVersion, extra = {}) => cfg.applyConfigChange({ db, uid: 'root', input: { patch, expectedVersion, reason: 'Modification de test', ...extra }, nowMs: 1 });
   const r1 = await set({ pilotClientIds: ['c1'] }, 4);
-  assert.deepEqual(r1.before, { pilotPartnerIds: ['r1'], pilotClientIds: [], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 4 });
+  assert.deepEqual(r1.before, { pilotPartnerIds: ['r1'], pilotClientIds: [], pilotDriverIds: [], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 4 });
   assert.deepEqual(r1.after.pilotClientIds, ['c1']);
   assert.equal(r1.generalOpening, false);
   await assert.rejects(set({ pilotClientIds: ['c2'] }, 4), (e) => e.code === 'CONFIG_CONFLICT');

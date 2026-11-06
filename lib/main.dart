@@ -22,6 +22,7 @@ import 'theme/app_theme.dart';
 import 'screens/home/home_screen.dart';
 import 'services/notification_service.dart';
 import 'services/firestore_service.dart';
+import 'services/fcm_policy.dart';
 import 'services/firebase_emulator_config.dart';
 import 'web/web_app.dart';
 import 'marketplace/providers/mp_provider.dart';
@@ -205,7 +206,7 @@ Future<void> _initializeDeferred(Future<void> appCheckReady) async {
   // initialisations réseau.
   // Mode émulateurs : pas de FCM ni d'enregistrement de jeton (aucun émulateur
   // FCM, et aucun appel vers des serveurs Google avec une configuration factice).
-  if (!FirebaseEmulatorConfig.enabled) unawaited(NotificationService().init());
+  if (!FirebaseEmulatorConfig.enabled && !FcmPolicy.disabled) unawaited(NotificationService().init());
 
   final authFuture = _ensureAnonymousAuth();
 

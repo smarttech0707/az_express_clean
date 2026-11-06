@@ -21,6 +21,7 @@ const prepare = require('./prepare');
 const intruder = require('./intruder');
 const storageInventory = require('./storageInventory');
 const financialReport = require('./financialReport');
+const knownChanges = require('./knownChanges');
 
 const { LOT_ID, LOT_FIELD, IDENTITIES, UIDS } = lot;
 // Extension 7E-43 : le compte intrus fait partie du lot (même cycle de vie), mais n'a droit à AUCUNE activité.
@@ -81,7 +82,9 @@ function validateManifest(manifest) {
 }
 
 // Lecture seule. Retourne l'inventaire exact des ressources du lot, les conflits (qui bloquent toute suppression) et l'empreinte.
-async function collectInventory({ admin, db, auth, bucket, manifest }) {
+// `annex` (Mission 7E-55, optionnelle) : changements automatiques connus et vérifiés (voir knownChanges.js). Sans annexe : comportement strict.
+async function collectInventory({ admin, db, auth, bucket, manifest, annex = null }) {
+  if (annex) knownChanges.validateAnnex(annex, LOT_ID);
   validateManifest(manifest);
   const items = []; const conflicts = []; const missingSeeds = [];
   const baseline = new Set(manifest.baseline.orderIds);
@@ -96,8 +99,9 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
     if (!snap.exists) { missingSeeds.push(p); continue; }
     const data = snap.data();
     if (data[LOT_FIELD] !== LOT_ID) { conflict('firestore', p, 'document sans marqueur du lot'); continue; }
-    const s = sensitive(data);
-    if (s.length) { conflict('firestore', p, `champ sensible présent (${s.join(',')})`); continue; }
+    // Seule l'exception exacte de l'annexe (chemin + champ + empreinte vérifiée) cesse d'être un conflit ; tout autre champ sensible bloque.
+    const s = knownChanges.classifySensitive({ docPath: p, data, sensitiveFields: sensitive(data), annex }).unexplained;
+    if (s.length) { conflict('firestore', p, `champ sensible présent (${s.map((x) => x.field).join(',')})`); continue; }
     add({ type: 'firestore', path: p, group: 'seed' });
   }
 
@@ -206,12 +210,16 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
     // Mission 7E-41 : un pilote ouvert à d’autres clients (liste étrangère, intrus compris, ou ouverture générale) n’est plus un pilote du lot.
     const clients = pilot.data().pilotClientIds;
     const foreignPartners = ids.some((id) => id !== IDENTITIES.restaurant.uid);
+    // Mission 7E-55 : idem pour les livreurs pilotes (seul le livreur du lot est admis).
+    const drivers = pilot.data().pilotDriverIds;
+    const foreignDrivers = Array.isArray(drivers) && drivers.some((id) => id !== IDENTITIES.driver.uid);
     const foreignClients = (Array.isArray(clients) && clients.some((id) => id !== IDENTITIES.client.uid)) || pilot.data().clientAccess === 'open';
     if (foreignPartners) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres partenaires : ne pas toucher');
     if (foreignClients) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres clients ou est ouvert à tous : ne pas toucher');
+    if (foreignDrivers) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres livreurs : ne pas toucher');
     // Pilote encore ouvert : aucune suppression tant que la création n'est pas refermée par le chemin audité (CLOSE / emergencyClose.js).
     if (pilot.data().creationOpen === true) conflict('firestore', PILOT_CONFIG, 'pilote encore ouvert : fermer par le chemin audité avant tout nettoyage');
-    if (!foreignPartners && !foreignClients) add({ type: 'firestore', path: PILOT_CONFIG, group: 'pilot' });
+    if (!foreignPartners && !foreignClients && !foreignDrivers) add({ type: 'firestore', path: PILOT_CONFIG, group: 'pilot' });
   }
 
   items.sort((a, b) => (itemKey(a) < itemKey(b) ? -1 : 1));
@@ -228,9 +236,9 @@ function dryRun(inventory) {
   };
 }
 
-async function executeCleanup({ admin, db, auth, bucket, manifest, expectedHash, confirm, log = () => {} }) {
+async function executeCleanup({ admin, db, auth, bucket, manifest, annex = null, expectedHash, confirm, log = () => {} }) {
   guard.assertConfirmation(confirm, 'DELETE');
-  const inventory = await collectInventory({ admin, db, auth, bucket, manifest });
+  const inventory = await collectInventory({ admin, db, auth, bucket, manifest, annex });
   if (inventory.conflicts.length) {
     throw new guard.GuardError('CONFLICTS', `Suppression refusée, conflits : ${inventory.conflicts.map((c) => `${c.id} (${c.reason})`).join('; ')}`);
   }
@@ -255,7 +263,7 @@ async function executeCleanup({ admin, db, auth, bucket, manifest, expectedHash,
   }
   // 2. Fermeture de la création (le pilote doit déjà être fermé : conflit sinon) et vidage des listes avant la suppression.
   if (inventory.items.some((i) => i.path === PILOT_CONFIG)) {
-    await db.doc(PILOT_CONFIG).update({ creationOpen: false, pilotPartnerIds: [], pilotClientIds: [], clientAccess: 'restricted' });
+    await db.doc(PILOT_CONFIG).update({ creationOpen: false, pilotPartnerIds: [], pilotClientIds: [], pilotDriverIds: [], clientAccess: 'restricted' });
     log('pilote fermé');
   }
   // 3. Tous les documents Firestore en UN lot atomique : la réconciliation financière ne voit jamais un grand livre à moitié supprimé.
@@ -269,7 +277,7 @@ async function executeCleanup({ admin, db, auth, bucket, manifest, expectedHash,
   // 4. Comptes Auth en dernier (un compte déjà supprimé lors d'une reprise n'est plus dans l'inventaire).
   for (const u of inventory.items.filter((i) => i.type === 'auth')) await auth.deleteUser(u.uid);
 
-  const after = await collectInventory({ admin, db, auth, bucket, manifest });
+  const after = await collectInventory({ admin, db, auth, bucket, manifest, annex });
   return { deleted: inventory.items.length, remaining: after.items.length, conflictsAfter: after.conflicts, clean: after.items.length === 0 && after.conflicts.length === 0 };
 }
 
@@ -278,7 +286,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i].startsWith('--') ? argv[i].slice(2) : null;
     if (key === 'execute') out.flags.add(key);
-    else if (['project', 'project-number', 'manifest', 'confirm', 'inventory-hash', 'report-dir'].includes(key)) { out.values[key] = argv[i + 1]; i += 1; }
+    else if (['project', 'project-number', 'manifest', 'known-changes', 'confirm', 'inventory-hash', 'report-dir'].includes(key)) { out.values[key] = argv[i + 1]; i += 1; }
     else throw new guard.GuardError('BAD_ARGUMENT', `Argument inattendu : ${argv[i]}`);
   }
   return out;
@@ -298,7 +306,8 @@ async function main(argv = process.argv.slice(2), env = process.env, log = conso
 
   const admin = prepare.connect(target);
   await guard.verifyProjectNumberOnline({ projectId: target.projectId, fetchJson: (url) => prepare.onlineFetchJson(admin, url) });
-  const ctx = { admin, db: admin.firestore(), auth: admin.auth(), bucket: admin.storage().bucket(), manifest };
+  const annex = knownChanges.loadAnnex(fs, args.values['known-changes'], LOT_ID);
+  const ctx = { admin, db: admin.firestore(), auth: admin.auth(), bucket: admin.storage().bucket(), manifest, annex };
 
   if (!args.flags.has('execute')) {
     const inventory = await collectInventory(ctx);

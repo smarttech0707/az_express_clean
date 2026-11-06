@@ -3,6 +3,7 @@
 const { readDriverState, runLifecycleTransaction, clearAcceptedOffers } = require('./driverLifecycle');
 const { isLegacyPartnerOrder, getLegacyPartnerPolicy } = require('./legacyPartnerPolicy');
 const { storageObjectOfUrl } = require('./proofStorage');
+const { CONFIG_COLLECTION, CONFIG_DOC, parsePilotConfig, isPartnerV2Order, driverRefusal } = require('./partnerOrdersConfig');
 
 // Acceptation d'une course par un livreur — côté SERVEUR.
 //
@@ -91,6 +92,14 @@ function buildAcceptOrder({
       }
       if (!ACCEPTABLE.has(order.status)) {
         throw new HttpsError('failed-precondition', 'Cette commande n’est plus disponible');
+      }
+      // Commande Restaurant/Boulangerie v2 en mode pilote restreint (Mission 7E-55) : seul un livreur de pilotDriverIds peut
+      // l'accepter, quelle que soit la façon dont il l'a reçue (assignation, diffusion, appel direct de la fonction). Liste
+      // relue dans CETTE transaction ; absente, vide ou malformée = refus. Avant tout prélèvement ; autres commandes inchangées.
+      if (isPartnerV2Order(order)) {
+        const cfgSnap = await tx.get(db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC));
+        const refusal = driverRefusal(parsePilotConfig(cfgSnap.exists ? cfgSnap.data() : null), uid);
+        if (refusal) throw new HttpsError('permission-denied', refusal.code, { code: refusal.code });
       }
       // Placé après le rejeu : une reprise réseau sans photo ne doit pas échouer une acceptation déjà faite.
       let bucketName;

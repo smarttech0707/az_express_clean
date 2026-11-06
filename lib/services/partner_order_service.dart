@@ -93,6 +93,10 @@ class PartnerOrderException implements Exception {
   /// Création volontairement fermée (arrêt d'urgence ou pilote suspendu) : jamais de repli sur l'ancien parcours.
   bool get creationClosed => code == 'CREATION_CLOSED';
 
+  /// Le compte n'est pas dans la liste du pilote (liste lue côté serveur). Contrairement à PARTNER_NOT_IN_PILOT, ce refus
+  /// ne prouve pas que le restaurant est hors pilote : jamais de repli sur l'ancien parcours, jamais de relance.
+  bool get clientNotInPilot => code == 'CLIENT_NOT_IN_PILOT';
+
   String get userMessage {
     switch (code) {
       case 'NETWORK':
@@ -104,6 +108,8 @@ class PartnerOrderException implements Exception {
       case 'AMOUNT_NOT_CONFIRMED':
       case 'QUOTE_MISMATCH':
         return 'Le montant a été recalculé. Merci de le confirmer à nouveau.';
+      case 'CLIENT_NOT_IN_PILOT':
+        return "Ce restaurant n'est pas encore disponible pour votre compte pendant la phase de test.";
       case 'CREATION_CLOSED':
         return 'Les commandes sont momentanément indisponibles. Réessayez plus tard.';
       case 'SOLDE_INSUFFISANT':

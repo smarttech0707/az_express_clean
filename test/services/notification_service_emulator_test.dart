@@ -10,13 +10,13 @@ void main() {
     final start = src.indexOf('Future<String?> getTokenWhenReady()');
     expect(start, greaterThan(0));
     final body = src.substring(start);
-    final guard = body.indexOf('if (FirebaseEmulatorConfig.enabled) return null;');
+    final guard = body.indexOf('if (!FcmPolicy.allowsRegistration()) return null;');
     expect(guard, greaterThan(0));
     expect(guard, lessThan(body.indexOf('_fcm.getToken()')));
     // Seul getTokenWhenReady appelle getToken ; les autres chemins passent par lui.
     expect(RegExp(r'\.getToken\(\)').allMatches(src).length, 2);
     expect(src.contains('onTokenRefresh.listen'), isTrue);
-    expect(RegExp(r'if \(!FirebaseEmulatorConfig\.enabled\) unawaited\(NotificationService\(\)\.init\(\)\)')
+    expect(RegExp(r'if \(!FirebaseEmulatorConfig\.enabled && !FcmPolicy\.disabled\) unawaited\(NotificationService\(\)\.init\(\)\)')
         .hasMatch(File('lib/main.dart').readAsStringSync()), isTrue);
   });
 }

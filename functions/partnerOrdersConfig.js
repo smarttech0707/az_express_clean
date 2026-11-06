@@ -20,6 +20,13 @@
 //                      'open' (ouverture générale). Le passage à 'open' exige une décision explicite (confirmGeneralOpening) et
 //                      est journalisé (generalOpening) ; il n'a jamais lieu implicitement.
 //
+//   pilotDriverIds   : (Mission 7E-55) liste blanche des LIVREURS autorisés à recevoir ou accepter une commande Restaurant/
+//                      Boulangerie v2 pendant le mode « restreint » (clientAccess === 'restricted'). Liste absente, vide ou
+//                      malformée = AUCUN livreur autorisé (refus par défaut). Appliquée par le serveur au dispatch ET à
+//                      l'acceptation et au transfert (relue dans chaque transaction) ; jamais pour les autres commandes.
+//                      L'ouverture générale (clientAccess 'open') ne lève la restriction que si la liste est vide/absente :
+//                      vider pilotDriverIds est l'étape explicite et auditée qui rend les livreurs libres (Mission 7E-56).
+//
 // Création v2 = variable 'on' ET creationOpen === true ET partenaire dans pilotPartnerIds ET (clientAccess === 'open' OU client
 // dans pilotClientIds). Liste absente, vide ou malformée en mode restreint = AUCUN client autorisé (refus par défaut).
 // Modification du document : uniquement par l'opération super-administrateur `setPartnerOrdersConfig`
@@ -50,6 +57,10 @@ function parsePilotConfig(data) {
   const clientList = Array.isArray(d.pilotClientIds) && d.pilotClientIds.every(validId) ? d.pilotClientIds : [];
   return {
     clientIds: new Set(clientList),
+    // Même règle que les clients : une seule entrée invalide rend TOUTE la liste invalide (aucun livreur autorisé).
+    driverIds: new Set(Array.isArray(d.pilotDriverIds) && d.pilotDriverIds.every(validId) ? d.pilotDriverIds : []),
+    // Liste déclarée = présente et non vide (ou de type inattendu). Seule une liste vide/absente en mode 'open' lève la restriction.
+    driverListDeclared: d.pilotDriverIds !== undefined && d.pilotDriverIds !== null && !(Array.isArray(d.pilotDriverIds) && d.pilotDriverIds.length === 0),
     clientAccess: d.clientAccess === 'open' ? 'open' : 'restricted',
     ids: new Set(Array.isArray(d.pilotPartnerIds)
       ? d.pilotPartnerIds.filter((id) => typeof id === 'string' && id && !id.includes('/')) : []),
@@ -77,6 +88,22 @@ function clientRefusal(config, clientId) {
   return { code: 'CLIENT_NOT_IN_PILOT', message: 'Ce service n’est pas encore ouvert à votre compte' };
 }
 
+// Commande Restaurant/Boulangerie v2 : seules concernées par la restriction des livreurs du pilote.
+const V2_SELLER_TYPES = Object.freeze(['restaurant', 'boulangerie']);
+const isPartnerV2Order = (order) => !!order && order.amountsVersion === 2 && V2_SELLER_TYPES.includes(order.sellerType);
+
+// Ce livreur peut-il recevoir / accepter une commande v2 ? null = oui. Mode restreint : il doit figurer dans pilotDriverIds
+// (liste absente, vide ou malformée = personne). Ouverture générale : pas de restriction. Le livreur vient toujours de
+// request.auth.uid ou des documents serveur, jamais d'un paramètre du client.
+function driverRefusal(config, driverId) {
+  // Ouverture générale : lève la restriction SEULEMENT si aucune liste de livreurs n'est déclarée. Une liste déclarée (même malformée)
+  // reste appliquée : les commandes d'un pilote restreint ne passent pas à des livreurs hors liste par un simple changement de
+  // clientAccess ; l'ouverture complète exige de vider pilotDriverIds, étape auditée distincte.
+  if (config.clientAccess === 'open' && !config.driverListDeclared) return null;
+  if (typeof driverId === 'string' && driverId && config.driverIds.has(driverId)) return null;
+  return { code: 'DRIVER_NOT_IN_PILOT', message: 'Ce livreur n’est pas autorisé pour les commandes du pilote' };
+}
+
 // Autorisation (partenaire pilote + client autorisé), SANS tenir compte de creationOpen : utilisée aussi avant un rejeu idempotent.
 function accessRefusal(config, sellerId, clientId) {
   if (!config.ids.has(sellerId)) return { code: 'PARTNER_NOT_IN_PILOT', message: 'Ce partenaire n’accepte pas encore ce type de commande' };
@@ -99,10 +126,11 @@ class ConfigRefusal extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
-const PATCH_KEYS = Object.freeze(['pilotPartnerIds', 'pilotClientIds', 'clientAccess', 'creationOpen', 'managementFrozen']);
+const PATCH_KEYS = Object.freeze(['pilotPartnerIds', 'pilotClientIds', 'pilotDriverIds', 'clientAccess', 'creationOpen', 'managementFrozen']);
 const PARTNER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_PILOTS = 50;
 const MAX_PILOT_CLIENTS = 50;
+const MAX_PILOT_DRIVERS = 50;
 
 function validateConfigChange(input) {
   const i = input && typeof input === 'object' ? input : {};
@@ -133,6 +161,14 @@ function validateConfigChange(input) {
     }
     clean.pilotClientIds = [...list].sort();
   }
+  if ('pilotDriverIds' in patch) {
+    const list = patch.pilotDriverIds;
+    if (!Array.isArray(list) || list.length > MAX_PILOT_DRIVERS || list.some((id) => typeof id !== 'string' || !PARTNER_ID.test(id))
+      || new Set(list).size !== list.length) {
+      throw new ConfigRefusal('INVALID_CONFIG', 'Liste de livreurs pilotes invalide');
+    }
+    clean.pilotDriverIds = [...list].sort();
+  }
   if ('clientAccess' in patch) {
     if (!CLIENT_ACCESS_MODES.includes(patch.clientAccess)) throw new ConfigRefusal('INVALID_CONFIG', 'Mode d’accès des clients invalide');
     // Ouverture générale : jamais implicite, toujours une décision explicite et distincte de la simple modification.
@@ -145,7 +181,7 @@ function validateConfigChange(input) {
   return { patch: clean, expectedVersion: i.expectedVersion, reason };
 }
 
-const view = (c) => ({ pilotPartnerIds: [...c.ids].sort(), pilotClientIds: [...c.clientIds].sort(), clientAccess: c.clientAccess, creationOpen: c.creationOpen, managementFrozen: c.managementFrozen, version: c.version });
+const view = (c) => ({ pilotPartnerIds: [...c.ids].sort(), pilotClientIds: [...c.clientIds].sort(), pilotDriverIds: [...c.driverIds].sort(), clientAccess: c.clientAccess, creationOpen: c.creationOpen, managementFrozen: c.managementFrozen, version: c.version });
 
 // Écrit la configuration dans UNE transaction : lecture, contrôle de version (modifications concurrentes), écriture et trace
 // `lastChange` dans le document lui-même (le journal d'audit est écrit ensuite par l'appelant ; cette trace subsiste même si
@@ -161,7 +197,7 @@ async function applyConfigChange({ db, uid, input, nowMs = Date.now() }) {
     }
     const after = { ...before, ...patch, version: before.version + 1 };
     tx.set(ref, {
-      pilotPartnerIds: after.pilotPartnerIds, pilotClientIds: after.pilotClientIds, clientAccess: after.clientAccess, creationOpen: after.creationOpen, managementFrozen: after.managementFrozen,
+      pilotPartnerIds: after.pilotPartnerIds, pilotClientIds: after.pilotClientIds, pilotDriverIds: after.pilotDriverIds, clientAccess: after.clientAccess, creationOpen: after.creationOpen, managementFrozen: after.managementFrozen,
       version: after.version, updatedAtMs: nowMs, updatedBy: uid,
       lastChange: { by: uid, atMs: nowMs, reason, before, after },
     });
@@ -171,5 +207,5 @@ async function applyConfigChange({ db, uid, input, nowMs = Date.now() }) {
 
 module.exports = {
   CONFIG_COLLECTION, CONFIG_DOC, MANAGEMENT_FREEZE_POLICY, creationEnabled, managementEnabled, parsePilotConfig, loadPilotConfig,
-  v2CreationAllowed, creationRefusal, accessRefusal, clientRefusal, CLIENT_ACCESS_MODES, legacyCreationBlocked, ConfigRefusal, validateConfigChange, applyConfigChange,
+  v2CreationAllowed, creationRefusal, accessRefusal, clientRefusal, driverRefusal, isPartnerV2Order, CLIENT_ACCESS_MODES, legacyCreationBlocked, ConfigRefusal, validateConfigChange, applyConfigChange,
 };

@@ -89,7 +89,51 @@ function checkDartDefines(json) {
   return problems;
 }
 
+// Build Android de PRÉPRODUCTION (APK installé sur téléphone). Ces projet/numéro/package sont les seuls admis ; tout écart
+// (garde de démarrage absente, google-services.json d'un autre projet, UI des preuves coupée) invalide le build.
+const PREPROD = Object.freeze({
+  projectId: 'az-express-preprod',
+  projectNumber: '306761725053',
+  packageName: 'com.azexpress.app.test',
+});
+
+function checkPreprodBuild(defines, googleServices) {
+  const problems = [];
+  const d = defines || {};
+  if (d.AZ_REQUIRED_FIREBASE_PROJECT !== PREPROD.projectId) {
+    problems.push(`AZ_REQUIRED_FIREBASE_PROJECT doit valoir ${PREPROD.projectId} (garde de démarrage FirebaseProjectGuard)`);
+  }
+  if (d.FIREBASE_PROJECT_ID !== PREPROD.projectId) problems.push(`FIREBASE_PROJECT_ID doit valoir ${PREPROD.projectId}`);
+  if (String(d.FIREBASE_MESSAGING_SENDER_ID) !== PREPROD.projectNumber) {
+    problems.push(`FIREBASE_MESSAGING_SENDER_ID doit valoir ${PREPROD.projectNumber}`);
+  }
+  if (d.DELIVERY_PROOFS_UI !== true && d.DELIVERY_PROOFS_UI !== 'true') {
+    problems.push('DELIVERY_PROOFS_UI doit valoir true dans le build de test (preuves QR/PIN)');
+  }
+  // Aucun jeton FCM sur les comptes fictifs (Mission 7E-55) : le build de test ne doit demander ni écrire aucun jeton.
+  if (d.DISABLE_FCM !== true && d.DISABLE_FCM !== 'true') problems.push('DISABLE_FCM doit valoir true dans le build de test (aucun jeton FCM)');
+  if (!googleServices) { problems.push('google-services.json de test absent ou illisible'); return problems; }
+  const info = googleServices.project_info || {};
+  if (info.project_id !== PREPROD.projectId) problems.push(`google-services.json : project_id doit valoir ${PREPROD.projectId}`);
+  if (String(info.project_number) !== PREPROD.projectNumber) problems.push(`google-services.json : project_number doit valoir ${PREPROD.projectNumber}`);
+  if (info.storage_bucket && !String(info.storage_bucket).includes(PREPROD.projectId)) problems.push('google-services.json : storage_bucket étranger à la préproduction');
+  const clients = Array.isArray(googleServices.client) ? googleServices.client : [];
+  if (clients.length !== 1) problems.push('google-services.json : exactement une app Android attendue');
+  const c = clients[0] || {};
+  const pkg = ((c.client_info || {}).android_client_info || {}).package_name;
+  if (pkg !== PREPROD.packageName) problems.push(`google-services.json : package doit être ${PREPROD.packageName}`);
+  if (!d.FIREBASE_ANDROID_APP_ID || (c.client_info || {}).mobilesdk_app_id !== d.FIREBASE_ANDROID_APP_ID) {
+    problems.push('FIREBASE_ANDROID_APP_ID incohérent avec google-services.json');
+  }
+  const keys = (c.api_key || []).map((k) => k.current_key);
+  if (!d.FIREBASE_ANDROID_API_KEY || !keys.includes(d.FIREBASE_ANDROID_API_KEY)) {
+    problems.push('FIREBASE_ANDROID_API_KEY incohérente avec google-services.json');
+  }
+  return problems;
+}
+
 module.exports = {
+  PREPROD, checkPreprodBuild,
   PRODUCTION, isProductionProject, assertTestProject, assertNoProductionEnv,
   findProductionReferences, checkFunctionsEnv, checkDartDefines,
 };

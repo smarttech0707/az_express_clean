@@ -57,6 +57,35 @@ test('dart-defines : projet de test uniquement, valeurs renseignées, bucket coh
   assert.ok(g.checkDartDefines({ ...good, FIREBASE_STORAGE_BUCKET: 'autre.firebasestorage.app' }).length > 0);
 });
 
+test('checkPreprodBuild : garde de démarrage, projet, numéro, package, app et clé cohérents ou refus', () => {
+  const key = 'AIzaFAKE_KEY_FOR_TEST_ONLY_0000000000000';
+  const defines = { AZ_REQUIRED_FIREBASE_PROJECT: 'az-express-preprod', FIREBASE_PROJECT_ID: 'az-express-preprod',
+    FIREBASE_ANDROID_APP_ID: '1:306761725053:android:abc', FIREBASE_ANDROID_API_KEY: key,
+    FIREBASE_MESSAGING_SENDER_ID: '306761725053', FIREBASE_STORAGE_BUCKET: 'az-express-preprod.firebasestorage.app', DELIVERY_PROOFS_UI: true, DISABLE_FCM: true };
+  const gs = { project_info: { project_id: 'az-express-preprod', project_number: '306761725053', storage_bucket: 'az-express-preprod.firebasestorage.app' },
+    client: [{ client_info: { mobilesdk_app_id: '1:306761725053:android:abc', android_client_info: { package_name: 'com.azexpress.app.test' } },
+      api_key: [{ current_key: key }] }] };
+  assert.deepEqual(g.checkPreprodBuild(defines, gs), []);
+  const bad = (d, s = gs) => g.checkPreprodBuild({ ...defines, ...d }, s).length > 0;
+  assert.ok(bad({ AZ_REQUIRED_FIREBASE_PROJECT: undefined }), 'garde absente');
+  assert.ok(bad({ AZ_REQUIRED_FIREBASE_PROJECT: 'az-express-b0469' }), 'garde = production');
+  assert.ok(bad({ FIREBASE_PROJECT_ID: 'az-express-test' }), 'autre projet');
+  assert.ok(bad({ FIREBASE_MESSAGING_SENDER_ID: '697217052961' }), 'numéro de production');
+  assert.ok(bad({ DELIVERY_PROOFS_UI: false }), 'preuves coupées');
+  assert.ok(bad({ DISABLE_FCM: undefined }), 'FCM non désactivé (absent)');
+  assert.ok(bad({ DISABLE_FCM: false }), 'FCM non désactivé (false)');
+  assert.ok(bad({ DISABLE_FCM: 'false' }), 'FCM non désactivé (texte)');
+  assert.deepEqual(g.checkPreprodBuild({ ...defines, DISABLE_FCM: 'true' }, gs), []);
+  assert.ok(bad({ FIREBASE_ANDROID_APP_ID: '1:306761725053:android:autre' }), 'app incohérente');
+  assert.ok(bad({ FIREBASE_ANDROID_API_KEY: 'AIzaAUTRE' }), 'clé incohérente');
+  assert.ok(bad({}, null), 'google-services absent');
+  assert.ok(bad({}, { ...gs, project_info: { ...gs.project_info, project_id: 'az-express-b0469' } }), 'google-services de production');
+  assert.ok(bad({}, { ...gs, project_info: { ...gs.project_info, project_number: '697217052961' } }), 'numéro de production');
+  const pkg = (name) => ({ ...gs, client: [{ ...gs.client[0], client_info: { ...gs.client[0].client_info, android_client_info: { package_name: name } } }] });
+  assert.ok(bad({}, pkg('com.azexpress.app')), 'package de production');
+  assert.ok(bad({}, { ...gs, client: [...gs.client, ...gs.client] }), 'plusieurs apps');
+});
+
 test('seed-test-data.js : refuse la production, un nom ambigu, l’absence de confirmation et un env de production', () => {
   const env = { AZ_TEST_PASSWORD: 'motdepasse-test-12' };
   assert.equal(run(['--project', 'az-express-b0469', '--confirm-project', 'az-express-b0469'], env).status, 1);

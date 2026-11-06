@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/firestore_service.dart';
 import '../../models/order_model.dart';
+import '../../models/partner_v2_info.dart';
 import '../chat/chat_page.dart';
 import '../../widgets/order_status_stepper.dart';
 import '../../widgets/rating_dialog.dart';
@@ -59,7 +60,10 @@ class SuiviCommandePage extends StatelessWidget {
             }
 
             final orders =
-                snapshot.data!.where((o) => o.status != "cancelled").toList();
+                snapshot.data!
+                .where((o) =>
+                    PartnerV2Info.visibleToClient(o.status, o.partnerV2))
+                .toList();
 
             if (orders.isEmpty) {
               return const Center(
@@ -159,6 +163,8 @@ class _OrderCard extends StatelessWidget {
         return "Colis récupéré — en livraison";
       case "delivered":
         return "Livré";
+      case "cancelled":
+        return order.partnerV2?.cancelledTitle ?? "Annulée";
       default:
         return status;
     }
@@ -182,7 +188,8 @@ class _OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool hasDriver = order.driverId != null;
+    final bool hasDriver =
+        order.driverId != null && order.status != "cancelled";
     final bool isActive = order.status == "accepted" ||
         order.status == "picked_up" ||
         order.status == "assigned";
@@ -237,9 +244,23 @@ class _OrderCard extends StatelessWidget {
                       fontSize: 15, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
-                Text("${order.budget} FCFA",
+                Text(
+                    "${PartnerV2Info.clientAmount(order.budget, order.partnerV2)} FCFA",
                     style: const TextStyle(
                         fontSize: 14, color: AppColors.primary)),
+                if (order.status == "cancelled" && order.partnerV2 != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(order.partnerV2!.cancelledMessage,
+                        style: const TextStyle(fontSize: 13, color: Colors.red)),
+                  )
+                else if (order.partnerV2 != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                        "${order.sellerName ?? 'Restaurant'} : ${order.partnerV2!.preparationLabel}",
+                        style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                  ),
                 if (order.items != null && order.items!.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   ...order.items!.map((item) => Padding(
@@ -713,12 +734,12 @@ class _OrderCard extends StatelessWidget {
                       if (confirmed != true) return;
                       try {
                         await FirestoreService().cancelOrder(order.id);
-                      } catch (_) {
+                      } catch (e) {
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
+                            SnackBar(
                               content: Text(
-                                  "Échec de l'annulation. Réessayez dans quelques instants."),
+                                  PartnerV2Info.cancelFailureMessage(e)),
                               backgroundColor: Colors.red,
                             ),
                           );

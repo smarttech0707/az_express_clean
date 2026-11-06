@@ -7,6 +7,10 @@
 // exactement comme celles créées manuellement. Pas d'expansion progressive du
 // rayon ici (ça n'existe côté Dart que sur refus d'un livreur, pas à la création).
 
+const {
+  CONFIG_COLLECTION, CONFIG_DOC, loadPilotConfig, parsePilotConfig, isPartnerV2Order, driverRefusal,
+} = require('./partnerOrdersConfig');
+
 const STALE_MINUTES     = 3;
 const DEFAULT_RADIUS_KM = 2.0;
 const EARTH_RADIUS_M    = 6371000;
@@ -201,6 +205,14 @@ async function resolveDispatchGeography(db, {
   };
 }
 
+// Restriction des livreurs du pilote (Mission 7E-55) : uniquement pour une commande Restaurant/Boulangerie v2. Retourne la
+// configuration du pilote à appliquer, ou null (commande historique / autre service : aucun changement de comportement).
+async function loadPilotDriverScope(db, orderId) {
+  const snap = await db.collection('orders').doc(orderId).get();
+  if (!snap.exists || !isPartnerV2Order(snap.data())) return null;
+  return loadPilotConfig(db);
+}
+
 // Retourne { dispatched: boolean, mode: 'assigned'|'broadcast'|'none' }
 async function dispatchOrder(db, admin, {
   orderId,
@@ -227,6 +239,7 @@ async function dispatchOrder(db, admin, {
   if (typeof pickupCityId !== 'string' || pickupCityId.length === 0) {
     throw new DispatchError('missing-pickup-city', 'pickupCityId manquant');
   }
+  const pilotScope = await loadPilotDriverScope(db, orderId);
   const commission = await calculateCommission(db, budget);
   const staleMs     = Date.now() - STALE_MINUTES * 60 * 1000;
   const cities = await loadActiveCities(db);
@@ -254,12 +267,13 @@ async function dispatchOrder(db, admin, {
   // les logs).
   const excluded = {
     onDelivery: 0, unavailable: 0, suspended: 0, alreadyNotified: 0,
-    walletLow: 0, staleGps: 0, noGps: 0, tooFar: 0, outsideCityGeometry: 0,
+    walletLow: 0, staleGps: 0, noGps: 0, tooFar: 0, outsideCityGeometry: 0, notInPilot: 0,
   };
 
   const nearby = [];
   snap.docs.forEach((doc) => {
     const d = doc.data();
+    if (pilotScope && driverRefusal(pilotScope, doc.id)) { excluded.notInPilot++; return; }
     if (d.deletionRequested === true) { excluded.unavailable++; return; }
     if (d.isOnDelivery === true)  { excluded.onDelivery++; return; }
     if (d.isAvailable === false)  { excluded.unavailable++; return; }
@@ -331,6 +345,13 @@ async function dispatchOrder(db, admin, {
     if (current.amountsVersion === 2 && !current.partnerAcceptedAtMs) {
       return { dispatched: false, mode: 'awaiting_partner' };
     }
+    // Relue DANS la transaction : une modification de la liste entre la sélection et l'attribution est prise en compte, et aucun
+    // appel (client, scheduler, admin) ne peut attribuer une commande du pilote à un livreur hors liste.
+    let txPilot = null;
+    if (isPartnerV2Order(current)) {
+      const cfgSnap = await tx.get(db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC));
+      txPilot = parsePilotConfig(cfgSnap.exists ? cfgSnap.data() : null);
+    }
     const expanding = expandBroadcast === true && current.status === 'broadcast' && !current.driverId;
     if (current.status !== 'pending' && !expanding) {
       return { dispatched: false, mode: 'already_assigned' };
@@ -340,6 +361,7 @@ async function dispatchOrder(db, admin, {
     // created concurrently forces a retry; an active mission is never changed.
     const eligibleIds=[];
     for (const id of ids) {
+      if (txPilot && driverRefusal(txPilot, id)) continue;
       const deletion=await tx.get(db.collection('account_deletions').doc(id));
       if (!deletion.exists || deletion.data().consentVerified !== true) eligibleIds.push(id);
     }

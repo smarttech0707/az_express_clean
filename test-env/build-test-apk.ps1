@@ -41,7 +41,7 @@ try {
   Copy-Item $mapsTest $mapsFile -Force
 
   # 2) Garde-fou : refuse tout ce qui reference la production, y compris une cle Maps de production restante.
-  node test-env\verify-isolation.js --defines test-env\dart-defines.test.json --google-services android\app\src\debug\google-services.json --maps-swapped
+  node test-env\verify-isolation.js --defines test-env\dart-defines.test.json --google-services android\app\src\debug\google-services.json --maps-swapped --require-preprod
   if ($LASTEXITCODE -ne 0) { throw 'Isolation non validee : build annule.' }
 
   # 3) Identifiant d'application de test (propriete Gradle lue par build.gradle.kts) + cle Maps de test eventuelle.

@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../models/local_place.dart';
 import 'active_city_service.dart';
+import 'fcm_policy.dart';
 import 'notification_service.dart';
 
 /// État du suivi GPS — utilisé par l'UI pour afficher le bon indicateur.
@@ -310,7 +311,8 @@ class DriverLocationService {
         'position': geo.data,
         'heading': pos.heading,
         'speed': pos.speed,
-        'fcmToken': _fcmToken,
+        // DISABLE_FCM : le champ n'est pas écrit du tout (même pas une chaîne vide).
+        if (!FcmPolicy.disabled) 'fcmToken': _fcmToken,
         'isOnline': true,
         ...driverCityFields(
           currentCityId: currentCityId,

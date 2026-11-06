@@ -49,6 +49,14 @@ if (gs !== null) {
   } catch (_) { problems.push(`${gsFile} : format inattendu`); }
 }
 
+// Build de préproduction (APK sur téléphone) : cohérence stricte defines <-> google-services.json (--require-preprod).
+if (args.includes('--require-preprod')) {
+  let d = null; let gj = null;
+  try { d = JSON.parse(defines); } catch (_) { /* déjà signalé */ }
+  try { gj = JSON.parse(gs); } catch (_) { /* déjà signalé */ }
+  g.checkPreprodBuild(d, gj).forEach((m) => problems.push(`préproduction : ${m}`));
+}
+
 // Cle Google Maps de PRODUCTION (lib/constants/maps_key.dart, versionnee) : le build de test doit l'avoir remplacee.
 // Les imports conditionnels Dart n'honorent pas --dart-define dans cette chaine d'outils (verifie le 2026-10-31) :
 // seule la substitution du fichier par build-test-apk.ps1 est fiable. Option --maps-swapped pour le build.

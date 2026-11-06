@@ -7,6 +7,7 @@ const {
   verifyProofInTransaction, hashToken, hashPin, PROOF_TTL_MS, MAX_PROOF_GENERATIONS,
 } = require('./deliveryProofs');
 const { captureHandoverPoint } = require('./earningsSettlement');
+const { CONFIG_COLLECTION, CONFIG_DOC, parsePilotConfig, isPartnerV2Order, driverRefusal } = require('./partnerOrdersConfig');
 
 // Transfert d'une course APRÈS récupération du colis (cas 2).
 //
@@ -136,8 +137,15 @@ function buildDeliveryTransfer({
       .where('isOnline', '==', true).where('currentCityId', '==', cityId).limit(100).get();
     const excluded = new Set([uid, ...(preOrder.data().excludedDriverIds || []),
       ...(preOrder.data().driverHistory || []).map((h) => h.driverId)]);
+    // Commande Restaurant/Boulangerie v2 en pilote restreint (Mission 7E-56) : seuls les livreurs de pilotDriverIds sont sollicités.
+    // Config absente/illisible = parsePilotConfig(null) = aucun livreur autorisé (refus par défaut). L'acceptation relit la config.
+    let pilotScope = null;
+    if (isPartnerV2Order(preOrder.data())) {
+      const cfgSnap = await db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC).get();
+      pilotScope = parsePilotConfig(cfgSnap.exists ? cfgSnap.data() : null);
+    }
     const candidateIds = online.docs
-      .filter((doc) => !excluded.has(doc.id) && eligibleDriver(doc.data()))
+      .filter((doc) => !excluded.has(doc.id) && eligibleDriver(doc.data()) && !(pilotScope && driverRefusal(pilotScope, doc.id)))
       .slice(0, MAX_CANDIDATES).map((doc) => doc.id);
 
     let result;
@@ -248,6 +256,12 @@ function buildDeliveryTransfer({
           order.activeTransferId !== transferId ||
           Number(order.driverAssignmentVersion || 1) !== t.assignmentVersion) {
         throw new HttpsError('failed-precondition', 'La commande a changé : transfert impossible');
+      }
+      // Même garde qu'à la finalisation, posée dès l'acceptation pour ne jamais réserver (isOnDelivery) un livreur hors pilote.
+      if (isPartnerV2Order(order)) {
+        const cfgSnap = await tx.get(db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC));
+        const refusal = driverRefusal(parsePilotConfig(cfgSnap.exists ? cfgSnap.data() : null), uid);
+        if (refusal) throw new HttpsError('permission-denied', refusal.code, { code: refusal.code });
       }
       const b = bSnap.data();
       if (b.currentCityId !== t.cityId) {
@@ -426,6 +440,13 @@ function buildDeliveryTransfer({
       const bSnap = await tx.get(driverRef(t.toDriverId));
       if (!bSnap.exists || bSnap.data().isSuspended === true || bSnap.data().deletionRequested === true) {
         throw new HttpsError('failed-precondition', 'Le livreur remplaçant n’est plus disponible');
+      }
+      // Commande Restaurant/Boulangerie v2 en mode pilote restreint (Mission 7E-55) : le remplaçant doit lui aussi figurer dans
+      // pilotDriverIds (sinon le transfert contournerait la restriction posée au dispatch et à l'acceptation).
+      if (isPartnerV2Order(order)) {
+        const cfgSnap = await tx.get(db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC));
+        const refusal = driverRefusal(parsePilotConfig(cfgSnap.exists ? cfgSnap.data() : null), t.toDriverId);
+        if (refusal) throw new HttpsError('permission-denied', refusal.code, { code: refusal.code });
       }
       const aSnap = await tx.get(driverRef(uid));
       const stateA = await readDriverState(tx, db, uid, orderId);
