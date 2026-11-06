@@ -18,8 +18,12 @@ const path = require('node:path');
 const lot = require('./lot');
 const guard = require('./guard');
 const prepare = require('./prepare');
+const intruder = require('./intruder');
 
 const { LOT_ID, LOT_FIELD, IDENTITIES, UIDS } = lot;
+// Extension 7E-43 : le compte intrus fait partie du lot (même cycle de vie), mais n'a droit à AUCUNE activité.
+const INTRUDER_UID = intruder.INTRUDER.uid;
+const ALL_UIDS = Object.freeze([...UIDS, INTRUDER_UID]);
 const SWEEP_COLLECTIONS = Object.freeze([
   'wallet_transactions', 'commissions', 'reconciliation_flags', 'order_dispute_decisions', 'stuck_order_alerts',
   'dispatch_metrics', 'delivery_transfers', 'transfer_settlements',
@@ -38,6 +42,7 @@ const ALLOWED_PATHS = Object.freeze([
   new RegExp(`^restaurants/${IDENTITIES.restaurant.uid}(/(wallet_transactions|menu)/${ID})?$`),
   new RegExp(`^restaurant_owners/${IDENTITIES.restaurant.uid}$`),
   new RegExp(`^admins/${IDENTITIES.admin.uid}$`),
+  new RegExp(`^clients/${INTRUDER_UID}$`),
   new RegExp(`^(${SWEEP_COLLECTIONS.join('|')})/${ID}$`),
   new RegExp(`^notification_dedupe/${ID}$`),
   /^config\/partnerOrdersV2$/,
@@ -58,6 +63,15 @@ function validateManifest(manifest) {
   }
   const seeds = new Set(lot.buildSeedPlan().map((d) => d.path));
   for (const d of manifest.documents || []) if (!seeds.has(d.path)) bad(`document hors plan : ${d.path}`);
+  // Extensions : uniquement le compte intrus, uid/e-mail exacts, documents du plan d'extension seulement.
+  const extSeeds = new Set(intruder.buildIntruderPlan().map((d) => d.path));
+  for (const ext of manifest.extensions || []) {
+    if (!ext || ext.id !== intruder.EXTENSION_ID) bad('extension inconnue');
+    const id = ext.identities && ext.identities.intruder;
+    if (!id || id.uid !== INTRUDER_UID || id.email !== intruder.INTRUDER.email) bad('identité d’extension inattendue');
+    for (const u of ext.authUids || []) if (u !== INTRUDER_UID) bad(`compte d’extension hors plan : ${u}`);
+    for (const d of ext.documents || []) if (!extSeeds.has(d.path)) bad(`document d’extension hors plan : ${d.path}`);
+  }
   if (!manifest.baseline || !Array.isArray(manifest.baseline.orderIds)) bad('instantané de référence absent');
   return manifest;
 }
@@ -72,7 +86,8 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
   const sensitive = (data) => Object.keys(data).filter((k) => /fcm|token|phone|password|secret/i.test(k));
 
   // 1. Documents de départ (manifeste) : marqueur du lot et absence de champ sensible (jeton FCM...).
-  for (const { path: p } of manifest.documents) {
+  const extensionDocs = (manifest.extensions || []).flatMap((e) => e.documents || []);
+  for (const { path: p } of [...manifest.documents, ...extensionDocs]) {
     const snap = await db.doc(p).get();
     if (!snap.exists) { missingSeeds.push(p); continue; }
     const data = snap.data();
@@ -83,7 +98,8 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
   }
 
   // 2. Comptes Auth : uid ET e-mail du manifeste, domaine .invalid, sans téléphone.
-  for (const i of Object.values(IDENTITIES)) {
+  const authIdentities = [...Object.values(IDENTITIES), ...((manifest.extensions || []).length ? [intruder.INTRUDER] : [])];
+  for (const i of authIdentities) {
     try {
       const user = await auth.getUser(i.uid);
       if (user.email !== i.email || !String(user.email).endsWith(`@${lot.EMAIL_DOMAIN}`) || user.phoneNumber) {
@@ -108,6 +124,13 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
     if (!TERMINAL_STATUSES.includes(o.status)) { conflict('firestore', p, `commande non terminée (${o.status})`); continue; }
     lotOrderIds.push(id);
     add({ type: 'firestore', path: p, group: 'order' });
+  }
+
+  // 3b. L'intrus ne doit avoir AUCUNE activité : ni commande, ni devis, ni écriture de wallet. Toute trace bloque le nettoyage.
+  if ((manifest.extensions || []).length) {
+    for (const d of (await db.collection('orders').where('clientId', '==', INTRUDER_UID).get()).docs) conflict('firestore', `orders/${d.id}`, 'commande de l’intrus (interdite)');
+    for (const d of (await db.collection('tariff_quotes').where('uid', '==', INTRUDER_UID).get()).docs) conflict('firestore', `tariff_quotes/${d.id}`, 'devis de l’intrus (interdit)');
+    for (const d of (await db.collection(`clients/${INTRUDER_UID}/wallet_transactions`).get()).docs) conflict('firestore', `clients/${INTRUDER_UID}/wallet_transactions/${d.id}`, 'mouvement de wallet de l’intrus (interdit)');
   }
 
   // 4. Devis du client du lot, pour le restaurant du lot seulement.
@@ -152,7 +175,7 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
       for (const d of (await q.get()).docs) add({ type: 'firestore', path: `${col}/${d.id}`, group: 'linked' });
     }
   }
-  for (const uids of chunk([...UIDS], 10)) {
+  for (const uids of chunk([...ALL_UIDS], 10)) {
     for (const d of (await db.collection('notification_dedupe').where('recipientId', 'in', uids).get()).docs) {
       add({ type: 'firestore', path: `notification_dedupe/${d.id}`, group: 'linked' });
     }
@@ -170,13 +193,13 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
   const pilot = await db.doc(PILOT_CONFIG).get();
   if (pilot.exists) {
     const ids = Array.isArray(pilot.data().pilotPartnerIds) ? pilot.data().pilotPartnerIds : [];
-    if (ids.some((id) => id !== IDENTITIES.restaurant.uid)) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres partenaires : ne pas toucher');
-    // Mission 7E-41 : un pilote ouvert à d’autres clients (liste étrangère ou ouverture générale) n’est plus un pilote du lot.
+    // Mission 7E-41 : un pilote ouvert à d’autres clients (liste étrangère, intrus compris, ou ouverture générale) n’est plus un pilote du lot.
     const clients = pilot.data().pilotClientIds;
-    if ((Array.isArray(clients) && clients.some((id) => id !== IDENTITIES.client.uid)) || pilot.data().clientAccess === 'open') {
-      conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres clients ou est ouvert à tous : ne pas toucher');
-    }
-    else add({ type: 'firestore', path: PILOT_CONFIG, group: 'pilot' });
+    const foreignPartners = ids.some((id) => id !== IDENTITIES.restaurant.uid);
+    const foreignClients = (Array.isArray(clients) && clients.some((id) => id !== IDENTITIES.client.uid)) || pilot.data().clientAccess === 'open';
+    if (foreignPartners) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres partenaires : ne pas toucher');
+    if (foreignClients) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres clients ou est ouvert à tous : ne pas toucher');
+    if (!foreignPartners && !foreignClients) add({ type: 'firestore', path: PILOT_CONFIG, group: 'pilot' });
   }
 
   items.sort((a, b) => (itemKey(a) < itemKey(b) ? -1 : 1));
@@ -204,7 +227,7 @@ async function executeCleanup({ admin, db, auth, bucket, manifest, expectedHash,
   }
   for (const i of inventory.items) {
     if (i.type === 'firestore' && !pathAllowed(i.path)) throw new guard.GuardError('PATH_NOT_ALLOWED', `Chemin hors liste blanche : ${i.path}`);
-    if (i.type === 'auth' && !UIDS.includes(i.uid)) throw new guard.GuardError('UID_NOT_ALLOWED', `Compte hors lot : ${i.uid}`);
+    if (i.type === 'auth' && !ALL_UIDS.includes(i.uid)) throw new guard.GuardError('UID_NOT_ALLOWED', `Compte hors lot : ${i.uid}`);
     if (i.type === 'storage' && !/^(acceptance_selfies\/[A-Za-z0-9_-]+\/t7e-driver\.jpg|delivery_photos\/t7e-driver\/[A-Za-z0-9_-]+\.jpg)$/.test(i.path)) {
       throw new guard.GuardError('PATH_NOT_ALLOWED', `Objet Storage hors liste blanche : ${i.path}`);
     }
