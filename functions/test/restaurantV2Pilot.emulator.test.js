@@ -39,8 +39,23 @@ function fakeAuth() {
     deleteUser: async (uid) => { users.delete(uid); },
   };
 }
+// Bucket factice fidèle au compte CLI : listing et suppression seulement ; exists()/getMetadata() (storage.objects.get) échouent en 403.
 function fakeBucket(files) {
-  return { file: (p) => ({ exists: async () => [files.has(p)], delete: async () => { files.delete(p); } }) };
+  const gens = new Map();
+  const gen = (p) => { if (!gens.has(p)) gens.set(p, String(1000 + gens.size)); return gens.get(p); };
+  const deny = async () => { throw Object.assign(new Error('403 storage.objects.get denied'), { code: 403 }); };
+  return {
+    name: lot.TARGET.storageBucket,
+    getFiles: async ({ prefix = '' } = {}) => [[...files].filter((p) => p.startsWith(prefix)).sort().map((name) => ({ name, metadata: { bucket: lot.TARGET.storageBucket, name, generation: gen(name), size: '1976', contentType: 'image/jpeg', md5Hash: 'x' } }))],
+    file: (p, opts = {}) => ({
+      exists: deny, getMetadata: deny,
+      delete: async (o = {}) => {
+        if ((opts.generation && opts.generation !== gen(p)) || (o.ifGenerationMatch && o.ifGenerationMatch !== gen(p))) throw Object.assign(new Error('412'), { code: 412 });
+        if (!files.has(p)) throw Object.assign(new Error('404'), { code: 404 });
+        files.delete(p); gens.delete(p);
+      },
+    }),
+  };
 }
 async function wipe() {
   const res = await fetch(`http://${process.env.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${process.env.GCLOUD_PROJECT}/databases/(default)/documents`, { method: 'DELETE' });
@@ -316,8 +331,15 @@ test('4. annulations : refus du restaurant avant acceptation du livreur, après 
 });
 
 test('5. nettoyage en DRY-RUN : inventaire exact, aucune écriture, empreinte stable', options, async () => {
-  const before = await dumpAll();
   const ctx = { admin, db, auth, bucket, manifest };
+  // Pilote encore ouvert : conflit (aucune suppression possible). Fermeture par le chemin audité, comme en mission réelle.
+  const openInv = await cleanup.collectInventory(ctx);
+  assert.ok(openInv.conflicts.some((c) => c.id === 'config/partnerOrdersV2' && /encore ouvert/.test(c.reason)), JSON.stringify(openInv.conflicts));
+  assert.equal(cleanup.dryRun(openInv).executable, false);
+  const live = (await db.doc('config/partnerOrdersV2').get()).data();
+  const closed = await run.action(asUser(ADMIN, { action: 'setPartnerOrdersConfig', patch: { creationOpen: false }, expectedVersion: live.version, reason: 'Fermeture avant nettoyage de test' }));
+  assert.equal(closed.success, true, JSON.stringify(closed));
+  const before = await dumpAll();
   const inv = await cleanup.collectInventory(ctx);
   assert.deepEqual(inv.conflicts, [], JSON.stringify(inv.conflicts));
   const report = cleanup.dryRun(inv);
@@ -406,6 +428,8 @@ test('7. nettoyage exécuté : pilote fermé d’abord, lot supprimé, ressource
         const v = r[m]; return typeof v === 'function' ? v.bind(r) : v;
       } });
     }
+    if (k === 'batch') return () => { const b = t.batch(); return { delete: (ref) => { ops.push(`delete:${ref.path}`); b.delete(ref); }, commit: () => { ops.push('commit'); return b.commit(); } }; };
+    if (k === 'batch') return () => { const b = t.batch(); return { delete: (ref) => { ops.push(`delete:${ref.path}`); b.delete(ref); }, commit: () => { ops.push('commit'); return b.commit(); } }; };
     const v = t[k]; return typeof v === 'function' ? v.bind(t) : v;
   } });
   const ctx = { admin, db: spied, auth, bucket, manifest };
@@ -415,14 +439,11 @@ test('7. nettoyage exécuté : pilote fermé d’abord, lot supprimé, ressource
   assert.equal(result.clean, true, JSON.stringify(result));
   assert.equal(result.remaining, 0);
 
-  // Ordre : fermeture du pilote avant toute suppression, configuration supprimée en dernier, sous-documents avant leurs parents.
+  // Ordre : listes vidées avant toute suppression Firestore, puis UN SEUL lot atomique (grand livre jamais à moitié supprimé).
   assert.equal(ops[0], 'update:config/partnerOrdersV2');
+  assert.equal(ops.filter((o) => o === 'commit').length, 1, 'un seul commit atomique');
   assert.equal(ops.filter((o) => o === 'delete:config/partnerOrdersV2').length, 1);
-  const lastFirestoreDelete = ops.map((o, i) => [o, i]).filter(([o]) => o.startsWith('delete:')).pop()[0];
-  assert.equal(lastFirestoreDelete, 'delete:config/partnerOrdersV2');
-  const at = (o) => ops.indexOf(o);
-  assert.ok(ops.filter((o) => /wallet_transactions/.test(o)).every((o) => at(o) < at(`delete:clients/${CLIENT}`) || !o.includes('/clients/')));
-  assert.ok(ops.filter((o) => /\/versions\//.test(o)).every((o) => at(o) < ops.findIndex((x) => /delete:delivery_proofs\/[^/]+$/.test(x))));
+  assert.ok(ops.filter((o) => o.startsWith('delete:')).every((o) => ops.indexOf(o) < ops.indexOf('commit')));
 
   // État final : plus rien du lot, tout le reste identique.
   const after = await dumpAll();

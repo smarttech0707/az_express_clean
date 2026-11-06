@@ -19,6 +19,8 @@ const lot = require('./lot');
 const guard = require('./guard');
 const prepare = require('./prepare');
 const intruder = require('./intruder');
+const storageInventory = require('./storageInventory');
+const financialReport = require('./financialReport');
 
 const { LOT_ID, LOT_FIELD, IDENTITIES, UIDS } = lot;
 // Extension 7E-43 : le compte intrus fait partie du lot (même cycle de vie), mais n'a droit à AUCUNE activité.
@@ -31,6 +33,7 @@ const SWEEP_COLLECTIONS = Object.freeze([
 const TERMINAL_STATUSES = Object.freeze(['delivered', 'cancelled']);
 const PRESERVED = Object.freeze(['audit_logs (écriture serveur seule)', 'rate_limits (expirent seuls)', 'commandes et comptes historiques']);
 const PILOT_CONFIG = 'config/partnerOrdersV2';
+const MAX_BATCH = 450; // limite Firestore : 500 opérations par lot
 
 const ID = '[A-Za-z0-9_-]{1,128}';
 const ALLOWED_PATHS = Object.freeze([
@@ -51,7 +54,8 @@ const pathAllowed = (p) => ALLOWED_PATHS.some((re) => re.test(p));
 
 const chunk = (list, n) => Array.from({ length: Math.ceil(list.length / n) }, (_, i) => list.slice(i * n, i * n + n));
 const isNotFound = (err) => err && (err.code === 'auth/user-not-found' || err.errorInfo?.code === 'auth/user-not-found');
-const itemKey = (i) => `${i.type}:${i.path || i.uid}`;
+// Un objet Storage est identifié par son chemin ET sa génération : un objet remplacé change l'empreinte de l'inventaire.
+const itemKey = (i) => `${i.type}:${i.path || i.uid}${i.generation ? `@${i.generation}` : ''}`;
 
 function validateManifest(manifest) {
   const bad = (why) => { throw new guard.GuardError('MANIFEST_INVALID', `Manifeste refusé : ${why}`); };
@@ -182,11 +186,17 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
   }
 
   // 8. Objets Storage par commande (selfie d'acceptation exigé par acceptOrderCF, photo de livraison).
-  for (const orderId of lotOrderIds) {
-    for (const p of [`acceptance_selfies/${orderId}/${IDENTITIES.driver.uid}.jpg`, `delivery_photos/${IDENTITIES.driver.uid}/${orderId}.jpg`]) {
-      const [exists] = await bucket.file(p).exists();
-      if (exists) add({ type: 'storage', path: p, group: 'storage' });
-    }
+  // Listing seul (storage.objects.list) : le compte CLI n'a pas storage.objects.get. Voir storageInventory.js.
+  const stored = await storageInventory.inventoryOrders({ bucket, orderIds: lotOrderIds });
+  for (const o of stored.items) add(o);
+  conflicts.push(...stored.conflicts);
+
+  // 8b. Réconciliation financière des commandes du lot : aucun nettoyage tant que les montants ne concordent pas (lecture seule).
+  const includeIntruder = (manifest.extensions || []).length > 0;
+  const walletDocs = await Promise.all(Object.entries(financialReport.WALLET_OWNERS).filter(([k]) => k !== 'intruder' || includeIntruder).map(([, p]) => db.doc(p).get()));
+  if (lotOrderIds.length || walletDocs.some((s) => s.exists)) {
+    const verdict = financialReport.reconcile(await financialReport.gather({ db, orderIds: lotOrderIds, includeIntruder }));
+    for (const why of verdict.problems) conflict('finance', 'reconciliation', why);
   }
 
   // 9. Configuration du pilote : supprimée seulement si elle ne désigne que le restaurant du lot.
@@ -199,6 +209,8 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
     const foreignClients = (Array.isArray(clients) && clients.some((id) => id !== IDENTITIES.client.uid)) || pilot.data().clientAccess === 'open';
     if (foreignPartners) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres partenaires : ne pas toucher');
     if (foreignClients) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres clients ou est ouvert à tous : ne pas toucher');
+    // Pilote encore ouvert : aucune suppression tant que la création n'est pas refermée par le chemin audité (CLOSE / emergencyClose.js).
+    if (pilot.data().creationOpen === true) conflict('firestore', PILOT_CONFIG, 'pilote encore ouvert : fermer par le chemin audité avant tout nettoyage');
     if (!foreignPartners && !foreignClients) add({ type: 'firestore', path: PILOT_CONFIG, group: 'pilot' });
   }
 
@@ -228,23 +240,33 @@ async function executeCleanup({ admin, db, auth, bucket, manifest, expectedHash,
   for (const i of inventory.items) {
     if (i.type === 'firestore' && !pathAllowed(i.path)) throw new guard.GuardError('PATH_NOT_ALLOWED', `Chemin hors liste blanche : ${i.path}`);
     if (i.type === 'auth' && !ALL_UIDS.includes(i.uid)) throw new guard.GuardError('UID_NOT_ALLOWED', `Compte hors lot : ${i.uid}`);
-    if (i.type === 'storage' && !/^(acceptance_selfies\/[A-Za-z0-9_-]+\/t7e-driver\.jpg|delivery_photos\/t7e-driver\/[A-Za-z0-9_-]+\.jpg)$/.test(i.path)) {
-      throw new guard.GuardError('PATH_NOT_ALLOWED', `Objet Storage hors liste blanche : ${i.path}`);
+    if (i.type === 'storage') {
+      if (!storageInventory.pathAllowed(i.path) || !inventory.lotOrderIds.includes(storageInventory.orderIdOf(i.path))) throw new guard.GuardError('PATH_NOT_ALLOWED', `Objet Storage hors liste blanche : ${i.path}`);
+      if (i.bucket !== lot.TARGET.storageBucket) throw new guard.GuardError('WRONG_BUCKET', `Bucket inattendu : ${i.bucket}`);
     }
   }
 
-  // 1. Fermeture du pilote AVANT toute suppression (aucune nouvelle commande possible pendant le nettoyage).
+  // Ordre choisi pour qu'une interruption à n'importe quel point reste REPRENABLE (relancer dry-run puis exécution) :
+  // 1. Objets Storage d'abord, tant que la commande existe encore (leur appartenance au lot en dérive) ; chaque objet est relu et supprimé
+  //    avec précondition de génération, un échec arrête tout avant la moindre suppression Firestore.
+  for (const s of inventory.items.filter((i) => i.type === 'storage')) {
+    await storageInventory.deleteObject({ bucket, item: s, orderIds: inventory.lotOrderIds });
+    log(`objet supprimé : ${s.path}`);
+  }
+  // 2. Fermeture de la création (le pilote doit déjà être fermé : conflit sinon) et vidage des listes avant la suppression.
   if (inventory.items.some((i) => i.path === PILOT_CONFIG)) {
     await db.doc(PILOT_CONFIG).update({ creationOpen: false, pilotPartnerIds: [], pilotClientIds: [], clientAccess: 'restricted' });
     log('pilote fermé');
   }
-  // 2. Documents Firestore, du plus profond au plus haut ; configuration du pilote en dernier.
-  const docs = inventory.items.filter((i) => i.type === 'firestore' && i.path !== PILOT_CONFIG)
-    .sort((a, b) => b.path.split('/').length - a.path.split('/').length || (a.path < b.path ? -1 : 1));
-  for (const d of docs) await db.doc(d.path).delete();
-  if (inventory.items.some((i) => i.path === PILOT_CONFIG)) await db.doc(PILOT_CONFIG).delete();
-  // 3. Objets Storage, 4. comptes Auth.
-  for (const s of inventory.items.filter((i) => i.type === 'storage')) await bucket.file(s.path).delete({ ignoreNotFound: true });
+  // 3. Tous les documents Firestore en UN lot atomique : la réconciliation financière ne voit jamais un grand livre à moitié supprimé.
+  const docs = inventory.items.filter((i) => i.type === 'firestore');
+  if (docs.length > MAX_BATCH) throw new guard.GuardError('TOO_LARGE', `${docs.length} documents : plus que le lot atomique autorisé (${MAX_BATCH})`);
+  if (docs.length) {
+    const batch = db.batch();
+    for (const d of docs) batch.delete(db.doc(d.path));
+    await batch.commit();
+  }
+  // 4. Comptes Auth en dernier (un compte déjà supprimé lors d'une reprise n'est plus dans l'inventaire).
   for (const u of inventory.items.filter((i) => i.type === 'auth')) await auth.deleteUser(u.uid);
 
   const after = await collectInventory({ admin, db, auth, bucket, manifest });
@@ -256,7 +278,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i].startsWith('--') ? argv[i].slice(2) : null;
     if (key === 'execute') out.flags.add(key);
-    else if (['project', 'project-number', 'manifest', 'confirm', 'inventory-hash'].includes(key)) { out.values[key] = argv[i + 1]; i += 1; }
+    else if (['project', 'project-number', 'manifest', 'confirm', 'inventory-hash', 'report-dir'].includes(key)) { out.values[key] = argv[i + 1]; i += 1; }
     else throw new guard.GuardError('BAD_ARGUMENT', `Argument inattendu : ${argv[i]}`);
   }
   return out;
@@ -279,7 +301,17 @@ async function main(argv = process.argv.slice(2), env = process.env, log = conso
   const ctx = { admin, db: admin.firestore(), auth: admin.auth(), bucket: admin.storage().bucket(), manifest };
 
   if (!args.flags.has('execute')) {
-    const report = dryRun(await collectInventory(ctx));
+    const inventory = await collectInventory(ctx);
+    const report = dryRun(inventory);
+    // Preuve locale (hors dépôt, droits 0600) : rapport financier sans secret + empreinte de l'inventaire. Lecture seule côté cloud.
+    if (args.values['report-dir']) {
+      const dir = guard.assertOutDirOutsideRepo(args.values['report-dir']);
+      const finance = financialReport.buildReport(await financialReport.gather({ db: ctx.db, orderIds: inventory.lotOrderIds, includeIntruder: (manifest.extensions || []).length > 0 }), { project: target.projectId });
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `restaurant-v2-first-run-report-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+      fs.writeFileSync(file, JSON.stringify({ finance, inventory: { hash: report.hash, total: report.total, byGroup: report.byGroup, items: report.items, conflicts: report.conflicts } }, null, 2), { mode: 0o600 });
+      log(`Rapport local écrit : ${file}`);
+    }
     log(JSON.stringify(report, null, 2));
     log(`Pour exécuter : --execute --inventory-hash ${report.hash} --confirm "${guard.confirmationFor('DELETE')}"`);
     return report.executable ? 0 : 2;

@@ -108,3 +108,12 @@ Constat du 7E-44 : le pilote est fermé (`config/partnerOrdersV2` version 2, `cr
 **Fermeture d'urgence indépendante** : `node scripts/restaurant-v2-pilot/emergencyClose.js --project az-express-preprod --project-number 306761725053 --credentials-dir <hors dépôt> --execute --confirm "EMERGENCY-CLOSE t7e-lot-1 az-express-preprod 306761725053"`. N'importe ni le runner ni le fichier d'état ; lit la version réelle, envoie `creationOpen:false` seul, un second essai sur conflit de version, vérifie le résultat, ne supprime jamais la configuration. DRY-RUN par défaut.
 
 **Ordre d'exécution du premier parcours réel** (après autorisation) : `REOPEN --expected-version 2` → S1 … S11 (une étape par appel) → `CLOSE` (ou `emergencyClose.js`) → vérifications → nettoyage final sur demande.
+
+
+## Mission 7E-47 — nettoyage sans `storage.objects.get`, réconciliation financière, reprise sûre
+
+- **Cause du 403** : `cleanup.js` testait l'objet Storage par `file.exists()`, c'est-à-dire `storage.objects.get`, que le compte CLI n'a pas (il a `list`, `create`, `delete`).
+- **Correction** (`storageInventory.js`) : inventaire par listing seul (`versions:true`) ; nom exact dérivé d'une commande du lot, bucket `az-express-preprod.firebasestorage.app`, génération, taille, type vérifiés ; objets voisins ou plusieurs générations = conflit ; suppression d'une génération précise avec `ifGenerationMatch`. L'empreinte de l'inventaire inclut la génération.
+- **Réconciliation** (`financialReport.js`) : montants, quatre écritures de wallet, commission, devis utilisé, preuves validées, soldes ; tout écart bloque le nettoyage. Rapport local sans secret : `cleanup.js … --report-dir <hors dépôt>`.
+- **Ordre de suppression reprenable** : Storage (vérifié) → listes du pilote vidées → tous les documents Firestore en un lot atomique → comptes Auth. Le pilote doit déjà être fermé (sinon conflit).
+- Le bucket n'a ni versioning ni suppression logicielle : une suppression Storage est définitive.
