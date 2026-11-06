@@ -92,3 +92,19 @@ Déployés en préproduction (révisions 00002) : `quotePartnerOrderCF`, `create
 
 ## Mission 7E-43 — compte intrus créé (préproduction)
 `t7e-intrus` (Auth mot de passe + `clients/t7e-intrus`, wallet 0, `testLotId`) existe, hors `pilotClientIds`. Créé par `scripts/restaurant-v2-pilot/intruder.js` (DRY-RUN par défaut, confirmation `ADD-INTRUDER …`). Manifeste étendu (version 2, `extensions[]`), copie de référence `manifest.base.json`, identifiants dans `credentials.intruder.json` (hors dépôt). Le nettoyage (`cleanup.js`) inventorie l'intrus avec le lot et bloque tout si l'intrus a une commande, un devis, un mouvement de wallet, ou figure dans le pilote. L'intrus a un wallet à 0 : le refus attendu (`CLIENT_NOT_IN_PILOT`) intervient AVANT toute lecture du compte, il prouve donc la liste blanche et non l'insuffisance de solde.
+
+
+## Mission 7E-45 — réouverture auditée, contrôle du pilote réel, fermeture d'urgence indépendante
+
+Constat du 7E-44 : le pilote est fermé (`config/partnerOrdersV2` version 2, `creationOpen=false`, listes et `restricted` inchangés), mais le fichier d'état du runner marque S0 comme faite. S0 refuse (à raison) une configuration existante : il fallait une réouverture explicite.
+
+**Runner (`runStep.js`)**
+- Avant CHAQUE étape S1…S11, la configuration réelle est relue : projet préproduction, `pilotPartnerIds=["t7e-resto"]`, `pilotClientIds=["t7e-client"]`, `clientAccess=restricted`, `managementFrozen=false`, `creationOpen=true`, et version égale à `state.configVersion` (écrite par S0/REOPEN). Toute divergence = arrêt avant tout appel (`PILOT_NOT_READY`, `STATE_INCONSISTENT`, `WRONG_PROJECT`).
+- `--step REOPEN --expected-version <n> [--execute --confirm "RUN REOPEN t7e-lot-1 az-express-preprod 306761725053"]` : appel audité `setPartnerOrdersConfig` (mêmes paramètres que S0, `expectedVersion` = version réelle, qui doit égaler `--expected-version`). Refus : configuration absente/ouverte/avec listes différentes/`open`/gelée, version périmée, wallets ≠ 40000/5000/0, nombre de commandes ≠ 11, état local avec devis/commande/échec. Seul le runner réécrit l'état (jamais à la main).
+- S1 : le scénario jour (frais 500 → total 7 000, commission 100) ou nuit (frais 1 000 → total 7 500, commission 200) est déduit du devis RÉEL (`lot.amountsFromQuote`), cohérent avec `isNight`, puis recoupé avec le barème officiel (±5 min). Le devis `800fead3-86d9-4534-88f6-be0509b41d11` est refusé s'il revient (`RETIRED_QUOTE`).
+
+**Devis antérieur** : `tariff_quotes/800fead3-…` (client `t7e-client`, restaurant `t7e-resto`) est expiré, jamais réutilisé, jamais supprimé à la main. Le nettoyage final (`cleanup.js`, groupe `quote`) l'inventorie et le supprime avec les autres ressources du lot.
+
+**Fermeture d'urgence indépendante** : `node scripts/restaurant-v2-pilot/emergencyClose.js --project az-express-preprod --project-number 306761725053 --credentials-dir <hors dépôt> --execute --confirm "EMERGENCY-CLOSE t7e-lot-1 az-express-preprod 306761725053"`. N'importe ni le runner ni le fichier d'état ; lit la version réelle, envoie `creationOpen:false` seul, un second essai sur conflit de version, vérifie le résultat, ne supprime jamais la configuration. DRY-RUN par défaut.
+
+**Ordre d'exécution du premier parcours réel** (après autorisation) : `REOPEN --expected-version 2` → S1 … S11 (une étape par appel) → `CLOSE` (ou `emergencyClose.js`) → vérifications → nettoyage final sur demande.

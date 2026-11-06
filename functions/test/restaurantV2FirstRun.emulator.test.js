@@ -27,7 +27,7 @@ const { client: CLIENT, restaurant: RESTO, driver: DRIVER, admin: ADMIN } = Obje
 const BUCKET = 'demo-bucket';
 const MIN = 60 * 1000;
 
-let admin; let db; let run; let bucketFiles; let manifest; let outDir; let io; let transcript;
+let byFn; let makeRun; let setClock; let admin; let db; let run; let bucketFiles; let manifest; let outDir; let io; let transcript;
 const asUser = (uid, data) => ({ auth: { uid, token: { firebase: { sign_in_provider: 'password' } } }, data });
 const UID = { client: CLIENT, restaurant: RESTO, driver: DRIVER, admin: ADMIN };
 
@@ -84,9 +84,9 @@ test.before(async () => {
   const proofs = require('../deliveryProofs');
   const base = { db, admin, onCall: (...a) => ({ run: a[a.length - 1] }), HttpsError, checkRateLimit: async () => {}, logAudit: async () => {}, isEnabled: () => true };
   const withProof = { ...base, deliveryProofPepper: { name: 'DELIVERY_PROOF_PEPPER' } };
-  run = {
-    quote: buildQuotePartnerOrderCF({ ...base, now: () => NOW }).run,
-    create: buildCreatePartnerOrderFromQuoteCF({ ...base, now: () => NOW }).run,
+  makeRun = (nowMs) => ({
+    quote: buildQuotePartnerOrderCF({ ...base, now: () => nowMs }).run,
+    create: buildCreatePartnerOrderFromQuoteCF({ ...base, now: () => nowMs }).run,
     action: buildPartnerOrderAction({
       ...base, calculateCommission, requireSuperAdmin,
       dispatchAccepted: (orderId) => dispatchAcceptedPartnerOrder({ db, admin, dispatchOrder, orderId }),
@@ -96,11 +96,16 @@ test.before(async () => {
     prepareProof: proofs.buildPrepareOrderProof(withProof).run,
     pickup: proofs.buildConfirmPickupWithProof(withProof).run,
     deliver: buildDeliverOrderWithProof({ ...withProof, calculateCommission }).run,
+  });
+  // Horloge des fonctions de devis/création (jour 10 h, nuit 23 h) : les fonctions réelles, seul « now » change.
+  setClock = (nowMs) => {
+    run = makeRun(nowMs);
+    byFn = {
+      [fr.FN.quote]: run.quote, [fr.FN.create]: run.create, [fr.FN.partner]: run.action, [fr.FN.accept]: run.accept,
+      [fr.FN.prepareProof]: run.prepareProof, [fr.FN.pickup]: run.pickup, [fr.FN.deliver]: run.deliver,
+    };
   };
-  const byFn = {
-    [fr.FN.quote]: run.quote, [fr.FN.create]: run.create, [fr.FN.partner]: run.action, [fr.FN.accept]: run.accept,
-    [fr.FN.prepareProof]: run.prepareProof, [fr.FN.pickup]: run.pickup, [fr.FN.deliver]: run.deliver,
-  };
+  setClock(NOW);
   transcript = [];
   // Même interface que cloudIo ; seuls les appels de fonctions sont simulés (modules réels, sans HTTP).
   io = {
@@ -265,7 +270,7 @@ test('3. exécuteur : ordre imposé, aucune reprise, première erreur fige le pa
   // Pilote réouvert (version 2 → 3) pour les essais suivants.
   const reopen = await run.action(asUser(ADMIN, { action: 'setPartnerOrdersConfig', patch: { creationOpen: true }, expectedVersion: 2, reason: 'Réouverture de test' }));
   assert.equal(reopen.success, true, JSON.stringify(reopen));
-  const base = () => ({ lotId: lot.LOT_ID, completed: ['S0'], baselineOrderIds: manifest.baseline.orderIds });
+  const base = () => ({ lotId: lot.LOT_ID, completed: ['S0'], configVersion: 3, baselineOrderIds: manifest.baseline.orderIds });
 
   const store = memoryStore();
   await assert.rejects(runner.executeStep({ stepId: 'S5', state: base(), io, store, nowMs: NOW }), (e) => e.code === 'OUT_OF_ORDER');
@@ -274,6 +279,10 @@ test('3. exécuteur : ordre imposé, aucune reprise, première erreur fige le pa
   assert.equal(store.saved(), null, 'un refus d’ordre n’écrit rien');
 
   // Heure de nuit : le total retourné par le serveur (jour) ne correspond pas au barème → arrêt, jamais d'hypothèse « jour ».
+  // Le runner exige les soldes de départ du lot avant S1 : remise à zéro (les parcours précédents les ont modifiés).
+  await db.doc(`clients/${CLIENT}`).update({ wallet: lot.WALLETS.client });
+  await db.doc(`livreurs/${DRIVER}`).update({ wallet: lot.WALLETS.driver });
+  await db.doc(`restaurants/${RESTO}`).update({ wallet: lot.WALLETS.restaurant });
   const nightState = { ...base(), startWallets: await wallets() };
   await assert.rejects(runner.executeStep({ stepId: 'S1', state: nightState, io, store, nowMs: NIGHT }), (e) => e.code === 'AMOUNT_MISMATCH');
   assert.equal(nightState.failed.step, 'S1');
@@ -310,7 +319,7 @@ test('4. GPS : fraîcheur 180 s, GPS périmé, aucun livreur éligible, rafraîc
   await db.doc(`livreurs/${DRIVER}`).update({ isOnline: true });
   await setGpsAge(5 * MIN);
   const a = await place();
-  const stale = { lotId: lot.LOT_ID, completed: runner.ORDER_OF_STEPS.slice(0, 4), baselineOrderIds: manifest.baseline.orderIds, orderId: a, quoteId: 'x', amounts, startWallets: lot.WALLETS, ledgerKey: 'afterCreate' };
+  const stale = { lotId: lot.LOT_ID, configVersion: 3, completed: runner.ORDER_OF_STEPS.slice(0, 4), baselineOrderIds: manifest.baseline.orderIds, orderId: a, quoteId: 'x', amounts, startWallets: lot.WALLETS, ledgerKey: 'afterCreate' };
   await assert.rejects(runner.executeStep({ stepId: 'S3', state: stale, io, store: memoryStore(), nowMs: NOW }), (e) => e.code === 'GPS_STALE');
   const d1 = await dispatchOutcome(a);
   assert.equal(d1.dispatched, false, `GPS périmé : ${JSON.stringify(d1)}`);
@@ -402,3 +411,87 @@ test('6. historique intact : commandes, comptes et jeton FCM existants identique
   assert.equal((await db.doc('clients/real-client').get()).data().fcmToken, 'PLACEHOLDER-NOT-A-REAL-TOKEN');
   assert.equal((await db.doc('restaurants/real-resto').get()).data().wallet, 5000);
 });
+
+test('7. réouverture auditée depuis la configuration fermée, parcours de NUIT (commission 200), fermeture d’urgence indépendante', options, async () => {
+  const emergency = require(path.join(dir, 'emergencyClose'));
+  const live = async () => (await db.doc('config/partnerOrdersV2').get()).data();
+  const adminAction = (data) => run.action(asUser(ADMIN, data));
+  // Remise à zéro du lot (soldes de départ) : la fermeture d'abord, par le chemin audité, avec la version réellement lue.
+  setClock(NOW);
+  await db.doc(`clients/${CLIENT}`).update({ wallet: lot.WALLETS.client });
+  await db.doc(`livreurs/${DRIVER}`).update({ wallet: lot.WALLETS.driver });
+  await db.doc(`restaurants/${RESTO}`).update({ wallet: lot.WALLETS.restaurant });
+  const before = await live();
+  if (before.creationOpen) assert.equal((await adminAction({ action: 'setPartnerOrdersConfig', patch: { creationOpen: false }, expectedVersion: before.version, reason: 'Fermeture avant réouverture de test' })).success, true);
+  const closed = await live();
+  assert.equal(closed.creationOpen, false);
+  assert.equal((await run.quote(asUser(CLIENT, choices()))).error, 'CREATION_CLOSED');
+
+  // Version périmée, puis version exacte : réouverture auditée, listes inchangées, version +1.
+  const store = memoryStore();
+  const state = { lotId: lot.LOT_ID, completed: ['S0'], configVersion: 1 }; // état d'une session précédente
+  await assert.rejects(runner.reopenPilot({ state, io, store, expectedVersion: closed.version - 1 }), (e) => e.code === 'STALE_VERSION');
+  assert.equal((await live()).creationOpen, false, 'refus sans effet');
+  const res = await runner.reopenPilot({ state, io, store, expectedVersion: closed.version });
+  assert.deepEqual([res.reopened, res.configVersion], [true, closed.version + 1]);
+  const reopened = await live();
+  assert.deepEqual([reopened.creationOpen, reopened.pilotClientIds, reopened.pilotPartnerIds, reopened.clientAccess, reopened.managementFrozen], [true, [CLIENT], [RESTO], 'restricted', false]);
+  assert.equal(reopened.lastChange.by, ADMIN);
+  await assert.rejects(runner.reopenPilot({ state, io, store, expectedVersion: reopened.version }), (e) => e.code === 'PILOT_NOT_READY', 'déjà ouvert');
+
+  // Une modification extérieure de la configuration fige le parcours avant tout appel.
+  await adminAction({ action: 'setPartnerOrdersConfig', patch: { managementFrozen: true }, expectedVersion: reopened.version, reason: 'Gel de test, aucun effet' });
+  await assert.rejects(runner.executeStep({ stepId: 'S1', state: { ...state }, io, store: memoryStore(), nowMs: NIGHT }), (e) => e.code === 'PILOT_NOT_READY');
+  const thawed = await live();
+  assert.equal((await adminAction({ action: 'setPartnerOrdersConfig', patch: { managementFrozen: false }, expectedVersion: thawed.version, reason: 'Dégel de test, aucun effet' })).success, true);
+  await assert.rejects(runner.executeStep({ stepId: 'S1', state: { ...state }, io, store: memoryStore(), nowMs: NIGHT }), (e) => e.code === 'STATE_INCONSISTENT', 'version enregistrée périmée');
+  state.configVersion = (await live()).version; // uniquement pour la suite du test : le runner l'écrit lui-même en conditions réelles
+
+  // Parcours de NUIT complet avec les fonctions réelles : frais 1 000, total 7 500, commission 200, rejeux sans second mouvement.
+  setClock(NIGHT);
+  const results = await runJourneyFrom(state, store, {
+    S2: async () => {
+      const replay = { ...choices(), quoteId: state.quoteId, paymentMethod: 'wallet', confirmedAmount: 7500, deliveryAddress: 'Adresse fictive de test, Abengourou' };
+      assert.equal((await run.create(asUser(CLIENT, replay))).data.replayed, true);
+      assert.equal((await wallets()).client, 32500);
+    },
+    S7: async () => {
+      assert.equal((await run.accept(asUser(DRIVER, { orderId: state.orderId, acceptanceSelfieUrl: state.selfieUrl }))).alreadyAccepted, true);
+      assert.equal((await wallets()).driver, 4800);
+    },
+  }, NIGHT);
+  assert.equal(results[0].scenario, 'NUIT');
+  assert.equal(state.quotedNight, true);
+  const o = await order(state.orderId);
+  assert.deepEqual([o.status, o.productAmount, o.deliveryFee, o.totalAmount, o.commissionAmount], ['delivered', 6500, 1000, 7500, 200]);
+  assert.deepEqual(await wallets(), { client: 32500, driver: 5800, restaurant: 6500 });
+  assert.equal((await db.collection('commissions').where('orderId', '==', state.orderId).get()).size, 1);
+
+  // Fermeture d'urgence INDÉPENDANTE : aucun fichier d'état, état local « corrompu » ; version réelle, audit de la fonction réelle.
+  const emergencyIo = {
+    project: lot.TARGET.projectId,
+    signInAdmin: async () => ({ uid: ADMIN }),
+    readConfig: async () => (await live()),
+    call: async (data) => adminAction(data),
+  };
+  const open = await live();
+  assert.equal(open.creationOpen, true);
+  const out = await emergency.closeNow({ io: emergencyIo });
+  assert.deepEqual([out.closed, out.version], [true, open.version + 1]);
+  const after = await live();
+  assert.deepEqual([after.creationOpen, after.pilotClientIds, after.pilotPartnerIds, after.clientAccess], [false, [CLIENT], [RESTO], 'restricted']);
+  assert.equal((await run.quote(asUser(CLIENT, choices()))).error, 'CREATION_CLOSED');
+  assert.equal((await emergency.closeNow({ io: emergencyIo })).alreadyClosed, true);
+  assert.equal((await db.doc('config/partnerOrdersV2').get()).exists, true, 'la configuration n’est jamais supprimée');
+  setClock(NOW);
+});
+
+// Reprend le parcours à partir de S1 (la réouverture a déjà fixé S0).
+async function runJourneyFrom(state, store, hooks, nowMs) {
+  const results = [];
+  for (const id of runner.ORDER_OF_STEPS.slice(1)) {
+    results.push(await runner.executeStep({ stepId: id, state, io, store, nowMs }));
+    if (hooks[id]) await hooks[id]();
+  }
+  return results;
+}

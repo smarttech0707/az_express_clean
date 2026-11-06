@@ -128,6 +128,18 @@ function expectedAmounts({ basket = BASKET, nowMs = Date.now() } = {}) {
   return { ...amounts, commission: commissionFor(amounts.budget) }; // driverAcceptance.js : calculateCommission(budget), sans plafond
 }
 
+// Montants déduits du devis RÉEL retourné par le serveur (le scénario jour/nuit n'est jamais supposé). Refuse tout devis dont les frais
+// ne sont pas 500 (jour) ou 1 000 (nuit), dont le drapeau isNight contredit les frais, ou dont les produits/total ne sont pas ceux du panier.
+function amountsFromQuote(quote, basket = BASKET) {
+  const q = quote || {};
+  const base = expectedAmounts({ basket });
+  if (q.productAmount !== base.productAmount) throw new Error(`produits ${q.productAmount}, attendus ${base.productAmount}`);
+  if (![500, 1000].includes(q.deliveryFee) || (q.deliveryFee === 1000) !== (q.isNight === true)) throw new Error('frais de livraison incohérents avec le barème jour/nuit');
+  const amounts = buildPartnerAmounts(q.productAmount, q.deliveryFee);
+  if (q.total !== amounts.totalAmount) throw new Error(`total ${q.total}, attendu ${amounts.totalAmount}`);
+  return { ...amounts, commission: commissionFor(amounts.budget) };
+}
+
 // Soldes attendus à chaque étape d'une commande payée en wallet (voir orderActions.js : création, acceptation, livraison).
 function expectedLedger(amounts, start = WALLETS) {
   const afterCreate = { client: start.client - amounts.totalAmount, driver: start.driver, restaurant: start.restaurant };
@@ -189,6 +201,6 @@ function buildInventory(plan = buildSeedPlan()) {
 module.exports = {
   LOT_ID, LOT_FIELD, TARGET, FORBIDDEN_PROJECT_IDS, EMAIL_DOMAIN, IDENTITIES, UIDS, SERVER_TIMESTAMP,
   RESTAURANT_POINT, DELIVERY_POINT, DRIVER_POINT, CITY_ID, MENU, BASKET, WALLETS, PARTNER_KINDS,
-  buildSeedPlan, findSensitiveKeys, commissionFor, expectedAmounts, expectedLedger, pilotConfigPlan, buildInventory,
+  buildSeedPlan, findSensitiveKeys, commissionFor, expectedAmounts, amountsFromQuote, expectedLedger, pilotConfigPlan, buildInventory,
   canonical, sha256, docHash,
 };

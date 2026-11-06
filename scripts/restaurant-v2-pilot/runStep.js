@@ -21,6 +21,10 @@ const ORDER_OF_STEPS = Object.freeze(fr.STEPS.map((s) => s.id));
 const GPS_MAX_AGE_MS = 60 * 1000; // marge de sécurité sous la limite serveur de 180 s
 const WALLET_PATHS = Object.freeze({ client: `clients/${UID.client}`, driver: `livreurs/${UID.driver}`, restaurant: `restaurants/${UID.restaurant}` });
 
+// Devis de test antérieur (Mission 7E-44) : jamais réutilisé ; nettoyé par cleanup.js (groupe « quote »), jamais supprimé ici.
+const RETIRED_QUOTE_IDS = Object.freeze(['800fead3-86d9-4534-88f6-be0509b41d11']);
+const sameList = (a, b) => Array.isArray(a) && JSON.stringify(a) === JSON.stringify(b);
+
 class StepError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -65,17 +69,39 @@ function assertDataInLot(data, state) {
   walk(data);
 }
 
+// ── Vérification du pilote RÉEL (jamais déduite du fichier d'état local) ────────────────────────────────────────────────────────
+// Relue avant chaque étape du parcours : configuration exacte, version identique à celle enregistrée par S0/REOPEN, création ouverte.
+function assertPilotConfig(c, { open }) {
+  if (!c) throw new StepError('PILOT_NOT_READY', 'Configuration du pilote absente');
+  if (!sameList(c.pilotPartnerIds, [UID.restaurant]) || !sameList(c.pilotClientIds, [UID.client]) || c.clientAccess !== 'restricted' || c.managementFrozen !== false) {
+    throw new StepError('PILOT_NOT_READY', 'Pilote non limité au seul restaurant et au seul client fictifs');
+  }
+  if (open !== undefined && c.creationOpen !== open) throw new StepError('PILOT_NOT_READY', open ? 'Pilote fermé : réouverture auditée requise' : 'Pilote déjà ouvert');
+  if (!Number.isSafeInteger(c.version)) throw new StepError('PILOT_NOT_READY', 'Version de configuration illisible');
+}
+async function assertLiveBeforeStep({ io, read, state }) {
+  if (io.projectId !== undefined && io.projectId !== lot.TARGET.projectId) throw new StepError('WRONG_PROJECT', 'Projet inattendu');
+  const c = await read('config/partnerOrdersV2');
+  assertPilotConfig(c, { open: true });
+  if (!Number.isSafeInteger(state.configVersion) || c.version !== state.configVersion) {
+    throw new StepError('STATE_INCONSISTENT', `Version réelle ${c.version}, version enregistrée ${state.configVersion} : état local incohérent, revue humaine`);
+  }
+}
+async function assertCleanSlate({ io, read, state }) {
+  const wallets = await readWallets(read);
+  if (JSON.stringify(wallets) !== JSON.stringify(lot.WALLETS)) throw new StepError('WALLETS_CHANGED', `Soldes ${JSON.stringify(wallets)}, attendus ${JSON.stringify(lot.WALLETS)}`);
+  if (io.countOrders) {
+    const n = await io.countOrders();
+    const expected = (state.baselineOrderIds || (await io.baselineOrderIds())).length;
+    if (n !== expected) throw new StepError('UNEXPECTED_ORDERS', `${n} commandes, ${expected} attendues : aucune commande du lot ne doit exister`);
+  }
+}
+
 // ── Préconditions et postconditions par étape ───────────────────────────────────────────────────────────────────────────────────
 const statusIs = (o, status, sellerStatus) => !!o && o.status === status && (sellerStatus === undefined || o.sellerStatus === sellerStatus);
 const GATES = {
-  S0: async ({ read }) => { if (await read('config/partnerOrdersV2')) throw new StepError('PILOT_ALREADY_CONFIGURED', 'Le pilote est déjà configuré : revue manuelle'); },
-  S1: async ({ read }) => {
-    const c = await read('config/partnerOrdersV2');
-    if (!c || c.creationOpen !== true || JSON.stringify(c.pilotPartnerIds) !== JSON.stringify([UID.restaurant])
-      || JSON.stringify(c.pilotClientIds) !== JSON.stringify([UID.client]) || c.clientAccess !== 'restricted') {
-      throw new StepError('PILOT_NOT_READY', 'Pilote non ouvert au seul restaurant et au seul client fictifs');
-    }
-  },
+  S0: async ({ read }) => { if (await read('config/partnerOrdersV2')) throw new StepError('PILOT_ALREADY_CONFIGURED', 'Le pilote est déjà configuré : utiliser REOPEN (réouverture auditée), jamais S0'); },
+  S1: async ({ io, read, state }) => { await assertCleanSlate({ io, read, state }); },
   S2: async ({ state }) => { if (!state.quoteId) throw new StepError('NO_QUOTE', 'Aucun devis (S1 requise)'); },
   S2b: async ({ read, state }) => { if (!statusIs(await read(`orders/${state.orderId}`), 'pending')) throw new StepError('BAD_STATE', 'Commande non « pending »'); },
   S3: async ({ read, state, clockMs }) => {
@@ -137,7 +163,8 @@ async function executeStep({ stepId, state, io, store, nowMs = Date.now(), clock
       const who = await io.identity(step.caller);
       if (who.uid !== UID[step.caller] || !who.uid.startsWith('t7e-')) throw new StepError('WRONG_IDENTITY', 'Identité inattendue');
     }
-    await GATES[stepId]({ read, state, nowMs, clockMs });
+    if (stepId !== 'S0') await assertLiveBeforeStep({ io, read, state });
+    await GATES[stepId]({ io, read, state, nowMs, clockMs });
     if (stepId === 'S0') state.baselineOrderIds = (await io.baselineOrderIds());
     if (stepId === 'S0') state.startWallets = await readWallets(read);
     const data = step.data(ctxOf(state));
@@ -170,11 +197,17 @@ function applyResult(stepId, res, state, nowMs, summary) {
     if (!Number.isSafeInteger(cfg.version)) throw new StepError('NO_CONFIG_VERSION', 'Version de configuration non retournée');
     state.configVersion = cfg.version; summary.configVersion = cfg.version;
   } else if (stepId === 'S1') {
-    const expected = lot.expectedAmounts({ nowMs });
-    // Les frais de jour ne sont JAMAIS supposés : le total retourné doit égaler le barème officiel à l’heure de l’appel.
-    if (d.total !== expected.totalAmount) throw new StepError('AMOUNT_MISMATCH', `Total du devis ${d.total}, barème attendu ${expected.totalAmount} (jour/nuit ?)`);
-    state.quoteId = d.quoteId; state.total = d.total; state.amounts = expected; state.quotedNight = !!d.isNight;
-    summary.total = d.total; summary.isNight = !!d.isNight;
+    // Le scénario (jour 500 / nuit 1 000) est déterminé par le devis RÉEL puis recoupé avec le barème officiel (fenêtre ±5 min
+    // autour de l'horloge, pour la bascule jour/nuit) : jamais supposé.
+    if (RETIRED_QUOTE_IDS.includes(d.quoteId)) throw new StepError('RETIRED_QUOTE', 'Devis antérieur : ne jamais le réutiliser');
+    let amounts;
+    try { amounts = lot.amountsFromQuote(d); } catch (e) { throw new StepError('AMOUNT_MISMATCH', e.message); }
+    const official = [-5 * 60 * 1000, 0, 5 * 60 * 1000].map((delta) => lot.expectedAmounts({ nowMs: nowMs + delta }));
+    if (!official.some((o) => o.totalAmount === amounts.totalAmount && o.deliveryFee === amounts.deliveryFee)) {
+      throw new StepError('AMOUNT_MISMATCH', `Total du devis ${d.total}, barème attendu ${official[1].totalAmount} (jour/nuit ?)`);
+    }
+    state.quoteId = d.quoteId; state.total = d.total; state.amounts = amounts; state.quotedNight = !!d.isNight;
+    summary.total = d.total; summary.isNight = !!d.isNight; summary.scenario = d.isNight ? 'NUIT' : 'JOUR'; summary.commission = amounts.commission;
   } else if (stepId === 'S2') {
     if (!d.orderId) throw new StepError('NO_ORDER', 'Commande non retournée');
     if ((state.baselineOrderIds || []).includes(d.orderId)) throw new StepError('HISTORIC_ORDER_REFUSED', 'Identifiant de commande historique');
@@ -237,6 +270,44 @@ async function closePilot({ state, io, store }) {
   return summary;
 }
 
+// ── Réouverture auditée (pilote déjà configuré, fermé) ─────────────────────────────────────────────────────────────────────────
+// Remplace S0 quand config/partnerOrdersV2 existe. La version attendue est donnée EXPLICITEMENT par l'opérateur ET relue sur le
+// document réel : tout écart refuse. Ne rouvre que le restaurant et le client fictifs ; jamais d'ouverture générale. Le fichier
+// d'état n'est modifié que par cette fonction (aucune retouche manuelle) et seulement s'il ne contient aucun devis ni commande.
+async function reopenPilot({ state, io, store, expectedVersion }) {
+  if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new StepError('EXPECTED_VERSION_REQUIRED', 'Version attendue requise (--expected-version)');
+  if (state.failed) throw new StepError('PREVIOUS_FAILURE', `L’étape ${state.failed.step} a échoué : revue humaine requise`);
+  const done = state.completed || [];
+  if (state.quoteId || state.orderId || state.secrets || !(done.length === 0 || (done.length === 1 && done[0] === 'S0'))) {
+    throw new StepError('JOURNEY_IN_PROGRESS', 'Parcours entamé : réouverture refusée, revue humaine');
+  }
+  if (io.projectId !== undefined && io.projectId !== lot.TARGET.projectId) throw new StepError('WRONG_PROJECT', 'Projet inattendu');
+  const who = await io.identity('admin');
+  if (who.uid !== UID.admin) throw new StepError('WRONG_IDENTITY', 'Identité inattendue');
+  const baseline = await io.baselineOrderIds();
+  const scope = { ...state, baselineOrderIds: baseline };
+  const read = safeReader(io, scope);
+  const live = await read('config/partnerOrdersV2');
+  assertPilotConfig(live, { open: false });
+  if (live.version !== expectedVersion) throw new StepError('STALE_VERSION', `Version réelle ${live.version}, version attendue ${expectedVersion}`);
+  await assertCleanSlate({ io, read, state: scope });
+  const startWallets = await readWallets(read);
+  const request = { ...lot.pilotConfigPlan().request, expectedVersion: live.version };
+  assertDataInLot(request, scope);
+  const res = await io.call(fr.FN.partner, 'admin', request);
+  if (res && res.success === false) throw new StepError(res.error || 'REOPEN_REFUSED', res.message || 'Réouverture refusée');
+  const after = await read('config/partnerOrdersV2');
+  assertPilotConfig(after, { open: true });
+  if (after.version !== live.version + 1) throw new StepError('UNEXPECTED_STATE', 'Version après réouverture inattendue');
+  state.completed = ['S0'];
+  state.baselineOrderIds = baseline;
+  state.startWallets = startWallets;
+  state.configVersion = after.version;
+  state.reopenedAtMs = Date.now();
+  await store.save(state);
+  return { step: 'REOPEN', reopened: true, previousVersion: live.version, configVersion: after.version, next: 'S1' };
+}
+
 const STOP_CONDITIONS = Object.freeze([
   'toute erreur de l’exécuteur fige le parcours (état failed) : aucune étape suivante sans revue humaine',
   'identité, projet, numéro de projet ou jeton inattendus',
@@ -252,6 +323,10 @@ function describeStep(stepId, state = {}) {
   if (stepId === 'CLOSE') {
     const c = lot.pilotConfigPlan().closing;
     return { step: 'CLOSE', title: 'Fermeture d’urgence du pilote', fn: fr.FN.partner, caller: 'admin', request: { action: 'setPartnerOrdersConfig', patch: c.patch, expectedVersion: '<version réellement lue>', reason: c.reason }, effects: ['config/partnerOrdersV2.creationOpen = false, version +1, lastChange', 'audit_logs : partner_orders_config_update'], pass: ['creationOpen=false, liste inchangée, version+1'], fail: ['CONFIG_CONFLICT (relire puis refaire)'] };
+  }
+  if (stepId === 'REOPEN') {
+    const r = lot.pilotConfigPlan().request;
+    return { step: 'REOPEN', title: 'Réouverture auditée du pilote (restaurant ET client fictifs, mode restreint)', fn: fr.FN.partner, caller: 'admin', request: { ...r, expectedVersion: '<version réelle, égale à --expected-version>' }, preconditions: ['configuration fermée, listes exactes, clientAccess restricted', 'wallets 40000/5000/0', '11 commandes, aucune du lot', 'aucun devis ni commande dans l’état local'], effects: ['config/partnerOrdersV2.creationOpen = true, version +1', 'audit_logs : partner_orders_config_update'], pass: ['creationOpen=true, listes inchangées, version+1'], fail: ['STALE_VERSION', 'PILOT_NOT_READY', 'JOURNEY_IN_PROGRESS'], closing: 'emergencyClose.js (indépendant du runner et du fichier d’état)' };
   }
   const s = fr.STEPS.find((x) => x.id === stepId);
   if (!s) throw new StepError('UNKNOWN_STEP', `Étape inconnue : ${stepId}`);
@@ -308,6 +383,8 @@ function cloudIo({ admin, target, credentials, manifest, apiKey, fetchImpl = fet
     return uris.get(name);
   };
   return {
+    projectId: target.projectId,
+    countOrders: async () => (await db.collection('orders').count().get()).data().count,
     identity: async (role) => ({ uid: (await signIn(role)).uid }),
     call: async (fn, role, data) => {
       const { idToken } = await signIn(role);
@@ -338,7 +415,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i].startsWith('--') ? argv[i].slice(2) : null;
     if (key === 'execute') out.flags.add(key);
-    else if (['project', 'project-number', 'state-dir', 'credentials-dir', 'step', 'confirm'].includes(key)) { out.values[key] = argv[i + 1]; i += 1; }
+    else if (['project', 'project-number', 'state-dir', 'credentials-dir', 'step', 'confirm', 'expected-version'].includes(key)) { out.values[key] = argv[i + 1]; i += 1; }
     else throw new guard.GuardError('BAD_ARGUMENT', `Argument inattendu : ${argv[i]}`);
   }
   return out;
@@ -363,7 +440,8 @@ async function main(argv = process.argv.slice(2), env = process.env, log = conso
     credentials: JSON.parse(fs.readFileSync(path.join(credDir, 'credentials.json'), 'utf8')),
     manifest: JSON.parse(fs.readFileSync(path.join(credDir, 'manifest.json'), 'utf8')),
   });
-  const result = stepId === 'CLOSE' ? await closePilot({ state, io, store }) : await executeStep({ stepId, state, io, store });
+  const expectedVersion = args.values['expected-version'] === undefined ? undefined : Number(args.values['expected-version']);
+  const result = stepId === 'REOPEN' ? await reopenPilot({ state, io, store, expectedVersion }) : stepId === 'CLOSE' ? await closePilot({ state, io, store }) : await executeStep({ stepId, state, io, store });
   log(JSON.stringify({ ok: true, ...result }, null, 2));
   return 0;
 }
@@ -375,4 +453,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { closePilot, STOP_CONDITIONS, executeStep, describeStep, cloudIo, fileStore, parseArgs, main, redact, assertDataInLot, safeReader, StepError, ORDER_OF_STEPS, GPS_MAX_AGE_MS };
+module.exports = { closePilot, reopenPilot, assertPilotConfig, RETIRED_QUOTE_IDS, STOP_CONDITIONS, executeStep, describeStep, cloudIo, fileStore, parseArgs, main, redact, assertDataInLot, safeReader, StepError, ORDER_OF_STEPS, GPS_MAX_AGE_MS };
