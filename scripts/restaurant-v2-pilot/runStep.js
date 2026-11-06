@@ -79,12 +79,24 @@ function assertPilotConfig(c, { open }) {
   if (open !== undefined && c.creationOpen !== open) throw new StepError('PILOT_NOT_READY', open ? 'Pilote fermé : réouverture auditée requise' : 'Pilote déjà ouvert');
   if (!Number.isSafeInteger(c.version)) throw new StepError('PILOT_NOT_READY', 'Version de configuration illisible');
 }
-async function assertLiveBeforeStep({ io, read, state }) {
+// Création (S1, S2) : pilote ouvert, version identique à celle enregistrée. Gestion de la commande existante (S2b…S11) : pilote ouvert à
+// cette version, OU fermé par UNE fermeture auditée (version +1, par CLOSE ou emergencyClose.js) : fermer le pilote après S2 ne
+// bloque pas la commande en cours (le serveur ne teste creationOpen qu'à la création). Toute autre version = état incohérent.
+async function assertLiveBeforeStep({ io, read, state, stepId }) {
   if (io.projectId !== undefined && io.projectId !== lot.TARGET.projectId) throw new StepError('WRONG_PROJECT', 'Projet inattendu');
   const c = await read('config/partnerOrdersV2');
-  assertPilotConfig(c, { open: true });
-  if (!Number.isSafeInteger(state.configVersion) || c.version !== state.configVersion) {
-    throw new StepError('STATE_INCONSISTENT', `Version réelle ${c.version}, version enregistrée ${state.configVersion} : état local incohérent, revue humaine`);
+  assertPilotConfig(c, {});
+  if (!Number.isSafeInteger(state.configVersion)) throw new StepError('STATE_INCONSISTENT', 'Version de configuration non enregistrée : état local incohérent, revue humaine');
+  const creating = stepId === 'S1' || stepId === 'S2';
+  const openAtRecorded = c.creationOpen === true && c.version === state.configVersion;
+  if (creating) {
+    if (c.creationOpen !== true) throw new StepError('PILOT_NOT_READY', 'Pilote fermé : réouverture auditée requise');
+    if (!openAtRecorded) throw new StepError('STATE_INCONSISTENT', `Version réelle ${c.version}, version enregistrée ${state.configVersion} : état local incohérent, revue humaine`);
+    return;
+  }
+  const closedOnce = c.creationOpen === false && c.version === state.configVersion + 1 && !!state.orderId;
+  if (!openAtRecorded && !closedOnce) {
+    throw new StepError('STATE_INCONSISTENT', `Version réelle ${c.version} (création ${c.creationOpen}), version enregistrée ${state.configVersion} : état local incohérent, revue humaine`);
   }
 }
 async function assertCleanSlate({ io, read, state }) {
@@ -163,7 +175,7 @@ async function executeStep({ stepId, state, io, store, nowMs = Date.now(), clock
       const who = await io.identity(step.caller);
       if (who.uid !== UID[step.caller] || !who.uid.startsWith('t7e-')) throw new StepError('WRONG_IDENTITY', 'Identité inattendue');
     }
-    if (stepId !== 'S0') await assertLiveBeforeStep({ io, read, state });
+    if (stepId !== 'S0') await assertLiveBeforeStep({ io, read, state, stepId });
     await GATES[stepId]({ io, read, state, nowMs, clockMs });
     if (stepId === 'S0') state.baselineOrderIds = (await io.baselineOrderIds());
     if (stepId === 'S0') state.startWallets = await readWallets(read);
@@ -453,4 +465,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { closePilot, reopenPilot, assertPilotConfig, RETIRED_QUOTE_IDS, STOP_CONDITIONS, executeStep, describeStep, cloudIo, fileStore, parseArgs, main, redact, assertDataInLot, safeReader, StepError, ORDER_OF_STEPS, GPS_MAX_AGE_MS };
+module.exports = { closePilot, reopenPilot, assertLiveBeforeStep, assertPilotConfig, RETIRED_QUOTE_IDS, STOP_CONDITIONS, executeStep, describeStep, cloudIo, fileStore, parseArgs, main, redact, assertDataInLot, safeReader, StepError, ORDER_OF_STEPS, GPS_MAX_AGE_MS };

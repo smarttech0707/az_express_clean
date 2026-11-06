@@ -260,3 +260,67 @@ test('fermeture d’urgence : adaptateur cloud réservé à la préproduction, c
   assert.throws(() => emergency.cloudIo({ admin: {}, target, credentials: creds }), (e) => e.code === 'API_KEY_REQUIRED');
   assert.throws(() => emergency.cloudIo({ admin: {}, target, credentials: { admin: { email: 'real@gmail.com' } }, apiKey: 'k' }), (e) => e.code === 'WRONG_IDENTITY');
 });
+
+// ── Mission 7E-46 : fermeture après création sans bloquer la commande en cours ; veille de fermeture ────────────────────────────
+const watchdog = require(path.join(dir, 'closeWatchdog'));
+
+test('pilote fermé APRÈS la création : la gestion de la commande continue (une seule fermeture auditée, version +1), pas la création', async () => {
+  const live = (over) => fakeIo(closedConfig({ version: 4, ...over }));
+  const base = { ...staleState(), configVersion: 3, orderId: 'ord-1' };
+  const check = (stepId, io, state = base) => runner.assertLiveBeforeStep({ io, read: async (p) => io.read(p), state, stepId });
+  // Ouvert à la version enregistrée, ou fermé une fois (v+1) : les étapes de gestion passent.
+  for (const stepId of ['S2b', 'S3', 'S7', 'S9', 'S11']) {
+    await check(stepId, live({ creationOpen: false, version: 4 }));
+    await check(stepId, live({ creationOpen: true, version: 3 }));
+  }
+  // La création (S1, S2) exige le pilote ouvert à la version enregistrée.
+  for (const stepId of ['S1', 'S2']) {
+    await assert.rejects(check(stepId, live({ creationOpen: false, version: 4 })), (e) => e.code === 'PILOT_NOT_READY');
+    await assert.rejects(check(stepId, live({ creationOpen: true, version: 4 })), (e) => e.code === 'STATE_INCONSISTENT');
+  }
+  // Fermé deux fois, rouvert par un tiers, fermé sans commande dans l'état, listes ou accès modifiés : refus.
+  await assert.rejects(check('S3', live({ creationOpen: false, version: 5 })), (e) => e.code === 'STATE_INCONSISTENT');
+  await assert.rejects(check('S3', live({ creationOpen: true, version: 5 })), (e) => e.code === 'STATE_INCONSISTENT');
+  await assert.rejects(check('S3', live({ creationOpen: false, version: 4 }), { ...base, orderId: undefined }), (e) => e.code === 'STATE_INCONSISTENT');
+  await assert.rejects(check('S3', live({ creationOpen: false, version: 4, clientAccess: 'open' })), (e) => e.code === 'PILOT_NOT_READY');
+  await assert.rejects(check('S3', live({ creationOpen: false, version: 4, pilotClientIds: [CLIENT, 'x'] })), (e) => e.code === 'PILOT_NOT_READY');
+  await assert.rejects(check('S3', live({ creationOpen: false, version: 4, managementFrozen: true })), (e) => e.code === 'PILOT_NOT_READY');
+  await assert.rejects(check('S3', live({ creationOpen: false, version: 4 }), { ...base, configVersion: undefined }), (e) => e.code === 'STATE_INCONSISTENT');
+});
+
+test('veille de fermeture : se ferme à l’échéance, s’arrête sur le fichier stop, réessaie, échec signalé, délai maximal 30 min', async () => {
+  let t = 0; const slept = [];
+  const sleep = async (ms) => { slept.push(ms); t += ms; };
+  const calls = [];
+  const closeNow = async () => { calls.push(t); return { closed: true }; };
+  // Échéance atteinte : une fermeture, jamais avant.
+  let res = await watchdog.watch({ deadlineMs: 60000, now: () => t, sleep, closeNow, stopExists: () => false });
+  assert.deepEqual([res.fired, res.attempts, calls.length], [true, 1, 1]);
+  assert.ok(calls[0] >= 60000 && slept.every((ms) => ms <= 5000));
+  // Fichier stop : aucune fermeture.
+  t = 0; calls.length = 0;
+  res = await watchdog.watch({ deadlineMs: 60000, now: () => t, sleep, closeNow, stopExists: () => t >= 10000 });
+  assert.deepEqual([res.stopped, calls.length], [true, 0]);
+  // Échecs transitoires puis succès ; échec persistant → erreur explicite.
+  t = 0; let n = 0;
+  res = await watchdog.watch({ deadlineMs: 1000, now: () => t, sleep, stopExists: () => false, closeNow: async () => { n += 1; if (n < 3) throw Object.assign(new Error('x'), { code: 'CALL_FAILED' }); return { closed: true }; } });
+  assert.equal(res.attempts, 3);
+  t = 0;
+  await assert.rejects(watchdog.watch({ deadlineMs: 1000, now: () => t, sleep, stopExists: () => false, closeNow: async () => { throw Object.assign(new Error('x'), { code: 'CALL_FAILED' }); } }), (e) => e.code === 'WATCHDOG_FAILED');
+  // Ligne de commande : délai borné, production refusée, confirmation, stop-file hors dépôt, aucun réseau en DRY-RUN.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => { throw new Error('réseau interdit'); };
+  try {
+    const os = require('node:os');
+    const base = ['--project', 'az-express-preprod', '--project-number', '306761725053', '--stop-file', path.join(os.tmpdir(), 'stop-x'), '--max-minutes', '25'];
+    const lines = [];
+    assert.equal(await watchdog.main(base, {}, (l) => lines.push(l)), 0);
+    assert.match(lines.join('\n'), /DRY-RUN/);
+    for (const m of ['0', '31', 'abc', '']) await assert.rejects(watchdog.main([...base.slice(0, -1), m], {}, () => {}), (e) => e.code === 'BAD_ARGUMENT', m);
+    await assert.rejects(watchdog.main(['--project', 'az-express-b0469', '--project-number', '306761725053', '--stop-file', path.join(os.tmpdir(), 's'), '--max-minutes', '5'], {}, () => {}), (e) => e.code === 'PRODUCTION_FORBIDDEN');
+    await assert.rejects(watchdog.main([...base, '--execute', '--confirm', 'x', '--credentials-dir', os.tmpdir()], {}, () => {}), (e) => e.code === 'CONFIRMATION_REQUIRED');
+    await assert.rejects(watchdog.main([...base.slice(0, 4), '--stop-file', path.join(path.resolve(__dirname, '..', '..'), 'stop'), '--max-minutes', '5'], {}, () => {}), (e) => e.code === 'OUT_DIR_IN_REPO');
+    await assert.rejects(watchdog.main([...base, '--force'], {}, () => {}), (e) => e.code === 'BAD_ARGUMENT');
+  } finally { globalThis.fetch = realFetch; }
+  assert.ok(!/runStep|first-run-state/.test(require('node:fs').readFileSync(path.join(dir, 'closeWatchdog.js'), 'utf8').replace(/\/\/.*$/gm, '')), 'indépendant du runner');
+});

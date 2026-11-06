@@ -495,3 +495,47 @@ async function runJourneyFrom(state, store, hooks, nowMs) {
   }
   return results;
 }
+
+test('8. fermeture du pilote APRÈS la création : restaurant, livreur et preuves QR/PIN terminent la commande ; plus aucune création', options, async () => {
+  const emergency = require(path.join(dir, 'emergencyClose'));
+  const live = async () => (await db.doc('config/partnerOrdersV2').get()).data();
+  const adminAction = (data) => run.action(asUser(ADMIN, data));
+  const emergencyIo = { project: lot.TARGET.projectId, signInAdmin: async () => ({ uid: ADMIN }), readConfig: live, call: adminAction };
+  for (const closer of ['runner', 'emergencyClose']) {
+    setClock(NOW);
+    await db.doc(`clients/${CLIENT}`).update({ wallet: lot.WALLETS.client });
+    await db.doc(`livreurs/${DRIVER}`).update({ wallet: lot.WALLETS.driver });
+    await db.doc(`restaurants/${RESTO}`).update({ wallet: lot.WALLETS.restaurant });
+    const pre = await live();
+    assert.equal(pre.creationOpen, false, 'pilote fermé au départ');
+    const store = memoryStore();
+    const state = { lotId: lot.LOT_ID, completed: ['S0'], configVersion: 1 };
+    await runner.reopenPilot({ state, io, store, expectedVersion: pre.version });
+    const results = [];
+    const step = async (id) => { results.push(await runner.executeStep({ stepId: id, state, io, store, nowMs: NOW })); };
+    await step('S1'); await step('S2');
+    const ordersBefore = (await db.collection('orders').get()).size;
+
+    // Fermeture (clientAccess=restricted, managementFrozen=false inchangés) dès que la création n'est plus nécessaire.
+    if (closer === 'runner') assert.equal((await runner.closePilot({ state, io, store })).closed, true);
+    else assert.equal((await emergency.closeNow({ io: emergencyIo })).closed, true);
+    const closed = await live();
+    assert.deepEqual([closed.creationOpen, closed.managementFrozen, closed.clientAccess, closed.pilotClientIds, closed.version], [false, false, 'restricted', [CLIENT], state.configVersion + 1]);
+    // Plus aucune création : nouveau devis refusé, nouvelle création avec le devis de S1 déjà utilisé = rejeu de LA commande.
+    assert.equal((await run.quote(asUser(CLIENT, choices()))).error, 'CREATION_CLOSED');
+    const replay = await run.create(asUser(CLIENT, { ...choices(), quoteId: state.quoteId, paymentMethod: 'wallet', confirmedAmount: state.total, deliveryAddress: 'Adresse fictive de test, Abengourou' }));
+    assert.equal(replay.data.replayed, true);
+    assert.equal((await db.collection('orders').get()).size, ordersBefore, 'aucune seconde commande');
+    assert.equal((await wallets()).client, 33000, 'aucun second débit');
+
+    // La commande existante se termine : restaurant, livreur, selfie, preuves QR/PIN, livraison.
+    for (const id of ['S2b', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11']) await step(id);
+    const o = await order(state.orderId);
+    assert.deepEqual([o.status, o.totalAmount, o.commissionAmount], ['delivered', 7000, 100], closer);
+    assert.deepEqual(await wallets(), { client: 33000, driver: 5400, restaurant: 6500 }, closer);
+    assert.equal((await db.collection('commissions').where('orderId', '==', state.orderId).get()).size, 1);
+    assert.equal((await live()).creationOpen, false);
+    assert.deepEqual(state.completed, runner.ORDER_OF_STEPS);
+  }
+  setClock(NOW);
+});
