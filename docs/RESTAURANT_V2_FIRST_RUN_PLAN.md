@@ -10,7 +10,7 @@ Mission 7E-38. **Rien de ce document n'a été exécuté.** Source de vérité d
 ## Séquence
 | # | Fonction | Appelant | Paramètres | Effets attendus | Argent |
 |---|---|---|---|---|---|
-| S0 | `partnerOrderActionCF` | admin | `{action:'setPartnerOrdersConfig', patch:{pilotPartnerIds:['t7e-resto'], creationOpen:true}, expectedVersion:0, reason}` | crée `config/partnerOrdersV2` (version 1), audit | aucun |
+| S0 | `partnerOrderActionCF` | admin | `{action:'setPartnerOrdersConfig', patch:{pilotPartnerIds:['t7e-resto'], pilotClientIds:['t7e-client'], clientAccess:'restricted', creationOpen:true, managementFrozen:false}, expectedVersion:0, reason}` | crée `config/partnerOrdersV2` (version 1), audit | aucun |
 | S1 | `quotePartnerOrderCF` | client | `{sellerType:'restaurant', sellerId:'t7e-resto', items:[{itemId,qty}], destination:{lat,lng}}` | `tariff_quotes/<quoteId>` ouvert | aucun |
 | S2 | `createPartnerOrderFromQuoteCF` | client | choix identiques + `quoteId`, `paymentMethod:'wallet'`, `confirmedAmount`, `deliveryAddress` | `orders/<id>` pending, devis `used`, journal `order_<id>` | client −total |
 | S2b | script `prepare.js --refresh-driver-gps` | — | confirmation `REFRESH t7e-lot-1 az-express-preprod 306761725053` | GPS livreur frais (< 3 min exigé au dispatch) | aucun |
@@ -58,7 +58,7 @@ Variable d'environnement : `T7E_API_KEY` (clé web de l'application Android de p
 
 | Étape | Fonction | Identité | Écriture cloud attendue | Précondition (contrôlée) | Résultat attendu | Vérification après écriture | Arrêt |
 |---|---|---|---|---|---|---|---|
-| S0 | `partnerOrderActionCF` setPartnerOrdersConfig | `t7e-admin` | `config/partnerOrdersV2` (v1), `audit_logs`, `rate_limits` | document absent | `pilotPartnerIds=["t7e-resto"]`, `creationOpen=true` | lecture du document | `cleanup.js` (ferme puis supprime) |
+| S0 | `partnerOrderActionCF` setPartnerOrdersConfig | `t7e-admin` | `config/partnerOrdersV2` (v1), `audit_logs`, `rate_limits` | document absent | `pilotPartnerIds=["t7e-resto"]`, `pilotClientIds=["t7e-client"]`, `clientAccess=restricted`, `creationOpen=true` | lecture du document | `cleanup.js` (ferme puis supprime) |
 | S1 | `quotePartnerOrderCF` | `t7e-client` | `tariff_quotes/<id>` (open), `rate_limits` | pilote ouvert au seul restaurant fictif | total = barème officiel à l'heure de l'appel (7 000 de jour ; 7 500 de nuit → **arrêt** si écart) | total, `isNight` | devis expire seul |
 | S2 | `createPartnerOrderFromQuoteCF` | `t7e-client` | `orders/<id>` pending, journal wallet client, devis `used` | devis ouvert | client 40 000 → 33 000 | soldes + 1 seul document `orders` | annulation/refus → remboursement intégral |
 | S2b | `prepare.js --refresh-driver-gps` | script (ADC) | `livreurs/t7e-driver` : lat, lng, isOnline, updatedAt | commande pending | GPS < 60 s | âge du GPS | — |
@@ -74,3 +74,8 @@ Variable d'environnement : `T7E_API_KEY` (clé web de l'application Android de p
 | Fin | fermeture + nettoyage | admin / script | `config/partnerOrdersV2` fermé puis supprimé, lot supprimé | — | pilote fermé | inventaire vide | `cleanup.js` (DRY-RUN puis confirmation) |
 
 Écritures cloud faites hors des fonctions déployées : (1) ouverture du pilote, (2) rafraîchissement du GPS du livreur, (3) un objet Storage, (4) l'état local hors dépôt. Le reste est écrit par les fonctions déployées.
+
+## Mission 7E-40 — S0 et fermeture d'urgence
+- **S0** : `partnerOrderActionCF` `{action:'setPartnerOrdersConfig', patch:{pilotPartnerIds:['t7e-resto'], pilotClientIds:['t7e-client'], clientAccess:'restricted', creationOpen:true, managementFrozen:false}, expectedVersion:0, reason:'Ouverture temporaire du pilote Restaurant v2 pour essai fictif T7E.'}`. Le patch REMPLACE la liste (aucune fusion) ; seule une nouvelle action de super-administrateur peut la modifier.
+- **Fermeture** : `runStep.js … --step CLOSE --execute --confirm "RUN CLOSE t7e-lot-1 az-express-preprod 306761725053"`. Même fonction auditée, `patch:{creationOpen:false}` seul (la liste n'est jamais vidée pour arrêter), `expectedVersion` lue sur le document réel (la version retournée par S0 est mémorisée et un écart est signalé sans bloquer). Possible à tout moment, même après une erreur. La configuration n'est supprimée que par `cleanup.js`, en fin d'essai.
+- **Isolation des comptes (Mission 7E-41)** : corrigée côté serveur par la liste blanche `pilotClientIds` + le mode `clientAccess` (`restricted` par défaut, `open` = ouverture générale explicite, confirmée et auditée). **À déployer en préproduction AVANT S0** : `quotePartnerOrderCF`, `createPartnerOrderFromQuoteCF`, `partnerOrderActionCF`. Sans ce déploiement, S0 ne doit pas être exécutée.

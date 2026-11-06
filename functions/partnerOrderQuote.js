@@ -24,7 +24,7 @@ const { DEFAULT_TARIFF_CONFIG } = require('./tariffConfig');
 const { computeOfficialTariff, validPoint } = require('./officialTariff');
 const { assertNewAccountActivity } = require('./accountAdmission');
 const { buildPartnerAmounts } = require('./partnerOrderAmounts');
-const { creationEnabled, loadPilotConfig, parsePilotConfig, creationRefusal } = require('./partnerOrdersConfig');
+const { creationEnabled, loadPilotConfig, parsePilotConfig, creationRefusal, accessRefusal } = require('./partnerOrdersConfig');
 const {
   PARTNER_KINDS, PartnerRefusal, parseItems, partnerRefusal, partnerPoint, priceItems, itemsFingerprint,
 } = require('./partnerCatalog');
@@ -113,10 +113,12 @@ function buildQuotePartnerOrderCF({
     await checkRateLimit(uid, 'quote_partner_order', 30, 60);
     try {
       const c = parseChoices(d);
-      assertActiveClient(await db.collection('clients').doc(uid).get());
-      // Activation progressive (sécurité par défaut) : création ouverte (creationOpen) ET partenaire listé, sinon refus.
-      const closed = creationRefusal(await loadPilot(), c.sellerId);
+      // Activation progressive (sécurité par défaut) : création ouverte (creationOpen), partenaire listé ET client autorisé
+      // (uid du jeton vérifié, jamais un paramètre). Contrôlé AVANT toute lecture du compte client : un client non autorisé ne
+      // découvre rien sur l’état de son compte.
+      const closed = creationRefusal(await loadPilot(), c.sellerId, uid);
       if (closed) throw new PartnerRefusal(closed.code, closed.message);
+      assertActiveClient(await db.collection('clients').doc(uid).get());
       const read = (collection, id) => db.collection(collection).doc(id).get();
       const { partner, menu } = await readPartnerAndMenu(read, c.sellerType, c.sellerId, c.items);
       const nowMs = now();
@@ -223,12 +225,17 @@ function buildCreatePartnerOrderFromQuoteCF({
         const q = quoteSnap.data();
         // Même réponse qu'un devis absent : on ne révèle ni le devis d'un autre client ni celui d'un autre type.
         if (q.uid !== uid || q.kind !== 'partner') throw new PartnerRefusal('QUOTE_NOT_FOUND', 'Devis introuvable');
+        // Autorisation AVANT le rejeu idempotent : un client retiré de la liste blanche (ou un partenaire retiré du pilote) ne
+        // retrouve pas sa commande par cette voie. creationOpen n'est volontairement pas testé ici (voir plus bas).
+        const pilotConfig = parsePilotConfig(pilotSnap.exists ? pilotSnap.data() : null);
+        const notAuthorized = accessRefusal(pilotConfig, q.sellerId, uid);
+        if (notAuthorized) throw new PartnerRefusal(notAuthorized.code, notAuthorized.message);
         // Rejeu après réponse perdue / double appui : le MÊME client retrouve SA commande, sans second débit.
         if (q.status === 'used' && q.orderId) { replay = { orderId: q.orderId, charged: q.chargedTotal || 0 }; return; }
         if (q.status !== 'open') throw new PartnerRefusal('QUOTE_ALREADY_USED', 'Devis déjà utilisé');
         if (!(q.expiresAtMs > nowMs)) throw new PartnerRefusal('QUOTE_EXPIRED', 'Devis expiré');
         if (orderSnap.exists) throw new PartnerRefusal('ORDER_EXISTS', 'Commande déjà créée');
-        const closedNow = creationRefusal(parsePilotConfig(pilotSnap.exists ? pilotSnap.data() : null), q.sellerId);
+        const closedNow = creationRefusal(pilotConfig, q.sellerId, uid);
         if (closedNow) throw new PartnerRefusal(closedNow.code, closedNow.message);
         if (!geography) throw new PartnerRefusal('GEOGRAPHY_UNAVAILABLE', 'Zone de livraison indisponible, réessayez');
         // Le document de devis n'a pas été altéré (il n'est inscriptible que par le serveur ; défense en profondeur).

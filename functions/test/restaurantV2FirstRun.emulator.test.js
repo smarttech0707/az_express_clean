@@ -182,6 +182,11 @@ test('1. lot préparé sur l’émulateur ; production et ressources hors lot re
   const adminSteps = fr.STEPS.filter((s) => s.caller === 'admin');
   assert.deepEqual(adminSteps.map((s) => s.id), ['S0']);
   assert.deepEqual(adminSteps[0].data(), lot.pilotConfigPlan().request);
+  assert.deepEqual(adminSteps[0].data().patch.pilotClientIds, [CLIENT], 'S0 désigne explicitement le seul client fictif');
+  assert.equal(adminSteps[0].data().patch.clientAccess, 'restricted');
+  assert.throws(() => runner.assertDataInLot({ patch: { pilotClientIds: [CLIENT, 'real-client'] } }, state), (e) => e.code === 'OUT_OF_LOT');
+  assert.throws(() => runner.assertDataInLot({ patch: { clientAccess: 'open' } }, state), (e) => e.code === 'OUT_OF_LOT', 'jamais d’ouverture générale par les scripts');
+  assert.throws(() => runner.assertDataInLot({ confirmGeneralOpening: true }, state), (e) => e.code === 'OUT_OF_LOT');
 });
 
 test('2. parcours S0 → S11 par l’exécuteur : transitions, soldes, commission unique, pilote refermé', options, async () => {
@@ -238,13 +243,15 @@ test('2. parcours S0 → S11 par l’exécuteur : transitions, soldes, commissio
   assert.equal(runner.redact(`erreur ${secrets[0]} ${secrets[1]} eyJhbGciOi.abc.def key=SECRET`, state).includes(secrets[0]), false);
   assert.ok(!/eyJ|key=SECRET/.test(runner.redact('x eyJhbGciOi.abc.def key=SECRET', state)));
 
-  // Étape finale : fermeture du pilote (même fonction que S0, patch de fermeture figé par le plan).
-  const closing = lot.pilotConfigPlan().closing;
-  const closed = await run.action(asUser(ADMIN, { action: 'setPartnerOrdersConfig', ...closing, reason: 'Fin de la répétition (lot t7e-lot-1)' }));
-  assert.equal(closed.success, true, JSON.stringify(closed));
+  // Étape finale : fermeture d'urgence par le chemin audité, avec la version réellement lue (jamais supposée), sans suppression.
+  assert.equal(state.configVersion, 1, 'version retournée par S0');
+  const closed = await runner.closePilot({ state, io, store });
+  assert.deepEqual([closed.closed, closed.version, closed.versionDivergedFromS0], [true, 2, false]);
   const cfg = (await db.doc('config/partnerOrdersV2').get()).data();
-  assert.deepEqual([cfg.creationOpen, cfg.pilotPartnerIds, cfg.version], [false, [], 2]);
-  assert.equal((await run.quote(asUser(CLIENT, choices()))).error, 'PARTNER_NOT_IN_PILOT', 'pilote refermé');
+  assert.deepEqual([cfg.creationOpen, cfg.pilotPartnerIds, cfg.managementFrozen, cfg.version], [false, [RESTO], false, 2]);
+  assert.equal(cfg.lastChange.by, ADMIN);
+  assert.equal((await run.quote(asUser(CLIENT, choices()))).error, 'CREATION_CLOSED', 'pilote refermé');
+  assert.equal((await runner.closePilot({ state, io, store })).alreadyClosed, true, 'fermeture idempotente');
 
   // Aucune notification : aucun document de déduplication, aucun accès à la messagerie.
   const collections = (await db.listCollections()).map((c) => c.id);
@@ -256,7 +263,7 @@ test('2. parcours S0 → S11 par l’exécuteur : transitions, soldes, commissio
 
 test('3. exécuteur : ordre imposé, aucune reprise, première erreur fige le parcours, secrets masqués', options, async () => {
   // Pilote réouvert (version 2 → 3) pour les essais suivants.
-  const reopen = await run.action(asUser(ADMIN, { action: 'setPartnerOrdersConfig', patch: { pilotPartnerIds: [RESTO], creationOpen: true }, expectedVersion: 2, reason: 'Réouverture de test' }));
+  const reopen = await run.action(asUser(ADMIN, { action: 'setPartnerOrdersConfig', patch: { creationOpen: true }, expectedVersion: 2, reason: 'Réouverture de test' }));
   assert.equal(reopen.success, true, JSON.stringify(reopen));
   const base = () => ({ lotId: lot.LOT_ID, completed: ['S0'], baselineOrderIds: manifest.baseline.orderIds });
 
@@ -379,8 +386,14 @@ test('5. sécurité : mauvais compte, mauvais rôle, restaurant hors pilote, pre
   assert.equal((await wallets()).client, before.client + 7000, 'commande de test remboursée');
 
   // Pilote refermé : plus de devis.
-  await run.action(asUser(ADMIN, { action: 'setPartnerOrdersConfig', patch: { pilotPartnerIds: [], creationOpen: false }, expectedVersion: 3, reason: 'Fin des essais de sécurité' }));
-  assert.equal((await run.quote(asUser(CLIENT, choices()))).error, 'PARTNER_NOT_IN_PILOT');
+  // Fermeture d'urgence : la version réelle (3) est lue ; une modification concurrente est signalée sans bloquer la fermeture ;
+  // elle reste possible après une erreur de l'exécuteur ; hors identité administrateur, elle est refusée.
+  const failedState = { completed: ['S0'], configVersion: 1, failed: { step: 'S3', code: 'X', message: 'm' }, baselineOrderIds: manifest.baseline.orderIds };
+  const wrongAdmin = { ...io, identity: async () => ({ uid: CLIENT }) };
+  await assert.rejects(runner.closePilot({ state: failedState, io: wrongAdmin, store: memoryStore() }), (e) => e.code === 'WRONG_IDENTITY');
+  const closedAfterFailure = await runner.closePilot({ state: failedState, io, store: memoryStore() });
+  assert.deepEqual([closedAfterFailure.closed, closedAfterFailure.version, closedAfterFailure.versionDivergedFromS0], [true, 4, true]);
+  assert.equal((await run.quote(asUser(CLIENT, choices()))).error, 'CREATION_CLOSED');
 });
 
 test('6. historique intact : commandes, comptes et jeton FCM existants identiques', options, async () => {

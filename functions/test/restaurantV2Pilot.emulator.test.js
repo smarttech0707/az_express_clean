@@ -207,7 +207,7 @@ test('3. parcours complet : pilote, devis, commande, restaurant, livreur, QR/PIN
   await openPilot();
   const cfg = (await db.doc('config/partnerOrdersV2').get()).data();
   const expected = lot.pilotConfigPlan().expectedDocument;
-  assert.deepEqual({ pilotPartnerIds: cfg.pilotPartnerIds, creationOpen: cfg.creationOpen, managementFrozen: cfg.managementFrozen, version: cfg.version }, expected);
+  assert.deepEqual({ pilotPartnerIds: cfg.pilotPartnerIds, pilotClientIds: cfg.pilotClientIds, clientAccess: cfg.clientAccess, creationOpen: cfg.creationOpen, managementFrozen: cfg.managementFrozen, version: cfg.version }, expected);
   // Un autre partenaire reste refusé.
   const other = await run.quote(asUser(CLIENT, { ...request(), sellerId: 'real-resto' }));
   assert.equal(other.success, false);

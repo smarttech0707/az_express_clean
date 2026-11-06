@@ -36,7 +36,7 @@ test.before(async () => {
   await db.doc('restaurants/pr1').set({ name: 'Chez Test', lat: PLACE.lat, lng: PLACE.lng, isOpen: true });
   await db.doc('restaurants/pr1/menu/m1').set({ name: 'Plat test', price: 1500, available: true });
   // Sécurité par défaut (7C-1-S) : sans liste pilote, aucune création v2.
-  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['pr1'], creationOpen: true });
+  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['pr1'], clientAccess: 'open', creationOpen: true });
 });
 
 const as = (uid, data) => ({ auth: { uid, token: { firebase: { sign_in_provider: 'password' } } }, data });
@@ -593,5 +593,5 @@ test('configuration pilote : 6 modifications simultanées sur la même version �
   const c = (await db.doc('config/partnerOrdersV2').get()).data();
   assert.deepEqual([c.version, c.updatedBy, c.lastChange.before.version, c.lastChange.after.version], [1, 'rootCfg', 0, 1]);
   // Remise à l'état du jeu d'essai des autres tests (création ouverte pour pr1).
-  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['pr1'], creationOpen: true });
+  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['pr1'], clientAccess: 'open', creationOpen: true });
 });

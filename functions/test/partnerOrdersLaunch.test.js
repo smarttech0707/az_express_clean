@@ -303,7 +303,7 @@ const fakeAdmin = { firestore: { FieldValue: { serverTimestamp: () => 'ts', incr
 test('AZ IA create_restaurant_order : refusé pour un partenaire pilote, intact hors pilote, sans liste et après retrait de la liste', async () => {
   const db = aziaDb({
     'clients/c1': { wallet: 5000 }, 'restaurants/r1': { name: 'Chez Awa', wallet: 0 }, 'restaurants/r2': { name: 'Autre', wallet: 0 },
-    'config/partnerOrdersV2': { pilotPartnerIds: ['r1'] },
+    'config/partnerOrdersV2': { pilotPartnerIds: ['r1'], clientAccess: 'open' },
   });
   const tool = createRestaurantOrder({ db, admin: fakeAdmin, HttpsError });
   const input = (id) => ({ restaurantId: id, items: [{ name: 'Plat', price: 1000, quantity: 1 }], deliveryLat: 6.7, deliveryLng: -3.5, paymentMethod: 'cash' });

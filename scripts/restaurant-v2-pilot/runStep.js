@@ -55,6 +55,10 @@ function assertDataInLot(data, state) {
     if (k === 'sellerId' && v !== UID.restaurant) throw new StepError('OUT_OF_LOT', 'sellerId hors du lot');
     if (k === 'orderId' && (v !== state.orderId || (state.baselineOrderIds || []).includes(v))) throw new StepError('OUT_OF_LOT', 'orderId hors du lot');
     if (k === 'pilotPartnerIds' && !(Array.isArray(v) && v.every((id) => id === UID.restaurant))) throw new StepError('OUT_OF_LOT', 'pilotPartnerIds hors du lot');
+    if (k === 'pilotClientIds' && !(Array.isArray(v) && v.every((id) => id === UID.client))) throw new StepError('OUT_OF_LOT', 'pilotClientIds hors du lot');
+    // Jamais d'ouverture générale depuis les scripts d'essai.
+    if (k === 'clientAccess' && v !== 'restricted') throw new StepError('OUT_OF_LOT', 'ouverture générale refusée par les scripts d’essai');
+    if (k === 'confirmGeneralOpening') throw new StepError('OUT_OF_LOT', 'ouverture générale refusée par les scripts d’essai');
     if (k === 'uid' && !lotUids.has(v)) throw new StepError('OUT_OF_LOT', 'uid hors du lot');
   };
   const walk = (o) => { if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { check(k, v); walk(v); } };
@@ -67,7 +71,10 @@ const GATES = {
   S0: async ({ read }) => { if (await read('config/partnerOrdersV2')) throw new StepError('PILOT_ALREADY_CONFIGURED', 'Le pilote est déjà configuré : revue manuelle'); },
   S1: async ({ read }) => {
     const c = await read('config/partnerOrdersV2');
-    if (!c || c.creationOpen !== true || JSON.stringify(c.pilotPartnerIds) !== JSON.stringify([UID.restaurant])) throw new StepError('PILOT_NOT_READY', 'Pilote non ouvert au seul restaurant fictif');
+    if (!c || c.creationOpen !== true || JSON.stringify(c.pilotPartnerIds) !== JSON.stringify([UID.restaurant])
+      || JSON.stringify(c.pilotClientIds) !== JSON.stringify([UID.client]) || c.clientAccess !== 'restricted') {
+      throw new StepError('PILOT_NOT_READY', 'Pilote non ouvert au seul restaurant et au seul client fictifs');
+    }
   },
   S2: async ({ state }) => { if (!state.quoteId) throw new StepError('NO_QUOTE', 'Aucun devis (S1 requise)'); },
   S2b: async ({ read, state }) => { if (!statusIs(await read(`orders/${state.orderId}`), 'pending')) throw new StepError('BAD_STATE', 'Commande non « pending »'); },
@@ -158,7 +165,11 @@ async function executeStep({ stepId, state, io, store, nowMs = Date.now(), clock
 
 function applyResult(stepId, res, state, nowMs, summary) {
   const d = (res && res.data) || {};
-  if (stepId === 'S1') {
+  if (stepId === 'S0') {
+    const cfg = d.config || {};
+    if (!Number.isSafeInteger(cfg.version)) throw new StepError('NO_CONFIG_VERSION', 'Version de configuration non retournée');
+    state.configVersion = cfg.version; summary.configVersion = cfg.version;
+  } else if (stepId === 'S1') {
     const expected = lot.expectedAmounts({ nowMs });
     // Les frais de jour ne sont JAMAIS supposés : le total retourné doit égaler le barème officiel à l’heure de l’appel.
     if (d.total !== expected.totalAmount) throw new StepError('AMOUNT_MISMATCH', `Total du devis ${d.total}, barème attendu ${expected.totalAmount} (jour/nuit ?)`);
@@ -187,7 +198,8 @@ async function verifyAfter(stepId, { read, state }) {
   }
   if (stepId === 'S0') {
     const c = await read('config/partnerOrdersV2');
-    if (!c || c.version !== 1 || c.creationOpen !== true || JSON.stringify(c.pilotPartnerIds) !== JSON.stringify([UID.restaurant])) throw new StepError('UNEXPECTED_STATE', 'Configuration du pilote différente de celle prévue');
+    if (!c || c.version !== 1 || c.creationOpen !== true || JSON.stringify(c.pilotPartnerIds) !== JSON.stringify([UID.restaurant])
+      || JSON.stringify(c.pilotClientIds) !== JSON.stringify([UID.client]) || c.clientAccess !== 'restricted' || c.managementFrozen !== false) throw new StepError('UNEXPECTED_STATE', 'Configuration du pilote différente de celle prévue');
   }
   if (state.amounts && state.startWallets) {
     const ledger = lot.expectedLedger(state.amounts, state.startWallets);
@@ -199,14 +211,54 @@ async function verifyAfter(stepId, { read, state }) {
   }
 }
 
+// ── Fermeture d'urgence ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Possible À TOUT MOMENT (même après une erreur, même hors séquence) : même fonction auditée que S0, creationOpen:false uniquement.
+// La version attendue est lue sur le document réel au moment de l'appel ; un écart avec la version retournée par S0 est signalé
+// (quelqu'un a modifié la configuration) mais ne bloque jamais la fermeture. La configuration n'est JAMAIS supprimée ici.
+async function closePilot({ state, io, store }) {
+  const who = await io.identity('admin');
+  if (who.uid !== UID.admin) throw new StepError('WRONG_IDENTITY', 'Identité inattendue');
+  const read = safeReader(io, state);
+  const live = await read('config/partnerOrdersV2');
+  if (!live) throw new StepError('NOTHING_TO_CLOSE', 'Aucune configuration : le pilote est déjà fermé');
+  if (live.creationOpen !== true) return { step: 'CLOSE', alreadyClosed: true, version: live.version };
+  const plan = lot.pilotConfigPlan().closing;
+  const request = { action: 'setPartnerOrdersConfig', patch: plan.patch, expectedVersion: live.version, reason: plan.reason };
+  const res = await io.call(fr.FN.partner, 'admin', request);
+  if (res && res.success === false) throw new StepError(res.error || 'CLOSE_REFUSED', res.message || 'Fermeture refusée');
+  const after = await read('config/partnerOrdersV2');
+  if (!after || after.creationOpen !== false || after.version !== live.version + 1 || JSON.stringify(after.pilotPartnerIds) !== JSON.stringify(live.pilotPartnerIds)
+    || JSON.stringify(after.pilotClientIds) !== JSON.stringify(live.pilotClientIds) || after.clientAccess !== live.clientAccess) {
+    throw new StepError('UNEXPECTED_STATE', 'Configuration après fermeture différente de celle prévue');
+  }
+  const summary = { step: 'CLOSE', closed: true, version: after.version, versionDivergedFromS0: state.configVersion !== undefined && state.configVersion !== live.version };
+  state.pilotClosedAtMs = Date.now();
+  await store.save(state);
+  return summary;
+}
+
+const STOP_CONDITIONS = Object.freeze([
+  'toute erreur de l’exécuteur fige le parcours (état failed) : aucune étape suivante sans revue humaine',
+  'identité, projet, numéro de projet ou jeton inattendus',
+  'ouverture générale (clientAccess ≠ restricted) ou liste de clients différente de [t7e-client] : jamais depuis ces scripts',
+  'commande ou client hors lot détecté (orders dont clientId ≠ t7e-client, ou ≠ 1 commande du lot)',
+  'total du devis différent du barème officiel (nuit, tarif modifié)',
+  'GPS du livreur de plus de 60 s avant S3',
+  'solde différent de l’attendu après une étape',
+]);
+
 // ── Tableau d’exécution (données de l’étape, sans effet) ────────────────────────────────────────────────────────────────────────
 function describeStep(stepId, state = {}) {
+  if (stepId === 'CLOSE') {
+    const c = lot.pilotConfigPlan().closing;
+    return { step: 'CLOSE', title: 'Fermeture d’urgence du pilote', fn: fr.FN.partner, caller: 'admin', request: { action: 'setPartnerOrdersConfig', patch: c.patch, expectedVersion: '<version réellement lue>', reason: c.reason }, effects: ['config/partnerOrdersV2.creationOpen = false, version +1, lastChange', 'audit_logs : partner_orders_config_update'], pass: ['creationOpen=false, liste inchangée, version+1'], fail: ['CONFIG_CONFLICT (relire puis refaire)'] };
+  }
   const s = fr.STEPS.find((x) => x.id === stepId);
   if (!s) throw new StepError('UNKNOWN_STEP', `Étape inconnue : ${stepId}`);
   const secret = { pin: '[secret]', token: '[secret]' };
   const ctx = { orderId: state.orderId || '<orderId>', quoteId: state.quoteId || '<quoteId>', total: state.total || '<total>', selfieUrl: state.selfieUrl || '<url>', pickup: secret, delivery: secret };
   const body = s.fn ? s.data(ctx) : null;
-  return { step: s.id, title: s.title, fn: s.fn, caller: s.caller, request: s.fn ? body : s.command || { upload: 'acceptance_selfies/<orderId>/t7e-driver.jpg' }, preconditions: s.preconditions, effects: s.effects, pass: s.pass, fail: s.fail };
+  return { step: s.id, title: s.title, ...(s.id === 'S0' ? { closing: 'node scripts/restaurant-v2-pilot/runStep.js … --step CLOSE --execute --confirm "RUN CLOSE t7e-lot-1 az-express-preprod 306761725053"' } : {}), stopConditions: STOP_CONDITIONS, fn: s.fn, caller: s.caller, request: s.fn ? body : s.command || { upload: 'acceptance_selfies/<orderId>/t7e-driver.jpg' }, preconditions: s.preconditions, effects: s.effects, pass: s.pass, fail: s.fail };
 }
 
 // ── Stockage de l’état (hors dépôt, droits 0600) ────────────────────────────────────────────────────────────────────────────────
@@ -298,7 +350,7 @@ async function main(argv = process.argv.slice(2), env = process.env, log = conso
   const stepId = args.values.step;
   const store = fileStore(args.values['state-dir']);
   const state = await store.load();
-  log(JSON.stringify(describeStep(stepId, state), null, 2));
+  log(JSON.stringify({ target: { projectId: target.projectId, projectNumber: args.values['project-number'], mode: target.mode, region: 'europe-west1' }, ...describeStep(stepId, state) }, null, 2));
   if (!args.flags.has('execute')) { log('DRY-RUN : aucune connexion, aucune écriture.'); return 0; }
   if (target.mode !== 'preprod') throw new guard.GuardError('PREPROD_ONLY', 'Exécution réservée à az-express-preprod');
   guard.assertConfirmation(args.values.confirm, `RUN ${stepId}`);
@@ -311,7 +363,7 @@ async function main(argv = process.argv.slice(2), env = process.env, log = conso
     credentials: JSON.parse(fs.readFileSync(path.join(credDir, 'credentials.json'), 'utf8')),
     manifest: JSON.parse(fs.readFileSync(path.join(credDir, 'manifest.json'), 'utf8')),
   });
-  const result = await executeStep({ stepId, state, io, store });
+  const result = stepId === 'CLOSE' ? await closePilot({ state, io, store }) : await executeStep({ stepId, state, io, store });
   log(JSON.stringify({ ok: true, ...result }, null, 2));
   return 0;
 }
@@ -323,4 +375,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { executeStep, describeStep, cloudIo, fileStore, parseArgs, main, redact, assertDataInLot, safeReader, StepError, ORDER_OF_STEPS, GPS_MAX_AGE_MS };
+module.exports = { closePilot, STOP_CONDITIONS, executeStep, describeStep, cloudIo, fileStore, parseArgs, main, redact, assertDataInLot, safeReader, StepError, ORDER_OF_STEPS, GPS_MAX_AGE_MS };

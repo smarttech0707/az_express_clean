@@ -98,7 +98,7 @@ function buildPartnerOrderAction({
     }
     await logAudit({
       userId: uid, userType: 'admin', action: 'partner_orders_config_update', targetId: 'partnerOrdersV2',
-      metadata: { before: result.before, after: result.after, reason: result.reason },
+      metadata: { before: result.before, after: result.after, reason: result.reason, generalOpening: result.generalOpening },
     });
     return envelope(true, null, 'Configuration mise à jour', { config: result.after });
   }

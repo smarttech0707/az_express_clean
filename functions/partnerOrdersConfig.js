@@ -15,7 +15,13 @@
 //   PARTNER_ORDERS_V2        = 'on'  → rend la création possible (avec creationOpen et la liste). Absent : jamais de création.
 //   PARTNER_ORDERS_V2_MANAGE = 'off' → même gel que managementFrozen.
 //
-// Création v2 = variable 'on' ET creationOpen === true ET partenaire dans pilotPartnerIds.
+//   pilotClientIds   : (Mission 7E-41) liste blanche des CLIENTS autorisés à commander pendant le mode « restreint ».
+//   clientAccess     : mode d'accès des clients : 'restricted' (défaut, et valeur de toute configuration ancienne ou invalide) ou
+//                      'open' (ouverture générale). Le passage à 'open' exige une décision explicite (confirmGeneralOpening) et
+//                      est journalisé (generalOpening) ; il n'a jamais lieu implicitement.
+//
+// Création v2 = variable 'on' ET creationOpen === true ET partenaire dans pilotPartnerIds ET (clientAccess === 'open' OU client
+// dans pilotClientIds). Liste absente, vide ou malformée en mode restreint = AUCUN client autorisé (refus par défaut).
 // Modification du document : uniquement par l'opération super-administrateur `setPartnerOrdersConfig`
 // (partnerOrderActionCF) : validation stricte, version (contrôle de concurrence), journal d'audit avant/après.
 
@@ -35,9 +41,16 @@ const MANAGEMENT_FREEZE_POLICY = 'all_partner_order_actions_except_config';
 const creationEnabled = () => process.env.PARTNER_ORDERS_V2 === 'on';
 const managementEnabled = () => process.env.PARTNER_ORDERS_V2_MANAGE !== 'off';
 
+const CLIENT_ACCESS_MODES = Object.freeze(['restricted', 'open']);
+const validId = (id) => typeof id === 'string' && !!id && !id.includes('/');
+
 function parsePilotConfig(data) {
   const d = data && typeof data === 'object' ? data : {};
+  // Liste blanche des clients : une seule entrée invalide rend TOUTE la liste invalide (refus par défaut, jamais une liste partielle).
+  const clientList = Array.isArray(d.pilotClientIds) && d.pilotClientIds.every(validId) ? d.pilotClientIds : [];
   return {
+    clientIds: new Set(clientList),
+    clientAccess: d.clientAccess === 'open' ? 'open' : 'restricted',
     ids: new Set(Array.isArray(d.pilotPartnerIds)
       ? d.pilotPartnerIds.filter((id) => typeof id === 'string' && id && !id.includes('/')) : []),
     creationOpen: d.creationOpen === true,
@@ -57,10 +70,23 @@ const v2CreationAllowed = (config, sellerId) => config.creationOpen === true && 
 // Motif de refus lisible. L'APPARTENANCE au pilote est vérifiée EN PREMIER : PARTNER_NOT_IN_PILOT est la seule réponse qui
 // prouve au client que le partenaire reste sur l'ancien parcours (ce que les règles Firestore confirment : liste seule).
 // CREATION_CLOSED ne concerne donc que les partenaires pilotes : un arrêt d'urgence ne touche pas les autres partenaires.
-function creationRefusal(config, sellerId) {
+// Le client ne peut jamais se désigner lui-même : `clientId` vient de request.auth.uid (jeton vérifié), jamais des paramètres.
+function clientRefusal(config, clientId) {
+  if (config.clientAccess === 'open') return null;
+  if (typeof clientId === 'string' && clientId && config.clientIds.has(clientId)) return null;
+  return { code: 'CLIENT_NOT_IN_PILOT', message: 'Ce service n’est pas encore ouvert à votre compte' };
+}
+
+// Autorisation (partenaire pilote + client autorisé), SANS tenir compte de creationOpen : utilisée aussi avant un rejeu idempotent.
+function accessRefusal(config, sellerId, clientId) {
+  if (!config.ids.has(sellerId)) return { code: 'PARTNER_NOT_IN_PILOT', message: 'Ce partenaire n’accepte pas encore ce type de commande' };
+  return clientRefusal(config, clientId);
+}
+
+function creationRefusal(config, sellerId, clientId) {
   if (!config.ids.has(sellerId)) return { code: 'PARTNER_NOT_IN_PILOT', message: 'Ce partenaire n’accepte pas encore ce type de commande' };
   if (config.creationOpen !== true) return { code: 'CREATION_CLOSED', message: 'Ces commandes sont momentanément indisponibles' };
-  return null;
+  return clientRefusal(config, clientId);
 }
 
 // Ancien parcours de création (sans devis serveur) refusé pour ce partenaire ? Exactement les partenaires pilotes : même
@@ -73,9 +99,10 @@ class ConfigRefusal extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
-const PATCH_KEYS = Object.freeze(['pilotPartnerIds', 'creationOpen', 'managementFrozen']);
+const PATCH_KEYS = Object.freeze(['pilotPartnerIds', 'pilotClientIds', 'clientAccess', 'creationOpen', 'managementFrozen']);
 const PARTNER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_PILOTS = 50;
+const MAX_PILOT_CLIENTS = 50;
 
 function validateConfigChange(input) {
   const i = input && typeof input === 'object' ? input : {};
@@ -98,13 +125,27 @@ function validateConfigChange(input) {
     }
     clean.pilotPartnerIds = [...list].sort();
   }
+  if ('pilotClientIds' in patch) {
+    const list = patch.pilotClientIds;
+    if (!Array.isArray(list) || list.length > MAX_PILOT_CLIENTS || list.some((id) => typeof id !== 'string' || !PARTNER_ID.test(id))
+      || new Set(list).size !== list.length) {
+      throw new ConfigRefusal('INVALID_CONFIG', 'Liste de clients pilotes invalide');
+    }
+    clean.pilotClientIds = [...list].sort();
+  }
+  if ('clientAccess' in patch) {
+    if (!CLIENT_ACCESS_MODES.includes(patch.clientAccess)) throw new ConfigRefusal('INVALID_CONFIG', 'Mode d’accès des clients invalide');
+    // Ouverture générale : jamais implicite, toujours une décision explicite et distincte de la simple modification.
+    if (patch.clientAccess === 'open' && i.confirmGeneralOpening !== true) throw new ConfigRefusal('GENERAL_OPENING_NOT_CONFIRMED', 'Ouverture générale : confirmation explicite requise');
+    clean.clientAccess = patch.clientAccess;
+  }
   if (!Number.isSafeInteger(i.expectedVersion) || i.expectedVersion < 0) throw new ConfigRefusal('INVALID_CONFIG', 'Version attendue invalide');
   const reason = typeof i.reason === 'string' ? i.reason.trim() : '';
   if (reason.length < 10 || reason.length > 300) throw new ConfigRefusal('INVALID_CONFIG', 'Justification de 10 à 300 caractères obligatoire');
   return { patch: clean, expectedVersion: i.expectedVersion, reason };
 }
 
-const view = (c) => ({ pilotPartnerIds: [...c.ids].sort(), creationOpen: c.creationOpen, managementFrozen: c.managementFrozen, version: c.version });
+const view = (c) => ({ pilotPartnerIds: [...c.ids].sort(), pilotClientIds: [...c.clientIds].sort(), clientAccess: c.clientAccess, creationOpen: c.creationOpen, managementFrozen: c.managementFrozen, version: c.version });
 
 // Écrit la configuration dans UNE transaction : lecture, contrôle de version (modifications concurrentes), écriture et trace
 // `lastChange` dans le document lui-même (le journal d'audit est écrit ensuite par l'appelant ; cette trace subsiste même si
@@ -120,15 +161,15 @@ async function applyConfigChange({ db, uid, input, nowMs = Date.now() }) {
     }
     const after = { ...before, ...patch, version: before.version + 1 };
     tx.set(ref, {
-      pilotPartnerIds: after.pilotPartnerIds, creationOpen: after.creationOpen, managementFrozen: after.managementFrozen,
+      pilotPartnerIds: after.pilotPartnerIds, pilotClientIds: after.pilotClientIds, clientAccess: after.clientAccess, creationOpen: after.creationOpen, managementFrozen: after.managementFrozen,
       version: after.version, updatedAtMs: nowMs, updatedBy: uid,
       lastChange: { by: uid, atMs: nowMs, reason, before, after },
     });
-    return { before, after, reason };
+    return { before, after, reason, generalOpening: before.clientAccess !== 'open' && after.clientAccess === 'open' };
   });
 }
 
 module.exports = {
   CONFIG_COLLECTION, CONFIG_DOC, MANAGEMENT_FREEZE_POLICY, creationEnabled, managementEnabled, parsePilotConfig, loadPilotConfig,
-  v2CreationAllowed, creationRefusal, legacyCreationBlocked, ConfigRefusal, validateConfigChange, applyConfigChange,
+  v2CreationAllowed, creationRefusal, accessRefusal, clientRefusal, CLIENT_ACCESS_MODES, legacyCreationBlocked, ConfigRefusal, validateConfigChange, applyConfigChange,
 };

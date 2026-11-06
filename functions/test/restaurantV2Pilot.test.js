@@ -175,10 +175,13 @@ test('porte de création : fermée sans configuration, ouverte pour le seul rest
   const absent = parsePilotConfig(null);
   assert.equal(creationRefusal(absent, 't7e-resto').code, 'PARTNER_NOT_IN_PILOT', 'document absent = fermé');
   const open = parsePilotConfig(lot.pilotConfigPlan().expectedDocument);
-  assert.equal(creationRefusal(open, 't7e-resto'), null);
-  for (const other of ['pr1', 'real-restaurant', 't7e-client']) assert.equal(creationRefusal(open, other).code, 'PARTNER_NOT_IN_PILOT', other);
+  assert.equal(creationRefusal(open, 't7e-resto', 't7e-client'), null);
+  for (const other of ['pr1', 'real-restaurant', 't7e-client']) assert.equal(creationRefusal(open, other, 't7e-client').code, 'PARTNER_NOT_IN_PILOT', other);
+  // Isolation des clients (Mission 7E-41) : seul le client fictif passe, tout autre uid est refusé.
+  for (const other of ['real-client', 't7e-resto', '', undefined, null]) assert.equal(creationRefusal(open, 't7e-resto', other).code, 'CLIENT_NOT_IN_PILOT', String(other));
+  assert.equal(creationRefusal(open, 't7e-resto').code, 'CLIENT_NOT_IN_PILOT', 'uid absent = refus');
   const closing = parsePilotConfig({ ...lot.pilotConfigPlan().expectedDocument, ...lot.pilotConfigPlan().closing.patch });
-  assert.equal(creationRefusal(closing, 't7e-resto').code, 'PARTNER_NOT_IN_PILOT', 'fermeture : liste vide');
+  assert.equal(creationRefusal(closing, 't7e-resto', 't7e-client').code, 'CREATION_CLOSED', 'fermeture : creationOpen=false, liste inchangée');
   assert.equal(creationRefusal(parsePilotConfig({ pilotPartnerIds: ['t7e-resto'], creationOpen: false }), 't7e-resto').code, 'CREATION_CLOSED');
 });
 

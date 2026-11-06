@@ -171,6 +171,11 @@ async function collectInventory({ admin, db, auth, bucket, manifest }) {
   if (pilot.exists) {
     const ids = Array.isArray(pilot.data().pilotPartnerIds) ? pilot.data().pilotPartnerIds : [];
     if (ids.some((id) => id !== IDENTITIES.restaurant.uid)) conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres partenaires : ne pas toucher');
+    // Mission 7E-41 : un pilote ouvert à d’autres clients (liste étrangère ou ouverture générale) n’est plus un pilote du lot.
+    const clients = pilot.data().pilotClientIds;
+    if ((Array.isArray(clients) && clients.some((id) => id !== IDENTITIES.client.uid)) || pilot.data().clientAccess === 'open') {
+      conflict('firestore', PILOT_CONFIG, 'le pilote désigne d’autres clients ou est ouvert à tous : ne pas toucher');
+    }
     else add({ type: 'firestore', path: PILOT_CONFIG, group: 'pilot' });
   }
 
@@ -207,7 +212,7 @@ async function executeCleanup({ admin, db, auth, bucket, manifest, expectedHash,
 
   // 1. Fermeture du pilote AVANT toute suppression (aucune nouvelle commande possible pendant le nettoyage).
   if (inventory.items.some((i) => i.path === PILOT_CONFIG)) {
-    await db.doc(PILOT_CONFIG).update({ creationOpen: false, pilotPartnerIds: [] });
+    await db.doc(PILOT_CONFIG).update({ creationOpen: false, pilotPartnerIds: [], pilotClientIds: [], clientAccess: 'restricted' });
     log('pilote fermé');
   }
   // 2. Documents Firestore, du plus profond au plus haut ; configuration du pilote en dernier.

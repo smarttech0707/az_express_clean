@@ -22,13 +22,13 @@ const choices = () => ({ sellerType: 'restaurant', sellerId: RESTO, items: lot.B
 // ctx : { orderId, quoteId, total, pickup: { pin, token }, delivery: { pin, token }, selfieUrl }
 const STEPS = Object.freeze([
   {
-    id: 'S0', fn: FN.partner, caller: 'admin', title: 'Ouverture du pilote, restreinte au restaurant fictif',
+    id: 'S0', fn: FN.partner, caller: 'admin', title: 'Ouverture du pilote, restreinte au restaurant ET au client fictifs',
     data: () => lot.pilotConfigPlan().request,
     preconditions: ['config/partnerOrdersV2 absent (version 0)', 'admins/t7e-admin : role super, isActive'],
-    effects: ['crée config/partnerOrdersV2 {pilotPartnerIds:["t7e-resto"], creationOpen:true, managementFrozen:false, version:1, lastChange}', 'audit_logs : partner_orders_config_update', 'rate_limits/t7e-admin_partner_orders_config'],
+    effects: ['crée config/partnerOrdersV2 {pilotPartnerIds:["t7e-resto"], pilotClientIds:["t7e-client"], clientAccess:"restricted", creationOpen:true, managementFrozen:false, version:1, lastChange}', 'audit_logs : partner_orders_config_update', 'rate_limits/t7e-admin_partner_orders_config'],
     money: () => 'aucun mouvement',
     risks: ['seule étape qui ouvre le pilote : à refermer en fin d’essai (cleanup.js)'],
-    pass: ['success=true', 'pilotPartnerIds = ["t7e-resto"] uniquement'], fail: ['tout autre partenaire listé', 'CONFIG_CONFLICT (document déjà présent)'],
+    pass: ['success=true', 'pilotPartnerIds = ["t7e-resto"] et pilotClientIds = ["t7e-client"] uniquement'], fail: ['tout autre partenaire listé', 'CONFIG_CONFLICT (document déjà présent)'],
   },
   {
     id: 'S1', fn: FN.quote, caller: 'client', title: 'Devis Restaurant v2',

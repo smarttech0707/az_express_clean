@@ -146,17 +146,20 @@ function expectedLedger(amounts, start = WALLETS) {
 function pilotConfigPlan() {
   const request = {
     action: 'setPartnerOrdersConfig',
-    patch: { pilotPartnerIds: [IDENTITIES.restaurant.uid], creationOpen: true },
+    // Mode « restreint » explicite (Mission 7E-41) : seul le client fictif peut commander chez le restaurant fictif.
+    patch: { pilotPartnerIds: [IDENTITIES.restaurant.uid], pilotClientIds: [IDENTITIES.client.uid], clientAccess: 'restricted', creationOpen: true, managementFrozen: false },
     expectedVersion: 0, // document absent = version 0
-    reason: `Essais Restaurant v2 en préproduction, lot ${LOT_ID} (restaurant fictif uniquement)`,
+    reason: 'Ouverture temporaire du pilote Restaurant v2 pour essai fictif T7E.',
   };
   validateConfigChange(request); // lève ConfigRefusal si la demande n'est pas acceptée par la fonction réelle
   return {
     callable: 'partnerOrderActionCF',
     caller: IDENTITIES.admin.uid,
     request,
-    expectedDocument: { pilotPartnerIds: [IDENTITIES.restaurant.uid], creationOpen: true, managementFrozen: false, version: 1 },
-    closing: { patch: { pilotPartnerIds: [], creationOpen: false }, expectedVersion: 1 },
+    expectedDocument: { pilotPartnerIds: [IDENTITIES.restaurant.uid], pilotClientIds: [IDENTITIES.client.uid], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 1 },
+    // Arrêt d'urgence = creationOpen:false SEUL (la liste n'est jamais vidée pour arrêter : voir partnerOrdersConfig.js). La version
+    // attendue est celle réellement retournée par S0 / lue avant l'appel : jamais supposée.
+    closing: { patch: { creationOpen: false }, reason: 'Fermeture du pilote Restaurant v2 après essai fictif T7E.' },
   };
 }
 

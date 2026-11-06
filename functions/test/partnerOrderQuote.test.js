@@ -21,7 +21,7 @@ function world({ wallet = 20000, seed = {}, enabled = true } = {}) {
   const db = fakeDb({
     'clients/alice': { wallet, name: 'Alice Test', phone: '+2250000000001' },
     'clients/bob': { wallet: 9000 },
-    'config/partnerOrdersV2': { pilotPartnerIds: ['r1', 'b1', 'nope'], creationOpen: true },
+    'config/partnerOrdersV2': { pilotPartnerIds: ['r1', 'b1', 'nope'], clientAccess: 'open', creationOpen: true },
     'restaurants/r1': { name: 'Chez Test', lat: PLACE.lat, lng: PLACE.lng, isOpen: true },
     'restaurants/r1/menu/m1': { name: 'Attiéké poisson', price: 1500, available: true },
     'restaurants/r1/menu/m2': { name: 'Jus', price: 500 },
@@ -92,11 +92,11 @@ test('interrupteur : désactivées par défaut, aucune écriture ; pilote → FE
   const w = world({ enabled: false });
   const r = await w.q(rReq);
   assert.equal(r.code, 'FEATURE_DISABLED'); // r1 est pilote : jamais de repli historique
-  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], creationOpen: true });
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], clientAccess: 'open', creationOpen: true });
   assert.equal((await w.q(rReq)).code, 'PARTNER_NOT_IN_PILOT'); // restaurant hors pilote : ancien parcours préservé
   w.store.delete('config/partnerOrdersV2');
   assert.equal((await w.q(rReq)).code, 'PARTNER_NOT_IN_PILOT'); // configuration absente : aucun pilote
-  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['r1'], creationOpen: true });
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['r1'], clientAccess: 'open', creationOpen: true });
   assert.equal((await w.q({ ...rReq, sellerType: 'inconnu' })).code, 'FEATURE_DISABLED'); // requête ambiguë : blocage
   assert.equal((await w.q({ ...rReq, sellerId: 'a/b' })).code, 'FEATURE_DISABLED');
   const r2 = await w.o({ quoteId: 'x', paymentMethod: 'wallet' });
@@ -143,7 +143,7 @@ test('liste pilote : retrait entre le devis et la création → création refus�
   const w = world();
   const quote = await w.q(rReq);
   assert.equal(quote.success, true);
-  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], creationOpen: true });
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], clientAccess: 'open', creationOpen: true });
   const refused = await w.o(create(quote, rReq));
   assert.equal(refused.code, 'PARTNER_NOT_IN_PILOT');
   assert.equal(wallet(w), 20000);
@@ -151,11 +151,11 @@ test('liste pilote : retrait entre le devis et la création → création refus�
   assert.equal(ledger(w).length, 0);
   const bq = await w.q(bReq);
   // Arrêt d'urgence entre le devis et la création : refusé sans débit, la liste pilote n'a pas été vidée.
-  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], creationOpen: false });
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], clientAccess: 'open', creationOpen: false });
   assert.equal((await w.o(create(bq, bReq))).code, 'CREATION_CLOSED');
   assert.equal(wallet(w), 20000);
   assert.equal(orders(w).length, 0);
-  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], creationOpen: true });
+  w.store.set('config/partnerOrdersV2', { pilotPartnerIds: ['b1'], clientAccess: 'open', creationOpen: true });
   assert.equal((await w.o(create(bq, bReq))).success, true, 'boulangerie listée et création ouverte : création v2 possible');
 });
 
