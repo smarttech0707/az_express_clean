@@ -84,7 +84,7 @@ function onCall(options, handler) {
     return handler(request,...rest);
   });
 }
-const accountDeletion=buildAccountDeletion({db,auth:admin.auth(),admin,HttpsError,
+const accountDeletion=buildAccountDeletion({db,auth:admin.auth(),admin,HttpsError,checkRateLimit,logAudit,
   eraseAssets:async(uid,role)=>{
     await require('./accountPersonalAssets').erasePersonalAssets(admin.storage().bucket(),uid,role);
   }});

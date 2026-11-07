@@ -4,6 +4,10 @@ const ROLES={client:'clients',livreur:'livreurs'};
 const {ROLE_COLLECTIONS,readDeletionIdentity}=require('./accountDeletionIdentity');
 const TERMINAL=new Set(['delivered','cancelled','expired','completed','refunded','failed_refunded','failed','rejected']);
 const LIMIT=201, QUIET_MS=15*60*1000, RETRY_MS=60*60*1000;
+const {inspectCleanup,eraseProfileChildren,eraseAiData,failurePatch}=require('./accountCleanup');
+// Mission 7E-64 — anti-abus : 5 demandes/heure/compte (checkRateLimit), 10 demandes cumulées par dossier, une demande
+// identique dans les 60 s est absorbée sans retraitement, 6 échecs techniques consécutifs = fin des reprises automatiques.
+const RATE_MAX=5, RATE_WINDOW_S=3600, MAX_REQUESTS=10, REPEAT_WINDOW_MS=60*1000, MAX_ATTEMPTS=6;
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const validToken=t=>typeof t==='string' && /^[a-f0-9]{64}$/.test(t);
 const publicState=j=>({status:j.state,reason:j.reason||null,requestId:j.uid,
@@ -13,10 +17,17 @@ async function assertAccountEnabled(db,uid,HttpsError){
  if(uid && (await db.collection('account_tombstones').doc(uid).get()).exists)
   throw new HttpsError('permission-denied','ACCOUNT_DELETION_IN_PROGRESS');
 }
-function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAssets=async()=>{throw new Error('ASSET_CLEANER_REQUIRED');}}){
- const processPartners=require('./partnerAccountDeletion').buildPartnerAccountDeletion({db,auth,admin,clock,eraseAssets,quietMs:QUIET_MS});
+function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,checkRateLimit=null,logAudit=null,eraseAssets=async()=>{throw new Error('ASSET_CLEANER_REQUIRED');}}){
+ const processPartners=require('./partnerAccountDeletion').buildPartnerAccountDeletion({db,auth,admin,clock,eraseAssets,quietMs:QUIET_MS,
+  auditStrict:d=>auditStrict(d),auditInfo:d=>auditInfo(d)});
  const jobRef=uid=>db.collection('account_deletions').doc(uid);
  const stamp=()=>admin.firestore.Timestamp.fromMillis(clock());
+ // Même schéma que logAudit (index.js). logAudit avale ses erreurs : il ne peut pas servir de verrou avant l'étape
+ // irréversible. auditStrict propage l'échec ; auditInfo n'interrompt jamais le traitement. Jamais de jeton ni de donnée personnelle.
+ const auditDoc=d=>({userId:d.userId||null,userType:d.userType||'unknown',action:d.action,targetId:d.targetId||null,amount:null,
+  status:d.status||'success',metadata:d.metadata||{},createdAt:admin.firestore.FieldValue.serverTimestamp()});
+ const auditStrict=async d=>{await db.collection('audit_logs').add(auditDoc(d));};
+ const auditInfo=async d=>{try{if(typeof logAudit==='function')await logAudit(d);else await auditStrict(d);}catch(_){/* audit best effort */}};
  async function inspect(tx,uid,role){
   const profileRef=db.collection(ROLES[role]).doc(uid),profile=await tx.get(profileRef);
   const p=profile.data();
@@ -52,11 +63,18 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAsse
   const action=await db.runTransaction(async tx=>{
    const snap=await tx.get(ref);if(!snap.exists)return null;
    const j=snap.data();if(j.state==='completed')return null;
+   // Plafond atteint : seule une reprise motivée du support (qui remet le compteur à zéro) relance le dossier.
+   if(j.reason==='max_attempts_reached')return null;
    const config=(await tx.get(db.collection('operations_control').doc('account_deletion'))).data();
    if(config?.enabled!==true || config.inventoryVersion!==1){
     tx.update(ref,{state:'pending',reason:'server_rollout_not_enabled',nextAttemptAt:clock()+RETRY_MS});return null;
    }
    if(!j.consentVerified)return null;
+   // D3 (7E-68) : un UID présent dans `admins` n'est jamais traité automatiquement, quel que soit le rôle demandé
+   // (client, livreur ou partenaire) : ni quarantaine, ni suppression Auth. Intervention administrative distincte et tracée.
+   if((await tx.get(db.collection('admins').doc(uid))).exists){
+    tx.update(ref,{state:'blocked',reason:'admin_account_manual_process',reviewRequired:true,nextAttemptAt:null});return null;
+   }
    if(config.partnerInventoryVersion===1)return {partnerScope:true};
    if(!ROLES[j.role]){
     tx.update(ref,{state:'blocked',reason:'role_obligations_review_required',reviewRequired:true,nextAttemptAt:null});return null;
@@ -77,6 +95,16 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAsse
   if(!action)return publicState((await ref.get()).data());
   if(action.partnerScope){await processPartners(uid);return publicState((await ref.get()).data());}
   try{
+   const profileRef=db.collection(ROLES[action.role]).doc(uid);
+   // Avant TOUTE suppression Auth : un élément de nettoyage inconnu bloque le dossier en revue manuelle, compte intact.
+   const pre=await inspectCleanup(db,[profileRef],uid);
+   if(pre.reason){
+    await ref.update({state:action.authDeleted===true?'cleanup_pending':'blocked',reason:pre.reason,blockedDetail:pre.collections,reviewRequired:true,nextAttemptAt:null,leaseUntil:0});
+    await auditInfo({userId:uid,userType:action.role,action:'account_deletion_blocked',targetId:uid,status:'blocked',metadata:{role:action.role,reason:pre.reason,collections:pre.collections}});
+    return publicState((await ref.get()).data());
+   }
+   // Journal d'audit exigé AVANT l'étape irréversible : s'il échoue, le compte Auth n'est pas supprimé (reprise ultérieure).
+   if(action.authDeleted!==true)await auditStrict({userId:uid,userType:action.role,action:'account_deletion_auth_delete',targetId:uid,metadata:{role:action.role}});
    // Idempotent: an already missing Auth user is the expected retry state.
    try{await auth.updateUser(uid,{disabled:true});await auth.revokeRefreshTokens(uid);await auth.deleteUser(uid);}
    catch(e){if(e.code!=='auth/user-not-found')throw e;}
@@ -85,15 +113,11 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAsse
    await ref.update({authDeleted:true,state:'cleanup_pending',reason:'personal_data_cleanup',nextAttemptAt:clock()+RETRY_MS});
    // Fixed, UID-scoped prefixes only. Never delete order proofs or accounting assets.
    await eraseAssets(uid,action.role);
-   // Non-financial profile children are paginated; unknown collections require review.
-   const profileRef=db.collection(ROLES[action.role]).doc(uid);
-   for(const collection of await profileRef.listCollections()){
-    if(collection.id==='wallet_transactions')continue;
-    if(collection.id!=='notifications')throw new Error('PERSONAL_DATA_INVENTORY_REQUIRED');
-    const page=await collection.limit(100).get();
-    if(!page.empty){const batch=db.batch();for(const d of page.docs)batch.delete(d.ref);await batch.commit();}
-    if(page.size===100)return publicState((await ref.get()).data());
-   }
+   // Notifications (paginées) ; wallet_transactions conservé ; toute autre sous-collection a déjà bloqué le dossier plus haut.
+   if(!await eraseProfileChildren(db,[profileRef]))return publicState((await ref.get()).data());
+   // Données AZ IA identifiables par UID (voir accountCleanup.js : preuve de consentement et actions confirmées conservées).
+   const ai=await eraseAiData(db,uid);
+   if(!ai.done)return publicState((await ref.get()).data());
    if(action.role==='livreur')await db.collection('driver_requests').doc(uid).delete();
    await db.runTransaction(async tx=>{
     const j=(await tx.get(ref)).data();if(j.state==='completed'||j.lease!==lease)return;
@@ -109,9 +133,12 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAsse
     tx.update(ref,{state:'completed',reason:null,authDeleted:true,profileAnonymized:true,completedAt:stamp(),nextAttemptAt:null,
       retentionReviewRequired:true,reviewRequired:false});
    });
+   await auditInfo({userId:uid,userType:action.role,action:'account_deletion_completed',targetId:uid,metadata:{role:action.role,aiData:ai.counts}});
   }catch(_){
    // Never copy tokens, credentials, provider errors or personal data into the receipt.
-   await ref.update({state:'cleanup_pending',reason:'server_retry_required',reviewRequired:true,nextAttemptAt:clock()+RETRY_MS});
+   const patch=failurePatch((await ref.get()).data(),{now:clock(),retryMs:RETRY_MS,maxAttempts:MAX_ATTEMPTS});
+   await ref.update(patch);
+   await auditInfo({userId:uid,userType:action.role,action:'account_deletion_failed',targetId:uid,status:'failed',metadata:{role:action.role,reason:patch.reason,attempts:patch.attempts}});
   }
   return publicState((await ref.get()).data());
  }
@@ -119,15 +146,34 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAsse
   const uid=request.auth?.uid,role=request.data?.role,token=request.data?.recoveryToken;
   if(!uid || request.auth.token?.firebase?.sign_in_provider==='anonymous')throw new HttpsError('unauthenticated','Connexion requise');
   if(!Object.hasOwn(ROLE_COLLECTIONS,role) || !validToken(token))throw new HttpsError('invalid-argument','Demande invalide');
+  // Sans limiteur injecté, la fonction refuse de traiter : jamais de suppression sans protection anti-abus.
+  if(typeof checkRateLimit!=='function')throw new HttpsError('failed-precondition','RATE_LIMITER_REQUIRED');
+  // Mission 7E-74 : passerelle absente, fermée ou illisible => refus net AVANT toute écriture (aucun dossier, aucun marqueur
+  // deletionRequested, aucune quarantaine, aucun audit, aucune écriture du limiteur). Même condition que process() ; une erreur
+  // de lecture se propage : elle n'ouvre jamais la passerelle.
+  const gate=(await db.collection('operations_control').doc('account_deletion').get()).data();
+  if(gate?.enabled!==true || gate.inventoryVersion!==1)throw new HttpsError('failed-precondition','ACCOUNT_DELETION_NOT_ENABLED',{reason:'ACCOUNT_DELETION_NOT_ENABLED'});
+  await checkRateLimit(uid,'account_deletion_request',RATE_MAX,RATE_WINDOW_S);
   const recent=Number.isFinite(request.auth.token?.auth_time) && clock()/1000-request.auth.token.auth_time>=0 && clock()/1000-request.auth.token.auth_time<=300;
   const ref=jobRef(uid);
+  let repeated=false;
   await db.runTransaction(async tx=>{
+   repeated=false;
    const old=await tx.get(ref);
+   if((await tx.get(db.collection('admins').doc(uid))).exists)throw new HttpsError('failed-precondition','ADMIN_ACCOUNT_MANUAL_PROCESS');
    const identity=await readDeletionIdentity(tx,db,uid,role);
    if(!identity)throw new HttpsError('permission-denied','Identite du profil non etablie; verification support necessaire');
    const profileRef=identity.ref;
    if(old.exists){
-    if(old.data().role!==role)throw new HttpsError('failed-precondition','Demande existante pour un autre role');
+    const o=old.data();
+    if(o.role!==role)throw new HttpsError('failed-precondition','Demande existante pour un autre role');
+    if(o.state==='completed'){repeated=true;return;}
+    const count=o.requestCount||0;
+    if(count>=MAX_REQUESTS)throw new HttpsError('resource-exhausted','ACCOUNT_DELETION_REQUEST_LIMIT');
+    // Une demande qui apporte une information nouvelle (réauthentification récente, consentement) n'est jamais absorbée.
+    const adds=recent&&(!o.consentVerified||(request.data.allProfilesConsent===true&&o.allProfilesConsent!==true));
+    if(!adds&&typeof o.lastRequestAt==='number'&&clock()>=o.lastRequestAt&&clock()-o.lastRequestAt<REPEAT_WINDOW_MS){repeated=true;return;}
+    tx.update(ref,{requestCount:count+1,lastRequestAt:clock()});
     if(!old.data().consentVerified && recent)tx.update(ref,{consentVerified:true,state:'pending',reason:null,nextAttemptAt:clock()});
     if(recent&&request.data.allProfilesConsent===true)tx.update(ref,{allProfilesConsent:true,nextAttemptAt:clock()});
     if(role==='livreur' && (recent || old.data().consentVerified))tx.update(profileRef,{deletionRequested:true});
@@ -135,8 +181,11 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAsse
    }
    if(role==='livreur' && recent)tx.update(profileRef,{deletionRequested:true});
    tx.create(ref,{uid,role,profilePath:identity.profilePath,...(identity.businessPath?{businessPath:identity.businessPath}:{}),recoveryHash:digest(token),state:'pending',reason:recent?null:'reauthentication_required',
-    consentVerified:recent,allProfilesConsent:recent&&request.data.allProfilesConsent===true,requestedAt:stamp(),reviewAfter:clock()+72*60*60*1000,nextAttemptAt:recent?clock():null});
+    consentVerified:recent,allProfilesConsent:recent&&request.data.allProfilesConsent===true,requestedAt:stamp(),reviewAfter:clock()+72*60*60*1000,nextAttemptAt:recent?clock():null,
+    requestCount:1,lastRequestAt:clock(),attempts:0});
   });
+  await auditInfo({userId:uid,userType:role,action:repeated?'account_deletion_request_repeated':'account_deletion_requested',targetId:uid,metadata:{role,reauthenticated:recent}});
+  if(repeated)return publicState((await ref.get()).data());
   return process(uid);
  }
  async function status(request){
@@ -146,6 +195,8 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAsse
   const hash=digest(token);
   if(!j || typeof j.recoveryHash!=='string'||j.recoveryHash.length!==hash.length ||
      !timingSafeEqual(Buffer.from(j.recoveryHash),Buffer.from(hash)))throw new HttpsError('permission-denied','Suivi indisponible');
+  // Limite appliquée APRÈS la vérification du jeton : un tiers ne peut pas verrouiller le suivi d'un autre compte.
+  if(typeof checkRateLimit==='function')await checkRateLimit(uid,'account_deletion_status',30,600);
   // Recovery capability allows only reading this minimal status, never starting deletion.
   return publicState(j);
  }
@@ -155,4 +206,4 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,eraseAsse
  }
  return {request,status,process,drain};
 }
-module.exports={buildAccountDeletion,assertAccountEnabled,QUIET_MS};
+module.exports={buildAccountDeletion,assertAccountEnabled,QUIET_MS,MAX_ATTEMPTS,MAX_REQUESTS,REPEAT_WINDOW_MS};

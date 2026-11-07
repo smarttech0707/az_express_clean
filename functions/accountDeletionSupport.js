@@ -27,7 +27,11 @@ function buildAccountDeletionSupport({db,admin,HttpsError,process,clock=Date.now
    if(!snap.exists)throw new HttpsError('not-found','Demande absente');
    if(snap.data().state==='completed')throw new HttpsError('failed-precondition','Demande terminee');
    const patch={supportOwner:request.auth.uid,supportState:'in_review',supportUpdatedAt:admin.firestore.FieldValue.serverTimestamp(),reviewAfter:clock()+24*60*60*1000};
-   if(action==='retry')patch.nextAttemptAt=clock();
+   if(action==='retry'){
+    patch.nextAttemptAt=clock();patch.attempts=0;
+    // Un dossier arrêté par le plafond de tentatives repart seulement par cette reprise motivée.
+    if(snap.data().reason==='max_attempts_reached'){patch.reason=null;if(snap.data().state==='blocked')patch.state='pending';}
+   }
    tx.update(ref,patch);
    tx.create(audit,{actorUid:request.auth.uid,action,resolution:resolution||null,createdAt:admin.firestore.FieldValue.serverTimestamp()});
   });

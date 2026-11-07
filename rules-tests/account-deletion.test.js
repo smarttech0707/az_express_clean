@@ -23,7 +23,7 @@ test.beforeEach(async()=>{
   deleteUser:async uid=>{calls.push('delete');if(failDelete)throw Error('transient');if(!users.delete(uid))throw missing();},
   getUser:async uid=>{calls.push('verify');if(!users.has(uid))throw missing();return users.get(uid);}
  };
- api=buildAccountDeletion({db,auth,admin,HttpsError,clock:()=>now,eraseAssets:async()=>{calls.push('assets');if(failAssets)throw Error('storage unavailable');}});
+ api=buildAccountDeletion({db,auth,admin,HttpsError,clock:()=>now,checkRateLimit:async()=>{},eraseAssets:async()=>{calls.push('assets');if(failAssets)throw Error('storage unavailable');}});
 });
 test.after(async()=>{await env.cleanup();await app.delete();});
 for(const role of ['client','livreur'])test(role+' confirmed deletion anonymizes profile, preserves financial amounts and prevents reconnect',async()=>{
@@ -77,9 +77,26 @@ test('late financial change blocks finalization without losing money',async()=>{
  await seed();await api.request(request());await db.doc('clients/u').update({wallet:500});now+=QUIET_MS+1;
  assert.equal((await api.process('u')).status,'blocked');assert.equal(users.has('u'),true);assert.equal((await get('clients/u')).wallet,500);
 });
-test('rollout disabled keeps truthful pending request and no tombstone',async()=>{
- await seed();await db.doc('operations_control/account_deletion').delete();assert.equal((await api.request(request())).reason,'server_rollout_not_enabled');assert.equal(calls.length,0);
- assert.equal((await db.doc('account_tombstones/u').get()).exists,false);
+const stateOf=async()=>{const out={};for(const c of ['account_deletions','account_tombstones','audit_logs','rate_limits','clients','livreurs']){out[c]=(await db.collection(c).get()).docs.map(d=>[d.id,d.data()]);}return JSON.stringify(out);};
+for(const role of ['client','livreur'])for(const gate of ['absent','disabled','wrong-version']){
+ test('closed rollout ('+gate+') refuses a '+role+' request before any write: Firestore state unchanged',async()=>{
+  await seed(role);
+  if(gate==='absent')await db.doc('operations_control/account_deletion').delete();
+  else await db.doc('operations_control/account_deletion').set(gate==='disabled'?{enabled:false,inventoryVersion:1}:{enabled:true,inventoryVersion:2});
+  const before=await stateOf();
+  await assert.rejects(api.request(request(role)),e=>e.code==='failed-precondition'&&e.message==='ACCOUNT_DELETION_NOT_ENABLED');
+  assert.equal(await stateOf(),before);
+  assert.equal((await db.doc('account_deletions/u').get()).exists,false);
+  assert.equal((await db.doc('account_tombstones/u').get()).exists,false);
+  assert.equal((await get((role==='client'?'clients':'livreurs')+'/u')).deletionRequested,undefined);
+  assert.equal(calls.length,0);assert.equal(users.has('u'),true);
+ });
+}
+test('rollout closed after a first request: the new request is refused and the existing file is untouched',async()=>{
+ await seed();assert.equal((await api.request(request())).status,'quarantined');
+ const file=JSON.stringify(await get('account_deletions/u'));await db.doc('operations_control/account_deletion').set({enabled:false,inventoryVersion:1});
+ const before=await stateOf();await assert.rejects(api.request(request()),{message:'ACCOUNT_DELETION_NOT_ENABLED'});
+ assert.equal(await stateOf(),before);assert.equal(JSON.stringify(await get('account_deletions/u')),file);
 });
 test('technical state cannot be forged by SDK and pending users retain access',async()=>{
  await seed();const client=env.authenticatedContext('u').firestore();await assertSucceeds(client.doc('clients/u').get());

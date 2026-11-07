@@ -2,8 +2,11 @@
 const {randomUUID}=require('node:crypto');
 const {readDeletionScope}=require('./accountDeletionScope');
 const {relatedPersonalPatch}=require('./accountRelatedPersonalData');
+const {inspectCleanup,eraseProfileChildren,eraseAiData,failurePatch}=require('./accountCleanup');
+// Mission 7E-64 : même plafond de tentatives que le moteur client/livreur (accountDeletion.js).
+const MAX_ATTEMPTS=6;
 const PERSONAL=['name','fullName','firstName','lastName','phone','email','identifiant','address','photoUrl','fcmToken','token','lat','lng','latitude','longitude','deliveryOfferSession','password','accessCode','birthDate','identityNumber','identityPhotoUrl','idPhotoUrl','idNumber','dateOfBirth','contactPhone','location','currentPosition','depositAccounts','ownerName','operatorNumbers','agencyName'];
-function buildPartnerAccountDeletion({db,auth,admin,clock,eraseAssets,quietMs}){
+function buildPartnerAccountDeletion({db,auth,admin,clock,eraseAssets,quietMs,auditStrict=async()=>{},auditInfo=async()=>{}}){
  const stamp=()=>admin.firestore.Timestamp.fromMillis(clock());
  return async uid=>{
   const ref=db.collection('account_deletions').doc(uid),lease=randomUUID();
@@ -36,20 +39,24 @@ function buildPartnerAccountDeletion({db,auth,admin,clock,eraseAssets,quietMs}){
   });
   if(!action)return;
   try{
+   const cur=(await ref.get()).data()||{};
+   // Avant TOUTE suppression Auth : sous-collection inconnue (profil ou AZ IA) = revue manuelle, comptes intacts.
+   const pre=await inspectCleanup(db,action.profiles.map(p=>p.ref),uid);
+   if(pre.reason){
+    await ref.update({state:cur.authDeleted===true?'cleanup_pending':'blocked',reason:pre.reason,blockedDetail:pre.collections,reviewRequired:true,nextAttemptAt:null,leaseUntil:0});
+    await auditInfo({userId:uid,userType:'partner',action:'account_deletion_blocked',targetId:uid,status:'blocked',metadata:{reason:pre.reason,collections:pre.collections}});
+    return;
+   }
+   if(cur.authDeleted!==true)await auditStrict({userId:uid,userType:'partner',action:'account_deletion_auth_delete',targetId:uid,metadata:{roles:action.profiles.map(p=>p.role)}});
    try{await auth.updateUser(uid,{disabled:true});await auth.revokeRefreshTokens(uid);await auth.deleteUser(uid);}catch(e){if(e.code!=='auth/user-not-found')throw e;}
    try{await auth.getUser(uid);throw Error('AUTH_NOT_DELETED');}catch(e){if(e.code!=='auth/user-not-found')throw e;}
    await ref.update({state:'cleanup_pending',authDeleted:true,reason:'personal_data_cleanup',nextAttemptAt:clock()+3600000});
    for(const p of action.profiles){
     // Never remove business assets: only explicit personal UID prefixes.
     await eraseAssets(uid,p.role);
-    for(const children of await p.ref.listCollections()){
-     if(children.id==='wallet_transactions')continue;
-     if(children.id!=='notifications')throw Error('UNKNOWN_PROFILE_CHILDREN');
-     const page=await children.limit(100).get();
-     if(!page.empty){const batch=db.batch();for(const doc of page.docs)batch.delete(doc.ref);await batch.commit();}
-     if(page.size===100)return;
-    }
    }
+   if(!await eraseProfileChildren(db,action.profiles.map(p=>p.ref)))return;
+   if(!(await eraseAiData(db,uid)).done)return;
    await db.runTransaction(async tx=>{
     const j=(await tx.get(ref)).data();if(j.lease!==lease||j.state==='completed')return;
     const scope=await readDeletionScope(tx,db,uid);
@@ -67,7 +74,7 @@ function buildPartnerAccountDeletion({db,auth,admin,clock,eraseAssets,quietMs}){
     tx.update(ref,{state:'completed',reason:null,authDeleted:true,profileAnonymized:true,completedAt:stamp(),nextAttemptAt:null,reviewRequired:false,retentionReviewRequired:true});
    });
   }catch(_){
-   await db.runTransaction(async tx=>{const j=(await tx.get(ref)).data();if(j?.lease===lease&&j.state!=='completed')tx.update(ref,{state:'cleanup_pending',reason:'server_retry_required',reviewRequired:true,nextAttemptAt:clock()+3600000});});
+   await db.runTransaction(async tx=>{const j=(await tx.get(ref)).data();if(j?.lease===lease&&j.state!=='completed')tx.update(ref,failurePatch(j,{now:clock(),retryMs:3600000,maxAttempts:MAX_ATTEMPTS}));});
   }
  };
 }

@@ -17,7 +17,7 @@ test.before(async()=>{
  backend=admin.initializeApp({projectId,storageBucket:bucketName},'deletion-real');
  db=backend.firestore();auth=backend.auth();bucket=backend.storage().bucket();
  now=Date.now();
- api=buildAccountDeletion({db,auth,admin,HttpsError,clock:()=>now,eraseAssets:async(uid,role)=>{
+ api=buildAccountDeletion({db,auth,admin,HttpsError,clock:()=>now,checkRateLimit:async()=>{},eraseAssets:async(uid,role)=>{
   await erasePersonalAssets(bucket,uid,role);
  }});
  await db.doc('operations_control/account_deletion').set({enabled:true,inventoryVersion:1});
