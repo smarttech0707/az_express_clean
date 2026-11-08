@@ -31,6 +31,31 @@ void main() {
     expect(find.textContaining('Demande refusee'),findsOneWidget);expect(find.byType(SnackBar),findsNothing);
     expect(tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,isNotNull);
   });
+  testWidgets('closed gateway: states that the request was NOT recorded, never a confirmation',(tester)async{
+    await open(tester,({required role,required contactPhone,reason})async=>throw const AccountDeletionUnavailableException());
+    await tester.tap(find.text('Envoyer la demande'));await tester.pumpAndSettle();
+    expect(find.text('Le service de suppression de compte n’est pas disponible pour le moment. Votre demande n’a pas été enregistrée et votre compte reste inchangé. Réessayez plus tard ou contactez le support.'),findsOneWidget);
+    expect(find.textContaining('Votre demande est conservee'),findsNothing);
+    expect(find.byType(SnackBar),findsNothing);
+    expect(tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,isNotNull);
+  });
+  testWidgets('network failure never claims the request was recorded',(tester)async{
+    await open(tester,({required role,required contactPhone,reason})async=>throw FirebaseException(plugin:'cloud_functions',code:'unavailable'));
+    await tester.tap(find.text('Envoyer la demande'));await tester.pumpAndSettle();
+    expect(find.textContaining('Enregistrement non confirme'),findsOneWidget);
+    expect(find.textContaining('Aucune suppression confirmee'),findsOneWidget);
+    expect(find.textContaining('pas disponible'),findsNothing);
+    expect(find.textContaining('Votre demande est conservee'),findsNothing);
+  });
+  testWidgets('reauthentication failures ask the user to sign in again',(tester)async{
+    for(final code in ['requires-recent-login','unauthenticated']){
+      await open(tester,({required role,required contactPhone,reason})async=>throw FirebaseException(plugin:'firebase_auth',code:code));
+      await tester.tap(find.text('Envoyer la demande'));await tester.pumpAndSettle();
+      expect(find.textContaining('Reauthentification requise'),findsOneWidget,reason:code);
+      expect(find.textContaining('pas disponible'),findsNothing,reason:code);
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
   testWidgets('late failure after disposal is harmless',(tester)async{
     final ack=Completer<AccountDeletionRequestResult>();
     await open(tester,({required role,required contactPhone,reason})=>ack.future);

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -37,10 +38,21 @@ class AccountDeletionRequestResult {
       case 'active_or_unresolved_operation': return 'Une mission ou une operation est encore en cours. Terminez-la puis demandez une reprise.';
       case 'waiting_for_inflight_operations': return 'Les nouvelles operations sont bloquees. Le serveur attend la fin des operations deja engagees.';
       case 'server_rollout_not_enabled': return 'Le traitement serveur n est pas encore active. Votre demande est conservee.';
+      case 'unknown_personal_data_review_required':
+      case 'max_attempts_reached': return 'Votre demande est enregistree et necessite une verification par le support. Aucune suppression complete n est confirmee.';
       case 'server_retry_required': return 'Un traitement serveur a echoue. Reprise prevue ; aucune suppression complete n est confirmee.';
       default: return completed ? 'Les donnees personnelles du profil ont ete anonymisees. Les pieces transactionnelles necessaires restent soumises a une revue de conservation.' : 'La demande reste en attente. Le support peut consulter son etat et les blocages.';
     }
   }
+}
+
+/// Le serveur a refusé la demande parce que la suppression de compte n'est pas ouverte (passerelle fermée).
+/// Aucune demande n'a été enregistrée et le compte est inchangé : ne jamais l'afficher comme une demande conservée.
+class AccountDeletionUnavailableException implements Exception {
+  const AccountDeletionUnavailableException();
+  String get message => 'Le service de suppression de compte n’est pas disponible pour le moment. '
+      'Votre demande n’a pas été enregistrée et votre compte reste inchangé. Réessayez plus tard ou contactez le support.';
+  @override String toString() => message;
 }
 
 class AccountDeletionService {
@@ -108,9 +120,8 @@ class AccountDeletionService {
         final response = await FirebaseFunctions.instanceFor(region:'europe-west1')
           .httpsCallable('requestAccountDeletionCF').call({'role':role,'recoveryToken':recovery!['token'],'allProfilesConsent':true});
         result = AccountDeletionRequestResult.fromData(response.data);
-      } on FirebaseFunctionsException {
-        // A response can be lost after deletion. Only the server receipt confirms it.
-        result = await checkLastRequest();
+      } on FirebaseFunctionsException catch (e) {
+        result = await resolveCallableFailure(e, checkLastRequest);
       }
       if (result.accessClosed) await FirebaseAuth.instance.signOut();
       return result;
@@ -123,6 +134,26 @@ class AccountDeletionService {
         await ref.set({...data, 'createdAt': FieldValue.serverTimestamp()});
         return ref.id;
       });
+  }
+
+  /// Politique d'erreur de l'appel de demande. Refus explicite du serveur avant toute ecriture : pas de recu a chercher,
+  /// la demande n'existe pas (et un ancien recu ne doit jamais etre presente comme une confirmation). Autre erreur :
+  /// la reponse a pu etre perdue apres l'ecriture, seul le recu serveur fait foi.
+  @visibleForTesting
+  static Future<AccountDeletionRequestResult> resolveCallableFailure(
+      FirebaseFunctionsException e, Future<AccountDeletionRequestResult> Function() lastRequest) async {
+    if (isGateClosedRefusal(e)) throw const AccountDeletionUnavailableException();
+    return lastRequest();
+  }
+
+  /// Refus serveur avant toute ecriture (passerelle fermee). Le code machine `details.reason` prime ;
+  /// le texte du message reste un repli pour une version de fonction anterieure.
+  @visibleForTesting
+  static bool isGateClosedRefusal(FirebaseFunctionsException e) {
+    if (e.code != 'failed-precondition') return false;
+    final details = e.details;
+    if (details is Map && details['reason'] == 'ACCOUNT_DELETION_NOT_ENABLED') return true;
+    return (e.message ?? '').contains('ACCOUNT_DELETION_NOT_ENABLED');
   }
 
   static Future<AccountDeletionRequestResult> checkLastRequest() async {

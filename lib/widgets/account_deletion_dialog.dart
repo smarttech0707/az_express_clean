@@ -65,11 +65,14 @@ class _AccountDeletionRequestDialogState extends State<AccountDeletionRequestDia
       if (!mounted) return;
       setState(() => _sending = false);
       Navigator.of(context).pop(result);
+    } on AccountDeletionUnavailableException catch (e) {
+      if (!mounted) return;
+      setState(() { _sending = false; _error = e.message; });
     } on FirebaseException catch (e) {
       if (!mounted) return;
       setState(() {
         _sending = false;
-        _error = ['wrong-password','invalid-credential','requires-recent-login'].contains(e.code)
+        _error = ['wrong-password','invalid-credential','requires-recent-login','unauthenticated'].contains(e.code)
           ? 'Reauthentification requise ou mot de passe incorrect. Aucune suppression confirmee.'
           : e.code == 'permission-denied'
           ? 'Demande refusee par le serveur. Contactez le support. Votre compte reste inchange.'
