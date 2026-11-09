@@ -1,6 +1,8 @@
 'use strict';
 
 const { buildConfirmResponse } = require('./responseBuilder');
+// Tombstone relu dans la transaction de confirmation (Mission 7E-68).
+const { assertNewAccountActivity } = require('../accountAdmission');
 // Expurgation partagée (jeton, en-tête d'autorisation, URL, téléphone) —
 // voir functions/feexpaySanitize.js.
 const { sanitizeProviderMessage } = require('../feexpaySanitize');
@@ -36,13 +38,15 @@ async function createPendingAction(db, admin, { uid, conversationId, toolName, t
 // `ekClientConfirmOrder` dans functions/index.js — pour empêcher un replay
 // (un double-tap voit status !== 'pending' et échoue proprement).
 function buildConfirmAction({
-  db, admin, onCall, logAudit, HttpsError, toolsByName, secrets = [],
+  db, admin, onCall, logAudit, HttpsError, toolsByName, secrets = [], options = {},
 }) {
   return onCall({
     region:         'europe-west1',
     timeoutSeconds: 60,
     memory:         '256MiB',
     secrets,
+    // Plafond propre à la préproduction (pilotLightOptions) : vide ailleurs, donc production inchangée.
+    ...options,
   }, async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Vous devez être connecté');
@@ -75,6 +79,10 @@ function buildConfirmAction({
       const data = snap.data();
       if (data.uid !== uid) throw new HttpsError('permission-denied', 'Non autorisé');
       if (data.status !== 'pending') throw new HttpsError('failed-precondition', 'Cette action a déjà été traitée');
+
+      // Une action préparée avant la quarantaine ne doit jamais être exécutée après : le marqueur est relu ICI,
+      // avant tout confirmHandler (commande, débit wallet, recharge). Une erreur de lecture fait échouer la confirmation.
+      await assertNewAccountActivity(tx, db, HttpsError, uid);
 
       const expiresAtMs = data.expiresAt?.toMillis ? data.expiresAt.toMillis() : 0;
       if (expiresAtMs < Date.now()) {

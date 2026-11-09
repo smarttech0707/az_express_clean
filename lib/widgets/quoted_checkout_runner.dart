@@ -125,8 +125,20 @@ String quotedFailureMessage(CheckoutFailed f) => switch (f.code) {
       'LATE_NIGHT_RESTRICTED' => f.message,
       'CLIENT_NOT_FOUND' => 'Connectez-vous avec votre compte client pour commander.',
       'QUOTE_MISMATCH' => 'L\'adresse a changé : veuillez recommencer la commande.',
+      _ when isAccountClosingRefusal(f) => 'Votre compte est en cours de suppression : '
+          'aucune nouvelle commande ne peut être passée. Rien n\'a été débité.',
       _ => f.message,
     };
+
+/// Refus du serveur parce que le compte est supprimé ou en cours de suppression :
+/// `permission-denied` / `ACCOUNT_DELETION_IN_PROGRESS` (contrôle d'entrée des
+/// fonctions) ou `failed-precondition` (garde relue dans la transaction de
+/// `createOrderFromQuoteCF`). Dans les deux cas rien n'est débité ni créé.
+bool isAccountClosingRefusal(CheckoutFailed f) =>
+    (f.code == 'permission-denied' &&
+        f.message == 'ACCOUNT_DELETION_IN_PROGRESS') ||
+    (f.code == 'failed-precondition' &&
+        f.message.startsWith('Compte supprime ou en cours de suppression'));
 
 /// Relit la commande créée et lance la recherche de livreur.
 Future<OrderModel?> finalizeQuotedOrder(String orderId,

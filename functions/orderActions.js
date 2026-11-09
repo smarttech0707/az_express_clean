@@ -10,6 +10,7 @@ const { buildAmounts, readAmounts, cashBreakdown } = require('./orderAmounts');
 const { getBillingMode, decideBilling, assertAcceptedTotal } = require('./billingPolicy');
 const { isLegacyPartnerOrder, getLegacyPartnerPolicy } = require('./legacyPartnerPolicy');
 const { initialCashPayment } = require('./cashPayment');
+const { assertNewAccountActivity } = require('./accountAdmission');
 
 // Fabriques pour payOrderFromWalletCF / cancelOrderCF / deliverOrderCF —
 // séparées de index.js pour rester testables sans initialiser Firebase Admin
@@ -1331,6 +1332,9 @@ function buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, 
       sellerCredit = amounts ? amounts.productAmount : totalPrice;
 
       const clientSnap    = await tx.get(clientRef);
+      // Mission 7E-90 (lot 2B) : tombstone / suppression du client ET du vendeur relus dans la transaction du débit,
+      // avant toute écriture (toutes les lectures précèdent les écritures ci-dessous).
+      await assertNewAccountActivity(tx, db, HttpsError, uid, [['sellers', sellerId]]);
       const clientWallet  = Number(clientSnap.data()?.wallet || 0);
       if (clientWallet < chargeTotal) {
         // Format conservé pour compatibilité avec le parsing existant côté
@@ -1531,6 +1535,9 @@ function buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLim
 
       amounts = billing === 'explicit' ? buildAmounts(totalPrice, BOUTIQUE_DELIVERY_FEE) : null;
       if (amounts) assertAcceptedTotal({ acceptedTotal, totalAmount: amounts.totalAmount, HttpsError });
+      // Mission 7E-90 (lot 2B) : nouvelle commande sans fonds ; aucun wallet touché, mais pas de nouvelle commande pour un
+      // compte supprimé ou en quarantaine. Lectures du garde avant la première écriture (stock).
+      await assertNewAccountActivity(tx, db, HttpsError, uid);
       tx.update(productRef, { stock: currentStock - quantity });
 
       tx.set(orderRef, {

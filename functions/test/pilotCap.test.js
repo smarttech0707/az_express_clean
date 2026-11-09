@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { pilotInstanceLimit, capInstances, pilotOnlyInstanceOptions, pilotRetry, PREPROD_PROJECT } = require('../pilotCap');
+const { pilotInstanceLimit, capInstances, pilotOnlyInstanceOptions, pilotLightOptions, pilotRetry, PREPROD_PROJECT, PILOT_LIGHT_OPTIONS } = require('../pilotCap');
 
 const PROD = 'az-express-b0469';
 
@@ -107,4 +107,55 @@ test('syncDriverOrderLifecycle : sans réessai en préproduction, retry: true en
     assert.equal(pre[n].retry, prod[n].retry, n);
   }
   assert.equal(prod.applyDriverRatingOnOrderUpdate.retry, true);
+});
+
+// Mission 7E-71 — fonctions de garde financières : plafond de capacité propre à la préproduction, production inchangée.
+const GUARDS = ['initiateFeexPayPayment', 'initiateWithdrawal', 'aiConfirmAction', 'feexPayWebhook'];
+
+test('pilotLightOptions : vide hors préproduction, 1 instance / 0,25 vCPU / concurrence 1 en préproduction', () => {
+  for (const env of [{}, { GCLOUD_PROJECT: PROD }, { GCLOUD_PROJECT: 'az-express-clean' }, { GCLOUD_PROJECT: 'az-express-preprod-1' }, { GCLOUD_PROJECT: 'demo-test' }]) {
+    assert.deepEqual(pilotLightOptions(env), {}, JSON.stringify(env));
+  }
+  assert.deepEqual(pilotLightOptions({ GCLOUD_PROJECT: PREPROD_PROJECT }), { maxInstances: 1, cpu: 0.25, concurrency: 1 });
+  // PILOT_MAX_INSTANCES ne relève jamais ce plafond (la fraction de vCPU impose la concurrence 1).
+  assert.deepEqual(pilotLightOptions({ GCLOUD_PROJECT: PREPROD_PROJECT, PILOT_MAX_INSTANCES: '50' }), { maxInstances: 1, cpu: 0.25, concurrency: 1 });
+  const copy = pilotLightOptions({ GCLOUD_PROJECT: PREPROD_PROJECT });
+  copy.cpu = 99; // la constante exportée n'est pas modifiable par un appelant
+  assert.equal(PILOT_LIGHT_OPTIONS.cpu, 0.25);
+});
+
+function guardEndpoints(project) {
+  const code = `const m=require(${JSON.stringify(path.join(__dirname, '..', 'index.js'))});const out={};
+    for(const n of ${JSON.stringify(GUARDS)}){const e=m[n]&&m[n].__endpoint;out[n]=e?{max:e.maxInstances===undefined?null:e.maxInstances,
+    cpu:e.cpu===undefined?null:e.cpu,conc:e.concurrency===undefined?null:e.concurrency,mem:e.availableMemoryMb===undefined?null:e.availableMemoryMb,
+    timeout:e.timeoutSeconds===undefined?null:e.timeoutSeconds,region:e.region,secrets:(e.secretEnvironmentVariables||[]).map(s=>s.key).sort()}:null;}
+    process.stdout.write('@@'+JSON.stringify(out));`;
+  const env = { ...process.env, GCLOUD_PROJECT: project, FIREBASE_CONFIG: JSON.stringify({ projectId: project }) };
+  const out = execFileSync(process.execPath, ['-e', code], { env, encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] });
+  return JSON.parse(out.slice(out.lastIndexOf('@@') + 2));
+}
+
+test('gardes financières — production : aucune option de capacité ajoutée (cpu, maxInstances, concurrence inchangés)', () => {
+  const e = guardEndpoints(PROD);
+  for (const n of GUARDS) {
+    assert.ok(e[n], n);
+    assert.equal(e[n].max, null, n);
+    assert.equal(e[n].cpu, null, n);
+    assert.equal(e[n].conc, null, n);
+    assert.deepEqual(e[n].region, ['europe-west1'], n);
+  }
+  assert.equal(e.aiConfirmAction.mem, 256);
+  assert.equal(e.aiConfirmAction.timeout, 60);
+});
+
+test('gardes financières — préproduction : 1 instance, 0,25 vCPU, concurrence 1 ; région, secrets, mémoire et délai conservés', () => {
+  const pre = guardEndpoints(PREPROD_PROJECT);
+  const prod = guardEndpoints(PROD);
+  let total = 0;
+  for (const n of GUARDS) {
+    assert.deepEqual([pre[n].max, pre[n].cpu, pre[n].conc], [1, 0.25, 1], n);
+    for (const k of ['region', 'secrets', 'mem', 'timeout']) assert.deepEqual(pre[n][k], prod[n][k], `${n}.${k}`);
+    total += pre[n].cpu * pre[n].max;
+  }
+  assert.equal(total, 1); // empreinte théorique des quatre fonctions : 1 vCPU
 });

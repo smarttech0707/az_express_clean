@@ -9,6 +9,7 @@ const MAX_TOKENS = 1024;
 const { getRecentMessages, appendMessage, clearHistory } = require('./conversationStore');
 const { buildRegistry } = require('./toolRegistry');
 const { buildConfirmAction, buildCleanupScheduler } = require('./pendingActions');
+const { pilotLightOptions } = require('../pilotCap');
 const { createAIProviderService } = require('./AIProviderService');
 const { createPolicyEngine } = require('./policyEngine');
 const { createAiGateway } = require('./aiGateway');
@@ -321,6 +322,7 @@ module.exports = function createAzIa({
   const aiConfirmAction = buildConfirmAction({
     db, admin, onCall, logAudit, HttpsError, toolsByName,
     secrets: aiConfirmActionSecrets,
+    options: pilotLightOptions(),
   });
   const aiCleanupExpiredPendingActions = buildCleanupScheduler({ db, admin, onSchedule });
   // Rappels (Master Prompt 118) — même famille que le scheduler ci-dessus.

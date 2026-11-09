@@ -490,6 +490,32 @@ async function applyPayoutStatus({
  * l'historique. Ajoute : montant vérifié, statut inconnu explicite, txId
  * invalide rejeté, trace de vérification indépendante.
  */
+// Statut d'un paiement VÉRIFIÉ mais non crédité parce que le compte est supprimé / en suppression (Mission 7E-68).
+const HELD_STATUS = 'held_for_review';
+
+const toMillis = (ts) => {
+  if (ts && typeof ts.toMillis === 'function') return ts.toMillis();
+  if (ts && typeof ts.toDate === 'function') return ts.toDate().getTime();
+  return ts instanceof Date ? ts.getTime() : null;
+};
+
+/**
+ * Pure. Retourne le motif de mise en attente, ou null si le crédit normal est permis.
+ *  - profil anonymisé (isDeleted) : crédit toujours refusé (le solde serait définitivement perdu) ;
+ *  - tombstone posé AVANT la création de la demande de paiement : paiement « nouveau » qui n'aurait pas dû exister ;
+ *  - tombstone sans date lisible : prudence, mise en attente.
+ * Une demande créée AVANT la quarantaine reste créditée : l'argent appartient à l'utilisateur, et un solde non nul
+ * est précisément ce qui bloque la suppression (inspection du moteur) jusqu'à régularisation.
+ */
+function shouldHoldPayment({ tx, profile, tombstone }) {
+  if (profile && profile.isDeleted === true) return 'profile_anonymized';
+  if (!tombstone) return null;
+  const created = toMillis(tx && tx.createdAt);
+  const tomb = toMillis(tombstone.createdAt);
+  if (created === null || tomb === null) return 'tombstone_date_unreadable';
+  return created > tomb ? 'payment_created_after_quarantine' : null;
+}
+
 async function processFeexPayWebhookEvent({
   db, admin, body, nowMs = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS,
   collectionFor, logAudit = async () => {}, logSecurityEvent = async () => {},
@@ -517,7 +543,7 @@ async function processFeexPayWebhookEvent({
     }
   }
 
-  if (tx.credited === true || tx.status === 'completed') {
+  if (tx.credited === true || tx.status === 'completed' || tx.status === HELD_STATUS) {
     return { httpStatus: 200, outcome: 'already_processed', payload: { message: 'Déjà traité' } };
   }
 
@@ -591,16 +617,44 @@ async function processFeexPayWebhookEvent({
   }
   const independentlyVerified = true;
 
+  let heldReason = null;
   const creditedNow = await db.runTransaction(async (firestoreTx) => {
+    heldReason = null;
     const currentSnap = await firestoreTx.get(txRef);
     if (!currentSnap.exists) throw new Error(`Transaction ${txId} introuvable`);
     const current = currentSnap.data();
-    if (current.credited === true || current.status === 'completed') return false;
+    if (current.credited === true || current.status === 'completed' || current.status === HELD_STATUS) return false;
 
     const colName = collectionFor(current.userType);
     const userRef = db.collection(colName).doc(current.userId);
-    const userSnap = await firestoreTx.get(userRef);
+    // Lecture simultanée du profil et du tombstone : une seule fenêtre de verrouillage face à la transaction de quarantaine
+    // (lectures séquentielles = risque d'interblocage observé à l'émulateur, 7E-69).
+    const [userSnap, tombSnap] = await Promise.all([
+      firestoreTx.get(userRef),
+      firestoreTx.get(db.collection('account_tombstones').doc(current.userId)),
+    ]);
     if (!userSnap.exists) throw new Error(`Utilisateur ${current.userId} introuvable`);
+
+    // Suppression de compte (Mission 7E-68). Le paiement a DÉJÀ été prélevé chez l'opérateur : on ne le rejette pas
+    // (réconciliation impossible), mais on ne le crédite pas non plus sur un profil supprimé ou sur une demande née
+    // après la quarantaine. Le montant reste tracé sur la transaction (statut dédié + needsReview) pour une reprise
+    // administrative ; le solde n'est pas modifié. Tout est lu AVANT toute écriture de cette transaction.
+    const hold = shouldHoldPayment({ tx: current, profile: userSnap.data(), tombstone: tombSnap.exists ? tombSnap.data() : null });
+    if (hold) {
+      firestoreTx.update(txRef, {
+        status: HELD_STATUS,
+        needsReview: true,
+        reviewReason: hold,
+        credited: false,
+        heldAt: admin.firestore.FieldValue.serverTimestamp(),
+        feexpayOperator: body?.reseau || body?.operator || null,
+        feexpayRef: body?.ref_operator || body?.reference || null,
+        amountVerified: amountCheck.verified,
+        independentlyVerified,
+      });
+      heldReason = hold;
+      return false;
+    }
 
     const currentWallet = userSnap.data().wallet || 0;
     firestoreTx.update(userRef, {
@@ -630,6 +684,16 @@ async function processFeexPayWebhookEvent({
     return true;
   });
 
+  if (heldReason) {
+    await logSecurityEvent(tx.userId, 'webhook_paid_account_in_deletion', 'high',
+      `Paiement vérifié ${txId} non crédité (${heldReason}) : revue administrative requise`);
+    await logAudit({
+      userId: tx.userId, userType: tx.userType, action: 'payment_held_account_deletion',
+      targetId: txId, amount: tx.amount, status: 'held',
+    });
+    // 200 : l'événement est traité et tracé ; un 4xx/5xx ferait rejouer le webhook sans issue.
+    return { httpStatus: 200, outcome: 'held_for_review', payload: { message: 'OK' }, reason: heldReason };
+  }
   if (!creditedNow) {
     return { httpStatus: 200, outcome: 'already_processed', payload: { message: 'Déjà traité' } };
   }
@@ -700,6 +764,8 @@ module.exports = {
   PAYOUT_API_BASE,
   PAYOUT_PATH,
   PAYOUT_MIN_AMOUNT,
+  HELD_STATUS,
+  shouldHoldPayment,
   PAYOUT_MOTIF_MAX_LENGTH,
   UNCERTAIN_RETRY_BLOCK_MS,
   COLLECT_UNCERTAIN_STATUS,

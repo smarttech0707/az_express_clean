@@ -4,7 +4,7 @@ const { onCall: rawOnCall, onRequest, HttpsError } = require('firebase-functions
 const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
-const { capInstances, pilotOnlyInstanceOptions, pilotRetry } = require('./pilotCap');
+const { capInstances, pilotOnlyInstanceOptions, pilotLightOptions, pilotRetry } = require('./pilotCap');
 const { createNotificationGuard } = require('./notificationGuard');
 const { defineSecret } = require('firebase-functions/params');
 const admin  = require('firebase-admin');
@@ -77,6 +77,9 @@ for(const [kind,collection] of Object.entries(QR_COLLECTIONS)){
 // Refuse stale authenticated sessions once a verified deletion enters quarantine.
 // Financial webhooks/schedulers are deliberately not wrapped.
 const { buildAccountDeletion, assertAccountEnabled } = require('./accountDeletion');
+// Relecture du tombstone DANS la transaction financière (Mission 7E-68) : la garde du wrapper onCall ne protège pas contre
+// une quarantaine posée entre ce contrôle et l'écriture.
+const { assertNewAccountActivity, assertTargetNotClosing } = require('./accountAdmission');
 function onCall(options, handler) {
   if(typeof options==='function'){handler=options;options={};}
   return rawOnCall(options,async(request,...rest)=>{
@@ -372,6 +375,7 @@ function feexpayOperatorCode(operator) {
 // ═══════════════════════════════════════════════════════════════════════════
 exports.initiateFeexPayPayment = onCall({
   secrets: [FEEXPAY_TOKEN_SECRET, FEEXPAY_WEBHOOK_SECRET],
+  ...pilotLightOptions(),
 }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
@@ -447,17 +451,22 @@ exports.initiateFeexPayPayment = onCall({
   const txRef = db.collection('wallet_transactions').doc();
   const txId  = txRef.id;
 
-  await txRef.set({
-    userId:        uid,
-    userType:      userType || 'client',
-    amount:        amount,
-    status:        'pending',
-    paymentMethod: operator || 'mtn',
-    provider:      'FeexPay',
-    phone:         String(phone).trim(),
-    createdAt:     admin.firestore.FieldValue.serverTimestamp(),
-    validatedAt:   null,
-    credited:      false,
+  // Mission 7E-68 : tombstone / suppression relus dans la même transaction que la création. Toute erreur de lecture
+  // propage l'échec : aucune nouvelle demande de paiement n'est créée si l'état du compte est inconnu.
+  await db.runTransaction(async (accountTx) => {
+    await assertNewAccountActivity(accountTx, db, HttpsError, uid, [[collectionFor(userType), uid]]);
+    accountTx.set(txRef, {
+      userId:        uid,
+      userType:      userType || 'client',
+      amount:        amount,
+      status:        'pending',
+      paymentMethod: operator || 'mtn',
+      provider:      'FeexPay',
+      phone:         String(phone).trim(),
+      createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+      validatedAt:   null,
+      credited:      false,
+    });
   });
   await logAudit({ userId: uid, userType: userType, action: 'payment_initiated', targetId: txId, amount: amount, status: 'pending' });
 
@@ -553,6 +562,7 @@ exports.feexPayWebhook = onRequest({
   // FEEXPAY_TOKEN est requis pour la vérification serveur obligatoire du
   // paiement : sans cette déclaration, `token()` échouerait à l'exécution.
   secrets: [FEEXPAY_WEBHOOK_SECRET, FEEXPAY_TOKEN_SECRET],
+  ...pilotLightOptions(),
 }, async (req, res) => {
   // ── Vérification du token secret dans l'URL ──────────────────────────────
   // FeexPay renvoie l'URL telle quelle → le secret est dans ?wh_secret=
@@ -607,6 +617,7 @@ exports.feexPayWebhook = onRequest({
 // ═══════════════════════════════════════════════════════════════════════════
 exports.initiateWithdrawal = onCall({
   secrets: [FEEXPAY_TOKEN_SECRET],
+  ...pilotLightOptions(),
 }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
@@ -660,6 +671,8 @@ exports.initiateWithdrawal = onCall({
   // ── Déduire le solde atomiquement ──────────────────────────────────────────
   try {
     await db.runTransaction(async (firestoreTx) => {
+      // Mission 7E-68 : aucun fonds réservé ni débité pour un compte supprimé ou en quarantaine.
+      await assertNewAccountActivity(firestoreTx, db, HttpsError, uid, [[colName, uid]]);
       const userRef  = db.collection(colName).doc(uid);
       const userSnap = await firestoreTx.get(userRef);
 

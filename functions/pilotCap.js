@@ -25,10 +25,20 @@ function pilotOnlyInstanceOptions(env = process.env) {
   return limit === null ? {} : { maxInstances: limit };
 }
 
+// Fonctions de garde financières (Mission 7E-71 : initiateFeexPayPayment, initiateWithdrawal, aiConfirmAction, feexPayWebhook) :
+// sans maximum explicite la plateforme en réserve 100 et le quota CPU régional de la préproduction (20 vCPU) serait dépassé.
+// Préproduction seulement : 1 instance, 0,25 vCPU (empreinte 0,25 par fonction) et 1 requête par instance — une fraction de vCPU
+// impose concurrency 1 en 2e génération. L'exactitude financière ne dépend pas de ces valeurs (transactions Firestore) ; elles ne
+// limitent que le débit, négligeable pour des comptes synthétiques. Ailleurs : options vides, donc production inchangée.
+const PILOT_LIGHT_OPTIONS = Object.freeze({ maxInstances: 1, cpu: 0.25, concurrency: 1 });
+function pilotLightOptions(env = process.env) {
+  return pilotInstanceLimit(env) === null ? {} : { ...PILOT_LIGHT_OPTIONS };
+}
+
 // Réessai automatique d'un déclencheur : la préproduction garde la politique sans réessai déjà déployée (Mission 7E-25) ; tout autre
 // projet conserve la valeur d'origine du code. Un réessai relancerait aussi sans fin un échec permanent, facturé à chaque tentative.
 function pilotRetry(original, env = process.env) {
   return env.GCLOUD_PROJECT === PREPROD_PROJECT ? false : original;
 }
 
-module.exports = { PREPROD_PROJECT, pilotInstanceLimit, capInstances, pilotOnlyInstanceOptions, pilotRetry };
+module.exports = { PREPROD_PROJECT, PILOT_LIGHT_OPTIONS, pilotInstanceLimit, capInstances, pilotOnlyInstanceOptions, pilotLightOptions, pilotRetry };

@@ -15,6 +15,7 @@
 const crypto = require('crypto');
 const { DEFAULT_TARIFF_CONFIG } = require('./tariffConfig');
 const { computeOfficialTariff, validPoint } = require('./officialTariff');
+const { assertNewAccountActivity } = require('./accountAdmission');
 
 const coord = (n) => Math.round(n * 1e5) / 1e5;
 const canonicalPoint = (p) => ({ lat: coord(p.lat), lng: coord(p.lng) });
@@ -193,6 +194,9 @@ function buildCreateOrderFromQuoteCF({ db, admin, onCall, HttpsError, checkRateL
         if (!SUPPORTED_SERVICES[q.serviceType]) throw new QuoteRefusal('SERVICE_NOT_SUPPORTED', 'Service non pris en charge');
         // Seul un compte CLIENT actif crée une commande (un livreur ou un partenaire n'a pas de document clients/{uid}).
         assertActiveClient(clientSnap);
+        // Mission 7E-90 (lot 2B) : tombstone relu DANS cette transaction, avant tout débit ou création (wallet comme espèces :
+        // c'est une NOUVELLE commande). Le rejeu d'un devis déjà utilisé est sorti plus haut : il ne crée ni ne débite rien.
+        await assertNewAccountActivity(tx, db, HttpsError, uid);
         const total = fee + shopping;
         if (paymentMethod === 'wallet') {
           const wallet = Number(clientSnap.data().wallet);
