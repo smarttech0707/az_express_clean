@@ -4,6 +4,16 @@
 // defaults; settings/ai can override them at runtime without exposing API keys.
 const PROVIDERS = ['claude', 'openai', 'gemini', 'mistral', 'deepseek', 'groq'];
 
+// Seuls fournisseurs qui peuvent recevoir des données d'utilisateurs dans le parcours AZ IA : ceux annoncés dans le
+// consentement et la politique de confidentialité (Anthropic, Google). Plafond ABSOLU : ni AI_ALLOWED_PROVIDERS, ni
+// settings/ai (modifiable par un admin), ni un fournisseur forcé par l'appelant ne peuvent le dépasser. Pour en
+// ajouter un, il faut modifier ce code ET le consentement/la politique (CONSENT_VERSION), jamais une configuration.
+const AZIA_ALLOWED_PROVIDERS = Object.freeze(['claude', 'gemini']);
+
+function isAziaProviderAllowed(provider) {
+  return AZIA_ALLOWED_PROVIDERS.includes(provider);
+}
+
 function asBoolean(value, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
   return String(value).toLowerCase() === 'true';
@@ -20,6 +30,14 @@ function asList(value, fallback = []) {
 // les tests E2E des outils OpenAI ne sont pas terminés (Mission 4/6).
 function isOpenAIToolCallingEnabled() {
   return asBoolean(process.env.AI_OPENAI_TOOL_CALLING_ENABLED, false);
+}
+
+// Liste blanche effective : l'intersection de la valeur fournie (tableau ou CSV) et du plafond AZIA_ALLOWED_PROVIDERS.
+// Absente (ni tableau ni chaîne) = le plafond lui-même. Vide ou invalide = liste vide = tout est refusé (fail closed).
+function asAllowedList(value) {
+  if (Array.isArray(value)) return value.filter(isAziaProviderAllowed);
+  if (typeof value !== 'string') return [...AZIA_ALLOWED_PROVIDERS];
+  return value.split(',').map((item) => item.trim()).filter(isAziaProviderAllowed);
 }
 
 const ROUTER_DEFAULTS = Object.freeze({
@@ -41,8 +59,8 @@ const ROUTER_DEFAULTS = Object.freeze({
   // la chaîne par défaut : aucune de leurs clés n'est requise au déploiement,
   // et un incident Claude ne déclenche pas une cascade vers quatre
   // fournisseurs non configurés.
-  fallbackProviders: asList(process.env.AI_FALLBACK_PROVIDERS, ['claude', 'gemini']),
-  allowedProviders: asList(process.env.AI_ALLOWED_PROVIDERS, PROVIDERS),
+  fallbackProviders: asList(process.env.AI_FALLBACK_PROVIDERS, ['claude', 'gemini']).filter(isAziaProviderAllowed),
+  allowedProviders: asAllowedList(process.env.AI_ALLOWED_PROVIDERS),
   // Activé par défaut : `settings/ai` n'existe pas en production, donc un
   // défaut à `false` revenait à n'avoir AUCUN filet si Claude tombe. Le
   // basculement reste strictement conditionné à l'éligibilité de l'erreur
@@ -65,8 +83,11 @@ function normalizeConfig(config = {}) {
     // Explicit legacy overrides remain valid. An absent override follows the
     // configured primary, rather than silently pinning every chat to Claude.
     toolProvider: config.toolProvider || ROUTER_DEFAULTS.toolProvider || defaultProvider,
-    fallbackProviders: asList(config.fallbackProviders, ROUTER_DEFAULTS.fallbackProviders),
-    allowedProviders: asList(config.allowedProviders, ROUTER_DEFAULTS.allowedProviders),
+    fallbackProviders: asList(config.fallbackProviders, ROUTER_DEFAULTS.fallbackProviders).filter(isAziaProviderAllowed),
+    // settings/ai ne peut que RESTREINDRE la liste : l'intersection avec le plafond retire tout fournisseur non annoncé.
+    allowedProviders: config.allowedProviders === undefined
+      ? [...ROUTER_DEFAULTS.allowedProviders]
+      : asAllowedList(config.allowedProviders).filter((p) => ROUTER_DEFAULTS.allowedProviders.includes(p)),
     // Keep the legacy Firestore key active during migration. An explicit true
     // on either key enables fallback; the new key is the preferred one.
     // Précédence EXPLICITE, et non un OU logique. L'ancienne forme
@@ -110,14 +131,15 @@ function buildRoute({ config, hasTools = false, hasImage = false, complexity = '
     reason = 'default';
   }
 
-  if (!normalized.allowedProviders.includes(provider)) {
+  if (!isAziaProviderAllowed(provider) || !normalized.allowedProviders.includes(provider)) {
     throw new Error(`Fournisseur IA non autorise par la politique: ${provider}`);
   }
 
   const fallbacks = normalized.enableFallback
-    ? normalized.fallbackProviders.filter((candidate) => candidate !== provider && normalized.allowedProviders.includes(candidate))
+    ? normalized.fallbackProviders.filter((candidate) => candidate !== provider
+      && isAziaProviderAllowed(candidate) && normalized.allowedProviders.includes(candidate))
     : [];
   return { provider, fallbacks, reason, config: normalized };
 }
 
-module.exports = { PROVIDERS, ROUTER_DEFAULTS, normalizeConfig, buildRoute, isOpenAIToolCallingEnabled };
+module.exports = { PROVIDERS, AZIA_ALLOWED_PROVIDERS, isAziaProviderAllowed, ROUTER_DEFAULTS, normalizeConfig, buildRoute, isOpenAIToolCallingEnabled };

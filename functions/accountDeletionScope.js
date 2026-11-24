@@ -1,5 +1,6 @@
 'use strict';
 const {ROLE_COLLECTIONS,readDeletionIdentity}=require('./accountDeletionIdentity');
+const {inspectWithdrawals}=require('./accountObligationsInspector');
 const TERMINAL=new Set(['delivered','cancelled','expired','completed','refunded','failed_refunded','failed','rejected','closed']);
 const FINANCIAL=['wallet','walletBalance','balance','debt','pendingBalance','reservedBalance','pendingWithdrawal','commissionDebt'];
 // Bounded, fail-closed inspection: no status, balance or responsibility is guessed.
@@ -48,9 +49,16 @@ async function readDeletionScope(tx,db,uid){
   if(role==='fleet_owner')add('livreurs','ownerId',id,'responsibility');
   if(role==='real_estate_agent'){add('real_estate_visit_requests','agentId',id);add('real_estate_listings','agentId',id,'listing');}
   if(role==='seller'){add('marketplace_products','sellerId',id,'listing');add('boutique_products','sellerId',id,'listing');}
-  add('withdrawal_requests','userId',personalId);add('wallet_transactions','userId',personalId);
+  add('withdrawal_requests','userId',personalId,'withdrawal');add('wallet_transactions','userId',personalId);
  }
  for(const q of queries.values()){
+  if(q.kind==='withdrawal'){
+   // L2.2 : même prédicat que accountDeletion.js (retraits réglés / ouverts / ambigus), même lecture plafonnée.
+   const w=await inspectWithdrawals(tx,db,{accountUid:q.id});
+   if(w.blocking)return {...result,reason:w.reason};
+   for(const doc of w.docs){related.set(doc.ref.path,doc);if(related.size>=200)return {...result,reason:'history_requires_manual_review'};}
+   continue;
+  }
   const snap=await tx.get(db.collection(q.collection).where(q.field,'==',q.id).limit(201));
   if(snap.size>=201)return {...result,reason:'history_requires_manual_review'};
   for(const doc of snap.docs){

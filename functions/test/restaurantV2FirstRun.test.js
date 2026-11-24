@@ -53,11 +53,26 @@ test('catalogue : chaque étape appelle une fonction connue et documente ses cri
   assert.equal(firstRun.stepsByFunction(firstRun.FN.dispatch).length, 0);
 });
 
+// S0 lit la liste des livreurs dans AZ_PILOT_DRIVER_IDS (lot.js) : la fixture la fournit explicitement (Mission 7E-55).
 test('catalogue : actions de partnerOrderActionCF reconnues par la fonction réelle', () => {
-  for (const s of firstRun.stepsByFunction(firstRun.FN.partner)) {
-    const d = s.data({ orderId: ORDER });
-    assert.ok(d.action === 'setPartnerOrdersConfig' || PARTNER_ACTIONS.includes(d.action), s.id);
-  }
+  const saved = process.env[lot.DRIVER_IDS_ENV];
+  process.env[lot.DRIVER_IDS_ENV] = 't7e-driver';
+  try {
+    for (const s of firstRun.stepsByFunction(firstRun.FN.partner)) {
+      const d = s.data({ orderId: ORDER });
+      assert.ok(d.action === 'setPartnerOrdersConfig' || PARTNER_ACTIONS.includes(d.action), s.id);
+      if (d.action === 'setPartnerOrdersConfig') assert.deepEqual(d.patch.pilotDriverIds, ['t7e-driver'], 'S0 transmet la liste explicite des livreurs');
+    }
+  } finally { if (saved === undefined) delete process.env[lot.DRIVER_IDS_ENV]; else process.env[lot.DRIVER_IDS_ENV] = saved; }
+});
+
+test('catalogue : S0 sans liste de livreurs est bloquée (aucun livreur autorisé par défaut)', () => {
+  const saved = process.env[lot.DRIVER_IDS_ENV];
+  delete process.env[lot.DRIVER_IDS_ENV];
+  try {
+    const s0 = firstRun.STEPS.find((s) => s.id === 'S0');
+    assert.throws(() => s0.data({}), (e) => e.code === 'PILOT_DRIVER_IDS_REQUIRED');
+  } finally { if (saved !== undefined) process.env[lot.DRIVER_IDS_ENV] = saved; }
 });
 
 test('catalogue : les appelants respectent les rôles du parcours', () => {

@@ -14,6 +14,7 @@ import '../models/vehicle_seller_profile.dart';
 import '../vehicle_media_service.dart';
 import '../vehicle_seller_profile_repository.dart';
 import '../vehicle_seller_profile_validator.dart';
+import '../../services/permission_primer.dart';
 
 typedef VehicleSellerProfileSaver = Future<void> Function(
   VehicleSellerProfile profile,
@@ -397,6 +398,7 @@ class _VehicleSellerProfileScreenState
   }
 
   Future<void> _pickLogo() async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final file = await _picker.pickImage(
       source: ImageSource.gallery,
       maxWidth: 1000,

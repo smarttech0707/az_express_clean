@@ -103,9 +103,26 @@ class _AiToolExecutionsPanelState extends State<AiToolExecutionsPanel> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               for (final status in _statuses)
+                // Styles explicites : sans eux, le chip hérite des couleurs
+                // par défaut du thème Web global (`ColorScheme.dark`,
+                // claires) sur un fond lui aussi clair — texte invisible,
+                // même cause que les autres corrections de contraste du
+                // Bureau Web.
                 ChoiceChip(
-                  label: Text(status == null ? 'Tous' : _labels[status]!),
+                  label: Text(status == null ? 'Tous' : _labels[status]!,
+                      style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _status == status
+                              ? Colors.white
+                              : const Color(0xFF202124))),
                   selected: _status == status,
+                  selectedColor: const Color(0xFFFF6D00),
+                  backgroundColor: const Color(0xFFF0F2F5),
+                  side: BorderSide(
+                      color: _status == status
+                          ? const Color(0xFFFF6D00)
+                          : const Color(0xFFEEEEEE)),
                   onSelected: (_) {
                     setState(() => _status = status);
                     _load();
@@ -114,8 +131,12 @@ class _AiToolExecutionsPanelState extends State<AiToolExecutionsPanel> {
               const SizedBox(width: 12),
               TextButton.icon(
                 onPressed: _loading ? null : _load,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Actualiser'),
+                icon: const Icon(Icons.refresh_rounded,
+                    size: 18, color: Color(0xFFFF6D00)),
+                label: Text('Actualiser',
+                    style: GoogleFonts.inter(
+                        color: const Color(0xFFFF6D00),
+                        fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -169,8 +190,15 @@ class _AiToolExecutionsPanelState extends State<AiToolExecutionsPanel> {
         children: [
           Row(children: [
             Expanded(
+              // Couleur explicite : sans elle, ce texte hérite de la couleur
+              // par défaut du thème Web global (`ColorScheme.dark`, claire),
+              // quasi invisible sur le fond blanc de la carte — même cause
+              // que les autres corrections de contraste du Bureau Web.
               child: Text(row['toolName']?.toString() ?? '—',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14)),
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: const Color(0xFF202124))),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

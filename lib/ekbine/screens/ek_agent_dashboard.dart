@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' show FieldValue;
 import '../../widgets/scale_button.dart';
+import '../../widgets/min_version_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -19,6 +20,7 @@ import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/stream_error_state.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import 'ek_deposit_accounts_screen.dart';
+import '../../services/permission_primer.dart';
 
 class EkAgentDashboard extends StatefulWidget {
   const EkAgentDashboard({super.key});
@@ -34,6 +36,10 @@ class _EkAgentDashboardState extends State<EkAgentDashboard>
   @override
   void initState() {
     super.initState();
+    // Version minimale du rôle agent E-Kbine (config/app_versions.ekbine) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleEkbine,
+        blockedMessage: 'Installez la dernière version pour continuer à traiter vos demandes.'));
     _tabCtrl = TabController(length: 3, vsync: this);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
@@ -856,6 +862,7 @@ class _ActiveOrderAgentCardState extends State<_ActiveOrderAgentCard> {
 
   Future<void> _uploadProof(EkOrder order) async {
     final picker = ImagePicker();
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final file =
         await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
     if (file == null) return;

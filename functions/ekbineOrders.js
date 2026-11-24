@@ -1,6 +1,9 @@
 'use strict';
 
 const crypto = require('crypto');
+const { assertNewAccountActivity } = require('./accountAdmission');
+const { assertClosureActor } = require('./accountClosureActor');
+const { STATE } = require('./accountClosureState');
 const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
 
 // E-Kbine — création, annulation et confirmation de commande CÔTÉ SERVEUR.
@@ -143,6 +146,8 @@ function buildEkCreateOrder({ db, admin, onCall, HttpsError, checkRateLimit, log
         if (!clientSnap.exists) throw new Refusal('ACCOUNT_NOT_FOUND', 'Compte client introuvable');
         const client = clientSnap.data();
         assertActive(client, HttpsError);
+        // Mission 7E-72 : un client en quarantaine (tombstone) ne crée plus de commande, même hors wallet (aucun débit à bloquer).
+        await assertNewAccountActivity(tx, db, HttpsError, uid, []);
 
         let balanceAfter = null;
         if (isWallet) {
@@ -277,6 +282,9 @@ function creditFor(order) {
   return provenDebit(order) ? { credit: order.debitedAmount, reason: 'proven' } : { credit: 0, reason: 'unproven_debit' };
 }
 
+// Autres identités : un compte en quarantaine qui confirme doit être UNIQUEMENT un client (C3).
+const OTHER_ROLE_COLLECTIONS = ['livreurs', 'sellers', 'restaurants', 'pharmacies', 'boulangeries', 'ekbine_agents', 'real_estate_agents', 'fleet_owners', 'admins'];
+
 function buildEkClientConfirmOrder({ db, admin, onCall, HttpsError, checkRateLimit }) {
   return onCall(async (request) => {
     const uid = requireAuth(request, HttpsError);
@@ -291,6 +299,20 @@ function buildEkClientConfirmOrder({ db, admin, onCall, HttpsError, checkRateLim
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
       const order = orderSnap.data();
       if (order.clientId !== uid) throw new HttpsError('permission-denied', 'Non autorisé');
+      // L3 / X-2 (C1, C3-C5) : client en quarantaine simple, commande attribuée à un agent AVANT la quarantaine (assignedAt est un
+      // Timestamp serveur strictement antérieur au tombstone), identité client uniquement. Scellé, supprimé, anonymisé : refus.
+      const actor = await assertClosureActor(tx, db, HttpsError, {
+        fn: 'ekClientConfirmOrder', uid,
+        engagedAtMs: order.assignedAt && typeof order.assignedAt.toMillis === 'function' ? order.assignedAt.toMillis() : null,
+      });
+      const quarantined = actor.state === STATE.CLOSING;
+      if (quarantined) {
+        for (const collection of OTHER_ROLE_COLLECTIONS) {
+          if ((await tx.get(db.collection(collection).doc(uid))).exists) {
+            throw new HttpsError('permission-denied', 'Compte supprime ou en cours de suppression', { code: 'ACCOUNT_DELETION_IN_PROGRESS' });
+          }
+        }
+      }
       if (order.status === 'completed' && order.agentCredited !== undefined) { outcome = { alreadyDone: true }; return; }
       if (order.status !== 'proof_sent') throw new HttpsError('failed-precondition', 'Statut invalide');
       const agentId = order.agentId;
@@ -301,6 +323,20 @@ function buildEkClientConfirmOrder({ db, admin, onCall, HttpsError, checkRateLim
       const agRef = db.collection('ekbine_agents').doc(agentId);
       const agentSnap = await tx.get(agRef);
       if (!agentSnap.exists) throw new HttpsError('not-found', 'Agent introuvable');
+      // Mission 7E-72 : jamais de crédit sur le portefeuille d'un agent supprimé ou en quarantaine (relu dans la transaction,
+      // avant toute écriture). Refus sans changement d'état : la commande reste en proof_sent pour traitement par le support.
+      await assertNewAccountActivity(tx, db, HttpsError, agentId, [['ekbine_agents', agentId]]);
+      if (quarantined && order.paymentMethod === 'wallet') {
+        // C9 : un débit non prouvé (ou dont le journal ne correspond pas) n'est jamais traité pendant la quarantaine : aucun
+        // signalement créé, la commande reste en proof_sent pour le support.
+        const ledgerSnap = provenDebit(order) && order.debitLedgerId === `ekorder_${orderId}`
+          ? await tx.get(db.collection('clients').doc(uid).collection('wallet_transactions').doc(order.debitLedgerId)) : null;
+        const ledger = ledgerSnap && ledgerSnap.exists ? ledgerSnap.data() : null;
+        if (!ledger || ledger.orderId !== orderId || ledger.type !== 'payment' || ledger.amount !== -order.debitedAmount) {
+          throw new HttpsError('failed-precondition', 'Debit non prouve; traitement manuel requis', { code: 'EK_DEBIT_UNPROVEN_DURING_CLOSURE' });
+        }
+      }
+      actor.applyTo(tx);
 
       tx.update(orderRef, {
         status: 'completed', completedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -318,6 +354,7 @@ function buildEkClientConfirmOrder({ db, admin, onCall, HttpsError, checkRateLim
       tx.set(db.collection('audit_logs').doc(), {
         userId: uid, userType: 'client', action: 'ekbine_confirm_order', targetId: orderId,
         amount: credit, agentId, status: 'success', creditReason: reason,
+        ...(quarantined ? { closureDuringQuarantine: true } : {}),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       outcome = { alreadyDone: false, credit, reason };
@@ -344,6 +381,8 @@ function buildEkbineAcceptOrder({ db, admin, onCall, HttpsError }) {
     const agentRef = db.collection('ekbine_agents').doc(agentId);
     let nextStatus;
     await db.runTransaction(async (tx) => {
+      // Mission 7E-68 : un agent supprimé ou en quarantaine n'accepte plus de nouvelle course (relu dans la transaction).
+      await assertNewAccountActivity(tx, db, HttpsError, agentId, [['ekbine_agents', agentId]]);
       const [orderSnap, agentSnap] = await Promise.all([tx.get(orderRef), tx.get(agentRef)]);
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
       if (!agentSnap.exists) throw new HttpsError('permission-denied', 'Agent introuvable');

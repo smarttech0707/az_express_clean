@@ -18,10 +18,9 @@ const OPEN_CONFIG = {
   toolProvider: 'claude', allowedProviders: ['claude', 'openai', 'gemini'],
 };
 
-test('1. requête simple sans outil ni image → OpenAI (provider par défaut)', () => {
-  const route = buildRoute({ config: OPEN_CONFIG });
-  assert.equal(route.provider, 'openai');
-  assert.equal(route.reason, 'default');
+// M2.14 : OpenAI n'est plus un fournisseur autorisé pour AZ IA (plafond du code : Claude et Gemini).
+test('1. defaultProvider=openai → refusé par la politique (plus de routage vers OpenAI)', () => {
+  assert.throws(() => buildRoute({ config: OPEN_CONFIG }), /non autorise.*openai/);
 });
 
 test('2. requête complexe → fournisseur configuré (complexProvider)', () => {
@@ -30,9 +29,10 @@ test('2. requête complexe → fournisseur configuré (complexProvider)', () => 
   assert.equal(route.reason, 'complex');
 });
 
-test('3. image non-sensible, sans outil → OpenAI si configuré (imageProvider)', () => {
-  const route = buildRoute({ config: OPEN_CONFIG, hasImage: true });
-  assert.equal(route.provider, 'openai');
+test('3. image non-sensible, sans outil → imageProvider=openai refusé par la politique', () => {
+  assert.throws(() => buildRoute({ config: OPEN_CONFIG, hasImage: true }), /non autorise.*openai/);
+  const route = buildRoute({ config: { ...OPEN_CONFIG, imageProvider: 'gemini' }, hasImage: true });
+  assert.equal(route.provider, 'gemini');
   assert.equal(route.reason, 'image');
 });
 
@@ -66,12 +66,12 @@ test('8. Confirmation d\'action en attente (tool présent) → Claude', () => {
   assert.equal(route.provider, 'claude');
 });
 
-test('9. Erreur OpenAI sans outil → fallback Claude autorisé si enableFallback', () => {
+test('9. Départ Claude sans outil → repli Gemini seulement ; un repli non autorisé est écarté', () => {
   const route = buildRoute({
-    config: { ...OPEN_CONFIG, enableFallback: true, fallbackProviders: ['claude', 'gemini'] },
+    config: { ...OPEN_CONFIG, defaultProvider: 'claude', enableFallback: true, fallbackProviders: ['openai', 'claude', 'gemini'] },
   });
-  assert.equal(route.provider, 'openai');
-  assert.deepEqual(route.fallbacks, ['claude', 'gemini']);
+  assert.equal(route.provider, 'claude');
+  assert.deepEqual(route.fallbacks, ['gemini']);
 });
 
 // Le repli est désormais ACTIVÉ par défaut (Claude principal, Gemini en
@@ -126,8 +126,9 @@ test('13. Aucun fournisseur disponible dans la liste autorisée → erreur clair
   );
 });
 
-test('forceProvider explicite avec des outils reste respecté par le routeur (le filtre supportsTools() vit dans AIProviderService, pas ici)', () => {
-  const route = buildRoute({ config: OPEN_CONFIG, hasTools: true, forceProvider: 'openai' });
-  assert.equal(route.provider, 'openai');
+test('forceProvider explicite autorisé reste respecté ; openai forcé est refusé (le filtre supportsTools() vit dans AIProviderService)', () => {
+  assert.throws(() => buildRoute({ config: OPEN_CONFIG, hasTools: true, forceProvider: 'openai' }), /non autorise/);
+  const route = buildRoute({ config: OPEN_CONFIG, hasTools: true, forceProvider: 'gemini' });
+  assert.equal(route.provider, 'gemini');
   assert.equal(route.reason, 'forced');
 });

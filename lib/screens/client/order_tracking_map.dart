@@ -10,6 +10,7 @@ import '../../models/order_model.dart';
 import '../../services/notification_service.dart';
 import '../../services/tracking_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/route_estimate_notice.dart';
 
 /// Cadence les commandes vers la vue native Google Maps sans limiter
 /// l'interpolation Flutter du marqueur.
@@ -421,6 +422,11 @@ class _OrderTrackingMapState extends State<OrderTrackingMap>
                   ],
                 ]),
 
+                if (hasDriver && s.routeIsEstimate) ...[
+                  const SizedBox(height: 10),
+                  const RouteEstimateNotice(),
+                ],
+
                 // Légende
                 if (hasDest) ...[
                   const SizedBox(height: 12),
@@ -637,7 +643,8 @@ class _LegacyTrackingMapState extends State<_LegacyTrackingMap>
                     if (s.driverPosition != null)
                       Text(
                           'ETA: ~${s.etaToClient} min · '
-                          '${s.distanceToClient.toStringAsFixed(1)} km',
+                          '${s.distanceToClient.toStringAsFixed(1)} km'
+                          '${s.routeIsEstimate ? ' (estimation)' : ''}',
                           style: GoogleFonts.urbanist(
                               fontSize: 12, color: AppColors.textMuted)),
                   ])),

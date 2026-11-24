@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../services/auth_service.dart';
+import '../../services/driver_location_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/single_photo_editor.dart';
 
@@ -324,10 +325,15 @@ class _DriverProfilState extends State<DriverProfil> {
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white),
             onPressed: () async {
-              await FirebaseFirestore.instance
-                  .collection("livreurs")
-                  .doc(widget.driverId)
-                  .update({"isOnline": false});
+              // SEC-01 / S5.1 : source unique pour « passer hors ligne ».
+              // `goOffline()` arrête d'abord le flux GPS puis écrit
+              // `isOnline: false` — l'écriture directe précédente laissait le
+              // flux GPS actif, et une position en vol pouvait remettre
+              // `isOnline` à `true` juste après cette déconnexion (même bug
+              // déjà corrigé pour le bouton « Hors ligne » du tableau de
+              // bord, voir driver_dashboard.dart::_setOnline).
+              await DriverLocationService.instance
+                  .goOffline(widget.driverId);
               AuthService().logAuthEvent('logout', 'livreur');
               await FirebaseAuth.instance.signOut();
               if (ctx.mounted) {
@@ -365,7 +371,7 @@ class _DriverProfilState extends State<DriverProfil> {
           final photoUrl = data["photoUrl"] as String?;
           final wallet = data["wallet"] ?? 0;
           final deliveries = data["deliveries"] ?? 0;
-          final rating = data["rating"] ?? 0.0;
+          final rating = (data["avgRating"] as num? ?? 0).toDouble();
 
           return CustomScrollView(
             slivers: [

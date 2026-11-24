@@ -135,8 +135,10 @@ test.before(async () => {
 
 // ── Aides de parcours ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 const request = () => ({ sellerType: 'restaurant', sellerId: RESTO, items: lot.BASKET, destination: lot.DELIVERY_POINT });
+// Depuis la Mission 7E-55 le livreur doit être autorisé EXPLICITEMENT (pilotDriverIds) : aucun livreur n'est autorisé par défaut.
+const pilotPlan = () => lot.pilotConfigPlan({ driverIds: [DRIVER] });
 async function openPilot() {
-  const res = await run.action(asUser(ADMIN, lot.pilotConfigPlan().request));
+  const res = await run.action(asUser(ADMIN, pilotPlan().request));
   assert.equal(res.success, true, JSON.stringify(res));
 }
 async function placeOrder() {
@@ -221,8 +223,8 @@ test('3. parcours complet : pilote, devis, commande, restaurant, livreur, QR/PIN
   // Ouverture limitée au seul restaurant du lot, document conforme au plan.
   await openPilot();
   const cfg = (await db.doc('config/partnerOrdersV2').get()).data();
-  const expected = lot.pilotConfigPlan().expectedDocument;
-  assert.deepEqual({ pilotPartnerIds: cfg.pilotPartnerIds, pilotClientIds: cfg.pilotClientIds, clientAccess: cfg.clientAccess, creationOpen: cfg.creationOpen, managementFrozen: cfg.managementFrozen, version: cfg.version }, expected);
+  const expected = pilotPlan().expectedDocument;
+  assert.deepEqual({ pilotPartnerIds: cfg.pilotPartnerIds, pilotClientIds: cfg.pilotClientIds, clientAccess: cfg.clientAccess, creationOpen: cfg.creationOpen, managementFrozen: cfg.managementFrozen, pilotDriverIds: cfg.pilotDriverIds, version: cfg.version }, expected);
   // Un autre partenaire reste refusé.
   const other = await run.quote(asUser(CLIENT, { ...request(), sellerId: 'real-resto' }));
   assert.equal(other.success, false);

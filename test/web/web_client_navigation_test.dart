@@ -60,15 +60,15 @@ void main() {
   });
 
   group('4. Chaque route déclarée mène à une destination définie', () {
-    test('les 4 sections réelles sont toutes déclarées comme routes', () {
+    test('les 5 sections réelles sont toutes déclarées comme routes', () {
       for (final section in clientSectionTabs.keys) {
         expect(clientAppRoutes, contains(section),
             reason: '$section doit exister comme GoRoute');
       }
     });
 
-    test('les 4 onglets sont distincts et couvrent 0..3', () {
-      expect(clientSectionTabs.values.toSet(), {0, 1, 2, 3});
+    test('les 5 onglets sont distincts et couvrent 0..4', () {
+      expect(clientSectionTabs.values.toSet(), {0, 1, 2, 3, 4});
     });
 
     test('clientPathForTab est l\'inverse exact de clientSectionTabs', () {

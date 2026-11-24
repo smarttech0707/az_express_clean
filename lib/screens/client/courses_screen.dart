@@ -21,6 +21,7 @@ import '../../widgets/scale_button.dart';
 import '../../widgets/premium_background.dart';
 import 'order_wait_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../services/permission_primer.dart';
 
 class CoursesScreen extends StatefulWidget {
   const CoursesScreen({super.key});
@@ -67,7 +68,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
   // ── Voice
   final SpeechToText _speech = SpeechToText();
-  bool _speechAvailable = false;
+  // Vrai tant que l'initialisation (qui déclenche l'invite micro) n'a pas eu lieu : elle est faite au premier appui.
+  bool _speechAvailable = true;
+  bool _speechInitialized = false;
   bool _listening = false;
   String _liveWords = '';
 
@@ -119,7 +122,6 @@ class _CoursesScreenState extends State<CoursesScreen> {
   @override
   void initState() {
     super.initState();
-    _initSpeech();
     _listenWallet();
     _budgetCtrl.addListener(() => setState(() {}));
   }
@@ -153,6 +155,15 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   Future<void> _toggleListening() async {
+    if (!_listening && !_speechInitialized) {
+      // Explication avant l'invite micro/reconnaissance vocale ; refus = on continue au clavier.
+      if (!await PermissionPrimer.prepareMicrophone(context: context)) {
+        _snack('Micro non autorisé : vous pouvez continuer en écrivant', Colors.orange);
+        return;
+      }
+      await _initSpeech();
+      _speechInitialized = true;
+    }
     if (!_speechAvailable) {
       _snack('Micro non disponible sur cet appareil', Colors.orange);
       return;

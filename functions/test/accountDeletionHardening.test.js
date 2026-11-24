@@ -347,7 +347,8 @@ test('effacement AZ IA : conversation, mémoire, rappels et actions non exécut�
 });
 
 test('données conservées : champs financiers du profil et commandes terminées gardés, champs personnels retirés', async () => {
-  const h = setup({ seed: { 'orders/o1': { clientId: UID, status: 'delivered', budget: 1500, clientName: 'Awa', clientPhone: '07', paymentStatus: 'paid' } } });
+  const h = setup({ seed: { 'orders/o1': { clientId: UID, status: 'delivered', budget: 1500, clientName: 'Awa', clientPhone: '07', paymentStatus: 'paid', paymentMethod: 'cash' } } });
+  // L2 : le moteur d'obligations s'ajoute à l'inspecteur ; une commande livrée SANS moyen de paiement est « ambiguë » (fail-closed).
   await h.run();
   const profile = h.db.store.get(`clients/${UID}`);
   assert.equal(profile.wallet, 0); assert.equal(profile.isDeleted, true);

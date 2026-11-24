@@ -5,14 +5,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:uuid/uuid.dart';
 
-import '../constants/app_constants.dart';
 import '../models/local_place.dart';
 import 'active_city_service.dart';
 import 'geo_cache_store.dart';
+import 'maps_proxy_client.dart';
 
-const _mapsKey = MapsConfig.apiKey;
-const _googleBase = 'https://maps.googleapis.com/maps/api';
 const _nominatimBase = 'https://nominatim.openstreetmap.org';
 
 class PlaceSuggestion {
@@ -744,51 +743,16 @@ class PlacesSearchService {
   // MOTEUR 3 — Google Places
   // ═══════════════════════════════════════════════════════════════════════
 
+  // Lot 1.2.1 — proxy uniquement : aucun appel Google direct en repli. Si le
+  // proxy est indisponible ou refuse (quelle que soit la cause), on renvoie
+  // simplement [], ce qui laisse les résultats Firestore/Nominatim déjà
+  // trouvés par `search()` (ce moteur n'intervient qu'en dernier recours).
   static Future<List<LocalPlace>> _searchGoogle(
     String query,
     _ActiveCityContext context,
   ) async {
-    try {
-      final q = '$query, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire';
-      final uri = Uri.parse('$_googleBase/place/autocomplete/json').replace(
-        queryParameters: {
-          'input': q,
-          'location': '${context.latitude},${context.longitude}',
-          'radius': '${(context.radiusKm * 1000).round()}',
-          'components': 'country:ci',
-          'language': 'fr',
-          'types': 'geocode|establishment',
-          'key': _mapsKey,
-        },
-      );
-      final resp =
-          await _httpClient.get(uri).timeout(const Duration(seconds: 5));
-      if (resp.statusCode != 200) return [];
-
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final predictions = data['predictions'] as List? ?? [];
-
-      return predictions
-          .map((p) {
-            final sf = p['structured_formatting'] as Map? ?? {};
-            final name = sf['main_text'] as String? ?? '';
-            final subtitle = sf['secondary_text'] as String? ?? '';
-            return LocalPlace(
-              id: p['place_id'] as String? ?? '',
-              name: name,
-              address: p['description'] as String? ?? name,
-              latitude: 0, longitude: 0, // sera résolu si sélectionné
-              category: 'other',
-              district: subtitle.split(',').first.trim(),
-              source: 'google',
-            );
-          })
-          .where((p) => p.name.isNotEmpty)
-          .toList();
-    } catch (e) {
-      debugPrint('[PlacesSearch] Google error: $e');
-      return [];
-    }
+    final q = '$query, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire';
+    return await _searchGoogleViaProxy(q, context) ?? [];
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -796,46 +760,33 @@ class PlacesSearchService {
   // ═══════════════════════════════════════════════════════════════════════
 
   /// Résout les coordonnées d'un lieu (si pas encore disponibles).
+  /// Lot 1.2.1 — proxy uniquement : `null` si indisponible/refusé (aucun
+  /// appel Google direct) ; le seul appelant ([livraison_screen.dart])
+  /// affiche déjà un message adapté sur `null`, comportement inchangé.
   static Future<LocalPlace?> resolve(
     LocalPlace place, {
     ActiveCityService? cityService,
   }) async {
     if (place.hasCoords) return place;
-
-    // Géocodage via Google
     try {
       final context = await _activeCityContext(
         cityService ?? _defaultCityService,
       );
       if (context == null) return null;
-      final uri = Uri.parse('$_googleBase/geocode/json').replace(
-        queryParameters: {
-          'address':
-              '${place.name}, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire',
-          'language': 'fr',
-          'key': _mapsKey,
-        },
-      );
-      final resp =
-          await _httpClient.get(uri).timeout(const Duration(seconds: 5));
-      if (resp.statusCode != 200) return null;
-
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final results = data['results'] as List?;
-      if (results == null || results.isEmpty) return null;
-
-      final loc = results.first['geometry']['location'] as Map<String, dynamic>;
-      final lat = (loc['lat'] as num).toDouble();
-      final lng = (loc['lng'] as num).toDouble();
-
+      final query =
+          '${place.name}, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire';
+      final proxied = await _geocodeViaProxy(query);
+      if (proxied == null) return null;
       return LocalPlace(
         id: place.id,
         name: place.name,
         category: place.category,
         district: place.district,
-        address: results.first['formatted_address'] as String? ?? place.address,
-        latitude: lat,
-        longitude: lng,
+        address: proxied.formattedAddress.isNotEmpty
+            ? proxied.formattedAddress
+            : place.address,
+        latitude: proxied.position.latitude,
+        longitude: proxied.position.longitude,
         keywords: place.keywords,
         source: place.source,
       );
@@ -847,53 +798,117 @@ class PlacesSearchService {
   static Future<LatLng?> _geocode(String address) async {
     final context = await _activeCityContext(_defaultCityService);
     if (context == null) return null;
-    try {
-      final uri = Uri.parse('$_googleBase/geocode/json').replace(
-        queryParameters: {
-          'address':
-              '$address, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire',
-          'language': 'fr',
-          'key': _mapsKey,
-        },
-      );
-      final resp =
-          await _httpClient.get(uri).timeout(const Duration(seconds: 5));
-      if (resp.statusCode != 200) return null;
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final results = data['results'] as List?;
-      if (results == null || results.isEmpty) return null;
-      final location = results.first['geometry']['location'] as Map;
-      return LatLng(
-        (location['lat'] as num).toDouble(),
-        (location['lng'] as num).toDouble(),
-      );
-    } catch (_) {
-      return null;
-    }
+    final query =
+        '$address, ${nominatimCityLabel(context.name)}, Côte d\'Ivoire';
+    final proxied = await _geocodeViaProxy(query);
+    return proxied?.position;
   }
 
-  static Future<LatLng?> _googlePlaceDetails(String placeId) async {
-    try {
-      final uri = Uri.parse('$_googleBase/place/details/json').replace(
-        queryParameters: {
-          'place_id': placeId,
-          'fields': 'geometry',
-          'key': _mapsKey,
-        },
-      );
-      final resp =
-          await _httpClient.get(uri).timeout(const Duration(seconds: 5));
-      if (resp.statusCode != 200) return null;
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final location = (data['result']?['geometry']?['location']) as Map?;
-      if (location == null) return null;
-      return LatLng(
-        (location['lat'] as num).toDouble(),
-        (location['lng'] as num).toDouble(),
-      );
-    } catch (_) {
-      return null;
+  // ── Proxy serveur (functions/mapsProxy.js) ────────────────────────────────
+  // `null` = proxy indisponible ou refusé (Lot 1.2.1) : l'appelant applique
+  // son repli local (jamais un appel Google direct).
+
+  /// Jeton de session Places : une recherche (plusieurs frappes) puis la
+  /// résolution du lieu choisi sont facturées comme une seule session.
+  static String? _placesSessionToken;
+
+  static String _currentSessionToken() =>
+      _placesSessionToken ??= const Uuid().v4().replaceAll('-', '');
+
+  static Future<List<LocalPlace>?> _searchGoogleViaProxy(
+    String query,
+    _ActiveCityContext context,
+  ) async {
+    final result = await MapsProxyClient.call(
+      MapsProxyClient.autocomplete,
+      {
+        'input': query,
+        'location': MapsProxyClient.point(context.latitude, context.longitude),
+        'radiusMeters': (context.radiusKm * 1000).round(),
+        'sessionToken': _currentSessionToken(),
+      },
+      timeout: const Duration(seconds: 6),
+    );
+    if (!result.hasData) return null;
+    return placesFromProxyPredictions(result.data!);
+  }
+
+  /// Convertit la réponse de `mapsAutocompleteCF` ; mêmes champs que le
+  /// chemin hérité (coordonnées résolues à la sélection).
+  @visibleForTesting
+  static List<LocalPlace>? placesFromProxyPredictions(
+    Map<String, dynamic> data,
+  ) {
+    final raw = data['predictions'];
+    if (raw is! List) return null;
+    final places = <LocalPlace>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final id = item['placeId'];
+      final name = item['mainText'];
+      if (id is! String || id.isEmpty) continue;
+      if (name is! String || name.isEmpty) continue;
+      final subtitle =
+          item['secondaryText'] is String ? item['secondaryText'] as String : '';
+      final description =
+          item['description'] is String ? item['description'] as String : name;
+      places.add(LocalPlace(
+        id: id,
+        name: name,
+        address: description.isEmpty ? name : description,
+        latitude: 0, longitude: 0, // sera résolu si sélectionné
+        category: 'other',
+        district: subtitle.split(',').first.trim(),
+        source: 'google',
+      ));
     }
+    return places;
+  }
+
+  static Future<({LatLng position, String formattedAddress})?> _geocodeViaProxy(
+    String address,
+  ) async {
+    final result = await MapsProxyClient.call(
+      MapsProxyClient.geocode,
+      {'address': address},
+      timeout: const Duration(seconds: 6),
+    );
+    if (!result.hasData) return null;
+    final results = result.data!['results'];
+    if (results is! List || results.isEmpty) return null;
+    return pointFromProxyResult(results.first);
+  }
+
+  /// Lit `{lat, lng, formattedAddress}` ; `null` si le point est inexploitable.
+  @visibleForTesting
+  static ({LatLng position, String formattedAddress})? pointFromProxyResult(
+    Object? raw,
+  ) {
+    if (raw is! Map) return null;
+    final lat = raw['lat'];
+    final lng = raw['lng'];
+    if (lat is! num || lng is! num) return null;
+    if (lat == 0 && lng == 0) return null;
+    final address = raw['formattedAddress'];
+    return (
+      position: LatLng(lat.toDouble(), lng.toDouble()),
+      formattedAddress: address is String ? address : '',
+    );
+  }
+
+  // Lot 1.2.1 — proxy uniquement : `null` si indisponible/refusé ou si la
+  // réponse est inexploitable, jamais un appel Google direct en repli.
+  static Future<LatLng?> _googlePlaceDetails(String placeId) async {
+    final token = _placesSessionToken;
+    final result = await MapsProxyClient.call(
+      MapsProxyClient.placeDetails,
+      {'placeId': placeId, if (token != null) 'sessionToken': token},
+      timeout: const Duration(seconds: 6),
+    );
+    if (!result.hasData) return null;
+    // La résolution du lieu clôt la session de recherche facturée.
+    _placesSessionToken = null;
+    return pointFromProxyResult(result.data!)?.position;
   }
 
   static String _viewboxFor(_ActiveCityContext context) {
@@ -1110,6 +1125,7 @@ class PlacesSearchService {
     _cacheLoadFuture = null;
     _lastSearchState = PlacesSearchState.idle;
     _httpClient = http.Client();
+    _placesSessionToken = null;
   }
 
   @visibleForTesting

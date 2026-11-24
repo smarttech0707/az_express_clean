@@ -1,9 +1,11 @@
 import '../../delivery_proofs/proof_presentation.dart';
 import 'dart:async';
 import '../../widgets/scale_button.dart';
+import '../../widgets/min_version_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -47,6 +49,10 @@ class _SellerDashboardState extends State<SellerDashboard>
   @override
   void initState() {
     super.initState();
+    // Version minimale du rôle vendeur (config/app_versions.seller) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleSeller,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer vos commandes.'));
     _photoUrl = widget.sellerData['photoUrl'] as String?;
     _tabCtrl = TabController(length: 4, vsync: this);
     NotificationService.registerTapHandler((type, orderId, status) {
@@ -1266,7 +1272,7 @@ class _OrderCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 if (hasDriver)
-                  _DriverSection(driverId: order.driverId!)
+                  _DriverSection(orderId: order.id, driverId: order.driverId!)
                 else
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -1405,16 +1411,66 @@ class _InfoSection extends StatelessWidget {
 
 // ── SECTION LIVREUR ──────────────────────────────────────────
 
-class _DriverSection extends StatelessWidget {
+class _DriverSection extends StatefulWidget {
+  final String orderId;
   final String driverId;
-  const _DriverSection({required this.driverId});
+  const _DriverSection({required this.orderId, required this.driverId});
+
+  @override
+  State<_DriverSection> createState() => _DriverSectionState();
+}
+
+// SEC-01 / S6.12 : `name`/`lat`/`lng`/`isOnline` restent lus en continu
+// depuis la projection publique `driver_public` (StreamBuilder, inchangé).
+// `phone` (privé) ne vient plus de `livreurs` mais de la Callable
+// `getDriverPhoneForOrderCF` (S6.8) — un `Future` mémorisé dans cet État,
+// créé une seule fois par `initState()` et jamais recréé par `build()`.
+// Sans cette mémorisation, chaque écriture GPS sur `driver_public` (toutes
+// les ~5 s pendant une livraison active, cf. docs/SEC01_S6_11_*) relancerait
+// la Callable au même rythme (voir audit S6.11 pour le détail du risque de
+// rate-limit). `didUpdateWidget` ne relance l'appel que si `orderId` ou
+// `driverId` change réellement (nouvelle commande affichée, ou livreur
+// réattribué) — jamais de polling, jamais de cache global, jamais de repli
+// vers une lecture directe de `livreurs.phone`.
+class _DriverSectionState extends State<_DriverSection> {
+  late Future<String?> _phoneFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneFuture = _fetchPhone();
+  }
+
+  @override
+  void didUpdateWidget(_DriverSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.orderId != widget.orderId ||
+        oldWidget.driverId != widget.driverId) {
+      // Nouvelle commande affichée, ou livreur réattribué : le Future est
+      // relancé — jamais de numéro obsolète conservé.
+      setState(() {
+        _phoneFuture = _fetchPhone();
+      });
+    }
+  }
+
+  Future<String?> _fetchPhone() async {
+    try {
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('getDriverPhoneForOrderCF')
+          .call({'orderId': widget.orderId});
+      return ((result.data as Map?)?['data'] as Map?)?['phone'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('livreurs')
-          .doc(driverId)
+          .collection('driver_public')
+          .doc(widget.driverId)
           .snapshots(),
       builder: (context, snap) {
         // En échec, ne pas laisser tourner le spinner indéfiniment : cette
@@ -1429,12 +1485,23 @@ class _DriverSection extends StatelessWidget {
         if (data == null) return const SizedBox.shrink();
 
         final name = data['name'] ?? 'Livreur';
-        final phone = data['phone'] as String?;
         final lat = (data['lat'] as num?)?.toDouble();
         final lng = (data['lng'] as num?)?.toDouble();
         final isOnline = data['isOnline'] ?? false;
 
-        return Container(
+        return FutureBuilder<String?>(
+          future: _phoneFuture,
+          builder: (context, phoneSnap) {
+            return _buildCard(name, phoneSnap.data, lat, lng, isOnline);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCard(
+      dynamic name, String? phone, double? lat, double? lng, dynamic isOnline) {
+    return Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: const Color(0xFF1565C0).withValues(alpha: 0.05),
@@ -1542,8 +1609,6 @@ class _DriverSection extends StatelessWidget {
             ],
           ),
         );
-      },
-    );
   }
 }
 

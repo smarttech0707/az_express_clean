@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/catalog_location_resolver.dart';
 import '../../services/catalog_order_service.dart';
 import '../../services/wallet_payment_compatibility.dart';
 import '../../widgets/catalog_quote_dialog.dart';
@@ -130,6 +131,25 @@ class _ColisPageState extends State<ColisPage> {
         }
       }
       if (!mounted) return;
+      // Correction release readiness : un point de service réel est exigé par le serveur
+      // (createCatalogOrderFromQuoteCF) — jamais de repli sur (0,0), qui rendait la commande
+      // invisible à tout livreur. GPS d'abord (position de l'expéditeur), géocodage de
+      // l'adresse du destinataire en secours (seule adresse texte disponible à l'écran).
+      final location = await CatalogLocationResolver.resolve(
+        context: context,
+        address: _recipientAddressCtrl.text.trim(),
+      );
+      if (location == null) {
+        if (mounted) {
+          _snack(
+            "Impossible de localiser l'envoi. Activez le GPS ou vérifiez l'adresse du destinataire.",
+            Colors.red,
+          );
+          setState(() => _loading = false);
+        }
+        return;
+      }
+      if (!mounted) return;
       final created = await runCatalogCheckout(
         context,
         checkout: _checkout,
@@ -144,6 +164,9 @@ class _ColisPageState extends State<ColisPage> {
           'recipientPhone': _recipientPhoneCtrl.text.trim(),
           'recipientAddress': _recipientAddressCtrl.text.trim(),
           'contentDescription': _descriptionCtrl.text.trim(),
+          'lat': location.lat,
+          'lng': location.lng,
+          'coordinateSource': location.serverSourceName,
         },
         notify: (m, err) => _snack(m, err ? Colors.red : Colors.green),
       );

@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:az_express/services/google_routes_service.dart';
+import 'package:az_express/services/maps_proxy_client.dart';
 import 'package:az_express/services/places_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -13,6 +13,10 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     GoogleRoutesService.debugResetCache();
+    MapsProxyClient.debugCall = null;
+  });
+  tearDown(() {
+    MapsProxyClient.debugCall = null;
   });
 
   test("une adresse Google n'est jamais persistée", () async {
@@ -59,28 +63,15 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('unrelated', 'keep-me');
 
-    var httpCalls = 0;
-    GoogleRoutesService.debugDirectionsGet = (uri) async {
-      httpCalls++;
-      return http.Response(
-        jsonEncode({
-          'status': 'OK',
-          'routes': [
-            {
-              'overview_polyline': {
-                'points': '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
-              },
-              'legs': [
-                {
-                  'distance': {'value': 1200},
-                  'duration': {'value': 600},
-                },
-              ],
-            },
-          ],
-        }),
-        200,
-      );
+    var proxyCalls = 0;
+    MapsProxyClient.debugCall = (_, __) async {
+      proxyCalls++;
+      return {
+        'encodedPolyline': '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+        'distanceMeters': 1200,
+        'durationSeconds': 600,
+        'isEstimate': false,
+      };
     };
 
     const origin = LatLng(6.7201, -3.4901);
@@ -94,7 +85,7 @@ void main() {
       destination: destination,
     );
 
-    expect(httpCalls, 1);
+    expect(proxyCalls, 1);
     expect(first.distanceKm, 1.2);
     expect(first.etaMinutes, 10);
     expect(second.distanceKm, first.distanceKm);
@@ -116,7 +107,7 @@ void main() {
 
   test('le fallback local conserve une distance positive entre deux points',
       () async {
-    GoogleRoutesService.debugDirectionsGet = (_) async => http.Response('', 500);
+    MapsProxyClient.debugCall = (_, __) async => null;
 
     final route = await GoogleRoutesService.getRouteModel(
       origin: const LatLng(6.7273, -3.4961),
@@ -125,5 +116,6 @@ void main() {
 
     expect(route.distanceKm, greaterThan(0));
     expect(route.distanceText, isNot('0 m'));
+    expect(route.isEstimate, isTrue);
   });
 }

@@ -25,8 +25,10 @@ import '../../theme/app_theme.dart';
 import '../../widgets/driver_marker.dart';
 import '../../widgets/glass_kit.dart';
 import '../../widgets/quoted_checkout_runner.dart';
+import '../../widgets/route_estimate_notice.dart';
 import '../../widgets/route_polyline.dart';
 import '../customer_tracking_screen.dart';
+import '../../services/permission_primer.dart';
 
 const LatLng _abengourou = LatLng(6.7273, -3.4961);
 
@@ -285,12 +287,21 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
   // ── Getters calculés ──────────────────────────────────────────────────────
 
+  // Un itinéraire `isEstimate` (ligne droite de repli, voir RouteModel) n'est
+  // pas un itinéraire routier réel : TarifService.compute retombe alors sur
+  // son propre calcul à vol d'oiseau (routeDistanceKm: null) plutôt que de
+  // traiter l'estimation du proxy/legacy comme une distance routière
+  // confirmée. Même barème, même fonction : seule la distance fournie change.
   TarifResult? get _tarifResult {
     if (_destination == null) return null;
+    final isRealRoute = RouteModel.resolveTariffDistance(
+      route: _route,
+      haversineFallbackKm: 0,
+    ).isRealRoute;
     return TarifService.compute(
       clientLat: _destination!.latitude,
       clientLng: _destination!.longitude,
-      routeDistanceKm: _route.distanceKm > 0 ? _route.distanceKm : null,
+      routeDistanceKm: isRealRoute ? _route.distanceKm : null,
     );
   }
 
@@ -354,7 +365,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     final cityProvider = context.read<ActiveCityProvider>();
     _gpsLoading = true;
     try {
-      final perm = await Geolocator.requestPermission();
+      final perm = await PermissionPrimer.requestLocation(context: context);
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
         await _recordLocationIssue(
@@ -981,7 +992,15 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             pickupLng: _departure!.longitude,
             destLat: _destination!.latitude,
             destLng: _destination!.longitude,
-            routeDistanceKm: _route.distanceKm > 0 ? _route.distanceKm : null,
+            // Le serveur (officialTariff.js) plafonne déjà toute distance
+            // déclarée à vol d'oiseau × facteur routier, mais on ne présente
+            // pas une estimation locale comme une distance routière confirmée.
+            routeDistanceKm: RouteModel.resolveTariffDistance(
+              route: _route,
+              haversineFallbackKm: 0,
+            ).isRealRoute
+                ? _route.distanceKm
+                : null,
           ),
           paymentMethod: _payment,
           walletBalance: _wallet,
@@ -1809,6 +1828,14 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                       modeColor)),
             ]),
           ),
+
+        if (_route.isNotEmpty && _route.isEstimate) ...[
+          const SizedBox(height: 8),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: RouteEstimateNotice(),
+          ),
+        ],
 
         const SizedBox(height: 12),
 

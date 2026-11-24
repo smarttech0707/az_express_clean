@@ -15,6 +15,7 @@ import 'admin_service_requests_page.dart';
 import 'driver_requests_page.dart';
 import 'admin_login.dart';
 import 'admin_menu.dart';
+import '../../widgets/min_version_dialog.dart';
 import 'admin_mfa_security.dart';
 
 class AdminDashboard extends StatefulWidget {
@@ -49,6 +50,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
     if (expectedUid == null || !validateAdminRecord(_adminData).allowed) {
       _closeInvalidSession();
     } else {
+      // Version minimale du rôle administrateur mobile (config/app_versions.admin) : sans configuration, aucun effet.
+      // Les administrateurs web ne sont jamais bloqués (build 0) : ils gardent la main pour corriger la configuration.
+      WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+          context, minVersionRoleAdmin,
+          blockedMessage: 'Installez la dernière version pour continuer à administrer AZ Express.'));
       _authSubscription =
           FirebaseAuth.instance.authStateChanges().listen((user) {
         if (!isAdminSessionValid(

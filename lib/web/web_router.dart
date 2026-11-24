@@ -13,7 +13,11 @@ import 'pages/contact_page.dart';
 import 'pages/about_page.dart';
 import 'pages/privacy_page.dart';
 import 'pages/terms_page.dart';
+import 'pages/legal_notice_page.dart';
 import 'pages/delete_account_page.dart';
+import 'pages/faq_page.dart';
+import 'pages/news_page.dart';
+import 'pages/download_page.dart';
 import 'pages/admin/web_admin_login.dart';
 import 'pages/admin/web_admin_dashboard.dart';
 import 'pages/client/web_client_login.dart';
@@ -33,6 +37,7 @@ const clientAppRoutes = <String>[
   '/app/commandes',
   '/app/wallet',
   '/app/profil',
+  '/app/support',
   // Services sans page web dédiée
   '/app/commander',
   '/app/restaurants',
@@ -95,6 +100,13 @@ final webRouter = GoRouter(
     GoRoute(
         path: '/confidentialite', builder: (_, __) => const WebPrivacyPage()),
     GoRoute(path: '/conditions', builder: (_, __) => const WebTermsPage()),
+    GoRoute(
+        path: '/mentions-legales',
+        builder: (_, __) => const WebLegalNoticePage()),
+    GoRoute(path: '/faq', builder: (_, __) => const WebFaqPage()),
+    GoRoute(path: '/actualites', builder: (_, __) => const WebNewsPage()),
+    GoRoute(
+        path: '/telecharger', builder: (_, __) => const WebDownloadPage()),
     GoRoute(
         path: '/delete-account',
         builder: (_, __) => const WebDeleteAccountPage()),

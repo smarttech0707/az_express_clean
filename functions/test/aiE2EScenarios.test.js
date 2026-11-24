@@ -72,30 +72,35 @@ function makeHarness(providerImpls, config = {}) {
     providers: {
       claude: providerImpls.claude || makeFakeProvider('claude', () => ({ text: '', toolCalls: [], inputTokens: 1, outputTokens: 1, finishReason: 'stop' })),
       openai: providerImpls.openai || makeFakeProvider('openai', () => ({ text: '', toolCalls: [], inputTokens: 1, outputTokens: 1, finishReason: 'stop' })),
-      gemini: makeFakeProvider('gemini', () => ({ text: '', toolCalls: [], inputTokens: 1, outputTokens: 1, finishReason: 'stop' })),
+      gemini: providerImpls.gemini || makeFakeProvider('gemini', () => ({ text: '', toolCalls: [], inputTokens: 1, outputTokens: 1, finishReason: 'stop' })),
       deepseek: makeFakeProvider('deepseek', () => ({ text: '', toolCalls: [], inputTokens: 1, outputTokens: 1, finishReason: 'stop' })),
       mistral: makeFakeProvider('mistral', () => ({ text: '', toolCalls: [], inputTokens: 1, outputTokens: 1, finishReason: 'stop' })),
       groq: makeFakeProvider('groq', () => ({ text: '', toolCalls: [], inputTokens: 1, outputTokens: 1, finishReason: 'stop' })),
     },
   });
-  const gateway = createAiGateway({ providerService, policyEngine: policy });
+  const rawGateway = createAiGateway({ providerService, policyEngine: policy });
+  // M2.14 : azIaChat fournit la liste des fournisseurs couverts par le consentement ; ces scénarios simulent un
+  // utilisateur ayant accepté Anthropic et Google.
+  const gateway = {
+    generateTurn: (turn, context = {}) => rawGateway.generateTurn(turn, { consentedProviders: ['claude', 'gemini'], ...context }),
+  };
   return { gateway, store };
 }
 
-// ── Scénario A — conversation simple, sans outil, va vers OpenAI ───────────
-test('Scénario A : "Bonjour, comment fonctionne AZ Express ?" → OpenAI, pas d\'outil', async () => {
-  const openai = makeFakeProvider('openai', () => ({
+// ── Scénario A — conversation simple, sans outil, va vers Gemini (OpenAI n'est plus autorisé, M2.14) ───────────
+test('Scénario A : "Bonjour, comment fonctionne AZ Express ?" → Gemini, pas d\'outil', async () => {
+  const gemini = makeFakeProvider('gemini', () => ({
     text: 'AZ Express est une super-app ivoirienne de livraison et de services.',
-    toolCalls: [], inputTokens: 15, outputTokens: 20, provider: 'openai', model: 'gpt-4o-mini', finishReason: 'stop',
+    toolCalls: [], inputTokens: 15, outputTokens: 20, provider: 'gemini', model: 'gemini-fixture', finishReason: 'stop',
   }));
-  const { gateway } = makeHarness({ openai }, { defaultProvider: 'openai' });
+  const { gateway } = makeHarness({ gemini }, { defaultProvider: 'gemini' });
   const result = await gateway.generateTurn({
     systemPrompt: 'Tu es AZ IA.',
     messages: [{ role: 'user', content: 'Bonjour, comment fonctionne AZ Express ?' }],
     tools: [],
   }, { uid: 'client-1', conversationId: 'conv-a' });
 
-  assert.equal(result.provider, 'openai');
+  assert.equal(result.provider, 'gemini');
   assert.equal(result.toolCalls.length, 0);
   assert.ok(result.text.includes('AZ Express'));
 });
@@ -150,21 +155,21 @@ test('Scénario C : "Débite 5 000 FCFA de mon wallet" → outil sensible, toujo
   // création de la confirmation restent dans azia/index.js, non touché ici.
 });
 
-// ── Scénario D — timeout OpenAI avant tout outil → fallback Claude ─────────
-test('Scénario D : timeout OpenAI avant tout outil → bascule Claude autorisée', async () => {
-  const openai = makeFakeProvider('openai', () => { const e = new Error('OpenAI timeout'); e.code = 'ETIMEDOUT'; throw e; });
+// ── Scénario D — timeout Gemini avant tout outil → fallback Claude ─────────
+test('Scénario D : timeout Gemini avant tout outil → bascule Claude autorisée', async () => {
+  const gemini = makeFakeProvider('gemini', () => { const e = new Error('Gemini timeout'); e.code = 'ETIMEDOUT'; throw e; });
   const claude = makeFakeProvider('claude', () => ({ text: 'réponse de secours Claude', model: 'claude-sonnet-5', inputTokens: 5, outputTokens: 5 }));
   const { db } = makeFakeDb();
   const providerService = createAIProviderService({
     db, admin: fakeAdmin,
-    providers: { claude, openai, gemini: makeFakeProvider('gemini', () => ({ text: 'x' })), deepseek: makeFakeProvider('deepseek', () => ({ text: 'x' })), mistral: makeFakeProvider('mistral', () => ({ text: 'x' })), groq: makeFakeProvider('groq', () => ({ text: 'x' })) },
+    providers: { claude, gemini, openai: makeFakeProvider('openai', () => ({ text: 'x' })), deepseek: makeFakeProvider('deepseek', () => ({ text: 'x' })), mistral: makeFakeProvider('mistral', () => ({ text: 'x' })), groq: makeFakeProvider('groq', () => ({ text: 'x' })) },
   });
-  // settings/ai configure OpenAI par défaut, avec bascule Claude activée —
-  // exactement le scénario D (timeout OpenAI sans outil → fallback autorisé).
-  await db.collection('settings').doc('ai').set({ provider: 'openai', fallbackEnabled: true, fallbackProviders: ['claude'] });
+  // settings/ai configure Gemini par défaut, avec bascule Claude activée —
+  // exactement le scénario D (timeout Gemini sans outil → fallback autorisé).
+  await db.collection('settings').doc('ai').set({ provider: 'gemini', fallbackEnabled: true, fallbackProviders: ['claude'] });
   const result = await providerService.generateText('bonjour', { uid: 'client-4', cache: false });
   assert.equal(result.provider, 'claude');
-  assert.equal(result.fallbackFrom, 'openai');
+  assert.equal(result.fallbackFrom, 'gemini');
   assert.equal(result.text, 'réponse de secours Claude');
 });
 

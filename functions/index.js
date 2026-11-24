@@ -1,7 +1,7 @@
 'use strict';
 
 const { onCall: rawOnCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
-const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten, onDocumentDeleted } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { capInstances, pilotOnlyInstanceOptions, pilotLightOptions, pilotRetry } = require('./pilotCap');
@@ -61,7 +61,7 @@ setGlobalOptions({ region: 'europe-west1' });
 
 const db = admin.firestore();
 const {buildPartnerQr,available:qrAvailable,COLLECTIONS:QR_COLLECTIONS}=require('./partnerQr');
-const partnerQr=buildPartnerQr({db,auth:admin.auth(),HttpsError});
+const partnerQr=buildPartnerQr({db,auth:admin.auth(),HttpsError,requireSuperAdmin,checkRateLimit,logAudit});
 exports.getPartnerQr=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.manage);
 exports.resolvePartnerQr=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.resolve);
 exports.listPartnerQrEstablishments=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.list);
@@ -87,6 +87,8 @@ function onCall(options, handler) {
     return handler(request,...rest);
   });
 }
+// L3 : enveloppe fermée des cinq fonctions qui terminent une opération engagée pour un compte en quarantaine (accountClosureActor.js).
+const onCallClosing = require('./accountClosureActor').buildOnCallClosing({ rawOnCall, db, HttpsError });
 const accountDeletion=buildAccountDeletion({db,auth:admin.auth(),admin,HttpsError,checkRateLimit,logAudit,
   eraseAssets:async(uid,role)=>{
     await require('./accountPersonalAssets').erasePersonalAssets(admin.storage().bucket(),uid,role);
@@ -114,6 +116,7 @@ const { buildDeclineLegacyOrder } = require('./driverDecline');
 const { buildDeliveryTransfer, expireDueTransfers } = require('./driverTransfer');
 const { buildSettleTransferEarnings } = require('./transferSettlement');
 const { shouldProcess: shouldApplyDriverRating, applyDriverRating } = require('./driverRatings');
+const { syncDriverPublicOnCreate, syncDriverPublicOnUpdate, syncDriverPublicOnDelete } = require('./driverPublicSync');
 
 // Forward-only lifecycle repair: never handles deletions or scans old drivers.
 exports.syncDriverOrderLifecycle = onDocumentUpdated({
@@ -1210,6 +1213,49 @@ exports.notifyDriverOnAssigned = onDocumentUpdated({ document: 'orders/{orderId}
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Alerte solde bas (< 500 FCFA)
 // ─────────────────────────────────────────────────────────────────────────────
+// SEC-01 / driver_public (phase S5.2) : synchronisation serveur des 7 champs non-GPS
+// (name, photoUrl, isOnline, isAvailable, isOnDelivery, avgRating, ratingCount) vers la
+// projection publique `driver_public/{driverId}`. Les champs GPS restent exclusivement gérés
+// par la double écriture client (S4/S4.1) : jamais lus, écrits ni effacés ici. Idempotent (pas
+// d'écriture si rien n'a changé) ; `retry: true` car un échec transitoire ne doit pas laisser
+// `driver_public` durablement obsolète (aucun montant, aucun statut métier sensible ici).
+// Projection initiale à la création (SEC-01, phase S5.3.1 — réserve S5.3 levée) : un livreur
+// fraîchement créé (driver_requests_page.dart ou fleetDriverCreation.js) obtient immédiatement
+// sa fiche `driver_public` pour les champs non-GPS déjà présents et valides, au lieu d'attendre
+// qu'un de ces champs change après coup. Même module, même validation, aucune nouvelle logique.
+// SEC-01 / S5.3.3 : les données de l'événement (`event.data`) ne sont plus utilisées — création
+// et mise à jour relisent désormais l'état COURANT de `livreurs`/`driver_public` dans une
+// transaction (voir `functions/driverPublicSync.js::reconcileDriverPublicFromSource`), pour ne
+// jamais écrire une valeur périmée si un événement s'exécute en retard par rapport à un autre
+// (RISK A, `docs/SEC01_S5_3_2_CONCURRENCY_AUDIT.md`). Seul `driverId` est tiré de l'événement.
+exports.syncDriverPublicOnLivreurCreate = onDocumentCreated({
+  document: 'livreurs/{driverId}', maxInstances: 1, cpu: 0.5, concurrency: 1,
+  memory: '256MiB', retry: true,
+}, async (event) => {
+  await syncDriverPublicOnCreate({ db, admin, driverId: event.params.driverId });
+});
+
+exports.syncDriverPublicOnLivreurUpdate = onDocumentUpdated({
+  document: 'livreurs/{driverId}', maxInstances: 1, cpu: 0.5, concurrency: 1,
+  memory: '256MiB', retry: true,
+}, async (event) => {
+  await syncDriverPublicOnUpdate({ db, admin, driverId: event.params.driverId });
+});
+
+// Suppression réelle de `livreurs/{driverId}` (ex. "Supprimer le livreur", admin,
+// lib/screens/admin/drivers_page.dart) : la clôture de compte normale (accountDeletion.js)
+// n'efface JAMAIS ce document (anonymisation en place, document conservé) — ce déclencheur ne
+// couvre donc que la suppression directe et définitive, pour ne jamais laisser une fiche
+// publique exposer un livreur qui n'existe plus. SEC-01 / S5.3.3 : relit `livreurs` dans une
+// transaction avant de supprimer — si le document a été recréé entre-temps (événement de
+// suppression en retard), la suppression de `driver_public` est annulée (RISK B).
+exports.syncDriverPublicOnLivreurDelete = onDocumentDeleted({
+  document: 'livreurs/{driverId}', maxInstances: 1, cpu: 0.25, concurrency: 1,
+  memory: '256MiB', retry: true,
+}, async (event) => {
+  await syncDriverPublicOnDelete({ db, driverId: event.params.driverId });
+});
+
 exports.notifyDriverLowBalance = onDocumentUpdated({ document: 'livreurs/{driverId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
@@ -1883,6 +1929,8 @@ exports.setPharmaciePassword = onCall({ maxInstances: 2 }, async (request) => {
   if (!pharmacieSnap.exists) {
     throw new HttpsError('not-found', 'Pharmacie introuvable');
   }
+  // Mission 7E-68 : ni mot de passe, ni accès, pour une pharmacie supprimée ou dont le propriétaire est en suppression.
+  await assertTargetNotClosing(db, HttpsError, [String(pharmacieId), pharmacieSnap.data().currentUid], pharmacieSnap.data());
 
   const isCallerOwner  = pharmacieSnap.data().currentUid === uid;
   let isCallerAdmin = false;
@@ -2028,7 +2076,7 @@ exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_request
 const { buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder, buildEkbineAcceptOrder } = require('./ekbineOrders');
 // Logique dans ekbineOrders.js : l'agent n'est credite que du montant prouve debite (voir docs/FINANCIAL_EKBINE_2026-11-03.md).
 exports.ekClientConfirmOrder = buildEkClientConfirmOrder({
-  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5 }, h), HttpsError, checkRateLimit,
+  db, admin, onCall: (h) => onCallClosing('ekClientConfirmOrder', { maxInstances: 2, cpu: 0.5 }, h), HttpsError, checkRateLimit,
 });
 
 exports.notifyEkAgentOnDepositProof = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
@@ -2429,12 +2477,17 @@ const {
   buildPrepareOrderProof,
   buildConfirmPickupWithProof,
 } = require('./deliveryProofs');
+// SEC-01 / S6.8 : accès contrôlé au téléphone du livreur, conçu en S6.7
+// (docs/SEC01_S6_7_PHONE_ACCESS_DESIGN_AUDIT.md). Aucun lecteur Flutter/Web
+// n'est migré vers cette callable dans cette phase (S6.8 isolée).
+const { buildGetDriverPhoneForOrder } = require('./driverPhoneAccess');
 
-exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
-exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall: (h) => onCall({ maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission });
+exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall: (h) => onCallClosing('payOrderFromWalletCF', { maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
+exports.getDriverPhoneForOrderCF = buildGetDriverPhoneForOrder({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
+exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall: (h) => onCallClosing('cancelOrderCF', { maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission });
 // Photo de livraison : même contrôle d'existence Storage que le selfie d'acceptation (Mission 7E-11-T).
 const deliveryPhotoCheck = { get bucketName() { return admin.storage().bucket().name; }, exists: async (path) => (await admin.storage().bucket().file(path).exists())[0] };
-exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, deliveryPhotoCheck });
+exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall: (o, h) => onCallClosing('deliverOrderCF', { ...o, maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, deliveryPhotoCheck });
 exports.acceptOrderCF        = buildAcceptOrder({
   db, admin, onCall: (h) => onCall({ maxInstances: capInstances(5) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission,
   selfieExists: async (path) => (await admin.storage().bucket().file(path).exists())[0],
@@ -2503,7 +2556,7 @@ exports.confirmOrderPickupWithProof = buildConfirmPickupWithProof({
   deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
 });
 exports.confirmOrderDeliveryWithProof = buildDeliverOrderWithProof({
-  db, admin, onCall: (o, h) => onCall({ ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
+  db, admin, onCall: (o, h) => onCallClosing('confirmOrderDeliveryWithProof', { ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
   deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
   deliveryPhotoCheck,
 });
@@ -2787,6 +2840,29 @@ exports.createOrderFromQuoteCF = buildCreateOrderFromQuoteCF({
   db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// PROXY GOOGLE MAPS (Lot 1) — itinéraire, recherche de lieux, géocodage.
+// La clé reste côté serveur : `defineSecret` crée une dépendance de déploiement, le secret
+// GOOGLE_MAPS_SERVER_KEY doit exister dans Secret Manager AVANT de déployer ces quatre fonctions.
+// Dimensionnement aligné sur les fonctions de devis (quota CPU régional serré) : 4 × (0,5 vCPU × 2).
+// Lot 1.2.1 : seuls les comptes clients/livreurs non suspendus y accèdent (assertEligibleRole, sans cache).
+// ═══════════════════════════════════════════════════════════════════════════
+const { createMapsProxy, buildMapsCallables, SECRET_NAME: MAPS_SECRET_NAME } = require('./mapsProxy');
+const GOOGLE_MAPS_SERVER_KEY_SECRET = defineSecret(MAPS_SECRET_NAME);
+const mapsCallables = buildMapsCallables({
+  onCall: (h) => onCall({
+    secrets: [GOOGLE_MAPS_SERVER_KEY_SECRET], maxInstances: 2, cpu: 0.5, concurrency: 1, timeoutSeconds: 30, memory: '256MiB',
+  }, h),
+  HttpsError,
+  checkRateLimit,
+  proxy: createMapsProxy({ getKey: () => GOOGLE_MAPS_SERVER_KEY_SECRET.value() }),
+  db,
+});
+exports.mapsRouteCF = mapsCallables.mapsRouteCF;
+exports.mapsAutocompleteCF = mapsCallables.mapsAutocompleteCF;
+exports.mapsPlaceDetailsCF = mapsCallables.mapsPlaceDetailsCF;
+exports.mapsGeocodeCF = mapsCallables.mapsGeocodeCF;
+
 // ═════════════════════════════════════════════════
 // APPROBATION ADMIN DES RECHARGES ET RETRAITS MANUELS (remplace les écritures wallet directes de l'écran admin)
 // Transactionnelles, idempotentes, super-admin uniquement. Quota Cloud Run : 0,5 CPU × 1 instance chacune.
@@ -2838,6 +2914,12 @@ exports.createPartnerOrderFromQuoteCF = buildCreatePartnerOrderFromQuoteCF({
 // Préparation et reversement cash des commandes Restaurant/Boulangerie v2 (Missions 7B-3B-P/C, locale, non déployée).
 // Gestion des commandes v2 existantes : active par défaut, gel d'urgence PARTNER_ORDERS_V2_MANAGE=off. La CRÉATION (devis +
 // création) reste désactivée par défaut (PARTNER_ORDERS_V2 != 'on'). Quota Cloud Run : 0,5 CPU × 2 (+1).
+// Configuration sécurisée de config/app_versions (Mission M2.2, locale, non déployée). Les règles Firestore interdisent toute
+// écriture cliente de ce document. Quota Cloud Run : 0,5 CPU × 1 (+0,5).
+const { buildSetAppVersionsConfig } = require('./appVersionsAdmin');
+exports.setAppVersionsConfigCF = buildSetAppVersionsConfig({
+  db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, requireSuperAdmin,
+});
 const { buildPartnerOrderAction } = require('./partnerOrderActions');
 const { dispatchAcceptedPartnerOrder } = require('./partnerDispatch');
 exports.partnerOrderActionCF = buildPartnerOrderAction({

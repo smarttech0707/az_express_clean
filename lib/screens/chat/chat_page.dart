@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../../theme/app_theme.dart';
+import '../../services/permission_primer.dart';
 
 class ChatPage extends StatefulWidget {
   final String orderId;
@@ -68,6 +69,10 @@ class _ChatPageState extends State<ChatPage> {
   // ── RECORDING ────────────────────────────────────
 
   Future<void> _startRecording() async {
+    if (!await PermissionPrimer.prepareMicrophone(context: context)) {
+      _snack("Micro non autorisé : vous pouvez continuer en écrivant");
+      return;
+    }
     final hasPermission = await _recorder.hasPermission();
     if (!hasPermission) {
       final status = await Permission.microphone.request();

@@ -1,6 +1,7 @@
 'use strict';
 
 const { runLifecycleTransaction } = require('./driverLifecycle');
+const { assertBeneficiariesCreditable } = require('./accountClosureActor');
 
 // Règlement administratif des gains d'une course transférée (Phase 3).
 //
@@ -112,6 +113,9 @@ function buildSettleTransferEarnings({
             .collection('wallet_transactions').doc(`transfer_settlement_${orderId}_${id}`));
           const ledgers = [];
           for (const r of ledgerRefs) ledgers.push(await tx.get(r));
+          // L4.5 : tous les livreurs crédités sont vérifiés avant la première écriture ; un seul fermé / absent / illisible
+          // => refus de tout le règlement (aucun crédit partiel, jamais marqué « settled », retenue conservée).
+          await assertBeneficiariesCreditable(tx, db, HttpsError, driverIds.map((id) => ({ collection: 'livreurs', id })));
           driverIds.forEach((id, i) => {
             if (!snaps[i].exists) throw new HttpsError('failed-precondition', `Compte livreur introuvable : ${id}`);
             if (ledgers[i].exists) throw new HttpsError('failed-precondition', 'Crédit déjà enregistré');

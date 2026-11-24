@@ -5,10 +5,44 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../screens/admin/admin_mfa_security.dart';
+import '../screens/admin/admin_otp_page.dart'
+    show
+        AdminMfaMode,
+        AdminEnrollmentSecret,
+        prepareAdminEnrollmentSession,
+        adminOtpErrorMessage,
+        adminFactorsFromHints,
+        normalizeAdminMfaPhone;
 import '../services/auth_service.dart';
 import '../services/email_verification_resend_guard.dart';
 
-enum WebAdminMfaState { idle, sending, codeSent, verifying }
+/// États du flux MFA Admin Web.
+///
+/// `totpAwaitingCode` couvre aussi bien l'enrôlement (secret/QR affichés,
+/// premier code attendu) que la connexion (facteur TOTP déjà enrôlé, code
+/// courant attendu) : dans les deux cas l'écran attend un code à 6 chiffres
+/// sans dépendance réseau SMS.
+enum WebAdminMfaState {
+  idle,
+  choosingFactor,
+  totpAwaitingCode,
+  smsSending,
+  smsCodeSent,
+  verifying,
+}
+
+/// Restriction temporaire Web (correction P0, audit admin Android/Web) :
+/// les règles Firestore des collections affichées par le tableau de bord
+/// Web (`sos_alerts`, `driver_applications`, `partner_applications`,
+/// `contact_messages`, `event_providers`) exigent `isAdmin()` strict, soit
+/// `role == 'super'` (voir `firestore.rules`) — elles n'ont pas d'équivalent
+/// `hasAdminPermission()` pour les sous-admins. Tant que ce n'est pas aligné
+/// côté règles, un sous-admin ne doit jamais atteindre le tableau de bord
+/// Web : il verrait des listes vides ou des erreurs de permission plutôt que
+/// ses propres données. N'affecte pas Android, qui n'appelle pas cette
+/// fonction. Fonction pure et publique (plutôt que privée) pour rester
+/// testable sans Firebase, comme `validateAdminRecord`.
+bool isWebSuperAdmin(Map<String, dynamic>? data) => data?['role'] == 'super';
 
 class WebAdminAuthResult {
   final bool success;
@@ -38,6 +72,18 @@ class WebAdminAuthResult {
         );
 }
 
+/// Authentification administrateur Web, second facteur compris.
+///
+/// Reprend la politique de sécurité du flux mobile (`admin_login.dart` /
+/// `admin_otp_page.dart` / `admin_mfa_security.dart`) sans dupliquer son
+/// code d'interface : les mêmes fonctions pures (`resolveAdminSecondFactor`,
+/// `adminFactorsFromHints`, `prepareAdminEnrollmentSession`, …) décident ici
+/// aussi, un `ChangeNotifier` pilotant une interface Web distincte.
+///
+/// TOTP est le facteur prioritaire (indépendant du réseau SMS). Un
+/// administrateur sans numéro de téléphone peut s'enrôler et se connecter
+/// uniquement avec une application d'authentification ; le SMS reste
+/// disponible en repli pour les comptes qui ont un numéro enregistré.
 class AdminAuthService extends ChangeNotifier {
   static final instance = AdminAuthService._();
   AdminAuthService._() {
@@ -60,16 +106,54 @@ class AdminAuthService extends ChangeNotifier {
   bool get isAdmin => _isAdmin;
   WebAdminMfaState _mfaState = WebAdminMfaState.idle;
   WebAdminMfaState get mfaState => _mfaState;
-  String? _verificationId;
-  int? _resendToken;
+
+  AdminMfaMode? _mode;
   MultiFactorResolver? _resolver;
+  AdminFactorResolution? _resolution;
+  AdminEnrolledFactor? _selectedFactor;
+
   MultiFactorSession? _enrollmentSession;
   String? _enrollmentUid;
   String? _enrollmentPhone;
+
+  // Le secret TOTP ne vit qu'en mémoire, le temps de l'enrôlement : jamais en
+  // Firestore, jamais en préférences, jamais journalisé.
+  TotpSecret? _totpSecret;
+  String? _totpQrCodeUrl;
+
   PhoneMultiFactorInfo? _phoneHint;
+  String? _verificationId;
+  int? _resendToken;
+
+  final _verificationGuard = EmailVerificationResendGuard();
+
+  /// Facteurs réellement enrôlés, à choisir lorsque plusieurs existent.
+  List<AdminEnrolledFactor> get availableFactors =>
+      _resolution?.available ?? const <AdminEnrolledFactor>[];
+  bool get requiresFactorChoice => _mfaState == WebAdminMfaState.choosingFactor;
+  AdminEnrolledFactor? get selectedFactor => _selectedFactor;
+
+  /// Vrai lorsque l'écran doit afficher le flux TOTP (secret/QR à l'enrôlement,
+  /// simple champ de code à la connexion).
+  bool get isTotpChallenge =>
+      _mfaState == WebAdminMfaState.totpAwaitingCode ||
+      (_mfaState == WebAdminMfaState.verifying &&
+          (_selectedFactor?.kind == AdminSecondFactor.totp ||
+              (_mode == AdminMfaMode.enrollment && _totpSecret != null)));
+
+  /// Secret affiché une seule fois pendant l'enrôlement TOTP (jamais après).
+  TotpSecret? get totpSecret => _totpSecret;
+  String? get totpQrCodeUrl => _totpQrCodeUrl;
+
+  /// Vrai pendant un enrôlement TOTP si un numéro Admin est enregistré : la
+  /// bascule SMS reste possible, exactement comme sur mobile.
+  bool get smsFallbackAvailable =>
+      _mode == AdminMfaMode.enrollment &&
+      _totpSecret != null &&
+      (_enrollmentPhone?.isNotEmpty == true);
+
   String get maskedPhone =>
       _maskPhone(_phoneHint?.phoneNumber ?? _enrollmentPhone ?? 'numéro Admin');
-  final _verificationGuard = EmailVerificationResendGuard();
 
   Duration get verificationEmailResendRemaining =>
       _verificationGuard.remaining();
@@ -88,7 +172,7 @@ class AdminAuthService extends ChangeNotifier {
       return;
     }
     _isAdmin = await _validateRole(user);
-    if (!_isAdmin) await FirebaseAuth.instance.signOut();
+    if (!_isAdmin) await _safeSignOut();
     notifyListeners();
   }
 
@@ -101,45 +185,136 @@ class AdminAuthService extends ChangeNotifier {
       final admin = await _adminData(user.uid);
       final access = validateAdminRecord(admin);
       if (!access.allowed) {
-        await FirebaseAuth.instance.signOut();
+        await _safeSignOut();
         return const WebAdminAuthResult.failure(
             'Accès refusé. Compte Admin invalide ou désactivé.');
       }
+      if (!isWebSuperAdmin(admin)) {
+        await _safeSignOut();
+        return const WebAdminAuthResult.failure(
+            'L’administration Web est réservée aux administrateurs principaux '
+            '(rôle super) pour le moment. Les sous-administrateurs peuvent '
+            'utiliser l’application mobile AZ Express.');
+      }
       if (!user.emailVerified) {
-        await FirebaseAuth.instance.signOut();
+        await _safeSignOut();
         return const WebAdminAuthResult.failure(
           'Vérifiez votre adresse email avant la 2FA Admin.',
           emailVerificationRequired: true,
         );
       }
-      final phone = admin?['phone'] as String?;
-      if (phone == null || phone.isEmpty) {
-        await FirebaseAuth.instance.signOut();
-        return const WebAdminAuthResult.failure(
-            '2FA obligatoire : aucun téléphone Admin configuré.');
-      }
+      // `signInWithEmailAndPassword` n'a levé aucune
+      // FirebaseAuthMultiFactorException : aucun second facteur n'est encore
+      // enrôlé sur ce compte. L'enrôlement devient le seul chemin vers le
+      // tableau de bord — il n'exige plus de numéro de téléphone, l'
+      // application d'authentification (TOTP) étant désormais le facteur
+      // proposé en premier (même politique que `admin_login.dart`).
+      _mode = AdminMfaMode.enrollment;
       _enrollmentUid = user.uid;
-      _enrollmentPhone = phone;
-      _enrollmentSession = await user.multiFactor.getSession();
-      return _sendChallenge();
+      _enrollmentPhone = admin?['phone'] as String?;
+      return _beginEnrollment(user, password);
     } on FirebaseAuthMultiFactorException catch (error) {
+      _mode = AdminMfaMode.signIn;
       _resolver = error.resolver;
-      final hints = error.resolver.hints.whereType<PhoneMultiFactorInfo>();
-      if (hints.isEmpty) {
+      final resolution =
+          resolveAdminSecondFactor(adminFactorsFromHints(error.resolver.hints));
+      _resolution = resolution;
+      if (!resolution.allowed) {
         return const WebAdminAuthResult.failure(
-            'Aucun facteur SMS Admin enrôlé.');
+            'Aucun second facteur Admin n’est enrôlé (ni application '
+                'd’authentification, ni SMS).');
       }
-      _phoneHint = hints.first;
-      return _sendChallenge();
+      if (resolution.requiresChoice) {
+        _mfaState = WebAdminMfaState.choosingFactor;
+        notifyListeners();
+        return const WebAdminAuthResult.challenge();
+      }
+      return _useFactor(resolution.single!);
     } on FirebaseAuthException catch (error) {
-      return WebAdminAuthResult.failure(_loginMessage(error.code));
+      return WebAdminAuthResult.failure(adminMfaErrorMessage(error.code));
     } catch (_) {
       return const WebAdminAuthResult.failure(
           'Impossible de démarrer la double authentification.');
     }
   }
 
-  Future<WebAdminAuthResult> resendChallenge() => _sendChallenge(resend: true);
+  /// Choix explicite d'un facteur lorsque plusieurs sont enrôlés (connexion).
+  Future<WebAdminAuthResult> selectFactor(AdminEnrolledFactor factor) =>
+      _useFactor(factor);
+
+  Future<WebAdminAuthResult> _useFactor(AdminEnrolledFactor factor) async {
+    _selectedFactor = factor;
+    if (factor.kind == AdminSecondFactor.totp) {
+      _mfaState = WebAdminMfaState.totpAwaitingCode;
+      notifyListeners();
+      return const WebAdminAuthResult.challenge();
+    }
+    final hints = _resolver!.hints.whereType<PhoneMultiFactorInfo>();
+    _phoneHint = hints.firstWhere(
+      (candidate) => candidate.uid == factor.enrollmentId,
+      orElse: () => hints.first,
+    );
+    return _sendSmsChallenge();
+  }
+
+  Future<WebAdminAuthResult> _beginEnrollment(
+      User user, String password) async {
+    try {
+      _enrollmentSession = await prepareAdminEnrollmentSession(
+        secret: AdminEnrollmentSecret(password),
+        reauthenticate: (pwd) async {
+          final email = user.email;
+          if (email == null || email.isEmpty) {
+            throw FirebaseAuthException(code: 'user-mismatch');
+          }
+          await user.reauthenticateWithCredential(
+            EmailAuthProvider.credential(email: email, password: pwd),
+          );
+        },
+        getSession: user.multiFactor.getSession,
+      );
+      _totpSecret =
+          await TotpMultiFactorGenerator.generateSecret(_enrollmentSession!);
+      _totpQrCodeUrl = await _totpSecret!.generateQrCodeUrl(
+        accountName: user.email,
+        issuer: 'AZ Express',
+      );
+      _mfaState = WebAdminMfaState.totpAwaitingCode;
+      notifyListeners();
+      return const WebAdminAuthResult.challenge();
+    } on FirebaseAuthException catch (error) {
+      await _safeSignOut();
+      _mfaState = WebAdminMfaState.idle;
+      notifyListeners();
+      return WebAdminAuthResult.failure(adminOtpErrorMessage(error.code));
+    } catch (_) {
+      await _safeSignOut();
+      _mfaState = WebAdminMfaState.idle;
+      notifyListeners();
+      return const WebAdminAuthResult.failure(
+          'Impossible de préparer l’enrôlement 2FA.');
+    }
+  }
+
+  /// Repli SMS explicite pendant l'enrôlement — le SMS reste pleinement
+  /// supporté, il n'est simplement plus le seul chemin possible. Jamais
+  /// proposé si aucun numéro Admin n'est enregistré.
+  Future<WebAdminAuthResult> useSmsInstead() async {
+    if (_mode != AdminMfaMode.enrollment) {
+      return const WebAdminAuthResult.failure('Action invalide hors enrôlement.');
+    }
+    final phone = _enrollmentPhone;
+    if (phone == null || phone.isEmpty) {
+      return const WebAdminAuthResult.failure(
+          'Aucun numéro Admin configuré pour le repli SMS.');
+    }
+    _totpSecret = null;
+    _totpQrCodeUrl = null;
+    return _sendSmsChallenge();
+  }
+
+  Future<WebAdminAuthResult> resendSmsChallenge() =>
+      _sendSmsChallenge(resend: true);
 
   Future<String?> resendVerificationEmail(String email, String password) async {
     if (!_verificationGuard.canSend()) {
@@ -162,24 +337,33 @@ class AdminAuthService extends ChangeNotifier {
           ? 'Trop de demandes. Réessayez plus tard.'
           : 'Impossible d’envoyer l’email de vérification.';
     } finally {
-      try {
-        await FirebaseAuth.instance.signOut();
-      } catch (_) {}
+      await _safeSignOut();
     }
   }
 
-  Future<WebAdminAuthResult> _sendChallenge({bool resend = false}) async {
-    _mfaState = WebAdminMfaState.sending;
+  Future<WebAdminAuthResult> _sendSmsChallenge({bool resend = false}) async {
+    _mfaState = WebAdminMfaState.smsSending;
     notifyListeners();
     final completer = Completer<WebAdminAuthResult>();
     try {
+      String? phoneNumber;
+      if (_mode == AdminMfaMode.enrollment && _resolver == null) {
+        final phone = _enrollmentPhone;
+        if (phone == null || phone.isEmpty) {
+          throw FirebaseAuthException(code: 'invalid-phone-number');
+        }
+        phoneNumber = normalizeAdminMfaPhone(phone);
+      }
       await FirebaseAuth.instance.verifyPhoneNumber(
-        phoneNumber: _resolver == null ? _enrollmentPhone : null,
+        phoneNumber: phoneNumber,
         multiFactorSession: _resolver?.session ?? _enrollmentSession,
         multiFactorInfo: _phoneHint,
         forceResendingToken: resend ? _resendToken : null,
         verificationCompleted: (credential) async {
-          final result = await _complete(credential);
+          final result = await _completeWithAssertion(
+            () async => PhoneMultiFactorGenerator.getAssertion(credential),
+            displayName: 'Téléphone Admin AZ Express',
+          );
           if (!completer.isCompleted) completer.complete(result);
         },
         verificationFailed: (error) {
@@ -193,7 +377,7 @@ class AdminAuthService extends ChangeNotifier {
         codeSent: (verificationId, resendToken) {
           _verificationId = verificationId;
           _resendToken = resendToken;
-          _mfaState = WebAdminMfaState.codeSent;
+          _mfaState = WebAdminMfaState.smsCodeSent;
           notifyListeners();
           if (!completer.isCompleted) {
             completer.complete(const WebAdminAuthResult.challenge());
@@ -215,57 +399,95 @@ class AdminAuthService extends ChangeNotifier {
     }
   }
 
-  Future<WebAdminAuthResult> verifyCode(String code) async {
+  /// Vérifie un code d'application d'authentification. Le code est validé
+  /// localement AVANT tout appel réseau, et n'est jamais journalisé.
+  Future<WebAdminAuthResult> verifyTotpCode(String code) async {
+    final error = validateAdminTotpCode(code);
+    if (error != null) return WebAdminAuthResult.failure(error);
+    if (_mode == AdminMfaMode.enrollment) {
+      final secret = _totpSecret;
+      if (secret == null) {
+        return const WebAdminAuthResult.failure(
+            'Aucun enrôlement actif. Recommencez la connexion Admin.');
+      }
+      return _completeWithAssertion(
+        () => TotpMultiFactorGenerator.getAssertionForEnrollment(
+            secret, code.trim()),
+        displayName: 'Authenticator Admin AZ Express',
+      );
+    }
+    final selected = _selectedFactor;
+    if (selected == null) {
+      return const WebAdminAuthResult.failure('Aucun facteur sélectionné.');
+    }
+    return _completeWithAssertion(
+      () => TotpMultiFactorGenerator.getAssertionForSignIn(
+          selected.enrollmentId, code.trim()),
+    );
+  }
+
+  Future<WebAdminAuthResult> verifySmsCode(String code) async {
     final verificationId = _verificationId;
-    if (verificationId == null || code.length != 6) {
+    if (verificationId == null || code.trim().length != 6) {
       return const WebAdminAuthResult.failure(
           'Entrez le code SMS à 6 chiffres.');
     }
-    return _complete(PhoneAuthProvider.credential(
-      verificationId: verificationId,
-      smsCode: code,
-    ));
+    return _completeWithAssertion(
+      () async => PhoneMultiFactorGenerator.getAssertion(
+        PhoneAuthProvider.credential(
+          verificationId: verificationId,
+          smsCode: code.trim(),
+        ),
+      ),
+      displayName: 'Téléphone Admin AZ Express',
+    );
   }
 
-  Future<WebAdminAuthResult> _complete(PhoneAuthCredential credential) async {
+  Future<WebAdminAuthResult> _completeWithAssertion(
+    Future<MultiFactorAssertion> Function() buildAssertion, {
+    String? displayName,
+  }) async {
     if (_mfaState == WebAdminMfaState.verifying) {
       return const WebAdminAuthResult.failure('Validation déjà en cours.');
     }
+    final previousState = _mfaState;
     _mfaState = WebAdminMfaState.verifying;
     notifyListeners();
     try {
+      final assertion = await buildAssertion();
       User user;
-      if (_resolver != null) {
-        final result = await _resolver!.resolveSignIn(
-          PhoneMultiFactorGenerator.getAssertion(credential),
-        );
-        user = result.user!;
-      } else {
+      if (_mode == AdminMfaMode.enrollment) {
         final current = FirebaseAuth.instance.currentUser;
         if (current == null || current.uid != _enrollmentUid) {
           throw FirebaseAuthException(code: 'user-mismatch');
         }
-        await current.multiFactor.enroll(
-          PhoneMultiFactorGenerator.getAssertion(credential),
-          displayName: 'Téléphone Admin AZ Express',
-        );
+        await current.multiFactor.enroll(assertion, displayName: displayName);
         user = current;
+      } else {
+        final result = await _resolver!.resolveSignIn(assertion);
+        user = result.user!;
       }
       await user.reload();
       await user.getIdToken(true);
       if (!await _validateRole(user)) {
-        await FirebaseAuth.instance.signOut();
+        await _safeSignOut();
         throw FirebaseAuthException(code: 'admin-role-rejected');
       }
       _isAdmin = true;
       _mfaState = WebAdminMfaState.idle;
       unawaited(AuthService().logAuthEvent('login', 'admin'));
+      _clearSecrets();
       notifyListeners();
       return const WebAdminAuthResult.success();
     } on FirebaseAuthException catch (error) {
-      _mfaState = WebAdminMfaState.codeSent;
+      _mfaState = previousState;
       notifyListeners();
-      return WebAdminAuthResult.failure(adminMfaErrorMessage(error.code));
+      return WebAdminAuthResult.failure(adminOtpErrorMessage(error.code));
+    } catch (_) {
+      _mfaState = previousState;
+      notifyListeners();
+      return const WebAdminAuthResult.failure(
+          'Échec de la double authentification.');
     }
   }
 
@@ -273,43 +495,52 @@ class AdminAuthService extends ChangeNotifier {
       (await FirebaseFirestore.instance.collection('admins').doc(uid).get())
           .data();
 
-  Future<bool> _validateRole(User user) async =>
-      validateAdminRecord(await _adminData(user.uid)).allowed;
+  Future<bool> _validateRole(User user) async {
+    final admin = await _adminData(user.uid);
+    return validateAdminRecord(admin).allowed && isWebSuperAdmin(admin);
+  }
 
   Future<void> cancelMfa() async {
     _resetChallenge();
-    await FirebaseAuth.instance.signOut();
+    await _safeSignOut();
     _isAdmin = false;
     notifyListeners();
   }
 
   Future<void> signOut() async {
     unawaited(AuthService().logAuthEvent('logout', 'admin'));
-    await FirebaseAuth.instance.signOut();
+    await _safeSignOut();
     _resetChallenge();
     _isAdmin = false;
     notifyListeners();
   }
 
+  Future<void> _safeSignOut() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
+  }
+
   void _resetChallenge() {
+    _mode = null;
     _resolver = null;
+    _resolution = null;
+    _selectedFactor = null;
     _enrollmentSession = null;
     _enrollmentUid = null;
     _enrollmentPhone = null;
     _phoneHint = null;
+    _totpSecret = null;
+    _totpQrCodeUrl = null;
     _verificationId = null;
     _resendToken = null;
     _mfaState = WebAdminMfaState.idle;
   }
 
-  String _loginMessage(String code) => switch (code) {
-        'user-not-found' ||
-        'wrong-password' ||
-        'invalid-credential' =>
-          'Identifiant ou mot de passe incorrect.',
-        'too-many-requests' => 'Trop de tentatives. Réessayez plus tard.',
-        _ => 'Erreur Firebase : $code',
-      };
+  void _clearSecrets() {
+    _totpSecret = null;
+    _totpQrCodeUrl = null;
+  }
 
   String _maskPhone(String phone) {
     if (phone.length <= 4) return '***';

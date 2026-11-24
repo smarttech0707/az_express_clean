@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import '../models/route_model.dart';
 import 'google_routes_service.dart';
 
 /// État de suivi partagé entre la vue client et la vue livreur.
@@ -19,6 +20,10 @@ class TrackingState {
   final int etaToDest; // minutes
   final bool routeLoading;
 
+  /// `true` quand distance et durée ne viennent pas d'un itinéraire routier
+  /// réel (vol d'oiseau, vitesse fixe) : l'écran doit l'indiquer.
+  final bool routeIsEstimate;
+
   const TrackingState({
     this.driverPosition,
     required this.clientPosition,
@@ -30,6 +35,7 @@ class TrackingState {
     this.etaToClient = 0,
     this.etaToDest = 0,
     this.routeLoading = false,
+    this.routeIsEstimate = false,
   });
 
   TrackingState copyWith({
@@ -43,6 +49,7 @@ class TrackingState {
     int? etaToClient,
     int? etaToDest,
     bool? routeLoading,
+    bool? routeIsEstimate,
   }) =>
       TrackingState(
         driverPosition: driverPosition ?? this.driverPosition,
@@ -55,6 +62,7 @@ class TrackingState {
         etaToClient: etaToClient ?? this.etaToClient,
         etaToDest: etaToDest ?? this.etaToDest,
         routeLoading: routeLoading ?? this.routeLoading,
+        routeIsEstimate: routeIsEstimate ?? this.routeIsEstimate,
       );
 
   int get etaTotal => etaToClient + etaToDest;
@@ -105,8 +113,10 @@ class TrackingService extends ChangeNotifier {
 
   void _start() {
     if (_driverId.isEmpty) return;
+    // SEC-01 / S6.2 : seuls `lat`/`lng` sont consommés (`_onDriverSnapshot`),
+    // tous deux dans la projection publique `driver_public`.
     _driverSub = FirebaseFirestore.instance
-        .collection('livreurs')
+        .collection('driver_public')
         .doc(_driverId)
         .snapshots()
         .listen(_onDriverSnapshot, onError: (_) {});
@@ -194,7 +204,7 @@ class TrackingService extends ChangeNotifier {
     notifyListeners();
 
     // Distance livreur → client
-    final distToClient = Geolocator.distanceBetween(
+    var distToClient = Geolocator.distanceBetween(
           driverPos.latitude,
           driverPos.longitude,
           _clientPosition.latitude,
@@ -202,7 +212,7 @@ class TrackingService extends ChangeNotifier {
         ) /
         1000;
 
-    final etaToClient = _eta(distToClient);
+    var etaToClient = _eta(distToClient);
 
     // Route livreur → client — via GoogleRoutesService (avec cache 5 min)
     final routeModel1 = await GoogleRoutesService.getRouteModel(
@@ -210,6 +220,13 @@ class TrackingService extends ChangeNotifier {
       destination: _clientPosition,
     );
     final routeToClient = routeModel1.points;
+    // Itinéraire routier réel : sa distance et sa durée remplacent le vol
+    // d'oiseau. Minimum 1 min : 0 signifie « phase de livraison » pour l'écran.
+    var isEstimate = !_isRealRoute(routeModel1);
+    if (!isEstimate) {
+      distToClient = routeModel1.distanceKm;
+      etaToClient = routeModel1.etaMinutes.clamp(1, 180);
+    }
 
     // Route client → destination (si destination disponible)
     List<LatLng> routeToDest = [];
@@ -231,6 +248,12 @@ class TrackingService extends ChangeNotifier {
         destination: _destination!,
       );
       routeToDest = routeModel2.points;
+      if (_isRealRoute(routeModel2)) {
+        distToDest = routeModel2.distanceKm;
+        etaToDest = routeModel2.etaMinutes.clamp(1, 180);
+      } else {
+        isEstimate = true;
+      }
     }
 
     _state = _state.copyWith(
@@ -243,10 +266,14 @@ class TrackingService extends ChangeNotifier {
       etaToClient: etaToClient,
       etaToDest: etaToDest,
       routeLoading: false,
+      routeIsEstimate: isEstimate,
     );
     _routeRevision++;
     notifyListeners();
   }
+
+  static bool _isRealRoute(RouteModel route) =>
+      route.isNotEmpty && !route.isEstimate;
 
   /// Vitesse moto en ville : 25 km/h (inclut arrêts feux, ralentissements)
   static int _eta(double distKm) {

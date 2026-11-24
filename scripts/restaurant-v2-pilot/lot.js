@@ -155,24 +155,70 @@ function expectedLedger(amounts, start = WALLETS) {
 // ── Configuration du pilote (préparée, JAMAIS écrite par ces scripts) ────────────────────────────────────────────────────
 // Ouverture par le super-administrateur fictif via partnerOrderActionCF (action setPartnerOrdersConfig) : audit avant/après et
 // contrôle de version intégrés. Document attendu : partnerOrdersConfig.applyConfigChange.
-function pilotConfigPlan() {
-  const request = {
-    action: 'setPartnerOrdersConfig',
-    // Mode « restreint » explicite (Mission 7E-41) : seul le client fictif peut commander chez le restaurant fictif.
-    patch: { pilotPartnerIds: [IDENTITIES.restaurant.uid], pilotClientIds: [IDENTITIES.client.uid], clientAccess: 'restricted', creationOpen: true, managementFrozen: false },
-    expectedVersion: 0, // document absent = version 0
-    reason: 'Ouverture temporaire du pilote Restaurant v2 pour essai fictif T7E.',
-  };
-  validateConfigChange(request); // lève ConfigRefusal si la demande n'est pas acceptée par la fonction réelle
-  return {
+
+// Livreurs autorisés (Mission 7E-55, liste blanche pilotDriverIds) : JAMAIS déduits ni ajoutés automatiquement. L'administrateur les
+// fournit explicitement : option { driverIds: [...] } ou variable d'environnement AZ_PILOT_DRIVER_IDS (identifiants séparés par des
+// virgules : uid Firebase du livreur, voir docs/RESTAURANT_V2_FIRST_RUN_PLAN.md). Absente, vide ou invalide : on refuse, car le serveur
+// ne dispatcherait alors à personne.
+const DRIVER_IDS_ENV = 'AZ_PILOT_DRIVER_IDS';
+const MAX_DRIVER_IDS = 50; // plafond de validateConfigChange (MAX_PILOT_DRIVERS)
+const DRIVER_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/; // même format que PARTNER_ID (partnerOrdersConfig.js)
+
+class PilotDriverListError extends Error {
+  constructor(message) { super(message); this.name = 'PilotDriverListError'; this.code = 'PILOT_DRIVER_IDS_REQUIRED'; }
+}
+
+function resolveDriverIds(source) {
+  const raw = Array.isArray(source) ? source : typeof source === 'string' ? source.split(',') : null;
+  if (raw === null || raw.length === 0 || (typeof source === 'string' && source.trim() === '')) {
+    throw new PilotDriverListError(`Livreurs du pilote non fournis : renseignez explicitement leurs identifiants (option driverIds ou variable ${DRIVER_IDS_ENV}). Aucun livreur n'est autorisé par défaut.`);
+  }
+  const ids = [];
+  for (const entry of raw) {
+    const id = typeof entry === 'string' ? entry.trim() : entry;
+    if (typeof id !== 'string' || !DRIVER_ID_PATTERN.test(id)) {
+      throw new PilotDriverListError(`Identifiant de livreur invalide dans ${DRIVER_IDS_ENV} / driverIds : chaque valeur doit être un uid non vide (lettres, chiffres, _ et -, 128 caractères au plus).`);
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  if (ids.length > MAX_DRIVER_IDS) throw new PilotDriverListError(`Trop de livreurs pilotes (${ids.length} > ${MAX_DRIVER_IDS}).`);
+  return ids.sort();
+}
+
+// La fermeture (creationOpen:false seul) ne dépend d'aucun livreur et reste TOUJOURS disponible, y compris pour l'arrêt d'urgence.
+// request et expectedDocument (ouverture / réouverture) lèvent PilotDriverListError tant que la liste n'est pas fournie.
+function pilotConfigPlan({ driverIds, env = process.env } = {}) {
+  const source = driverIds !== undefined ? driverIds : env[DRIVER_IDS_ENV];
+  const base = { pilotPartnerIds: [IDENTITIES.restaurant.uid], pilotClientIds: [IDENTITIES.client.uid], clientAccess: 'restricted', creationOpen: true, managementFrozen: false };
+  let resolved = null;
+  const drivers = () => (resolved === null ? (resolved = resolveDriverIds(source)) : resolved);
+  const plan = {
     callable: 'partnerOrderActionCF',
     caller: IDENTITIES.admin.uid,
-    request,
-    expectedDocument: { pilotPartnerIds: [IDENTITIES.restaurant.uid], pilotClientIds: [IDENTITIES.client.uid], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 1 },
     // Arrêt d'urgence = creationOpen:false SEUL (la liste n'est jamais vidée pour arrêter : voir partnerOrdersConfig.js). La version
     // attendue est celle réellement retournée par S0 / lue avant l'appel : jamais supposée.
     closing: { patch: { creationOpen: false }, reason: 'Fermeture du pilote Restaurant v2 après essai fictif T7E.' },
   };
+  Object.defineProperty(plan, 'request', {
+    enumerable: true,
+    get() {
+      const request = {
+        action: 'setPartnerOrdersConfig',
+        // Mode « restreint » explicite (Mission 7E-41) : seul le client fictif peut commander chez le restaurant fictif, et seuls
+        // les livreurs listés explicitement peuvent le recevoir ou l'accepter (Mission 7E-55).
+        patch: { ...base, pilotDriverIds: drivers() },
+        expectedVersion: 0, // document absent = version 0
+        reason: 'Ouverture temporaire du pilote Restaurant v2 pour essai fictif T7E.',
+      };
+      validateConfigChange(request); // lève ConfigRefusal si la demande n'est pas acceptée par la fonction réelle
+      return request;
+    },
+  });
+  Object.defineProperty(plan, 'expectedDocument', {
+    enumerable: true,
+    get() { return { ...base, pilotDriverIds: drivers(), version: 1 }; },
+  });
+  return plan;
 }
 
 // ── Inventaire des ressources prévues ────────────────────────────────────────────────────────────────────────────────────
@@ -181,13 +227,22 @@ const canonical = (value) => JSON.stringify(value, (_, v) => (v && typeof v === 
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 const docHash = (data) => sha256(canonical(data));
 
+// L'inventaire (DRY-RUN hors ligne) doit rester lisible sans liste de livreurs : on y signale alors le blocage au lieu de lever.
+function inventoryPilotPlan() {
+  const plan = pilotConfigPlan();
+  try { return { ...plan }; } catch (err) {
+    if (!(err instanceof PilotDriverListError)) throw err;
+    return { callable: plan.callable, caller: plan.caller, blocked: err.message, closing: plan.closing };
+  }
+}
+
 function buildInventory(plan = buildSeedPlan()) {
   return {
     lot: LOT_ID,
     project: { id: TARGET.projectId, number: TARGET.projectNumber, region: TARGET.region },
     authUsers: Object.values(IDENTITIES).map(({ role, uid, email }) => ({ role, uid, email, password: 'générée à l’exécution (fichier hors dépôt)' })),
     documents: plan.map((d) => ({ path: d.path, kind: d.kind, fields: Object.keys(d.data).sort(), hash: docHash(d.data) })),
-    pilotConfig: { written: false, plan: pilotConfigPlan() },
+    pilotConfig: { written: false, plan: inventoryPilotPlan() },
     dynamicAtTestTime: [
       'orders/<uuid> (une par scénario, créées par createPartnerOrderFromQuoteCF)',
       'tariff_quotes/<uuid>', 'delivery_proofs/<hash> + versions/*', 'clients|livreurs|restaurants/<uid>/wallet_transactions/*',
@@ -201,6 +256,6 @@ function buildInventory(plan = buildSeedPlan()) {
 module.exports = {
   LOT_ID, LOT_FIELD, TARGET, FORBIDDEN_PROJECT_IDS, EMAIL_DOMAIN, IDENTITIES, UIDS, SERVER_TIMESTAMP,
   RESTAURANT_POINT, DELIVERY_POINT, DRIVER_POINT, CITY_ID, MENU, BASKET, WALLETS, PARTNER_KINDS,
-  buildSeedPlan, findSensitiveKeys, commissionFor, expectedAmounts, amountsFromQuote, expectedLedger, pilotConfigPlan, buildInventory,
+  buildSeedPlan, findSensitiveKeys, commissionFor, expectedAmounts, amountsFromQuote, expectedLedger, pilotConfigPlan, resolveDriverIds, PilotDriverListError, DRIVER_IDS_ENV, buildInventory,
   canonical, sha256, docHash,
 };

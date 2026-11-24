@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../legal/legal_renderer.dart';
+import '../../legal/privacy_content.dart';
 import '../web_theme.dart';
 import '../widgets/web_navbar.dart';
 import '../widgets/web_footer.dart';
@@ -40,7 +42,7 @@ class WebPrivacyPage extends StatelessWidget {
         Text('Politique de Confidentialité',
             style: kH1Style(ctx), textAlign: TextAlign.center),
         const SizedBox(height: 12),
-        Text('Dernière mise à jour : 29 octobre 2026',
+        Text('Dernière mise à jour : ${PrivacyContent.lastUpdated}',
             style: GoogleFonts.inter(fontSize: 14, color: kTextMuted)),
       ]),
     );
@@ -53,125 +55,9 @@ class WebPrivacyPage extends StatelessWidget {
       child: Container(
         width: docWidth,
         padding: EdgeInsets.symmetric(horizontal: pad, vertical: 60),
-        child: const Column(children: [
-          _Section(
-              '1. Introduction',
-              'AZ Express ("nous", "notre", "nos") s\'engage à protéger la vie privée de ses utilisateurs. '
-                  'La présente Politique de Confidentialité explique comment nous collectons, utilisons, '
-                  'divulguons et protégeons vos informations personnelles lorsque vous utilisez notre '
-                  'application mobile AZ Express et notre site web az-express-b0469.web.app.'),
-          _Section(
-              '2. Informations collectées',
-              'Nous collectons les informations suivantes :\n\n'
-                  '• Informations d\'identification : nom, prénom, numéro de téléphone\n'
-                  '• Informations de localisation : position GPS en temps réel (uniquement lors de l\'utilisation)\n'
-                  '• Informations de commande : adresses de livraison, historique des commandes\n'
-                  '• Informations de paiement : données de transaction (non stockées localement)\n'
-                  '• Données techniques : identifiant d\'appareil, tokens de notification push\n'
-                  '• Communications : messages avec le support client et messages vocaux échangés dans le suivi d\'une commande'),
-          _Section(
-              '3. Utilisation des données',
-              'Vos données sont utilisées pour :\n\n'
-                  '• Traiter et suivre vos commandes en temps réel\n'
-                  '• Connecter clients, livreurs et commerçants\n'
-                  '• Envoyer des notifications sur l\'état de vos commandes\n'
-                  '• Améliorer nos services et l\'expérience utilisateur\n'
-                  '• Assurer la sécurité et prévenir les fraudes\n'
-                  '• Respecter nos obligations légales\n'
-                  '• Vous contacter en cas de besoin relatif à votre compte'),
-          _Section(
-              '4. Partage des données',
-              'Nous ne vendons jamais vos données personnelles à des tiers. '
-                  'Nous pouvons partager vos informations avec :\n\n'
-                  '• Nos livreurs partenaires (uniquement nom et adresse de livraison)\n'
-                  '• Nos commerçants partenaires (commande et coordonnées pour livraison)\n'
-                  '• Firebase/Google (infrastructure cloud sécurisée)\n'
-                  '• FeexPay (traitement sécurisé des paiements mobile money)\n'
-                  '• Anthropic (fournisseur de l\'assistant intelligent AZ IA — uniquement le texte '
-                  'nécessaire au traitement de votre demande, voir section 9 ci-dessous)\n'
-                  '• Autorités judiciaires (uniquement si requis par la loi)'),
-          _Section(
-              '5. Localisation',
-              'L\'application AZ Express utilise votre localisation GPS pour :\n\n'
-                  '• Trouver les services disponibles près de vous\n'
-                  '• Permettre aux livreurs de vous trouver\n'
-                  '• Calculer les prix et délais de livraison\n\n'
-                  'Vous pouvez désactiver la localisation dans les paramètres de votre téléphone, '
-                  'mais certaines fonctionnalités seront alors limitées.'),
-          _Section(
-              '6. Sécurité',
-              'Nous protégeons vos données grâce à :\n\n'
-                  '• Chiffrement en transit (HTTPS/TLS)\n'
-                  '• Firebase Security Rules avancées\n'
-                  '• Authentification sécurisée\n'
-                  '• Accès limité aux données (principe du moindre privilège)\n'
-                  '• Surveillance continue des accès anormaux\n\n'
-                  'Malgré ces mesures, aucun système n\'est infaillible. '
-                  'Nous vous encourageons à protéger votre mot de passe.'),
-          _Section(
-              '7. Conservation des données',
-              'Nous conservons vos données aussi longtemps que votre compte est actif. '
-                  'Après suppression de compte, vos données sont effacées sous 30 jours, '
-                  'sauf obligation légale de conservation.'),
-          _Section(
-              '8. Vos droits',
-              'Conformément aux lois applicables, vous avez le droit de :\n\n'
-                  '• Accéder à vos données personnelles\n'
-                  '• Corriger des informations inexactes\n'
-                  '• Supprimer votre compte et vos données\n'
-                  '• Vous opposer au traitement de vos données\n'
-                  '• Retirer votre consentement\n\n'
-                  'Pour exercer ces droits, contactez-nous à : znm0905@gmail.com\n\n'
-                  'Pour demander la suppression de votre compte, écrivez-nous en suivant les indications '
-                  'de la page az-express-b0469.web.app/delete-account (e-mail ou WhatsApp, avec le numéro '
-                  'et le rôle du compte).'),
-          _Section(
-              '9. Assistant intelligent AZ IA',
-              'AZ Express propose un assistant conversationnel intelligent (« AZ IA ») pour vous aider '
-                  'à effectuer vos commandes et répondre à vos questions.\n\n'
-                  '• AZ IA fait appel à des fournisseurs d\'intelligence artificielle externes : Anthropic '
-                  '(modèle Claude, fournisseur principal) et, uniquement s\'il est indisponible, Google (Gemini)\n'
-                  '• Aucune donnée n\'est envoyée sans votre accord explicite, demandé avant votre premier '
-                  'message ; en cas de refus, AZ IA n\'est pas utilisé. Vous pouvez retirer votre accord '
-                  'depuis le menu ⋮ de la conversation\n'
-                  '• Toujours transmis : votre message (ou la transcription de votre voix) et le début de la '
-                  'conversation en cours. Transmis seulement si vous les utilisez ou si votre demande en a besoin : '
-                  'les photos jointes ; votre nom, téléphone, adresses et préférences enregistrées ; votre dernière '
-                  'commande, le suivi d\'une commande, votre solde ou vos mouvements de portefeuille ; votre position '
-                  'GPS si la localisation est autorisée. Une question générale n\'en envoie aucun\n'
-                  '• Ces données ne sont jamais vendues, ni utilisées à des fins publicitaires\n'
-                  '• L\'objectif unique de ce traitement est de vous assister dans l\'utilisation de '
-                  'l\'application (suivi de commande, aide à la commande, réponses à vos questions)\n'
-                  '• Aucune action financière ou destructrice (paiement, retrait, remboursement, suppression) '
-                  'n\'est jamais exécutée par AZ IA sans votre confirmation explicite\n'
-                  '• Saisie vocale : la dictée utilise la reconnaissance vocale de votre téléphone (Apple sur '
-                  'iPhone, Google sur Android). L\'audio peut être traité par ce service selon ses propres '
-                  'conditions ; AZ Express et AZ IA ne reçoivent que le texte transcrit, jamais l\'enregistrement\n'
-                  '• Vous pouvez à tout moment consulter ou effacer votre historique de conversation '
-                  'avec AZ IA depuis le menu de la conversation dans l\'application'),
-          _Section(
-              '10. Notifications Push',
-              'Avec votre consentement, nous envoyons des notifications push pour :\n'
-                  '• Le statut de vos commandes en temps réel\n'
-                  '• Les confirmations de paiement\n'
-                  '• Les alertes de sécurité\n\n'
-                  'Vous pouvez désactiver les notifications dans les paramètres de votre appareil.'),
-          _Section(
-              '11. Mineurs',
-              'Nos services sont destinés aux personnes âgées de 16 ans et plus. '
-                  'Nous ne collectons pas sciemment de données concernant des mineurs. '
-                  'Si vous pensez qu\'un mineur utilise nos services, contactez-nous.'),
-          _Section(
-              '12. Modifications',
-              'Nous pouvons modifier cette politique à tout moment. '
-                  'Les modifications importantes vous seront notifiées via l\'application. '
-                  'La date de dernière mise à jour est indiquée en haut de ce document.'),
-          _Section(
-              '13. Contact',
-              'Pour toute question relative à cette politique de confidentialité :\n\n'
-                  'Email : znm0905@gmail.com\n'
-                  'Adresse : Abidjan, Côte d\'Ivoire\n'
-                  'WhatsApp : +225 07 98 05 13 97'),
+        child: Column(children: [
+          for (final section in PrivacyContent.sections)
+            _Section(section.title, LegalRenderer.plainBlocks(section.blocks)),
         ]),
       ),
     );

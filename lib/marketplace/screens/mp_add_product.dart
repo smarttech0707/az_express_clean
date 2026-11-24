@@ -10,6 +10,7 @@ import '../mp_constants.dart';
 import '../models/mp_product.dart';
 import '../services/mp_service.dart';
 import '../../utils/storage_cleanup.dart';
+import '../../services/permission_primer.dart';
 
 class MpAddProductScreen extends StatefulWidget {
   final MpProduct? editProduct; // null = new product
@@ -163,6 +164,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
   }
 
   Future<void> _pickImages() async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final picked = await _picker.pickMultiImage(imageQuality: 75);
     if (picked.isNotEmpty) {
       final total = _existingUrls.length + _newImages.length + picked.length;

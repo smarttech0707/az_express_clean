@@ -202,7 +202,7 @@ Future<String?> _initializeFirebaseApp() async {
 
 Future<void> _initializeDeferred(Future<void> appCheckReady) async {
   await appCheckReady;
-  // La permission notification ne doit bloquer ni le rendu ni les autres
+  // Pas de demande de permission ici (elle suit la connexion, avec explication). L'init ne doit bloquer ni le rendu ni les autres
   // initialisations réseau.
   // Mode émulateurs : pas de FCM ni d'enregistrement de jeton (aucun émulateur
   // FCM, et aucun appel vers des serveurs Google avec une configuration factice).
@@ -233,8 +233,31 @@ Future<void> _ensureAnonymousAuth() async {
   }
 }
 
+/// Clé publique reCAPTCHA v3 pour App Check Web (jamais un secret : une clé
+/// de site reCAPTCHA est conçue pour être embarquée côté client). Doit être
+/// fournie via `--dart-define=APP_CHECK_RECAPTCHA_SITE_KEY=...` pour un build
+/// Web de production ; aucune valeur n'est inventée ici.
+const String _appCheckRecaptchaSiteKey =
+    String.fromEnvironment('APP_CHECK_RECAPTCHA_SITE_KEY');
+
 Future<void> _activateAppCheck() async {
   try {
+    // `activate()` exige un `webProvider` non nul sur Web (le plugin lève une
+    // ArgumentError native sinon) : sans cela, App Check restait inactif sur
+    // tout build Web sans qu'aucun message explicite n'apparaisse.
+    WebProvider? webProvider;
+    if (kIsWeb) {
+      if (kDebugMode) {
+        webProvider = WebDebugProvider();
+      } else if (_appCheckRecaptchaSiteKey.isNotEmpty) {
+        webProvider = ReCaptchaV3Provider(_appCheckRecaptchaSiteKey);
+      } else {
+        debugPrint('[APP_CHECK] APP_CHECK_RECAPTCHA_SITE_KEY manquant : '
+            'App Check reste inactif sur ce build Web. Prérequis à fournir '
+            'avant toute mise en production Web.');
+        return;
+      }
+    }
     await FirebaseAppCheck.instance.activate(
       // ignore: deprecated_member_use
       androidProvider:
@@ -242,6 +265,8 @@ Future<void> _activateAppCheck() async {
       // ignore: deprecated_member_use
       appleProvider:
           kDebugMode ? AppleProvider.debug : AppleProvider.deviceCheck,
+      // ignore: deprecated_member_use
+      webProvider: webProvider,
     );
   } catch (e, stack) {
     FirebaseCrashlytics.instance

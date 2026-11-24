@@ -13,7 +13,7 @@ const admin = { firestore: { FieldValue: { serverTimestamp: () => 'TS' } } };
 const auth = (uid, provider = 'password') => ({ uid, token: { firebase: { sign_in_provider: provider } } });
 const T0 = Date.UTC(2026, 10, 3, 12, 0, 0);
 
-function world({ seed = {}, wallet = 10000 } = {}) {
+function world({ seed = {}, wallet = 10000, resolveGeography } = {}) {
   const db = fakeDb({
     'clients/alice': { wallet, name: 'Alice Test', phone: '+2250000000001' },
     'clients/bob': { wallet: 5000 },
@@ -25,6 +25,10 @@ function world({ seed = {}, wallet = 10000 } = {}) {
     db, admin, onCall: (h) => ({ run: h }), HttpsError,
     checkRateLimit: async (uid, action, max, win) => { limits.push([uid, action, max, win]); },
     logAudit: async (a) => { audits.push(a); }, now: () => clock,
+    resolveGeography: resolveGeography || (async () => ({
+      pickupCityId: 'abengourou', deliveryCityId: 'abengourou',
+      pickupZoneId: 'centre', deliveryZoneId: 'centre', cityResolutionStatus: 'resolved',
+    })),
   };
   const quoteFn = buildQuoteCatalogCF({ ...deps, randomId: () => `quote-${++seq}` }).run;
   const orderFn = buildCreateCatalogOrderFromQuoteCF({ ...deps, newOrderId: () => `order-${++seq}` }).run;
@@ -40,7 +44,12 @@ const colisReq = { service: 'colis', colisType: 'Colis standard', fragile: false
 const colisTexts = { recipientName: 'Kouassi', recipientPhone: '0700000000', recipientAddress: 'Quartier Dioulabougou', senderName: 'Alice', senderPhone: '0500000000', contentDescription: 'Livres' };
 const blanchReq = { service: 'blanchisserie', serviceType: 'Lavage + Repassage', quantity: 3 };
 const eauReq = { service: 'eau_boissons', items: [{ id: 'eau_1500', qty: 2 }, { id: 'coca_33', qty: 3 }] };
-const orderData = (quote, req, extra = {}) => ({ quoteId: quote.data.quoteId, paymentMethod: 'wallet', ...req, ...extra });
+// Point par défaut valide (Abengourou) : les tests qui ne portent pas spécifiquement sur la géolocalisation
+// n'ont pas besoin de le préciser.
+const orderData = (quote, req, extra = {}) => ({
+  quoteId: quote.data.quoteId, paymentMethod: 'wallet', lat: 6.7273, lng: -3.4961, coordinateSource: 'gps',
+  ...req, ...extra,
+});
 
 // ── Catalogue : tarifs actuellement appliqués, inchangés ───────────────────
 
@@ -371,4 +380,99 @@ test('Document / Enveloppe 300 FCFA : devis, commande wallet (débit 300, journa
   assert.equal(cash.success, true);
   assert.equal(wallet(w), 700);
   assert.equal(w.store.get(`orders/${cash.data.orderId}`).isPaid, false);
+});
+
+// ── Géolocalisation (correction release readiness — S6-Lot A Phase 4) ──────
+// `createCatalogOrderFromQuoteCF` écrivait auparavant latitude/longitude à 0 (jamais exploitable par le dispatch,
+// voir dispatchRetry.js::assertValidDispatchPoint) : une commande catalogue n'était jamais proposée à un livreur.
+// Un point réel est désormais exigé et validé avant toute création de commande.
+
+test('position manquante : commande refusée, aucun débit, aucune commande créée (jamais de repli 0,0)', async () => {
+  const w = world();
+  const quote = await w.q(colisReq);
+  const r = await w.o(orderData(quote, colisReq, { ...colisTexts, lat: undefined, lng: undefined }));
+  assert.equal(r.code, 'LOCATION_REQUIRED');
+  assert.equal(wallet(w), 10000);
+  assert.deepEqual(orders(w), []);
+});
+
+test('position (0,0) explicitement refusée, même si transmise par le client', async () => {
+  const w = world();
+  const quote = await w.q(colisReq);
+  const r = await w.o(orderData(quote, colisReq, { ...colisTexts, lat: 0, lng: 0 }));
+  assert.equal(r.code, 'LOCATION_REQUIRED');
+  assert.equal(wallet(w), 10000);
+  assert.deepEqual(orders(w), []);
+});
+
+test('position hors bornes (latitude/longitude invalides) refusée', async () => {
+  const w = world();
+  for (const bad of [{ lat: 95, lng: -3.5 }, { lat: 6.7, lng: 190 }, { lat: 'nord', lng: -3.5 }, { lat: NaN, lng: -3.5 }]) {
+    const quote = await w.q(colisReq);
+    const r = await w.o(orderData(quote, colisReq, { ...colisTexts, ...bad }));
+    assert.equal(r.code, 'LOCATION_REQUIRED');
+  }
+  assert.equal(wallet(w), 10000);
+  assert.deepEqual(orders(w), []);
+});
+
+test('position hors zone desservie : refus explicite OUTSIDE_SERVICE, aucun débit', async () => {
+  const w = world({
+    resolveGeography: async () => { throw Object.assign(new Error('hors villes'), { code: 'outside-service' }); },
+  });
+  const quote = await w.q(colisReq);
+  const r = await w.o(orderData(quote, colisReq, colisTexts));
+  assert.equal(r.code, 'OUTSIDE_SERVICE');
+  assert.equal(wallet(w), 10000);
+  assert.deepEqual(orders(w), []);
+});
+
+test('position valide : la commande porte des coordonnées réelles et la géographie résolue (compatibles avec dispatchOrder/retryPendingDispatch)', async () => {
+  const w = world();
+  const quote = await w.q(colisReq);
+  const r = await w.o(orderData(quote, colisReq, { ...colisTexts, lat: 6.7301, lng: -3.4967, coordinateSource: 'google' }));
+  assert.equal(r.success, true);
+  const order = w.store.get(`orders/${r.data.orderId}`);
+  assert.deepEqual(
+    [order.latitude, order.longitude, order.deliveryLatitude, order.deliveryLongitude, order.destLat, order.destLng],
+    [6.7301, -3.4967, 6.7301, -3.4967, 6.7301, -3.4967],
+  );
+  assert.deepEqual(
+    [order.pickupCityId, order.deliveryCityId, order.pickupZoneId, order.deliveryZoneId, order.cityResolutionStatus],
+    ['abengourou', 'abengourou', 'centre', 'centre', 'resolved'],
+  );
+  assert.deepEqual([order.pickupCoordinateSource, order.deliveryCoordinateSource], ['google', 'google']);
+});
+
+test('coordinateSource inconnu ou absent : replié sur "gps" (jamais une valeur arbitraire non reconnue)', async () => {
+  const w = world();
+  const quote = await w.q(colisReq);
+  const r = await w.o(orderData(quote, colisReq, { ...colisTexts, coordinateSource: 'invente' }));
+  assert.equal(r.success, true);
+  const order = w.store.get(`orders/${r.data.orderId}`);
+  assert.equal(order.pickupCoordinateSource, 'gps');
+});
+
+for (const [label, req, texts] of [
+  ['colis', colisReq, colisTexts], ['blanchisserie', blanchReq, {}], ['eau_boissons', eauReq, {}],
+]) {
+  test(`position valide pour le service ${label} : commande créée avec des coordonnées exploitables`, async () => {
+    const w = world();
+    const quote = await w.q(req);
+    const r = await w.o(orderData(quote, req, { ...texts, address: 'Quartier Dioulabougou' }));
+    assert.equal(r.success, true);
+    const order = w.store.get(`orders/${r.data.orderId}`);
+    assert.equal(order.latitude, 6.7273);
+    assert.equal(order.cityResolutionStatus, 'resolved');
+  });
+}
+
+test('rejeu d\'un devis déjà utilisé : la commande retrouvée garde ses coordonnées d\'origine, pas de second appel à la géographie', async () => {
+  const w = world();
+  const quote = await w.q(colisReq);
+  const first = await w.o(orderData(quote, colisReq, { ...colisTexts, lat: 6.71, lng: -3.44 }));
+  // Rejeu avec un point DIFFÉRENT : la commande déjà créée est retrouvée telle quelle (pas de recalcul de géographie).
+  const second = await w.o(orderData(quote, colisReq, { ...colisTexts, lat: 6.72, lng: -3.45 }));
+  assert.equal(second.data.orderId, first.data.orderId);
+  assert.equal(w.store.get(`orders/${first.data.orderId}`).latitude, 6.71);
 });

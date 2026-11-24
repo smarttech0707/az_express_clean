@@ -13,7 +13,10 @@ const guard = require(path.join(dir, 'guard'));
 const prepare = require(path.join(dir, 'prepare'));
 const cleanup = require(path.join(dir, 'cleanup'));
 const { partnerRefusal, partnerPoint, parseItems, priceItems } = require('../partnerCatalog');
-const { creationRefusal, parsePilotConfig, validateConfigChange } = require('../partnerOrdersConfig');
+const { creationRefusal, driverRefusal, parsePilotConfig, validateConfigChange } = require('../partnerOrdersConfig');
+
+// Livreurs du pilote : liste explicite fournie par les fixtures (Mission 7E-55), jamais déduite par le code métier.
+const DRIVERS = ['t7e-driver'];
 const { buildPartnerAmounts } = require('../partnerOrderAmounts');
 const { calculateCommission } = require('../dispatch');
 
@@ -162,8 +165,9 @@ test('soldes attendus : débit client, commission unique, crédits restaurant et
 
 // ── Pilote ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 test('configuration du pilote : acceptée par la validation réelle, limitée au seul restaurant du lot, jamais écrite', () => {
-  const plan = lot.pilotConfigPlan();
+  const plan = lot.pilotConfigPlan({ driverIds: DRIVERS, env: {} });
   assert.doesNotThrow(() => validateConfigChange(plan.request));
+  assert.deepEqual(plan.request.patch.pilotDriverIds, DRIVERS);
   assert.deepEqual(plan.request.patch.pilotPartnerIds, ['t7e-resto']);
   assert.equal(plan.request.expectedVersion, 0);
   assert.equal(lot.buildInventory().pilotConfig.written, false);
@@ -174,13 +178,13 @@ test('configuration du pilote : acceptée par la validation réelle, limitée au
 test('porte de création : fermée sans configuration, ouverte pour le seul restaurant du lot une fois configurée', () => {
   const absent = parsePilotConfig(null);
   assert.equal(creationRefusal(absent, 't7e-resto').code, 'PARTNER_NOT_IN_PILOT', 'document absent = fermé');
-  const open = parsePilotConfig(lot.pilotConfigPlan().expectedDocument);
+  const open = parsePilotConfig(lot.pilotConfigPlan({ driverIds: DRIVERS, env: {} }).expectedDocument);
   assert.equal(creationRefusal(open, 't7e-resto', 't7e-client'), null);
   for (const other of ['pr1', 'real-restaurant', 't7e-client']) assert.equal(creationRefusal(open, other, 't7e-client').code, 'PARTNER_NOT_IN_PILOT', other);
   // Isolation des clients (Mission 7E-41) : seul le client fictif passe, tout autre uid est refusé.
   for (const other of ['real-client', 't7e-resto', '', undefined, null]) assert.equal(creationRefusal(open, 't7e-resto', other).code, 'CLIENT_NOT_IN_PILOT', String(other));
   assert.equal(creationRefusal(open, 't7e-resto').code, 'CLIENT_NOT_IN_PILOT', 'uid absent = refus');
-  const closing = parsePilotConfig({ ...lot.pilotConfigPlan().expectedDocument, ...lot.pilotConfigPlan().closing.patch });
+  const closing = parsePilotConfig({ ...lot.pilotConfigPlan({ driverIds: DRIVERS, env: {} }).expectedDocument, ...lot.pilotConfigPlan({ driverIds: DRIVERS, env: {} }).closing.patch });
   assert.equal(creationRefusal(closing, 't7e-resto', 't7e-client').code, 'CREATION_CLOSED', 'fermeture : creationOpen=false, liste inchangée');
   assert.equal(creationRefusal(parsePilotConfig({ pilotPartnerIds: ['t7e-resto'], creationOpen: false }), 't7e-resto').code, 'CREATION_CLOSED');
 });
@@ -277,4 +281,18 @@ test('liste blanche de suppression : seules les ressources du lot, jamais audit_
   ];
   for (const p of yes) assert.equal(cleanup.pathAllowed(p), true, p);
   for (const p of no) assert.equal(cleanup.pathAllowed(p), false, p);
+});
+
+test('livreurs du pilote : seuls les livreurs listés explicitement sont autorisés, liste absente ou vide = aucun, plan sans liste = ouverture bloquée', () => {
+  const doc = lot.pilotConfigPlan({ driverIds: DRIVERS, env: {} }).expectedDocument;
+  const open = parsePilotConfig(doc);
+  assert.equal(driverRefusal(open, 't7e-driver'), null);
+  for (const other of ['real-driver', 't7e-client', '', undefined, null]) assert.equal(driverRefusal(open, other).code, 'DRIVER_NOT_IN_PILOT', String(other));
+  const { pilotDriverIds, ...withoutList } = doc;
+  assert.deepEqual(pilotDriverIds, DRIVERS);
+  assert.equal(driverRefusal(parsePilotConfig(withoutList), 't7e-driver').code, 'DRIVER_NOT_IN_PILOT', 'liste absente = refus par défaut');
+  assert.equal(driverRefusal(parsePilotConfig({ ...withoutList, pilotDriverIds: [] }), 't7e-driver').code, 'DRIVER_NOT_IN_PILOT', 'liste vide = refus par défaut');
+  for (const driverIds of [undefined, [], [''], ['a/b']]) {
+    assert.throws(() => lot.pilotConfigPlan({ driverIds, env: {} }).request, (e) => e.code === 'PILOT_DRIVER_IDS_REQUIRED', JSON.stringify(driverIds));
+  }
 });

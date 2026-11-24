@@ -102,7 +102,9 @@ function buildManageProfessionalSubscription({ db, auth, timestamp, fieldValue }
       const account = accountSnap.data();
       const walletField = WALLET_FIELDS[collection] || 'wallet';
       // Compte en cours de suppression : aucun débit ni activation (seules les actions de protection restent permises).
-      if ((account.deletionRequested === true || account.isDeleted === true) &&
+      // Mission 7E-68 : tombstone relu dans la transaction (le profil peut ne pas porter deletionRequested).
+      const closing = (await tx.get(db.collection('account_tombstones').doc(docId))).exists;
+      if ((closing || account.deletionRequested === true || account.isDeleted === true) &&
           !['suspend', 'deactivateVip'].includes(action)) {
         throw new HttpsError('failed-precondition', 'Compte en cours de suppression; operation suspendue');
       }

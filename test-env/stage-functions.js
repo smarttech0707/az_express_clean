@@ -48,7 +48,8 @@ function main() {
 
   // Secrets factices : sans .secret.local, l'émulateur interroge Google Secret Manager avec les identifiants
   // de connexion du CLI. Le pepper des preuves de livraison est aléatoire (QR/PIN utilisables en test).
-  const secrets = ['FEEXPAY_TOKEN', 'FEEXPAY_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY']
+  // GOOGLE_MAPS_SERVER_KEY : `DISABLED` est lu comme « non configuré » par functions/mapsProxy.js (aucun appel sortant).
+  const secrets = ['FEEXPAY_TOKEN', 'FEEXPAY_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_MAPS_SERVER_KEY']
     .map((name) => `${name}=DISABLED`);
   secrets.push(`DELIVERY_PROOF_PEPPER=${require('crypto').randomBytes(16).toString('hex')}`);
   fs.writeFileSync(path.join(target, '.secret.local'), `${secrets.join('\n')}\n`);

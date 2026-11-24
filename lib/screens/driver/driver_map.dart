@@ -13,6 +13,7 @@ import '../../models/order_model.dart';
 import '../../services/active_city_service.dart';
 import '../../services/google_routes_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/route_estimate_notice.dart';
 
 class DriverMapCameraThrottle {
   DriverMapCameraThrottle({required this.minInterval});
@@ -108,6 +109,14 @@ class _DriverMapState extends State<DriverMap>
   List<LatLng> _routeToDest = [];
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
+
+  // `true` quand un tronçon tracé est une ligne droite de repli (pas un
+  // itinéraire routier réel) : le livreur doit le savoir avant de naviguer.
+  bool _routeToClientIsEstimate = false;
+  bool _routeToDestIsEstimate = false;
+  bool get _routeIsEstimate =>
+      (_routeToClient.isNotEmpty && _routeToClientIsEstimate) ||
+      (_routeToDest.isNotEmpty && _routeToDestIsEstimate);
 
   double _distToClient = 0;
   double _distToDest = 0;
@@ -287,11 +296,15 @@ class _DriverMapState extends State<DriverMap>
         origin: from, destination: _clientPos);
     _routeToClient =
         model1.points.isNotEmpty ? model1.points : [from, _clientPos];
+    _routeToClientIsEstimate = model1.isEstimate;
 
     if (_destPos != null) {
       final model2 = await GoogleRoutesService.getRouteModel(
           origin: _clientPos, destination: _destPos!);
       _routeToDest = model2.points;
+      _routeToDestIsEstimate = model2.isEstimate;
+    } else {
+      _routeToDestIsEstimate = false;
     }
     if (mounted) {
       setState(() {
@@ -628,6 +641,11 @@ class _DriverMapState extends State<DriverMap>
                           ),
                         ],
                       ]),
+
+                      if (_routeIsEstimate) ...[
+                        const SizedBox(height: 10),
+                        const RouteEstimateNotice(),
+                      ],
 
                       const SizedBox(height: 14),
 

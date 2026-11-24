@@ -331,22 +331,6 @@ class FirestoreService {
   // TRANSACTIONS WALLET
   // ==============================
 
-  Future<void> _logTransaction(
-      String driverId, String type, int amount, String description,
-      {String? orderId}) async {
-    await db
-        .collection("livreurs")
-        .doc(driverId)
-        .collection("wallet_transactions")
-        .add({
-      "type": type,
-      "amount": amount,
-      "description": description,
-      "orderId": orderId,
-      "createdAt": Timestamp.now(),
-    });
-  }
-
   Stream<QuerySnapshot> walletTransactions(String driverId) {
     return db
         .collection("livreurs")
@@ -395,26 +379,6 @@ class FirestoreService {
       'ownerId': FieldValue.delete(),
       'ownerName': FieldValue.delete(),
     });
-  }
-
-  Future<void> deductCommission(String driverId, int price,
-      {String? orderId}) async {
-    int commission = calculateCommission(price);
-    final driverRef = db.collection("livreurs").doc(driverId);
-    await db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(driverRef);
-      if (!snapshot.exists) return;
-      int wallet = (snapshot["wallet"] as num? ?? 0).toInt();
-      int newWallet = (wallet - commission).clamp(0, double.maxFinite.toInt());
-      transaction.update(driverRef, {"wallet": newWallet});
-    });
-    await _logTransaction(
-      driverId,
-      "commission",
-      commission,
-      "Commission AZ Express — course à $price FCFA",
-      orderId: orderId,
-    );
   }
 
   // ==============================

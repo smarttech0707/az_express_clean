@@ -199,8 +199,9 @@ test('un provider non configuré est sauté silencieusement pendant le fallback 
     providers: { claude, gemini, openai, deepseek: makeFakeProvider('deepseek'), mistral: makeFakeProvider('mistral'), groq: makeFakeProvider('groq') },
   });
 
-  const result = await service.generateText('bonjour', { uid: 'u3', cache: false });
-  assert.equal(result.provider, 'openai');
+  // M2.14 : OpenAI n'est plus autorisé ; claude échoue et gemini n'est pas configuré → erreur, aucun appel à OpenAI.
+  await assert.rejects(service.generateText('bonjour', { uid: 'u3', cache: false }), /claude a échoué/);
+  assert.equal(openai.calls.length, 0, 'openai n\'est pas un fournisseur autorisé : aucun appel');
   assert.equal(gemini.calls.length, 0, 'gemini non configuré ne doit jamais recevoir d\'appel');
 });
 

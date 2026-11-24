@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
+import '../../services/permission_primer.dart';
 
 // Liste complète des sous-catégories disponibles à l'inscription
 const _kSubcats = [
@@ -132,7 +133,7 @@ class _ServiceProviderRegisterPageState
   Future<void> _captureGps() async {
     setState(() => _gpsLoading = true);
     try {
-      await Geolocator.requestPermission();
+      await PermissionPrimer.requestLocation(context: context);
       final pos = await Geolocator.getCurrentPosition(
           locationSettings:
               const LocationSettings(accuracy: LocationAccuracy.high));
@@ -160,6 +161,7 @@ class _ServiceProviderRegisterPageState
     }
     final src = await _pickSource();
     if (src == null) return;
+    if (!await PermissionPrimer.prepareImage(src, context: mounted ? context : null)) return;
     final picked = await ImagePicker()
         .pickImage(source: src, imageQuality: 75, maxWidth: 1200);
     if (picked != null) setState(() => _photos.add(File(picked.path)));

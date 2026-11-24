@@ -42,9 +42,9 @@ Fichiers modifiés : `index.js`, `orderActions.js`, `dispatch.js`, `ekbineFlow.j
 | 3 | Lots C puis B puis D puis **E** (§11) | idem | `functions:list` = 116, zéro écart | suppression ciblée |
 | 4 | Règles Firestore | `--dry-run` puis `firebase deploy --only firestore:rules` | tests §4 ; pas de `permission-denied` anormal | redéployer la copie de production |
 | 5 | Règles Storage | `--only storage` | upload selfie livreur OK | idem |
-| 6 | Hosting (pages légales) | `flutter build web` puis `firebase deploy --only hosting` | `/confidentialite` et `/delete-account` renvoient du HTML lisible **sans JavaScript** (`curl`), `/suppression-compte` ouvre le formulaire, `/` inchangé | version Hosting précédente (console → Rollback) |
+| 6 | Hosting (pages légales) | `.\run.ps1 -build web` (= `flutter build web --dart-define-from-file=.env` ; le web n'a pas de numéro de build, jamais bloqué par la version minimale) puis `firebase deploy --only hosting` | `/confidentialite` et `/delete-account` renvoient du HTML lisible **sans JavaScript** (`curl`), `/suppression-compte` ouvre le formulaire, `/` inchangé | version Hosting précédente (console → Rollback) |
 | 7 | Drapeau suppression (§1.3) | écriture du document, autorisation séparée | compte fictif : demande → traitement → statut | supprimer le document (le traitement s'arrête) |
-| 8 | Application 1.0.10 (+11) | AAB signé → test interne Play → production | cf. §4 | retirer la version du canal Play |
+| 8 | Application 1.0.10 (+11) | AAB signé par `py scripts/build_mobile.py appbundle` (numéro de build obligatoire) → test interne Play → production | cf. §4 | retirer la version du canal Play |
 
 Compatibilité : `acceptOrderCF` exige le selfie côté serveur ; seul appelant = `OrderRequestDialog` (selfie obligatoire à l'écran). L'ancienne application accepte par écriture directe et n'est pas concernée. Anciennes apps admin : recharge directe toujours permise par les règles (sans plafond) — à retirer ensuite.
 
@@ -72,6 +72,7 @@ Surveillance 24 h : `permission-denied` sur `orders`, `walletReconciliationCheck
 - Localisation en arrière-plan (`ACCESS_BACKGROUND_LOCATION`) et service au premier plan ; permissions photos (`READ_MEDIA_IMAGES`, stockage).
 - Classification du contenu, public cible, déclaration publicitaire, comptes de test pour évaluateurs (fictifs, hors dépôt).
 - Signature de l'AAB (`key.properties` + keystore, non versionnés) et `versionCode` 11 > dernier téléversé.
+- `APP_BUILD_NUMBER` : l'AAB doit être produit par `py scripts/build_mobile.py appbundle` (jamais `flutter build appbundle` en direct) ; le script injecte le `+N` de `pubspec.yaml` (= `versionCode`) et refuse un numéro absent, nul ou invalide. **NON VÉRIFIÉE** : sa présence dans l'AAB réel (aucun build de vérification abouti).
 
 ---
 
@@ -85,7 +86,7 @@ Surveillance 24 h : `permission-denied` sur `orders`, `walletReconciliationCheck
 | Sujet | État |
 |---|---|
 | Identifiant `com.azexpress.app`, équipe `F6XWK2W7XG`, iOS 15.0 minimum | Présents (`project.pbxproj`, `Podfile`, `codemagic.yaml`) |
-| Version / build | `pubspec.yaml` 1.0.10+11 → `CFBundleShortVersionString`/`CFBundleVersion` via Flutter. Des builds 12 et 13 ont été préparés dans l'historique git, mais **le dernier build réellement envoyé à App Store Connect est inconnu du dépôt**. `codemagic.yaml` ne code plus de numéro : il exige la variable Codemagic `IOS_BUILD_NUMBER` (entier) et échoue sinon. À définir après lecture de la liste des builds dans App Store Connect (valeur > dernier build de la version 1.0.10). Android : `versionCode` 11 / `versionName` 1.0.10 (via `flutter.versionCode`), à comparer au dernier code envoyé dans Play Console. |
+| Version / build | `pubspec.yaml` 1.0.10+11 → `CFBundleShortVersionString`/`CFBundleVersion` via Flutter. Des builds 12 et 13 ont été préparés dans l'historique git, mais **le dernier build réellement envoyé à App Store Connect est inconnu du dépôt**. `codemagic.yaml` ne code plus de numéro : il exige la variable Codemagic `IOS_BUILD_NUMBER` (entier) et échoue sinon. À définir après lecture de la liste des builds dans App Store Connect (valeur > dernier build de la version 1.0.10). `scripts/build_mobile.py ipa --build-number "$IOS_BUILD_NUMBER"` l'injecte aussi comme `APP_BUILD_NUMBER` (entier strictement positif, au plus 2 100 000 000) : la version minimale iOS se règle donc avec `minBuildIos`, distinct du numéro Android. Android : `versionCode` 11 / `versionName` 1.0.10 (via `flutter.versionCode`), à comparer au dernier code envoyé dans Play Console. |
 | Info.plist | Caméra, photos, micro, reconnaissance vocale, localisation (en cours d'usage + toujours) : textes en français présents. Modes d'arrière-plan : `fetch`, `location`, `remote-notification`. |
 | Firebase iOS | `GoogleService-Info.plist` et `firebase_options.dart` sont injectés par Codemagic (variables `FIREBASE_IOS_PLIST_B64`, `FIREBASE_DART_OPTIONS_B64`) ; le script vérifie bundle ID et projet `az-express-b0469`. Fichiers gitignorés : bon. |
 | Connexion sociale | Aucune (pas de Google/Facebook) : « Se connecter avec Apple » non exigé. |
@@ -99,7 +100,7 @@ Surveillance 24 h : `permission-denied` sur `orders`, `walletReconciliationCheck
 3. **`ios/Runner/Info.plist`** : retrait du mode d'arrière-plan `bluetooth-peripheral` (aucun code Bluetooth, aucune description d'usage : motif classique de refus à l'examen Apple).
 
 ### 8.3 Nécessite un Mac + Xcode (ou Codemagic) — NON fait
-- `pod install`, `flutter build ipa`, archive signée, vérification que `aps-environment` passe bien en `production` dans l'IPA exporté (le fichier source contient `development`).
+- `pod install`, build IPA via `python3 scripts/build_mobile.py ipa --build-number "$IOS_BUILD_NUMBER" …` (pas `flutter build ipa` en direct), archive signée, vérification que `aps-environment` passe bien en `production` dans l'IPA exporté (le fichier source contient `development`).
 - **Manifeste de confidentialité** : `ios/Runner/PrivacyInfo.xcprivacy` créé et déclaré dans `project.pbxproj` (référence, groupe Runner, phase Resources). À confirmer sur Mac : ouverture dans Xcode, présence dans l'IPA (`Payload/Runner.app/PrivacyInfo.xcprivacy`) et rapport de confidentialité Xcode (Product → Archive → Generate Privacy Report).
 - Notifications push : clé APNs (.p8) à charger dans Firebase → Cloud Messaging, puis vrai test iPhone (token APNs, banner, ouverture).
 - Appareil réel : caméra frontale (selfie d'acceptation), GPS arrière-plan livreur, micro, reconnaissance vocale, App Check (DeviceCheck à activer dans la console Firebase), liens universels (`applinks:az-express-b0469.web.app` : fichier `apple-app-site-association` à vérifier sur le domaine).
@@ -139,7 +140,7 @@ Surveillance 24 h : `permission-denied` sur `orders`, `walletReconciliationCheck
 
 ### IOS — Apple App Store
 **Prêt (préparé localement)** : identifiant `com.azexpress.app` et équipe ; textes d'autorisation ; modes d'arrière-plan réduits à `fetch`, `location`, `remote-notification` ; macros `permission_handler` (micro, localisation) ; réglages GPS arrière-plan iOS ; manifeste de confidentialité ajouté au projet ; build forcé via `IOS_BUILD_NUMBER` ; connexion sociale absente (pas de « Sign in with Apple ») ; suppression de compte dans l'app ; Cloud Functions identiques à Android.
-**À tester (Mac/Xcode/iPhone obligatoires)** : `pod install` + `flutter build ipa` ; contenu de l'IPA (manifeste, `aps-environment=production`, absence de `bluetooth-peripheral`) ; push APNs réelle ; caméra frontale (selfie) ; GPS arrière-plan et pastille ; micro et dictée ; liens universels (`apple-app-site-association` sur `az-express-b0469.web.app`) ; App Check DeviceCheck ; voix AZ IA ; parcours rôle par rôle (inscription, connexion, suppression) ; TestFlight.
+**À tester (Mac/Xcode/iPhone obligatoires)** : `pod install` + build IPA via `scripts/build_mobile.py ipa` ; présence de `APP_BUILD_NUMBER` dans l'IPA (**NON VÉRIFIÉE**) ; contenu de l'IPA (manifeste, `aps-environment=production`, absence de `bluetooth-peripheral`) ; push APNs réelle ; caméra frontale (selfie) ; GPS arrière-plan et pastille ; micro et dictée ; liens universels (`apple-app-site-association` sur `az-express-b0469.web.app`) ; App Check DeviceCheck ; voix AZ IA ; parcours rôle par rôle (inscription, connexion, suppression) ; TestFlight.
 **Empêche encore la publication** : (1) aucune compilation iOS depuis ces changements ; (2) numéro de build à confirmer dans App Store Connect puis à saisir dans `IOS_BUILD_NUMBER` ; (3) clé APNs `.p8` à charger dans Firebase ; (4) fiche App Store Connect, réponses de confidentialité, captures iPhone, compte de démonstration pour le relecteur ; (5) clé Google Maps iOS (en clair dans `AppDelegate.swift`) à restreindre au bundle ; (6) le workflow Codemagic publie vers App Store Connect (`submit_to_testflight:false`, `submit_to_app_store:false`) : le lancer envoie un build, ce qui exige une autorisation ; (7) aucun test sur iPhone. **Un test Android ne valide pas ces points.**
 
 ## 11. Ordre de déploiement complet des fonctions et dépendances

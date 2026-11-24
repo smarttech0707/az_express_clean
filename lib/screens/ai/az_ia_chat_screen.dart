@@ -26,6 +26,8 @@ import 'az_ia_chat_app_bar_title.dart';
 import 'az_ia_message_parser.dart';
 import 'az_ia_response_widgets.dart';
 import 'az_ia_rich_message.dart';
+import '../../services/permission_primer.dart';
+import '../../services/permission_primer.dart';
 
 const _kVoiceRepliesPrefKey = 'az_ia_voice_replies_enabled';
 
@@ -44,7 +46,9 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
   // ── Reconnaissance vocale (M7) — même pattern que
   // lib/screens/client/courses_screen.dart, déjà éprouvé en production.
   final SpeechToText _speech = SpeechToText();
-  bool _speechAvailable = false;
+  // Vrai tant que l'initialisation (qui déclenche l'invite micro) n'a pas eu lieu : elle est faite au premier appui.
+  bool _speechAvailable = true;
+  bool _speechInitialized = false;
   bool _listening = false;
   double _soundLevel = 0.0;
 
@@ -96,7 +100,6 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
   @override
   void initState() {
     super.initState();
-    _initSpeech();
     // Le moteur TTS n'est plus initialisé ici : `VoiceManager` se prépare
     // paresseusement au premier `speak()` réel (première réponse lue à voix
     // haute), pas à l'ouverture du chat — ouvrir AZ IA pour taper une
@@ -242,6 +245,16 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
   }
 
   Future<void> _toggleListening(AzIaProvider provider) async {
+    if (!_listening && !_speechInitialized) {
+      // Explication avant l'invite micro/reconnaissance vocale ; refus = on continue au clavier.
+      if (!await PermissionPrimer.prepareMicrophone(context: context)) {
+        _snack('Micro non autorisé : vous pouvez continuer en écrivant.');
+        return;
+      }
+      await _initSpeech();
+      _speechInitialized = true;
+    }
+    if (!mounted) return;
     if (!_speechAvailable) {
       _snack('Micro non disponible sur cet appareil');
       return;
@@ -553,6 +566,7 @@ class _AzIaChatScreenState extends State<AzIaChatScreen> {
     if (source == null || !mounted) return;
 
     try {
+      if (!await PermissionPrimer.prepareImage(source, context: context)) return;
       final picked = await ImagePicker().pickImage(
         source: source,
         imageQuality: 75,

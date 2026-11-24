@@ -25,12 +25,16 @@ class WebFooter extends StatelessWidget {
     ('Commerçants', '/commercants'),
     ('Livreurs', '/livreurs'),
     ('À propos', '/a-propos'),
+    ('FAQ', '/faq'),
+    ('Actualités', '/actualites'),
+    ('Télécharger l\'app', '/telecharger'),
     ('Contact', '/contact'),
   ];
 
   static const _legal = [
     ('Politique de confidentialité', '/confidentialite'),
     ('Conditions d\'utilisation', '/conditions'),
+    ('Mentions légales', '/mentions-legales'),
   ];
 
   @override
@@ -145,6 +149,16 @@ class WebFooter extends StatelessWidget {
         Text(
           'La plateforme N°1 de livraison express\net de services en Côte d\'Ivoire.',
           style: kBodyStyle(color: kTextMuted, size: 14),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'AZ Express est une plateforme numérique de livraison, de courses '
+          'et de services. Les prestations sont réalisées selon les '
+          'modalités propres à chaque service, par les prestataires ou les '
+          'opérateurs concernés. Les informations affichées sont '
+          'communiquées à titre informatif et sont soumises aux conditions '
+          'générales d\'AZ Express.',
+          style: kBodyStyle(color: kTextMuted, size: 12),
         ),
         const SizedBox(height: 20),
         Container(

@@ -10,6 +10,7 @@ import '../../services/auth_service.dart';
 import '../auth/client_auth_page.dart';
 import '../support/support_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../legal/legal_renderer.dart';
 import '../../widgets/fade_slide_in.dart';
 import '../../widgets/glass_kit.dart';
 import '../../widgets/single_photo_editor.dart';
@@ -931,51 +932,8 @@ class _ProfilClientState extends State<ProfilClient> {
     showAccountDeletionRequestDialog(context, role: 'client', initialPhone: _phoneCtrl.text);
   }
 
-  static const String _privacy = """POLITIQUE DE CONFIDENTIALITÉ — AZ Express
-
-Dernière mise à jour : 2026
-
-AZ Express est une application de livraison permettant aux utilisateurs de commander des courses et de se faire livrer des produits.
-
-1. DONNÉES COLLECTÉES
-
-Nous collectons les informations suivantes :
-• Nom et prénom
-• Numéro de téléphone
-• Adresse de livraison
-• Localisation GPS
-• Informations liées aux commandes
-
-2. UTILISATION DES DONNÉES
-
-Les données sont utilisées pour :
-• Traiter et livrer les commandes
-• Mettre en relation clients et livreurs
-• Améliorer l'application
-• Assurer la sécurité des utilisateurs
-
-3. PARTAGE DES DONNÉES
-
-Nous pouvons partager certaines informations avec :
-• Les livreurs (pour effectuer la livraison)
-• Nos services techniques (Firebase, etc.)
-
-Nous ne vendons aucune donnée personnelle.
-
-4. SÉCURITÉ
-
-Nous mettons en place des mesures de sécurité pour protéger vos informations personnelles.
-
-5. VOS DROITS
-
-Vous pouvez :
-• Modifier vos informations (section "Mon profil")
-• Demander la suppression de votre compte
-
-6. CONTACT
-
-Pour toute question :
-Email : znm0905@gmail.com""";
+  // Source unique : lib/legal/privacy_content.dart (mission M2.9)
+  static final String _privacy = LegalRenderer.privacyPlainText();
 
   static const String _terms = """CONDITIONS D'UTILISATION — AZ Express
 

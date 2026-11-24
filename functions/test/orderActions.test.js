@@ -186,7 +186,10 @@ test('payOrderFromWalletCF: happy path debits client, credits driver, marks orde
   assert.equal(store.get('livreurs/d1').wallet, 700);
   assert.equal(store.get('orders/o1').isPaid, true);
   assert.equal(store.get('orders/o1').paymentMethod, 'wallet');
-  assert.equal(added.filter(a => a.collection.includes('wallet_transactions')).length, 2);
+  // L4 : journaux écrits DANS la transaction, à identifiants déterministes (plus d'ajout post-transaction).
+  assert.equal(added.filter(a => a.collection.includes('wallet_transactions')).length, 0);
+  assert.equal(store.get('clients/c1/wallet_transactions/pay_order_o1').amount, 500);
+  assert.equal(store.get('livreurs/d1/wallet_transactions/earning_pay_order_o1').amount, 500);
   assert.equal(logAudit.calls.length, 1);
   assert.equal(logAudit.calls[0].action, 'pay_order_wallet');
 });

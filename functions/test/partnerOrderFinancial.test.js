@@ -104,13 +104,17 @@ test('double livraison (rejeu / double appui) : aucun second crédit ni second j
   assert.equal(t.keys('livreurs/dA/wallet_transactions/').length, 1);
 });
 
-test('partenaire introuvable à la livraison : livreur payé, montant dû signalé (jamais perdu en silence)', async () => {
+// L3.1 (DR2 §6.4) : un partenaire ABSENT est traité comme anonymisé. L'ancien comportement (livreur payé, partenaire non crédité,
+// signalement `partner_credit_missing`) créait une livraison sans contrepartie pour le partenaire ; la livraison est maintenant
+// refusée sans aucune écriture financière, avec une trace idempotente.
+test('partenaire introuvable à la livraison : livraison refusée, aucun crédit, trace du refus (jamais perdu en silence)', async () => {
   const t = world({ sellerId: 'ghost' });
-  await t.d();
-  assert.equal(t.order().status, 'delivered');
-  assert.equal(t.w('livreurs/dA'), 1400);
-  const flag = t.s.get('reconciliation_flags/o1_partner_credit_missing');
-  assert.deepEqual([flag.type, flag.status, flag.amount], ['partner_credit_missing', 'open', 3500]);
+  await assert.rejects(() => t.d(), (e) => e.code === 'failed-precondition' && e.details.code === 'BENEFICIARY_ACCOUNT_CLOSED' && e.details.cause === 'absent');
+  assert.equal(t.order().status, 'accepted');
+  assert.equal(t.w('livreurs/dA'), 900);
+  assert.equal(t.s.get('reconciliation_flags/o1_partner_credit_missing'), undefined);
+  const flag = t.s.get('reconciliation_flags/o1_deliver_beneficiary_refused');
+  assert.deepEqual([flag.type, flag.status, flag.completed, flag.beneficiary.state], ['beneficiary_closed_refused', 'open', false, 'absent']);
 });
 
 test('course transférée (gain retenu) : partenaire payé, gain livreur retenu pour l\'administration', async () => {

@@ -2,6 +2,8 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    // Le plugin Flutter doit être appliqué après les plugins Android et Kotlin.
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
@@ -51,10 +53,14 @@ android {
         versionCode   = flutter.versionCode
         versionName   = flutter.versionName
         // Build de test : JAMAIS la clé Google Maps de production (cartes désactivées, ou clé de test
-        // explicitement fournie par -PazTestMapsKey).
+        // explicitement fournie par -PazTestMapsKeyFile (fichier temporaire : la cle ne figure pas dans la ligne de
+        // commande) ou, pour les scripts historiques, par -PazTestMapsKey).
         manifestPlaceholders["MAPS_API_KEY"] =
-            if (project.hasProperty("azTestSuffix")) (project.findProperty("azTestMapsKey") as String? ?: "")
-            else localProperties.getProperty("MAPS_API_KEY", "")
+            if (project.hasProperty("azTestSuffix")) {
+                val testMapsKeyFile = project.findProperty("azTestMapsKeyFile") as String?
+                if (testMapsKeyFile != null) project.file(testMapsKeyFile).readText().trim()
+                else (project.findProperty("azTestMapsKey") as String? ?: "")
+            } else localProperties.getProperty("MAPS_API_KEY", "")
     }
 
     // Build de test sur émulateurs (test-env/) : manifeste de debug dédié (HTTP clair local,

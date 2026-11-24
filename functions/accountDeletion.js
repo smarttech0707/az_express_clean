@@ -5,6 +5,10 @@ const {ROLE_COLLECTIONS,readDeletionIdentity}=require('./accountDeletionIdentity
 const TERMINAL=new Set(['delivered','cancelled','expired','completed','refunded','failed_refunded','failed','rejected']);
 const LIMIT=201, QUIET_MS=15*60*1000, RETRY_MS=60*60*1000;
 const {inspectCleanup,eraseProfileChildren,eraseAiData,failurePatch}=require('./accountCleanup');
+// L2 : protocole de fermeture (tombstone phase/epoch, scellement T2b, fence F) et moteur d'obligations (s'ajoute à inspect()).
+const closure=require('./accountClosureProtocol');
+const {inspectObligations,inspectWithdrawals}=require('./accountObligationsInspector');
+const {INSPECTOR_TERMINAL_STATUSES}=require('./accountObligations');
 // Mission 7E-64 — anti-abus : 5 demandes/heure/compte (checkRateLimit), 10 demandes cumulées par dossier, une demande
 // identique dans les 60 s est absorbée sans retraitement, 6 échecs techniques consécutifs = fin des reprises automatiques.
 const RATE_MAX=5, RATE_WINDOW_S=3600, MAX_REQUESTS=10, REPEAT_WINDOW_MS=60*1000, MAX_ATTEMPTS=6;
@@ -44,7 +48,7 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,checkRate
   const related=[];
   const queries=[['orders',role==='client'?'clientId':'driverId'],
    ...['boutique_orders','blanchisserie_orders','eau_boissons_orders','ekbine_orders'].map(c=>[c,role==='client'?'clientId':'driverId']),
-   ['wallet_transactions','userId'],['withdrawal_requests','userId']];
+   ['wallet_transactions','userId']];
   for(const [col,field] of queries){
    const snap=await tx.get(db.collection(col).where(field,'==',uid).limit(LIMIT));
    if(snap.size>=LIMIT)return {reason:'history_requires_manual_review',profileRef};
@@ -56,7 +60,18 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,checkRate
     if(related.length>=200)return {reason:'history_requires_manual_review',profileRef};
    }
   }
+  // L2.2 : retraits classés par le prédicat du moteur (`sent`/`processed` confirmés ne bloquent plus), même position de lecture qu'avant.
+  const withdrawals=await inspectWithdrawals(tx,db,{accountUid:uid});
+  if(withdrawals.blocking)return {reason:withdrawals.reason,profileRef};
+  for(const doc of withdrawals.docs){related.push(doc);if(related.length>=200)return {reason:'history_requires_manual_review',profileRef};}
   return {profileRef,profile:p,related};
+ }
+ // inspect() d'abord (ses motifs historiques priment), puis le moteur d'obligations. `blocking` : toute autre valeur que false bloque.
+ async function inspectAll(tx,uid,role){
+  const check=await inspect(tx,uid,role);
+  if(check.reason)return {...check,blocking:true,digest:null,snapshot:null};
+  const eng=await inspectObligations(tx,db,{role,ids:[uid],terminalStatuses:INSPECTOR_TERMINAL_STATUSES.accountDeletion,atMs:clock(),accountUid:uid});
+  return {...check,blocking:eng.blocking,reason:eng.reason,digest:eng.digest,snapshot:eng.snapshot};
  }
  async function process(uid){
   const ref=jobRef(uid),lease=randomUUID();
@@ -82,17 +97,33 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,checkRate
    if(j.quarantinedAt && clock()<j.quarantinedAt+QUIET_MS)return null;
    if(j.leaseUntil>clock())return null;
    if(j.authDeleted===true){tx.update(ref,{lease,leaseUntil:clock()+180000,nextAttemptAt:clock()+180000});return j;}
-   const check=await inspect(tx,uid,j.role);
-   if(check.reason){tx.update(ref,{state:'blocked',reason:check.reason,reviewRequired:true,nextAttemptAt:clock()+RETRY_MS});return null;}
+   // Ordre de lecture fixe (réserve C2 / L0-F) : tombstone, puis profil et collections de l'inspecteur, puis écritures.
+   const tomb=await closure.readTombstone(tx,db,uid);
+   const check=await inspectAll(tx,uid,j.role);
    if(!j.quarantinedAt){
-    tx.create(db.collection('account_tombstones').doc(uid),{createdAt:stamp(),state:'deleting'});
+    // T1 : inspection et moteur non bloquants, aucun tombstone préexistant (jamais écrasé), tombstone `closing` / epoch 0.
+    if(check.blocking){tx.update(ref,{state:'blocked',reason:check.reason,reviewRequired:true,nextAttemptAt:clock()+RETRY_MS});return null;}
+    if(tomb.view.exists){tx.update(ref,{state:'blocked',reason:closure.REASON.EXISTING_TOMBSTONE,reviewRequired:true,nextAttemptAt:null});return null;}
+    tx.create(tomb.ref,closure.closingTombstone({createdAt:stamp(),now:clock()}));
     tx.update(check.profileRef,{isOnline:false,isAvailable:false,isSuspended:true});
     tx.update(ref,{state:'quarantined',reason:'waiting_for_inflight_operations',quarantinedAt:clock(),nextAttemptAt:clock()+QUIET_MS});return null;
    }
-   tx.update(ref,{lease,leaseUntil:clock()+180000,nextAttemptAt:clock()+180000});
+   const entry=closure.planEntry(tomb);
+   if(entry.kind==='blocked'){tx.update(ref,{state:'blocked',reason:entry.reason,reviewRequired:true,nextAttemptAt:null,leaseUntil:0});return {alert:entry.reason};}
+   if(entry.kind==='sealed'){
+    // Reprise d'un dossier scellé (§3.6) : jamais de déverrouillage ; mismatch = arrêt + alerte, le tombstone reste scellé.
+    const plan=closure.planResume({tomb,job:j,reinspection:check});
+    if(!plan.ok){tx.update(ref,{state:'blocked',reason:plan.reason,reviewRequired:true,nextAttemptAt:null,leaseUntil:0});return {alert:plan.reason};}
+    tx.update(ref,{lease,leaseUntil:clock()+180000,nextAttemptAt:clock()+180000});
+    return {...j,resumeSealed:true};
+   }
+   // T2 : (re)inspection complète, epoch observé, empreinte du snapshot financier et bail, dans la même transaction.
+   if(check.blocking){tx.update(ref,{state:'blocked',reason:check.reason,reviewRequired:true,nextAttemptAt:clock()+RETRY_MS});return null;}
+   tx.update(ref,{lease,leaseUntil:clock()+180000,nextAttemptAt:clock()+180000,closureEpoch:entry.epoch,snapshotDigest:check.digest,financialSnapshot:check.snapshot});
    return j;
   });
   if(!action)return publicState((await ref.get()).data());
+  if(action.alert){await auditInfo({userId:uid,userType:'unknown',action:'account_deletion_closure_alert',targetId:uid,status:'blocked',metadata:{reason:action.alert}});return publicState((await ref.get()).data());}
   if(action.partnerScope){await processPartners(uid);return publicState((await ref.get()).data());}
   try{
    const profileRef=db.collection(ROLES[action.role]).doc(uid);
@@ -105,11 +136,17 @@ function buildAccountDeletion({db,auth,admin,HttpsError,clock=Date.now,checkRate
    }
    // Journal d'audit exigé AVANT l'étape irréversible : s'il échoue, le compte Auth n'est pas supprimé (reprise ultérieure).
    if(action.authDeleted!==true)await auditStrict({userId:uid,userType:action.role,action:'account_deletion_auth_delete',targetId:uid,metadata:{role:action.role}});
-   // Idempotent: an already missing Auth user is the expected retry state.
-   try{await auth.updateUser(uid,{disabled:true});await auth.revokeRefreshTokens(uid);await auth.deleteUser(uid);}
-   catch(e){if(e.code!=='auth/user-not-found')throw e;}
-   try{await auth.getUser(uid);throw new Error('AUTH_DELETION_NOT_CONFIRMED');}
-   catch(e){if(e.code!=='auth/user-not-found')throw e;}
+   // Désactivation Auth, T2b (scellement), F (fence), puis suppression Auth ; `deleteUser` n'est jamais appelé avant T2b et F.
+   if(action.authDeleted===true)await closure.markAuthDeletedTx(db,{uid,now:clock()});
+   else{
+    const out=await closure.sealAndDeleteAuth({db,auth,uid,lease,resume:action.resumeSealed===true,clock,
+     reinspect:async tx=>{const r=await inspectAll(tx,uid,action.role);return {blocking:r.blocking,reason:r.reason,digest:r.digest};}});
+    if(!out.ok){
+     await ref.update(closure.blockedPatch((await ref.get()).data(),{reason:out.reason,now:clock(),retryMs:RETRY_MS,maxAttempts:MAX_ATTEMPTS}));
+     await auditInfo({userId:uid,userType:action.role,action:'account_deletion_closure_blocked',targetId:uid,status:'blocked',metadata:{role:action.role,reason:out.reason,authReactivated:out.reactivated===true}});
+     return publicState((await ref.get()).data());
+    }
+   }
    await ref.update({authDeleted:true,state:'cleanup_pending',reason:'personal_data_cleanup',nextAttemptAt:clock()+RETRY_MS});
    // Fixed, UID-scoped prefixes only. Never delete order proofs or accounting assets.
    await eraseAssets(uid,action.role);

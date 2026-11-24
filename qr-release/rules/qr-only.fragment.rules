@@ -1,0 +1,8 @@
+﻿// PROPOSAL ONLY: merge into the freshly exported active rules, never deploy alone.
+match /partner_qr/{id} { allow read, write: if false; }
+match /partner_qr_tokens/{id} { allow read, write: if false; }
+match /partner_qr_managers/{uid}/{document=**} { allow read, write: if false; }
+// Seller/bakery owner updates must preserve isActive,isSuspended,isDeleted,status.
+// Add affectedKeys().hasAny protection only to owner branches after baseline review.
+// Validate pharmacy_owners/currentUid are not client-forgeable in the active baseline.
+// A false rule cannot override an overlapping allow.

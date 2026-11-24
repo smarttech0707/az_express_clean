@@ -5,7 +5,7 @@ const {
   ClaudeProvider, OpenAIProvider, GeminiProvider,
   DeepSeekProvider, MistralProvider, GroqProvider,
 } = require('./providers');
-const { buildRoute, normalizeConfig, ROUTER_DEFAULTS } = require('./aiRouter');
+const { buildRoute, normalizeConfig, ROUTER_DEFAULTS, isAziaProviderAllowed } = require('./aiRouter');
 const { classifyProviderFailure } = require('./providers/fallbackPolicy');
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -290,6 +290,13 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
       })
       : null;
     const startProvider = route?.provider || opts.provider || config.provider || 'claude';
+    // Liste blanche appliquée à TOUS les chemins (generateTurn via buildRoute, mais aussi generateText/generateVision qui
+    // n'en passent pas) : plafond du code ∩ liste effective de la configuration. Un fournisseur hors liste n'est jamais
+    // appelé, ni en départ ni en repli.
+    const isAllowed = (name) => isAziaProviderAllowed(name) && (config.allowedProviders || []).includes(name);
+    if (!isAllowed(startProvider)) {
+      throw new Error(`Fournisseur IA non autorise par la politique: ${startProvider}`);
+    }
     const order = route
       ? [startProvider, ...route.fallbacks]
       : [startProvider, ...FALLBACK_ORDER.filter(p => p !== startProvider)];
@@ -303,17 +310,25 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
     // si un document existant l'utilise encore — jamais l'ancien champ lu
     // directement ici, pour ne plus jamais diverger de ce que buildRoute()
     // a déjà utilisé pour construire `route.fallbacks` juste au-dessus).
-    const attemptOrder = route
+    const attemptOrder = (route
       ? [...new Set(order)].filter((name) =>
         (!(turn.tools || []).length || providers[name]?.supportsTools?.())
         && (!turn.canonicalHistory || providers[name]?.supportsCanonicalHistory?.()))
-      : (config.enableFallback ? order : [startProvider]);
+      : (config.enableFallback ? order : [startProvider])).filter(isAllowed);
 
     let lastError = null;
     for (let i = 0; i < attemptOrder.length; i++) {
       const providerName = attemptOrder[i];
       const provider = providers[providerName];
       if (!provider) continue;
+      // Consentement : seuls les fournisseurs couverts par le consentement de l'utilisateur peuvent recevoir ses
+      // données, repli compris. Contrôlé avant toute tentative réseau (le fournisseur est simplement sauté).
+      if (Array.isArray(opts.consentedProviders) && !opts.consentedProviders.includes(providerName)) {
+        const refused = new Error(`Fournisseur IA non couvert par le consentement: ${providerName}`);
+        refused.code = 'CONSENT_PROVIDER_NOT_GRANTED';
+        lastError = lastError || refused;
+        continue;
+      }
       if (!provider.isConfigured()) {
         // Jamais tenté sur le réseau — ne compte pas comme une panne, juste
         // un fournisseur pas encore activé, on passe au suivant silencieusement.
@@ -444,6 +459,10 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
     }
   }
 
+  // generateText / generateChat / generateVision : aucun appelant en production (vérifié M2.14 : seul `azIaChat` appelle un
+  // modèle, via aiGateway.generateTurn). Conservées pour les tests et d'éventuels usages futurs, mais soumises à la MÊME
+  // liste blanche (claude/gemini) que generateTurn dans callWithFallback — jamais d'appel hors liste, ni en départ ni en
+  // repli. Toute donnée d'utilisateur envoyée par ces méthodes devra en plus passer `consentedProviders`.
   return {
     providers,
     getConfig,

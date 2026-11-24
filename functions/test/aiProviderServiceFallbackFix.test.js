@@ -104,24 +104,24 @@ test('3. Premier fournisseur réussi : aucun appel au deuxième fournisseur, mê
 });
 
 // ── 4. Échec OpenAI 429 avant tout outil : Claude est essayé une fois ─────
-test('4. Échec OpenAI (429 simulé) sur un tour SANS outil : Claude est tenté une fois en repli', async () => {
-  const quotaError = new Error('openai a échoué: 429 You exceeded your current quota');
+test('4. Échec Gemini (429 simulé) sur un tour SANS outil : Claude est tenté une fois en repli', async () => {
+  const quotaError = new Error('gemini a échoué: 429 You exceeded your current quota');
   quotaError.code = 429;
-  const openai = makeFakeProvider('openai', { fail: quotaError });
+  const gemini = makeFakeProvider('gemini', { fail: quotaError });
   const claude = makeFakeProvider('claude', { text: 'Claude prend le relais' });
   const service = makeService(
-    { claude, openai, gemini: makeFakeProvider('gemini'), deepseek: makeFakeProvider('deepseek'), mistral: makeFakeProvider('mistral'), groq: makeFakeProvider('groq') },
+    { claude, gemini, openai: makeFakeProvider('openai'), deepseek: makeFakeProvider('deepseek'), mistral: makeFakeProvider('mistral'), groq: makeFakeProvider('groq') },
     // `defaultProvider` doit être fixé explicitement : DEFAULT_CONFIG a déjà
     // `defaultProvider:'claude'` (via ROUTER_DEFAULTS) qui, sinon, gagnerait
     // sur `provider` dans normalizeConfig() et empêcherait ce test d'exercer
     // réellement un premier essai sur openai.
-    { ...DEFAULT_CONFIG, provider: 'openai', defaultProvider: 'openai', enableFallback: true, fallbackProviders: ['claude'] },
+    { ...DEFAULT_CONFIG, provider: 'gemini', defaultProvider: 'gemini', enableFallback: true, fallbackProviders: ['claude'] },
   );
   const result = await service.generateTurn({ messages: [{ role: 'user', content: 'Bonjour' }], tools: [] }, { uid: 'u4', cache: false });
-  assert.equal(openai.calls.length, 1, 'openai doit être tenté exactement une fois, jamais rejoué');
+  assert.equal(gemini.calls.length, 1, 'gemini doit être tenté exactement une fois, jamais rejoué');
   assert.equal(claude.calls.length, 1, 'claude doit être tenté exactement une fois en repli');
   assert.equal(result.provider, 'claude');
-  assert.equal(result.fallbackFrom, 'openai');
+  assert.equal(result.fallbackFrom, 'gemini');
 });
 
 // ── 5. Échec après exécution d'un outil : aucun fallback susceptible de rejouer ─

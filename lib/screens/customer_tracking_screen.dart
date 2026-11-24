@@ -2,6 +2,7 @@ import '../delivery_proofs/proof_presentation.dart';
 import '../delivery_proofs/delivery_proof_service.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -308,9 +309,12 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
   }
 
   Future<void> _loadDriverInfoById(String driverId) async {
+    // SEC-01 / S6.6 : séparation public/privé — `name`/`photoUrl`/`avgRating`
+    // viennent de la projection publique `driver_public` ; `phone` (privé,
+    // absent de cette projection) reste lu depuis `livreurs`.
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('livreurs')
+          .collection('driver_public')
           .doc(driverId)
           .get();
       if (!mounted || !doc.exists) return;
@@ -318,10 +322,25 @@ class _CustomerTrackingScreenState extends State<CustomerTrackingScreen>
       setState(() {
         _driverName = d['name'] as String?;
         _driverPhoto = d['photoUrl'] as String?;
-        _driverPhone = d['phone'] as String?;
         _driverRating = (d['avgRating'] as num?)?.toDouble();
       });
     } catch (_) {}
+    // SEC-01 / S6.9 : `phone` n'est plus lu directement sur `livreurs` —
+    // `getDriverPhoneForOrderCF` (S6.8) vérifie côté serveur que l'appelant
+    // est bien le client de cette commande. Aucun repli vers la lecture
+    // directe en cas d'échec ; en cas d'erreur, le numéro reste simplement
+    // absent (pas de valeur obsolète ni fabriquée).
+    try {
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('getDriverPhoneForOrderCF')
+          .call({'orderId': widget.order.id});
+      if (!mounted) return;
+      final phone =
+          ((result.data as Map?)?['data'] as Map?)?['phone'] as String?;
+      setState(() => _driverPhone = phone);
+    } catch (_) {
+      if (mounted) setState(() => _driverPhone = null);
+    }
   }
 
   // ── Mises à jour du service ────────────────────────────────────────────────

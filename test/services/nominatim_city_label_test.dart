@@ -1,6 +1,7 @@
 import 'package:az_express/models/delivery_zone.dart';
 import 'package:az_express/models/local_place.dart';
 import 'package:az_express/services/active_city_service.dart';
+import 'package:az_express/services/maps_proxy_client.dart';
 import 'package:az_express/services/places_search_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -62,6 +63,10 @@ void main() {
     requests = [];
     SharedPreferences.setMockInitialValues({});
     PlacesSearchService.debugResetSearchState();
+    MapsProxyClient.debugCall = null;
+  });
+  tearDown(() {
+    MapsProxyClient.debugCall = null;
   });
 
   group('libellé de ville envoyé à Nominatim', () {
@@ -129,15 +134,20 @@ void main() {
   });
 
   group('parcours Google : même normalisation du nom de ville', () {
+    // Lot 1.2.1 — la recherche/le géocodage Google passent désormais
+    // uniquement par le proxy serveur (plus d'appel HTTP direct) : on
+    // capture la requête envoyée à `MapsProxyClient` au lieu de mocker un
+    // appel HTTP Google qui n'existe plus. Nominatim (HTTP, sans clé) reste
+    // inchangé et continue d'être mocké via `debugSetHttpClient`.
     test('autocomplétion après « Élargir la recherche »', () async {
+      PlacesSearchService.debugSetHttpClient(
+          MockClient((request) async => http.Response('[]', 200)));
       final googleInputs = <String>[];
-      PlacesSearchService.debugSetHttpClient(MockClient((request) async {
-        if (request.url.host == 'nominatim.openstreetmap.org') {
-          return http.Response('[]', 200);
-        }
-        googleInputs.add(request.url.queryParameters['input'] ?? '');
-        return http.Response('{"predictions":[]}', 200);
-      }));
+      MapsProxyClient.debugCall = (name, payload) async {
+        expect(name, MapsProxyClient.autocomplete);
+        googleInputs.add(payload['input'] as String? ?? '');
+        return {'predictions': <Map<String, dynamic>>[]};
+      };
       await PlacesSearchService.search('hopital',
           cityService: await _service('Abengourou (TEST)'),
           expandSearch: true,
@@ -147,10 +157,11 @@ void main() {
 
     test('géocodage d\'un lieu sans coordonnées (resolve)', () async {
       final addresses = <String>[];
-      PlacesSearchService.debugSetHttpClient(MockClient((request) async {
-        addresses.add(request.url.queryParameters['address'] ?? '');
-        return http.Response('{"results":[]}', 200);
-      }));
+      MapsProxyClient.debugCall = (name, payload) async {
+        expect(name, MapsProxyClient.geocode);
+        addresses.add(payload['address'] as String? ?? '');
+        return {'results': <Map<String, dynamic>>[]};
+      };
       await PlacesSearchService.resolve(
         LocalPlace(
           id: 'g1',

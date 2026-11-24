@@ -85,3 +85,14 @@ test-env/.emulator-data/
 functions/.secret.local
 
 test-env/.snapshots/
+
+# Binaires volumineux retirés du suivi Git (nettoyage pré-push) — fichiers ciblés
+# individuellement, conservés physiquement sur disque, jamais supprimés.
+/AZ_Express_1.0.6_7_Play_Internal.aab
+/AZ_Express_1.0.7_8_Play_Internal.aab
+/AZ_Express_1.0.8_9_Play_Internal.aab
+/AZ_Express_1.0.9_10_Play_Alpha.aab
+/web/downloads/az-express-latest.apk
+/qr-release/android-test/AZExpress-1.0.10-qrtest-11.apk
+/qr-release/hosting/downloads/az-express-latest.apk
+/qr-release/hosting-audit/baseline/downloads/az-express-latest.apk

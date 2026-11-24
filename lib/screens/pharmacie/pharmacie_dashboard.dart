@@ -1,6 +1,7 @@
 import '../../delivery_proofs/proof_presentation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -8,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../widgets/min_version_dialog.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import 'pharmacie_login.dart' show kPharmacieLastIdPrefKey;
@@ -36,6 +38,10 @@ class _PharmacieDashboardState extends State<PharmacieDashboard>
   @override
   void initState() {
     super.initState();
+    // Version minimale du rôle pharmacie (config/app_versions.pharmacie) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRolePharmacie,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer vos commandes.'));
     _tabCtrl = TabController(length: 2, vsync: this);
     _isOnDuty = widget.pharmacieData['isOnDuty'] == true;
     _photoUrl = widget.pharmacieData['logoUrl'] as String?;
@@ -886,7 +892,8 @@ class _PharmacieOrderCard extends StatelessWidget {
                 // ── CARTE LIVREUR ──────────────────────────
                 if (driverId != null) ...[
                   const SizedBox(height: 12),
-                  _DriverInfoCard(driverId: driverId, status: status),
+                  _DriverInfoCard(
+                      orderId: orderId, driverId: driverId, status: status),
                 ] else if (status == 'pending') ...[
                   const SizedBox(height: 12),
                   Container(
@@ -939,11 +946,67 @@ class _PharmacieOrderCard extends StatelessWidget {
 // CARTE LIVREUR — chargement depuis Firestore en temps réel
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _DriverInfoCard extends StatelessWidget {
+class _DriverInfoCard extends StatefulWidget {
+  final String orderId;
   final String driverId;
   final String status;
 
-  const _DriverInfoCard({required this.driverId, required this.status});
+  const _DriverInfoCard({
+    required this.orderId,
+    required this.driverId,
+    required this.status,
+  });
+
+  @override
+  State<_DriverInfoCard> createState() => _DriverInfoCardState();
+}
+
+// SEC-01 / S6.13 : `name`/`photoUrl` restent lus en continu depuis la
+// projection publique `driver_public` (StreamBuilder, inchangé). `motoModel`
+// reste lu en continu depuis `livreurs` (StreamBuilder, inchangé — il ne
+// s'agit pas d'une donnée de contact et sa migration vers `driver_public`
+// n'est pas demandée). Seul `phone` (privé) ne vient plus de `livreurs` mais
+// de la Callable `getDriverPhoneForOrderCF` (S6.8), via un `Future` mémorisé
+// dans cet État — créé une seule fois par `initState()`, jamais recréé par
+// `build()`. Sans cette mémorisation, chaque reconstruction pilotée par les
+// écritures GPS sur `driver_public` (~5 s pendant une livraison active,
+// cf. docs/SEC01_S6_11_STREAMBUILDER_PHONE_AUDIT.md) relancerait la Callable
+// au même rythme. `phone` et `motoModel` restent deux sources indépendantes :
+// le `Future` du téléphone n'est jamais recréé par les reconstructions dues
+// à `motoModel`/`driver_public`, et réciproquement le flux `motoModel` n'est
+// pas affecté par l'état du téléphone.
+class _DriverInfoCardState extends State<_DriverInfoCard> {
+  late Future<String?> _phoneFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneFuture = _fetchPhone();
+  }
+
+  @override
+  void didUpdateWidget(_DriverInfoCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.orderId != widget.orderId ||
+        oldWidget.driverId != widget.driverId) {
+      // Nouvelle commande affichée, ou livreur réattribué : le Future est
+      // relancé — jamais de numéro obsolète conservé.
+      setState(() {
+        _phoneFuture = _fetchPhone();
+      });
+    }
+  }
+
+  Future<String?> _fetchPhone() async {
+    try {
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('getDriverPhoneForOrderCF')
+          .call({'orderId': widget.orderId});
+      return ((result.data as Map?)?['data'] as Map?)?['phone'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<void> _call(String phone) async {
     final url = Uri.parse('tel:$phone');
@@ -954,8 +1017,8 @@ class _DriverInfoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('livreurs')
-          .doc(driverId)
+          .collection('driver_public')
+          .doc(widget.driverId)
           .snapshots(),
       builder: (context, snap) {
         if (!snap.hasData || !snap.data!.exists) {
@@ -963,11 +1026,33 @@ class _DriverInfoCard extends StatelessWidget {
         }
         final d = snap.data!.data() as Map<String, dynamic>;
         final name = d['name'] as String? ?? 'Livreur';
-        final phone = d['phone'] as String? ?? '';
         final photo = d['photoUrl'] as String?;
-        final moto = d['motoModel'] as String? ?? '';
 
-        return Container(
+        return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('livreurs')
+              .doc(widget.driverId)
+              .snapshots(),
+          builder: (context, privSnap) {
+            final moto = (privSnap.data?.data()
+                    as Map<String, dynamic>?)?['motoModel'] as String? ??
+                '';
+            return FutureBuilder<String?>(
+              future: _phoneFuture,
+              builder: (context, phoneSnap) {
+                final phone = phoneSnap.data ?? '';
+                return _buildCard(context, name, phone, photo, moto);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCard(BuildContext context, String name, String phone,
+      String? photo, String moto) {
+    return Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: const Color(0xFFE8F5E9),
@@ -1048,7 +1133,7 @@ class _DriverInfoCard extends StatelessWidget {
                               style: GoogleFonts.urbanist(
                                   fontSize: 12, color: Colors.grey.shade600)),
                         const SizedBox(height: 4),
-                        _StatusChip(status: status),
+                        _StatusChip(status: widget.status),
                       ],
                     ),
                   ),
@@ -1103,8 +1188,6 @@ class _DriverInfoCard extends StatelessWidget {
             ],
           ),
         );
-      },
-    );
   }
 
   void _showPhoto(BuildContext context, String url, String name) {

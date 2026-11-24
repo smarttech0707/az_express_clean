@@ -125,7 +125,7 @@ test('QR/PIN sans SMS : les fonctions de preuve n\'appellent aucun SMS ; le déc
   assert.match(index, /process\.env\.DELIVERY_SMS_ENABLED !== 'true' \|\| process\.env\.DELIVERY_PROOFS_ENABLED !== 'true'\) return;/);
   const env = { ...process.env, DELIVERY_PROOFS_ENABLED: 'true', DELIVERY_SMS_ENABLED: 'false', DELIVERY_SMS_PROVIDER: 'none', DELIVERY_PROOF_PEPPER: 'test-only-not-a-secret' };
   delete env.NODE_TEST_CONTEXT; // sinon le sous-processus rapporte au test parent et n'écrit rien sur stdout
-  const out = execFileSync(process.execPath, ['--test', path.join(__dirname, 'deliveryProofs.test.js')], { env, encoding: 'utf8', timeout: 180000 });
+  const out = execFileSync(process.execPath, ['--test', '--test-reporter=spec', path.join(__dirname, 'deliveryProofs.test.js')], { env, encoding: 'utf8', timeout: 180000 });
   assert.match(out, /ℹ fail 0/);
   assert.match(out, /ℹ pass [1-9]/);
 });

@@ -2,6 +2,7 @@
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { setPin } = require('./artisanCredentials');
+const { assertTargetNotClosing } = require('./accountAdmission');
 
 function normalizePhone(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -64,6 +65,8 @@ function buildResetAccountPassword({ db, auth, fieldValue, hashSecret, checkRate
     if(accountDoc.data().isDeleted===true){
       throw new HttpsError('failed-precondition','Compte supprime; reactivation interdite');
     }
+    // Mission 7E-68 : compte cible en cours de suppression (tombstone sur l'id du document ou sur l'UID du propriétaire).
+    await assertTargetNotClosing(db, HttpsError, [accountDoc.id, accountDoc.data().currentUid]);
 
     if (userType === 'artisan') {
       const pin = String(newValue);

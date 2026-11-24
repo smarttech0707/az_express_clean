@@ -48,7 +48,7 @@ test('Gateway normalizes a provider turn without exposing provider protocol to c
 
   const result = await gateway.generateTurn({
     systemPrompt: 'system', messages: [{ role: 'user', content: 'mon solde' }], tools,
-  }, { uid: 'u1', conversationId: 'c1' });
+  }, { uid: 'u1', conversationId: 'c1', consentedProviders: ['claude', 'gemini'] });
 
   assert.deepEqual(received.turn.tools.map((tool) => tool.name), ['read_wallet']);
   assert.equal(received.options.recordUsage, false);

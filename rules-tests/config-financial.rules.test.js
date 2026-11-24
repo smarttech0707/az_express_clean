@@ -23,7 +23,7 @@ async function env(projectId) {
     await db.doc('config/billing').set({ mode: 'separate' });
     await db.doc('config/driver_recharge').set({ minAmount: 500 });
     await db.doc('config/commission').set({ commissionBasic: 100 });
-    await db.doc('config/app_versions').set({ livreur: { minBuild: 1 } });
+    await db.doc('config/app_versions').set({ driver: { minBuild: 1 } });
     await db.doc('config/app_version').set({ minWalletPaymentBuild: 1 });
     await db.doc('config/app').set({ name: 'AZ' });
     await db.doc('config/theme').set({ color: 'orange' });
@@ -88,6 +88,28 @@ test('config : l\'écriture reste réservée au super-admin (financière ou non)
     }
     await assertFails(e.unauthenticatedContext().firestore().doc('config/az_wallet').set({ totalCommissions: 1 }));
     await assertSucceeds(e.authenticatedContext('root', password).firestore().doc('config/commission').set({ commissionBasic: 100 }));
+  } finally { await e.cleanup(); }
+});
+
+test('config : app_versions et app_release_registry fermés à toute écriture cliente, super-admin compris (M2.2)', async () => {
+  const e = await env('az-config-appversions');
+  try {
+    const root = e.authenticatedContext('root', password).firestore();
+    for (const id of ['app_versions', 'app_release_registry']) {
+      await assertFails(root.doc(`config/${id}`).set({ driver: { minBuild: 1 } }));
+      await assertFails(root.doc(`config/${id}`).update({ x: 1 }));
+      await assertFails(root.doc(`config/${id}`).delete());
+      for (const uid of ['c1', 'sub']) {
+        await assertFails(e.authenticatedContext(uid, password).firestore().doc(`config/${id}`).set({ x: 1 }));
+      }
+      await assertFails(e.unauthenticatedContext().firestore().doc(`config/${id}`).set({ x: 1 }));
+    }
+    // Lecture inchangée : app_versions publique, registre réservé au super-admin.
+    await assertSucceeds(e.unauthenticatedContext().firestore().doc('config/app_versions').get());
+    await assertFails(e.authenticatedContext('c1', password).firestore().doc('config/app_release_registry').get());
+    await assertSucceeds(root.doc('config/app_release_registry').get());
+    // Les autres documents restent écrivables par le super-admin.
+    await assertSucceeds(root.doc('config/commission').set({ commissionBasic: 100 }));
   } finally { await e.cleanup(); }
 });
 

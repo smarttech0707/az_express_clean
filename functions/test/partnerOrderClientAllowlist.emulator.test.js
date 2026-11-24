@@ -204,7 +204,7 @@ test('13-14. liste modifiable par le seul super-administrateur ; modification ve
   // Administrateur : S0 exacte, auditée.
   const res = await run.action(user(ADMIN, request));
   assert.equal(res.success, true, JSON.stringify(res));
-  assert.deepEqual(res.data.config, { pilotPartnerIds: [RESTO], pilotClientIds: [CLIENT], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 1 });
+  assert.deepEqual(res.data.config, { pilotPartnerIds: [RESTO], pilotClientIds: [CLIENT], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, pilotDriverIds: [], version: 1 });
   const doc = await config();
   assert.deepEqual([doc.version, doc.updatedBy, doc.lastChange.by], [1, ADMIN, ADMIN]);
   const audit = audits.find((a) => a.action === 'partner_orders_config_update' && !a.status);
@@ -231,4 +231,22 @@ test('13-14. liste modifiable par le seul super-administrateur ; modification ve
   refusedWith(await quoteFor(EXISTING), 'CLIENT_NOT_IN_PILOT');
   assert.deepEqual((await config()).pilotClientIds, [CLIENT], 'la liste est conservée');
   await db.doc(`tariff_quotes/${q.data.quoteId}`).delete();
+});
+
+test('16. livreurs explicites (Mission 7E-55) : liste du lot acceptée et renvoyée, listes invalides refusées sans écriture, configuration compatible avec le plan du lot', options, async () => {
+  await setConfig(null);
+  const plan = lot.pilotConfigPlan({ driverIds: ['t7e-driver-b', 't7e-driver'], env: {} });
+  const res = await run.action(user(ADMIN, plan.request));
+  assert.equal(res.success, true, JSON.stringify(res));
+  assert.deepEqual(res.data.config, plan.expectedDocument, 'configuration renvoyée = document attendu par le plan (liste triée)');
+  assert.deepEqual((await config()).pilotDriverIds, ['t7e-driver', 't7e-driver-b']);
+
+  // Listes invalides : refusées, document inchangé.
+  const before = await config();
+  for (const bad of [[''], ['  '], ['a/b'], ['dup', 'dup'], 'pas-une-liste', [42], Array.from({ length: 51 }, (_, i) => `d${i}`)]) {
+    const r = await run.action(user(ADMIN, { action: 'setPartnerOrdersConfig', patch: { pilotDriverIds: bad }, expectedVersion: 1, reason: 'Liste de livreurs invalide à refuser' }));
+    refusedWith(r, 'INVALID_CONFIG');
+  }
+  assert.deepEqual(await config(), before, 'aucune écriture');
+  await setConfig(null);
 });

@@ -14,6 +14,7 @@ import '../../services/pharmacy_guard_repository.dart';
 import '../../services/tarif_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/premium_empty_state.dart';
+import '../../services/permission_primer.dart';
 
 typedef PharmacyGuardStreamLoader = Stream<List<PharmacyGuard>> Function(
   String cityName,
@@ -55,7 +56,7 @@ class _PharmacieGardePageState extends State<PharmacieGardePage>
 
   Future<void> _loadPosition() async {
     try {
-      final permission = await Geolocator.requestPermission();
+      final permission = await PermissionPrimer.requestLocation(context: context);
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
         return;

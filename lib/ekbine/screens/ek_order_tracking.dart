@@ -9,6 +9,7 @@ import '../ek_constants.dart';
 import '../ek_tracking.dart';
 import '../models/ek_order.dart';
 import '../services/ek_service.dart';
+import '../../services/permission_primer.dart';
 
 class EkOrderTracking extends StatefulWidget {
   // Pass either the full order OR just an orderId (for fresh navigation)
@@ -811,6 +812,7 @@ class _EkOrderTrackingState extends State<EkOrderTracking> {
 
   Future<void> _uploadDepositProof(EkOrder order) async {
     final picker = ImagePicker();
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final file =
         await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
     if (file == null) return;

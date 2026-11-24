@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -5,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'fcm_policy.dart';
 import 'notification_tap_coordinator.dart';
+import 'permission_primer.dart';
 
 // ── Handler background — doit être top-level (hors classe) ───────────
 @pragma('vm:entry-point')
@@ -85,8 +88,8 @@ class NotificationService {
     // Enregistrer le handler background
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // Demander la permission
-    await _fcm.requestPermission(alert: true, badge: true, sound: true);
+    // La permission n'est plus demandée au lancement : elle l'est après la connexion, avec explication
+    // (voir [requestPermissionWithExplanation], mission M2.9).
 
     // iOS : afficher la notification même quand l'app est au premier plan
     await _fcm.setForegroundNotificationPresentationOptions(
@@ -124,6 +127,23 @@ class NotificationService {
       // Synchroniser le badge non-lu au démarrage (clients uniquement)
       if (collection == 'clients') _syncUnreadCount(userId);
     } catch (_) {}
+    // Connexion réussie : moment opportun pour expliquer puis demander les notifications (sans bloquer la connexion).
+    unawaited(requestPermissionWithExplanation());
+  }
+
+  /// Explique l'utilité des notifications puis demande l'autorisation système, une seule fois (jamais au lancement).
+  Future<void> requestPermissionWithExplanation() {
+    if (FcmPolicy.disabled) return Future.value();
+    return PermissionPrimer.requestNotifications(
+      isAuthorized: () async {
+        final s = await _fcm.getNotificationSettings();
+        return s.authorizationStatus == AuthorizationStatus.authorized ||
+            s.authorizationStatus == AuthorizationStatus.provisional;
+      },
+      requestSystem: () async {
+        await _fcm.requestPermission(alert: true, badge: true, sound: true);
+      },
+    );
   }
 
   /// Retourne le token FCM uniquement lorsque sa dépendance APNs est prête.

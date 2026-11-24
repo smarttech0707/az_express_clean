@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../theme/app_theme.dart';
+import '../services/permission_primer.dart';
 
 /// Avatar/photo unique avec ajout, remplacement et barre de progression
 /// réelle pendant l'upload — un seul widget, réutilisé par chaque rôle qui a
@@ -62,6 +63,7 @@ class _SinglePhotoEditorState extends State<SinglePhotoEditor> {
   Future<void> _pickAndUpload(ImageSource source) async {
     XFile? picked;
     try {
+      if (!await PermissionPrimer.prepareImage(source, context: context)) return;
       picked = await ImagePicker().pickImage(
         source: source,
         imageQuality: 70,

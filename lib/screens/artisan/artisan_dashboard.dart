@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../widgets/scale_button.dart';
+import '../../widgets/min_version_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,6 +10,7 @@ import '../../services/auth_service.dart';
 import '../../widgets/account_deletion_dialog.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import 'artisan_login.dart' show kArtisanLastDocIdPrefKey;
+import '../../services/permission_primer.dart';
 
 class ArtisanDashboard extends StatefulWidget {
   final String docId;
@@ -32,7 +34,11 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
   @override
   void initState() {
     super.initState();
-    _photos = (widget.initialData['photos'] as List?)?.cast<String>() ?? [];
+    // Version minimale du rôle artisan (config/app_versions.artisan) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleArtisan,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer votre profil.'));
+    _photos =(widget.initialData['photos'] as List?)?.cast<String>() ?? [];
   }
 
   Future<void> _pickAndUpload(ImageSource source) async {
@@ -41,6 +47,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
       return;
     }
     final picker = ImagePicker();
+    if (!await PermissionPrimer.prepareImage(source, context: context)) return;
     final picked = await picker.pickImage(
         source: source, imageQuality: 75, maxWidth: 1280);
     if (picked == null) return;

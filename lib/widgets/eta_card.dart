@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../screens/chat/chat_page.dart';
 import '../services/realtime_tracking_service.dart';
 import '../theme/app_theme.dart';
+import 'route_estimate_notice.dart';
 
 /// Carte ETA style Yango — affichée en bas de l'écran de suivi client.
 /// Affiche le statut commande, les infos livreur, boutons Appeler/Chat, stats ETA.
@@ -317,6 +318,12 @@ class EtaCard extends StatelessWidget {
             ),
           ]),
         ),
+
+        if (hasDriver && tracking.routeIsEstimate)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
+            child: RouteEstimateNotice(),
+          ),
 
         const SizedBox(height: 12),
 

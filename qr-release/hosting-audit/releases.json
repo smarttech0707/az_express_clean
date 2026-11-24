@@ -1,0 +1,44 @@
+{
+  "releases": [
+    {
+      "name": "sites/az-express-b0469/releases/1791977055377000",
+      "type": "DEPLOY",
+      "releaseTime": "2026-10-14T11:24:15.377Z",
+      "version": {
+        "name": "sites/az-express-b0469/versions/3c2331e0f6a31a3e"
+      }
+    },
+    {
+      "name": "sites/az-express-b0469/releases/1791976813384000",
+      "type": "DEPLOY",
+      "releaseTime": "2026-10-14T11:20:13.384Z",
+      "version": {
+        "name": "sites/az-express-b0469/versions/17b284f706e8457b"
+      }
+    },
+    {
+      "name": "sites/az-express-b0469/releases/1791776064256000",
+      "type": "DEPLOY",
+      "releaseTime": "2026-10-12T03:34:24.256Z",
+      "version": {
+        "name": "sites/az-express-b0469/versions/75df260b86ade3af"
+      }
+    },
+    {
+      "name": "sites/az-express-b0469/releases/1791775931845000",
+      "type": "DEPLOY",
+      "releaseTime": "2026-10-12T03:32:11.845Z",
+      "version": {
+        "name": "sites/az-express-b0469/versions/ec0e0c81922fa747"
+      }
+    },
+    {
+      "name": "sites/az-express-b0469/releases/1791775795218000",
+      "type": "DEPLOY",
+      "releaseTime": "2026-10-12T03:29:55.218Z",
+      "version": {
+        "name": "sites/az-express-b0469/versions/7977e939ee5fc0d6"
+      }
+    }
+  ]
+}

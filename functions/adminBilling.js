@@ -3,6 +3,7 @@
 const { runLifecycleTransaction } = require('./driverLifecycle');
 const { cancelOrderTx, cancelOrderPostTx, PREPAID_PARTNER_TYPES } = require('./orderActions');
 const { readAmounts } = require('./orderAmounts');
+const { isBeneficiaryCreditable, assertBeneficiariesCreditable } = require('./accountClosureActor');
 
 // Examen administratif des commandes Marketplace / Boutique (super-admin).
 //
@@ -17,6 +18,11 @@ const { readAmounts } = require('./orderAmounts');
 //                         retain        AZ garde les frais, la commission est rendue
 //   refundBoutiqueOrder rembourse une commande boutique wallet dont la livraison est close
 //                       (annulée) sans passer par le délai de 48 h.
+//   clearBeneficiaryReview lève le verrou « bénéficiaire fermé » d'une commande dont un paiement ou une livraison a été
+//                       refusé (orders.needsReview + reviewReason `beneficiary_closed`). Ne crédite rien, ne touche à aucun
+//                       compte ni tombstone : la commande redevient simplement réglable / livrable, et les gardes de fermeture
+//                       sont ré-évaluées à ce moment-là (un bénéficiaire scellé / anonymisé / absent sera refusé de nouveau).
+//                       Les revues `beneficiary_credit_omitted` (somme due non versée) ne sont PAS levables ici.
 //   confirmStockReturn  remet en stock les produits d'une commande boutique remboursée ou
 //                       annulée, UNIQUEMENT sur confirmation administrative : le stock n'est
 //                       jamais restitué automatiquement (le produit peut déjà être chez le
@@ -28,7 +34,9 @@ const { readAmounts } = require('./orderAmounts');
 // identifiants de mouvement déterministes), journalisée (orders.adminReview /
 // deliveryFeeHold.decision, audit_logs).
 
-const ACTIONS = Object.freeze(['closeStuckDelivery', 'resolveFeeHold', 'refundBoutiqueOrder', 'confirmStockReturn']);
+const ACTIONS = Object.freeze(['closeStuckDelivery', 'resolveFeeHold', 'refundBoutiqueOrder', 'confirmStockReturn', 'clearBeneficiaryReview']);
+const REFUSED_REVIEW = 'beneficiary_closed';
+const REFUSAL_FLAG_KINDS = Object.freeze(['pay', 'deliver', 'cancel']);
 const STOCK_REASONS = Object.freeze(['non_delivery', 'product_returned']);
 const DECISIONS = Object.freeze(['refundClient', 'payDriver', 'retain']);
 const MIN_JUSTIFICATION = 10;
@@ -61,7 +69,9 @@ function buildAdminBilling({
         ? await resolveFeeHold({ data, uid, justification })
         : data.action === 'confirmStockReturn'
           ? await confirmStockReturn({ data, uid, justification })
-          : await refundBoutiqueOrder({ data, uid, justification });
+          : data.action === 'clearBeneficiaryReview'
+            ? await clearBeneficiaryReview({ data, uid, justification })
+            : await refundBoutiqueOrder({ data, uid, justification });
 
     await logAudit({
       userId: uid, userType: 'admin', action: `admin_billing_${data.action}`, targetId: data.orderId,
@@ -69,6 +79,58 @@ function buildAdminBilling({
     });
     return { success: true, ...result.response };
   });
+
+  async function clearBeneficiaryReview({ data, uid, justification }) {
+    const orderRef = db.collection('orders').doc(data.orderId);
+    const flagRefs = REFUSAL_FLAG_KINDS.map((k) => db.collection('reconciliation_flags').doc(`${data.orderId}_${k}_beneficiary_refused`));
+    let out;
+    await db.runTransaction(async (tx) => {
+      out = null;
+      const snap = await tx.get(orderRef);
+      if (!snap.exists) throw new HttpsError('not-found', 'Commande introuvable');
+      const flagSnaps = [];
+      for (const ref of flagRefs) flagSnaps.push(await tx.get(ref));
+      // Vérification de l'état ACTUEL de chaque bénéficiaire refusé (tombstone puis profil) : la levée ne rouvre rien et ne vaut pas
+      // autorisation de crédit ; elle n'est possible que si tous les bénéficiaires peuvent effectivement être crédités maintenant.
+      const beneficiaries = flagSnaps.filter((f) => f.exists && f.data().status === 'open' && f.data().beneficiary)
+        .map((f) => f.data().beneficiary);
+      const creditable = [];
+      for (const b of beneficiaries) {
+        creditable.push(isId(b.collection) && isId(b.id) ? await isBeneficiaryCreditable(tx, db, b) : false);
+      }
+      const order = snap.data();
+      if (order.needsReview === true && order.reviewReason !== REFUSED_REVIEW) {
+        // Somme due non versée : à traiter par un règlement explicite, jamais par une simple levée de verrou.
+        throw new HttpsError('failed-precondition', 'REVIEW_NOT_CLEARABLE: cette revue concerne un crédit non versé');
+      }
+      if (order.needsReview !== true) {
+        if (order.reviewClearedAtMs) { out = { replay: true }; return; }
+        throw new HttpsError('failed-precondition', 'Aucune revue bénéficiaire en cours pour cette commande');
+      }
+      if (beneficiaries.length === 0) {
+        // Aucun bénéficiaire vérifiable : on ne devine pas, on ne lève pas.
+        throw new HttpsError('failed-precondition', 'BENEFICIARY_NOT_VERIFIABLE: aucun bénéficiaire refusé à vérifier pour cette commande');
+      }
+      if (creditable.some((ok) => !ok)) {
+        throw new HttpsError('failed-precondition', 'BENEFICIARY_STILL_CLOSED: un bénéficiaire ne peut toujours pas être crédité');
+      }
+      const now = Date.now();
+      tx.update(orderRef, {
+        needsReview: false, reviewReason: FieldValue.delete(), reviewClearedReason: order.reviewReason,
+        reviewClearedAtMs: now, reviewClearedBy: uid,
+      });
+      flagSnaps.forEach((fs, i) => {
+        if (fs.exists && fs.data().status === 'open') {
+          // L4.6 (M-3) : la levée du verrou n'est PAS la clôture de la créance. Le signalement reste `open` (la dette demeure visible et
+          // bloquante pour le moteur d'obligations) ; seules des traces de levée sont ajoutées. Aucun montant, aucun solde, aucun statut de
+          // règlement n'est touché ; la clôture exige une décision et une preuve de règlement (hors périmètre, non implémentées).
+          tx.update(flagRefs[i], { lockLifted: true, lockLiftedAtMs: now, lockLiftedBy: uid, lockLiftJustification: justification });
+        }
+      });
+      out = { replay: false };
+    });
+    return { response: { replay: out.replay === true }, audit: { replay: out.replay === true } };
+  }
 
   async function closeStuckDelivery({ data, uid, justification }) {
     const orderRef = db.collection('orders').doc(data.orderId);
@@ -89,6 +151,7 @@ function buildAdminBilling({
         refundInfo = await cancelOrderTx(tx, {
           db, admin, orderRef, order, uid: order.clientId, calculateCommission,
           reason: 'admin_close_stuck', adminDecision: { refundFee: data.refundFee === true },
+          closure: { admin: true, HttpsError },
         });
       } catch (err) {
         if (err.message === 'ORDER_NOT_CANCELLABLE') {
@@ -146,6 +209,14 @@ function buildAdminBilling({
       const refundCommission = data.decision !== 'payDriver' && traced;
       const payerRef = refundCommission ? db.collection('livreurs').doc(order.commissionPayerId) : null;
       const payerSnap = payerRef ? await tx.get(payerRef) : null;
+
+      // L4.5 : tous les comptes qui seraient crédités sont vérifiés AVANT la première écriture ; un seul fermé, absent ou
+      // illisible => refus de toute l'opération (ni crédit partiel, ni retenue marquée résolue, ni détournement vers AZ).
+      const credited = [];
+      if (data.decision === 'refundClient') credited.push({ collection: 'clients', id: order.clientId });
+      if (data.decision === 'payDriver' && driverId) credited.push({ collection: 'livreurs', id: driverId });
+      if (refundCommission) credited.push({ collection: 'livreurs', id: order.commissionPayerId });
+      await assertBeneficiariesCreditable(tx, db, HttpsError, credited);
 
       if (data.decision === 'refundClient') {
         if (!clientSnap.exists) throw new HttpsError('failed-precondition', 'Client introuvable');
@@ -285,6 +356,13 @@ function buildAdminBilling({
       const sellerRef = isId(bo.sellerId) ? db.collection('sellers').doc(bo.sellerId) : null;
       const [clientSnap, sellerSnap] = await Promise.all([tx.get(clientRef), sellerRef ? tx.get(sellerRef) : null]);
       if (!clientSnap.exists) throw new HttpsError('failed-precondition', 'Client introuvable');
+
+      // L4.5 : client (crédit) et vendeur (débit) vérifiés avant toute écriture ; l'un fermé / absent / illisible => rien
+      // n'est remboursé ni débité, la commande reste « paid » (pas de remboursement sans reprise, pas de débit d'un compte fermé).
+      await assertBeneficiariesCreditable(tx, db, HttpsError, [
+        { collection: 'clients', id: bo.clientId },
+        ...(sellerRef ? [{ collection: 'sellers', id: bo.sellerId }] : []),
+      ]);
 
       const ts = FieldValue.serverTimestamp();
       tx.update(boRef, {

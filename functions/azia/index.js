@@ -16,7 +16,7 @@ const { createAiGateway } = require('./aiGateway');
 const { buildUserContext } = require('./contextBuilder');
 const { buildTurnResponse } = require('./responseBuilder');
 const { buildReminderScheduler } = require('./reminderScheduler');
-const { CONSENT_VERSION, getConsent, isConsentValid, setConsent } = require('./consent');
+const { CONSENT_VERSION, getConsent, isConsentValid, setConsent, consentedRouterProviders } = require('./consent');
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_TOOL_TURNS     = 6; // plafond d'aller-retours outils par message utilisateur
@@ -118,9 +118,12 @@ module.exports = function createAzIa({
     // Garde serveur : sans consentement valide (absent, refusé, retiré, version
     // périmée, ancienne app), ni historique, ni contexte, ni fournisseur n'est
     // touché. Seule AZ IA est bloquée.
-    if (!isConsentValid(await getConsent(db, uid))) {
+    const consent = await getConsent(db, uid);
+    if (!isConsentValid(consent)) {
       throw new HttpsError('failed-precondition', 'CONSENT_REQUIRED');
     }
+    // Fournisseurs auxquels ce consentement permet de transmettre des données (départ ET repli sont contrôlés).
+    const consentedProviders = consentedRouterProviders(consent);
 
     const message = String(request.data?.message || '').trim();
     if (!message) {
@@ -196,7 +199,7 @@ module.exports = function createAzIa({
           maxTokens: MAX_TOKENS,
           canonicalHistory: true,
           turnIndex: turnsTaken,
-        }, { uid, conversationId });
+        }, { uid, conversationId, consentedProviders });
         inputTokens += turn.usage.inputTokens;
         outputTokens += turn.usage.outputTokens;
         providerUsed = turn.provider || providerUsed;

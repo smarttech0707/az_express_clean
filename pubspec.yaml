@@ -87,6 +87,11 @@ dependencies:
   flutter_native_splash: ^2.4.0
   firebase_app_check: ^0.4.5
 
+# M2.7.2 : copie locale de flutter_foreground_task 8.17.0 sans plateforme iOS (voir third_party/flutter_foreground_task/AZ_PROVENANCE.md).
+dependency_overrides:
+  flutter_foreground_task:
+    path: third_party/flutter_foreground_task
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

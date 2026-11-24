@@ -3,20 +3,32 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-import '../constants/app_constants.dart';
 import 'geo_cache_store.dart';
-
-const String _mapsKey = MapsConfig.apiKey;
+import 'maps_proxy_client.dart';
 
 /// Reverse geocoding only. Search/autocomplete lives in PlacesSearchService.
+/// Lot 1.2.1 — proxy uniquement pour le géocodage Google : plus aucun appel
+/// Google direct depuis Flutter (Nominatim, sans clé, reste tenté en premier).
 class PlacesService {
-  static const _googleBase = 'https://maps.googleapis.com/maps/api';
   static const _nominatimBase = 'https://nominatim.openstreetmap.org';
 
   static final Map<String, _CachedAddress> _reverseCache = {};
   static const _reverseTtl = Duration(hours: 2);
   static const _reverseCacheStorageKey = 'geo_cache_reverse_v2';
   static Future<void>? _cacheLoadFuture;
+
+  /// Première adresse non vide de la réponse de `mapsGeocodeCF`, sinon `null`.
+  @visibleForTesting
+  static String? addressFromProxyData(Map<String, dynamic>? data) {
+    final results = data?['results'];
+    if (results is! List) return null;
+    for (final item in results) {
+      if (item is! Map) continue;
+      final address = item['formattedAddress'];
+      if (address is String && address.trim().isNotEmpty) return address;
+    }
+    return null;
+  }
 
   static Future<String?> reverseGeocode(double lat, double lng) async {
     await (_cacheLoadFuture ??= _loadReverseCache());
@@ -48,26 +60,22 @@ class PlacesService {
       }
     } catch (_) {}
 
+    // Nominatim sans résultat : géocodage inverse par le proxy serveur.
+    // Lot 1.2.1 — plus de repli Google direct si le proxy est indisponible
+    // ou refusé : `address` reste alors `null`, comportement déjà géré par
+    // les appelants (message adapté ou no-op).
     if (address == null || address.isEmpty) {
-      try {
-        final uri = Uri.parse('$_googleBase/geocode/json').replace(
-          queryParameters: {
-            'latlng': '$lat,$lng',
-            'language': 'fr',
-            'key': _mapsKey,
-          },
-        );
-        final response =
-            await http.get(uri).timeout(const Duration(seconds: 5));
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          final results = data['results'] as List?;
-          if (results != null && results.isNotEmpty) {
-            address = results.first['formatted_address'] as String?;
-            if (address != null && address.isNotEmpty) source = 'google';
-          }
-        }
-      } catch (_) {}
+      final result = await MapsProxyClient.call(
+        MapsProxyClient.geocode,
+        {'location': MapsProxyClient.point(lat, lng)},
+        timeout: const Duration(seconds: 6),
+      );
+      final proxied =
+          result.hasData ? addressFromProxyData(result.data) : null;
+      if (proxied != null) {
+        address = proxied;
+        source = 'google';
+      }
     }
 
     if (address != null && address.isNotEmpty) {

@@ -41,8 +41,10 @@ Interface : http://127.0.0.1:4000 (locale uniquement). Ports : Auth 9099, Firest
 4. Installer : `powershell -ExecutionPolicy Bypass -File test-env\install-test-apk.ps1`
 5. Exécuter `docs/ANDROID_TEST_PLAN.md`.
 
-Équivalent Flutter à la main (déconseillé : n'applique pas le contrôle de l'APK) :
-`flutter build apk --debug --dart-define=USE_FIREBASE_EMULATORS=true --dart-define=EMULATOR_HOST=<IP>` avec
+`build-emulator-apk.ps1` calcule `APP_BUILD_NUMBER` (suffixe `+N` de `pubspec.yaml`, via `scripts\get-app-build-number.ps1`) et **annule le build** s'il est absent, nul ou invalide ; le script modifié n'a pas encore été exécuté de bout en bout et la présence du numéro dans l'APK produit n'est **pas vérifiée**.
+
+Équivalent Flutter à la main (déconseillé : n'applique pas le contrôle de l'APK ; le numéro de build reste obligatoire, pris dans `& .\scripts\get-app-build-number.ps1`, qui échoue s'il est invalide) :
+`flutter build apk --debug --dart-define=USE_FIREBASE_EMULATORS=true --dart-define=EMULATOR_HOST=<IP> --dart-define=APP_BUILD_NUMBER=<N>` avec
 `--android-project-arg=azTestSuffix=.test` (une variable `ORG_GRADLE_PROJECT_*` n'est PAS transmise par Flutter) et le `google-services.json` factice (`node test-env\make-demo-google-services.js android\app\src\debug\google-services.json`, à supprimer ensuite).
 
 ## Limites connues

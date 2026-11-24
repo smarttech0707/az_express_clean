@@ -70,8 +70,10 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
   // ── Charger le livreur en ligne le plus proche ──────────────────────────
   Future<void> _loadNearestDriver() async {
     try {
+      // SEC-01 / S6.3 : seuls `isOnline` (filtre), `lat`, `lng`, `name` sont
+      // consommés par cet écran → projection publique `driver_public`.
       final snap = await FirebaseFirestore.instance
-          .collection('livreurs')
+          .collection('driver_public')
           .where('isOnline', isEqualTo: true)
           .limit(20)
           .get();

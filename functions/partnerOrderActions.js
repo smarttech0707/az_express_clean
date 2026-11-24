@@ -417,8 +417,15 @@ function buildPartnerOrderAction({
     try {
       refund = await cancelOrderTx(tx, {
         db, admin, orderRef, order, uid: order.clientId, calculateCommission, reason: 'partner_refused',
+        // L4.5.1 : l'acteur est le PARTENAIRE, pas le client. Mode « tous les bénéficiaires » de cancelOrderTx : client remboursé,
+        // payeur de commission rendu (et vendeur débité, s'il y en avait un) sont vérifiés avant toute écriture ; un seul fermé,
+        // absent ou illisible => refus de tout le refus (commande intacte, aucun crédit partiel, aucune compensation inventée).
+        closure: { admin: true, HttpsError },
       });
     } catch (err) {
+      if (err && err.details && err.details.code === 'BENEFICIARY_ACCOUNT_CLOSED') {
+        throw new Refusal('BENEFICIARY_ACCOUNT_CLOSED', 'Opération suspendue : un compte concerné par le remboursement est fermé. La commande reste en l’état ; contactez le support AZ Express');
+      }
       const mapped = {
         ORDER_NOT_CANCELLABLE: ['ORDER_CLOSED', 'Commande terminée ou annulée'],
         ORDER_PICKED_UP: ['ORDER_PICKED_UP', 'Commande déjà récupérée par le livreur'],

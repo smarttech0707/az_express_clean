@@ -1,51 +1,20 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
 
-import '../constants/app_constants.dart';
 import '../models/route_model.dart';
+import 'maps_proxy_client.dart';
 
-const String _mapsKey = MapsConfig.apiKey;
-
-@visibleForTesting
-Future<http.Response> getDirectionsWithTransientRetry(
-  Uri uri, {
-  http.Client? client,
-  Duration timeout = const Duration(seconds: 12),
-  Duration retryDelay = const Duration(milliseconds: 300),
-}) async {
-  final ownedClient = client == null;
-  final requestClient = client ?? http.Client();
-  try {
-    try {
-      return await requestClient.get(uri).timeout(timeout);
-    } on TimeoutException {
-      await Future<void>.delayed(retryDelay);
-      return requestClient.get(uri).timeout(timeout);
-    } on SocketException {
-      await Future<void>.delayed(retryDelay);
-      return requestClient.get(uri).timeout(timeout);
-    } on http.ClientException {
-      await Future<void>.delayed(retryDelay);
-      return requestClient.get(uri).timeout(timeout);
-    }
-  } finally {
-    if (ownedClient) requestClient.close();
-  }
-}
-
-/// Service de calcul d'itinéraire utilisant Google Directions API.
+/// Service de calcul d'itinéraire : passe par le proxy serveur
+/// (`functions/mapsProxy.js`) uniquement. Lot 1.2.1 — plus aucun appel
+/// Google direct depuis Flutter : si le proxy est indisponible ou refuse
+/// (quelle que soit la cause), le repli est l'estimation locale
+/// ([_fallback], ligne droite marquée [RouteModel.isEstimate]), jamais un
+/// appel HTTP vers Google avec la clé de l'application.
 /// Cache en mémoire par grille 100m (TTL 5 min) pour éviter les appels répétitifs.
 class GoogleRoutesService {
-  static const _directionsUrl =
-      'https://maps.googleapis.com/maps/api/directions/json';
-
   // ── Cache itinéraires : clé = grille 100m × 100m, TTL 5 minutes ───────────
   // Arrondir à 3 décimales ≈ 111m de précision
   static final Map<String, _CachedRoute> _routeCache = {};
@@ -54,13 +23,9 @@ class GoogleRoutesService {
   static const _maxRouteCacheEntries = 50;
 
   @visibleForTesting
-  static Future<http.Response> Function(Uri uri)? debugDirectionsGet;
-
-  @visibleForTesting
   static void debugResetCache() {
     _routeCache.clear();
     _inFlightRouteModels.clear();
-    debugDirectionsGet = null;
   }
 
   static String _routeKey(LatLng origin, LatLng dest) =>
@@ -114,71 +79,24 @@ class GoogleRoutesService {
       }
     }
 
-    try {
-      final params = <String, String>{
-        'origin': '${origin.latitude},${origin.longitude}',
-        'destination': '${destination.latitude},${destination.longitude}',
-        'mode': 'driving',
-        'language': 'fr',
-        'key': _mapsKey,
-      };
-      if (withTraffic) {
-        params['departure_time'] = 'now';
-        params['traffic_model'] = 'best_guess';
-      }
-
-      final uri = Uri.parse(_directionsUrl).replace(queryParameters: params);
-
-      // Un seul retry, après un court délai et uniquement sur panne transitoire.
-      final testGet = debugDirectionsGet;
-      final resp = testGet != null
-          ? await testGet(uri)
-          : await getDirectionsWithTransientRetry(uri);
-
-      if (resp.statusCode != 200) return _fallback(origin, destination);
-
-      final json = jsonDecode(resp.body) as Map<String, dynamic>;
-      final status = json['status'] as String?;
-      if (status != 'OK') return _fallback(origin, destination);
-
-      final route = (json['routes'] as List).first as Map<String, dynamic>;
-      final leg = (route['legs'] as List).first as Map<String, dynamic>;
-      final distM = (leg['distance']['value'] as num).toDouble();
-      final durS = withTraffic
-          ? (leg['duration_in_traffic']?['value'] as num? ??
-                  leg['duration']['value'] as num)
-              .toDouble()
-          : (leg['duration']['value'] as num).toDouble();
-      final polyline = route['overview_polyline']['points'] as String;
-
-      final points = PolylinePoints()
-          .decodePolyline(polyline)
-          .map((p) => LatLng(p.latitude, p.longitude))
-          .toList();
-
-      final distKm = distM / 1000;
-      final etaMins = (durS / 60).ceil();
-
-      final result = RouteModel(
-        points: points,
-        distanceKm: distKm,
-        etaMinutes: etaMins,
-        distanceText: RouteModel.formatDistance(distKm),
-        etaText: RouteModel.formatEta(etaMins),
-        estimatedPrice: RouteModel.estimatePrice(distKm),
-      );
-
-      // Mettre en cache (sans traffic uniquement)
+    // Seul chemin réseau : le proxy serveur (clé côté serveur, jamais dans
+    // l'app). Lot 1.2.1 — aucun appel Google direct en repli, quelle que
+    // soit la cause de l'échec du proxy (refus de sécurité ou panne
+    // technique) : seule l'estimation locale ([_fallback]) prend le relais.
+    final proxied = await _fetchViaProxy(
+      origin: origin,
+      destination: destination,
+      withTraffic: withTraffic,
+    );
+    if (proxied != null) {
       if (!withTraffic) {
-        final key = _routeKey(origin, destination);
-        _routeCache[key] = _CachedRoute(result);
+        _routeCache[_routeKey(origin, destination)] = _CachedRoute(proxied);
         _trimRouteCache();
       }
-
-      return result;
-    } catch (_) {
-      return _fallback(origin, destination);
+      return proxied;
     }
+
+    return _fallback(origin, destination);
   }
 
   // ── Route rapide (polyline seulement — pour mises à jour fréquentes) ──────
@@ -195,30 +113,64 @@ class GoogleRoutesService {
     }
   }
 
-  static Future<List<LatLng>> getPoints({
+  // Lot 1.1 — `getPoints()` est supprimée : aucun appelant dans lib/ ni
+  // test/ (vérifié), elle appelait Directions directement avec la clé de
+  // l'application sans passer par le proxy serveur. Utiliser [getRouteModel]
+  // (proxy → estimation signalée, Lot 1.2.1 : plus de repli Google direct).
+
+  // ── Itinéraire via le proxy serveur ───────────────────────────────────────
+
+  /// `null` = proxy indisponible ou refusé, ou réponse inexploitable :
+  /// l'appelant passe directement à l'estimation locale (jamais à un appel
+  /// Google direct, quelle que soit la cause — Lot 1.2.1).
+  static Future<RouteModel?> _fetchViaProxy({
     required LatLng origin,
     required LatLng destination,
+    required bool withTraffic,
   }) async {
-    // Vérifier le cache d'abord
-    final key = _routeKey(origin, destination);
-    final cached = _routeCache[key];
-    if (cached != null && !cached.isExpired(_routeCacheTtl)) {
-      return cached.route.points;
-    }
+    final result = await MapsProxyClient.call(
+      MapsProxyClient.route,
+      {
+        'origin': MapsProxyClient.point(origin.latitude, origin.longitude),
+        'destination':
+            MapsProxyClient.point(destination.latitude, destination.longitude),
+        'withTraffic': withTraffic,
+      },
+      timeout: const Duration(seconds: 12),
+    );
+    if (!result.hasData) return null;
+    return routeFromProxyData(result.data!);
+  }
 
+  /// Convertit la réponse de `mapsRouteCF`. Refuse (→ `null`) toute réponse
+  /// incomplète ou marquée estimation : seul un itinéraire routier réel peut
+  /// sortir d'ici sans le drapeau [RouteModel.isEstimate].
+  @visibleForTesting
+  static RouteModel? routeFromProxyData(Map<String, dynamic> data) {
     try {
-      final result = await PolylinePoints().getRouteBetweenCoordinates(
-        googleApiKey: _mapsKey,
-        request: PolylineRequest(
-          origin: PointLatLng(origin.latitude, origin.longitude),
-          destination: PointLatLng(destination.latitude, destination.longitude),
-          mode: TravelMode.driving,
-        ),
+      final encoded = data['encodedPolyline'];
+      final distM = data['distanceMeters'];
+      final durS = data['durationSeconds'];
+      if (encoded is! String || encoded.isEmpty) return null;
+      if (distM is! num || durS is! num) return null;
+      if (data['isEstimate'] != false) return null;
+      final points = PolylinePoints()
+          .decodePolyline(encoded)
+          .map((p) => LatLng(p.latitude, p.longitude))
+          .toList();
+      if (points.isEmpty) return null;
+      final distKm = distM.toDouble() / 1000;
+      final etaMins = (durS.toDouble() / 60).ceil();
+      return RouteModel(
+        points: points,
+        distanceKm: distKm,
+        etaMinutes: etaMins,
+        distanceText: RouteModel.formatDistance(distKm),
+        etaText: RouteModel.formatEta(etaMins),
+        estimatedPrice: RouteModel.estimatePrice(distKm),
       );
-      if (result.points.isEmpty) return [origin, destination];
-      return result.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
     } catch (_) {
-      return [origin, destination];
+      return null;
     }
   }
 
@@ -234,6 +186,8 @@ class GoogleRoutesService {
       distanceText: RouteModel.formatDistance(distKm),
       etaText: RouteModel.formatEta(eta),
       estimatedPrice: RouteModel.estimatePrice(distKm),
+      // Ligne droite, vol d'oiseau, vitesse fixe : jamais un trajet réel.
+      isEstimate: true,
     );
   }
 

@@ -117,3 +117,42 @@ Constat du 7E-44 : le pilote est fermé (`config/partnerOrdersV2` version 2, `cr
 - **Réconciliation** (`financialReport.js`) : montants, quatre écritures de wallet, commission, devis utilisé, preuves validées, soldes ; tout écart bloque le nettoyage. Rapport local sans secret : `cleanup.js … --report-dir <hors dépôt>`.
 - **Ordre de suppression reprenable** : Storage (vérifié) → listes du pilote vidées → tous les documents Firestore en un lot atomique → comptes Auth. Le pilote doit déjà être fermé (sinon conflit).
 - Le bucket n'a ni versioning ni suppression logicielle : une suppression Storage est définitive.
+
+## Mission L0-D — livreurs autorisés du pilote (`pilotDriverIds`) : prérequis de S0 et de REOPEN
+
+**Cette section complète et corrige les lignes S0 / REOPEN ci-dessus**, dont le `patch` ne mentionne pas les livreurs.
+
+### Règle
+Depuis la Mission 7E-55 (commit `aa3d1b0`), une commande Restaurant/Boulangerie v2 n'est dispatchée, acceptable ou transférable que pour un livreur présent dans `config/partnerOrdersV2.pilotDriverIds`. **Aucun livreur n'est autorisé implicitement** : liste absente, vide ou mal formée = aucun livreur (refus par défaut, `DRIVER_NOT_IN_PILOT`). Le serveur n'a pas été assoupli.
+
+### Où trouver l'identifiant d'un livreur
+L'identifiant est l'**uid Firebase Auth** du livreur, qui est aussi l'ID de son document `livreurs/{uid}` (console Firebase → Authentication → Utilisateurs → colonne « UID utilisateur », ou console Firestore → collection `livreurs`). Pour le lot fictif `t7e-lot-1`, c'est `t7e-driver` (uid fixé par `lot.js` et créé par `prepare.js`). Ne jamais le deviner : le copier depuis la console.
+
+### Comment renseigner `pilotDriverIds`
+Avant S0 ou REOPEN, fournir explicitement la liste à l'outillage (identifiants séparés par des virgules, sans espaces superflus) :
+```
+# PowerShell
+$env:AZ_PILOT_DRIVER_IDS = "t7e-driver"
+# bash
+export AZ_PILOT_DRIVER_IDS=t7e-driver
+```
+`lot.pilotConfigPlan()` ajoute alors `pilotDriverIds: [...]` au `patch` de S0/REOPEN (liste dédoublonnée et triée, 50 identifiants au plus, caractères `A-Z a-z 0-9 _ -`) et au document attendu. S0 devient :
+`{action:'setPartnerOrdersConfig', patch:{pilotPartnerIds:['t7e-resto'], pilotClientIds:['t7e-client'], pilotDriverIds:['t7e-driver'], clientAccess:'restricted', creationOpen:true, managementFrozen:false}, expectedVersion:0, reason:<…>}`.
+Plusieurs livreurs : `AZ_PILOT_DRIVER_IDS="uid1,uid2"`. Les scripts n'ajoutent jamais un livreur de leur propre initiative.
+
+### Si la liste est absente, vide ou invalide
+- S0 et REOPEN sont **bloqués avant tout appel** avec `PILOT_DRIVER_IDS_REQUIRED` (« Livreurs du pilote non fournis… Aucun livreur n'est autorisé par défaut »). Valeur vide, espaces seuls, identifiant contenant `/` ou des espaces, ou plus de 50 entrées : même blocage.
+- La **fermeture d'urgence** (`creationOpen:false` seul) reste possible sans liste.
+- Le DRY-RUN `prepare.js` reste lisible et signale `blocked` dans `pilotConfig.plan`.
+- Hors outillage : si le pilote est ouvert sans livreur listé, le dispatch ne notifie personne et la commande reste `pending` (aucune perte d'argent ; expiration/remboursement habituels).
+
+### Vérifier que le livreur est autorisé
+1. Après S0/REOPEN, relire `config/partnerOrdersV2` : `pilotDriverIds` contient l'uid du livreur et `version` a augmenté.
+2. Le livreur est en ligne, disponible, GPS de moins de 3 min (`--refresh-driver-gps` si besoin).
+3. À S3, le log de dispatch ne doit pas indiquer `notInPilot` pour ce livreur et la commande passe à `assigned`/`broadcast` avec son uid dans `notifiedDriverIds`.
+
+### Vérifier qu'un livreur non autorisé est refusé
+Avec un livreur **fictif** absent de la liste (jamais un vrai compte) : il n'apparaît pas dans `notifiedDriverIds` ; s'il appelle `acceptOrder` sur la commande, la réponse est `permission-denied` / `DRIVER_NOT_IN_PILOT` et la commande reste inchangée. Ces refus sont couverts par `dispatchRetry.emulator.test.js` et `pilotDriverRestriction.test.js`.
+
+### Nettoyage
+`cleanup.js` remet `pilotDriverIds` à `[]` à la fermeture du lot ; un livreur étranger au lot présent dans la liste est un conflit qui bloque le nettoyage.

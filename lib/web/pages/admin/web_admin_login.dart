@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../web_theme.dart';
 import '../../admin_auth_service.dart';
 import '../../widgets/az_logo.dart';
+import '../../../screens/admin/admin_mfa_security.dart'
+    show AdminSecondFactor, AdminEnrolledFactor;
 import '../../../widgets/admin_email_verification_prompt.dart';
 import '../../../widgets/password_reset_email_guidance.dart';
 
@@ -79,14 +82,44 @@ class _WebAdminLoginPageState extends State<WebAdminLoginPage> {
       _loading = true;
       _error = null;
     });
-    final result =
-        await AdminAuthService.instance.verifyCode(_otpCtrl.text.trim());
+    final auth = AdminAuthService.instance;
+    final result = auth.isTotpChallenge
+        ? await auth.verifyTotpCode(_otpCtrl.text.trim())
+        : await auth.verifySmsCode(_otpCtrl.text.trim());
     if (!mounted) return;
     setState(() {
       _loading = false;
       _error = result.error;
     });
     if (result.success) context.go('/admin/dashboard');
+  }
+
+  Future<void> _useSmsInstead() async {
+    _otpCtrl.clear();
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final result = await AdminAuthService.instance.useSmsInstead();
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _error = result.error;
+    });
+  }
+
+  Future<void> _selectFactor(AdminEnrolledFactor factor) async {
+    _otpCtrl.clear();
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final result = await AdminAuthService.instance.selectFactor(factor);
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _error = result.error;
+    });
   }
 
   Future<void> _cancelMfa() async {
@@ -128,8 +161,12 @@ class _WebAdminLoginPageState extends State<WebAdminLoginPage> {
   @override
   Widget build(BuildContext context) {
     final auth = AdminAuthService.instance;
-    final challengeActive = auth.mfaState == WebAdminMfaState.codeSent ||
-        auth.mfaState == WebAdminMfaState.verifying;
+    final choosingFactor = auth.requiresFactorChoice;
+    final challengeActive = !choosingFactor &&
+        (auth.mfaState == WebAdminMfaState.totpAwaitingCode ||
+            auth.mfaState == WebAdminMfaState.smsCodeSent ||
+            auth.mfaState == WebAdminMfaState.verifying);
+    final isTotp = auth.isTotpChallenge;
     return Scaffold(
       backgroundColor: kBg,
       body: Center(
@@ -178,23 +215,170 @@ class _WebAdminLoginPageState extends State<WebAdminLoginPage> {
                   ),
                   const SizedBox(height: 36),
 
-                  if (challengeActive) ...[
+                  if (choosingFactor) ...[
                     Text(
-                      'Code SMS envoyé au ${auth.maskedPhone}',
+                      'Choisissez votre second facteur',
                       style: GoogleFonts.inter(color: kText, fontSize: 14),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 18),
+                    for (final factor in auth.availableFactors)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: OutlinedButton.icon(
+                            onPressed:
+                                _loading ? null : () => _selectFactor(factor),
+                            icon: Icon(factor.kind == AdminSecondFactor.totp
+                                ? Icons.phonelink_lock
+                                : Icons.sms_outlined),
+                            label: Text(factor.kind == AdminSecondFactor.totp
+                                ? 'Application d’authentification'
+                                : 'Code SMS${factor.label == null ? '' : ' · ${factor.label}'}'),
+                          ),
+                        ),
+                      ),
+                    TextButton(
+                      onPressed: _loading ? null : _cancelMfa,
+                      child: const Text('Annuler'),
+                    ),
+                    if (_error != null)
+                      Text(
+                        _error!,
+                        style: GoogleFonts.inter(color: Colors.red),
+                        textAlign: TextAlign.center,
+                      ),
+                  ] else if (challengeActive) ...[
+                    if (isTotp) ...[
+                      Text(
+                        auth.totpSecret != null
+                            ? 'Activation obligatoire de la 2FA'
+                            : 'Double authentification',
+                        style: GoogleFonts.inter(
+                            color: kText,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        auth.totpSecret != null
+                            ? 'Scannez le QR code ou saisissez la clé ci-dessous '
+                                'dans votre application d’authentification, puis '
+                                'entrez le code à 6 chiffres affiché.'
+                            : 'Entrez le code affiché par votre application '
+                                'd’authentification.',
+                        style: GoogleFonts.inter(color: kTextMuted, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (auth.totpSecret != null) ...[
+                        const SizedBox(height: 18),
+                        if (auth.totpQrCodeUrl != null)
+                          QrImageView(
+                            data: auth.totpQrCodeUrl!,
+                            size: 180,
+                            backgroundColor: Colors.white,
+                          ),
+                        const SizedBox(height: 14),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: kOrange.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: kOrange.withValues(alpha: 0.3)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Clé de configuration',
+                                  style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13)),
+                              const SizedBox(height: 4),
+                              SelectableText(
+                                auth.totpSecret!.secretKey,
+                                style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 15,
+                                    letterSpacing: 1.2),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Cette clé ne sera plus affichée après l’enrôlement.',
+                                style: GoogleFonts.inter(
+                                    fontSize: 11, color: kTextMuted),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                    ] else ...[
+                      Text(
+                        'Code SMS envoyé au ${auth.maskedPhone}',
+                        style: GoogleFonts.inter(color: kText, fontSize: 14),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 18),
+                    ],
                     TextField(
                       controller: _otpCtrl,
                       keyboardType: TextInputType.number,
                       maxLength: 6,
                       autofocus: true,
+                      cursorColor: kOrange,
+                      // Couleur du texte saisi explicite : le thème Web
+                      // global (`web_app.dart`) est un `ColorScheme.dark`
+                      // dont le texte par défaut est clair, invisible sur le
+                      // fond blanc de ce champ. Même cause que le contraste
+                      // corrigé dans Événementiel, ici sur le code TOTP.
+                      style: GoogleFonts.inter(
+                        color: kText,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 6,
+                      ),
                       onSubmitted: (_) => _verifyMfa(),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Code de vérification',
+                        labelStyle:
+                            GoogleFonts.inter(color: kTextMuted, fontSize: 14),
+                        hintText: '000000',
+                        hintStyle: GoogleFonts.inter(
+                            color: kTextMuted.withValues(alpha: 0.7),
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 6),
                         counterText: '',
-                        prefixIcon: Icon(Icons.security_rounded),
+                        filled: true,
+                        fillColor: kCard,
+                        prefixIcon:
+                            const Icon(Icons.security_rounded, color: kTextMuted),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: kDivider),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: kDivider),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: kOrange, width: 2),
+                        ),
+                        errorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: Colors.red),
+                        ),
+                        focusedErrorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide:
+                              const BorderSide(color: Colors.red, width: 2),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 18),
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -211,17 +395,24 @@ class _WebAdminLoginPageState extends State<WebAdminLoginPage> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        TextButton(
-                          onPressed: _loading
-                              ? null
-                              : () async {
-                                  final result = await auth.resendChallenge();
-                                  if (mounted) {
-                                    setState(() => _error = result.error);
-                                  }
-                                },
-                          child: const Text('Renvoyer le code'),
-                        ),
+                        if (!isTotp)
+                          TextButton(
+                            onPressed: _loading
+                                ? null
+                                : () async {
+                                    final result =
+                                        await auth.resendSmsChallenge();
+                                    if (mounted) {
+                                      setState(() => _error = result.error);
+                                    }
+                                  },
+                            child: const Text('Renvoyer le code'),
+                          ),
+                        if (isTotp && auth.smsFallbackAvailable)
+                          TextButton(
+                            onPressed: _loading ? null : _useSmsInstead,
+                            child: const Text('Utiliser un code SMS à la place'),
+                          ),
                         TextButton(
                           onPressed: _loading ? null : _cancelMfa,
                           child: const Text('Annuler'),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/catalog_location_resolver.dart';
 import '../../services/catalog_order_service.dart';
 import '../../services/wallet_payment_compatibility.dart';
 import '../../widgets/catalog_quote_dialog.dart';
@@ -99,6 +100,24 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
         }
       }
       if (!mounted) return;
+      // Correction release readiness : un point de service réel est exigé par le serveur
+      // (createCatalogOrderFromQuoteCF) — jamais de repli sur (0,0), qui rendait la commande
+      // invisible à tout livreur. GPS d'abord, géocodage de l'adresse saisie en secours.
+      final location = await CatalogLocationResolver.resolve(
+        context: context,
+        address: _addressCtrl.text.trim(),
+      );
+      if (location == null) {
+        if (mounted) {
+          _snack(
+            "Impossible de localiser votre adresse. Activez le GPS ou vérifiez l'adresse saisie.",
+            Colors.red,
+          );
+          setState(() => _loading = false);
+        }
+        return;
+      }
+      if (!mounted) return;
       final created = await runCatalogCheckout(
         context,
         checkout: _checkout,
@@ -109,6 +128,9 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
         details: {
           'address': _addressCtrl.text.trim(),
           'notes': _notesCtrl.text.trim(),
+          'lat': location.lat,
+          'lng': location.lng,
+          'coordinateSource': location.serverSourceName,
         },
         notify: (m, err) => _snack(m, err ? Colors.red : Colors.green),
       );

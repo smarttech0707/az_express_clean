@@ -4,6 +4,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'delivery_proof_service.dart';
 import '../partner_qr/partner_qr_link.dart';
 import '../partner_qr/partner_qr_page.dart';
+import '../services/permission_primer.dart';
+import 'package:image_picker/image_picker.dart' show ImageSource;
 
 /// Returns a credential to the existing confirmation flow. Never writes an order.
 class ProofScannerPage extends StatefulWidget {
@@ -70,7 +72,15 @@ class _ProofScannerPageState extends State<ProofScannerPage> {
                 ))
           else
             FilledButton.icon(
-                onPressed: () => setState(() => camera = true),
+                onPressed: () async {
+                  // Explication avant l'invite caméra ; refus = on reste sur la saisie du PIN.
+                  final ok = await PermissionPrimer.prepareImage(ImageSource.camera, context: context);
+                  if (!mounted) return;
+                  setState(() {
+                    camera = ok;
+                    if (!ok) error = 'Caméra non autorisée. Utilisez le PIN.';
+                  });
+                },
                 icon: const Icon(Icons.camera_alt),
                 label: const Text('Ouvrir la caméra')),
           TextField(

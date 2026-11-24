@@ -2,12 +2,14 @@ import '../../delivery_proofs/proof_presentation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../widgets/min_version_dialog.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 
@@ -36,6 +38,10 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
   @override
   void initState() {
     super.initState();
+    // Version minimale du rôle boulangerie (config/app_versions.boulangerie) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleBoulangerie,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer vos commandes.'));
     _tabCtrl = TabController(length: 4, vsync: this);
     _isOpen = widget.boulangerieData['isOpen'] == true;
     _photoUrl = widget.boulangerieData['logoUrl'] as String?;
@@ -698,71 +704,13 @@ class _OrderCard extends StatelessWidget {
 
                 // ── Livreur (si assigné) ───────────────────────────
                 if (driverId != null)
-                  StreamBuilder<DocumentSnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('livreurs')
-                        .doc(driverId)
-                        .snapshots(),
-                    builder: (context, dSnap) {
-                      final dd = dSnap.data?.data() as Map<String, dynamic>?;
-                      if (dd == null) return const SizedBox.shrink();
-                      final dName = dd['name'] ?? 'Livreur';
-                      final dPhone = dd['phone'] ?? '';
-                      final online = dd['isOnline'] == true;
-                      return Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(children: [
-                          Icon(Icons.delivery_dining_rounded,
-                              color: Colors.blue.shade700, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(dName,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13)),
-                                Row(children: [
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: BoxDecoration(
-                                      color:
-                                          online ? Colors.green : Colors.grey,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    online ? 'En ligne' : 'Hors ligne',
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.grey),
-                                  ),
-                                ]),
-                              ],
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: () => launchUrl(Uri.parse('tel:$dPhone')),
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade700,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(Icons.phone_rounded,
-                                  color: Colors.white, size: 16),
-                            ),
-                          ),
-                        ]),
-                      );
-                    },
-                  ),
+                  // SEC-01 / S6.14 : `phone` n'est plus lu depuis `livreurs`
+                  // (lecture large à fermer) — accès contextualisé via la
+                  // Cloud Function `getDriverPhoneForOrderCF`, Future mémorisé
+                  // dans un State dédié (même patron que S6.10/S6.12/S6.13)
+                  // pour ne jamais la rappeler aux reconstructions GPS du
+                  // StreamBuilder `driver_public`.
+                  _DriverDeliveryCard(orderId: orderId, driverId: driverId),
 
                 const SizedBox(height: 10),
 
@@ -846,6 +794,124 @@ class _OrderCard extends StatelessWidget {
                   fontSize: 11, color: color, fontWeight: FontWeight.bold)),
         ]),
       ),
+    );
+  }
+}
+
+// SEC-01 / S6.14 : carte livreur de `_OrderCard` — `name`/`isOnline` restent
+// sur `driver_public` (StreamBuilder, inchangé) ; `phone` vient de
+// `getDriverPhoneForOrderCF`, mémorisée dans l'État et relancée uniquement si
+// `orderId`/`driverId` changent réellement (jamais à chaque reconstruction
+// GPS). Patron identique à S6.10/S6.12/S6.13.
+class _DriverDeliveryCard extends StatefulWidget {
+  final String orderId;
+  final String driverId;
+  const _DriverDeliveryCard({required this.orderId, required this.driverId});
+
+  @override
+  State<_DriverDeliveryCard> createState() => _DriverDeliveryCardState();
+}
+
+class _DriverDeliveryCardState extends State<_DriverDeliveryCard> {
+  late Future<String?> _phoneFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneFuture = _fetchPhone();
+  }
+
+  @override
+  void didUpdateWidget(_DriverDeliveryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.orderId != widget.orderId ||
+        oldWidget.driverId != widget.driverId) {
+      setState(() {
+        _phoneFuture = _fetchPhone();
+      });
+    }
+  }
+
+  Future<String?> _fetchPhone() async {
+    try {
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('getDriverPhoneForOrderCF')
+          .call({'orderId': widget.orderId});
+      return ((result.data as Map?)?['data'] as Map?)?['phone'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('driver_public')
+          .doc(widget.driverId)
+          .snapshots(),
+      builder: (context, dSnap) {
+        final dd = dSnap.data?.data() as Map<String, dynamic>?;
+        if (dd == null) return const SizedBox.shrink();
+        final dName = dd['name'] ?? 'Livreur';
+        final online = dd['isOnline'] == true;
+        return FutureBuilder<String?>(
+          future: _phoneFuture,
+          builder: (context, phoneSnap) {
+            final dPhone = phoneSnap.data ?? '';
+            return Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(children: [
+                Icon(Icons.delivery_dining_rounded,
+                    color: Colors.blue.shade700, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(dName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 13)),
+                      Row(children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: online ? Colors.green : Colors.grey,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          online ? 'En ligne' : 'Hors ligne',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.grey),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => launchUrl(Uri.parse('tel:$dPhone')),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade700,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.phone_rounded,
+                        color: Colors.white, size: 16),
+                  ),
+                ),
+              ]),
+            );
+          },
+        );
+      },
     );
   }
 }

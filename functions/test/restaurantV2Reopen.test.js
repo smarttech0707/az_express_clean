@@ -17,7 +17,17 @@ const UID = { client: CLIENT, restaurant: RESTO, driver: lot.IDENTITIES.driver.u
 const BASELINE = ['h1', 'h2', 'h3'];
 const DAY = Date.UTC(2026, 10, 6, 10, 0, 0);
 const NIGHT = Date.UTC(2026, 10, 6, 23, 0, 0);
-const closedConfig = (over = {}) => ({ pilotPartnerIds: [RESTO], pilotClientIds: [CLIENT], clientAccess: 'restricted', creationOpen: false, managementFrozen: false, version: 2, ...over });
+// Livreurs du pilote : liste explicite fournie par la fixture (Mission 7E-55). Le runner la lit dans AZ_PILOT_DRIVER_IDS (lot.js).
+const DRIVERS = ['t7e-driver'];
+function withDrivers(fn) {
+  const saved = process.env[lot.DRIVER_IDS_ENV];
+  process.env[lot.DRIVER_IDS_ENV] = DRIVERS.join(',');
+  const restore = () => { if (saved === undefined) delete process.env[lot.DRIVER_IDS_ENV]; else process.env[lot.DRIVER_IDS_ENV] = saved; };
+  let out;
+  try { out = fn(); } catch (e) { restore(); throw e; }
+  return out && typeof out.then === 'function' ? out.finally(restore) : (restore(), out);
+}
+const closedConfig = (over = {}) => ({ pilotPartnerIds: [RESTO], pilotClientIds: [CLIENT], pilotDriverIds: DRIVERS, clientAccess: 'restricted', creationOpen: false, managementFrozen: false, version: 2, ...over });
 
 // Serveur factice : applique setPartnerOrdersConfig comme la fonction réelle (version attendue, remplacement des listes).
 function fakeIo(config, { wallets = { ...lot.WALLETS }, orders = BASELINE.length, quote = null } = {}) {
@@ -46,7 +56,7 @@ function fakeIo(config, { wallets = { ...lot.WALLETS }, orders = BASELINE.length
 const memStore = () => { let saved = null; return { saved: () => saved, save: async (s) => { saved = JSON.stringify(s); } }; };
 const staleState = () => ({ lotId: lot.LOT_ID, completed: ['S0'], configVersion: 1 });
 
-test('réouverture depuis une configuration fermée en version 2 : version+1, listes inchangées, état mis à jour par le runner', async () => {
+test('réouverture depuis une configuration fermée en version 2 : version+1, listes inchangées, état mis à jour par le runner', () => withDrivers(async () => {
   const io = fakeIo(closedConfig());
   const state = staleState();
   const store = memStore();
@@ -60,6 +70,20 @@ test('réouverture depuis une configuration fermée en version 2 : version+1, li
   assert.equal(state.configVersion, 3);
   assert.deepEqual(state.startWallets, lot.WALLETS);
   assert.equal(JSON.parse(store.saved()).configVersion, 3);
+  assert.deepEqual(io.calls[0].data.patch.pilotDriverIds, DRIVERS, 'livreurs explicitement renvoyés à la réouverture');
+  assert.deepEqual(cfg.pilotDriverIds, DRIVERS);
+}));
+
+test('réouverture sans liste de livreurs : bloquée avant tout appel, configuration inchangée', async () => {
+  const saved = process.env[lot.DRIVER_IDS_ENV];
+  delete process.env[lot.DRIVER_IDS_ENV];
+  try {
+    const io = fakeIo(closedConfig());
+    const res = await runner.reopenPilot({ state: staleState(), io, store: memStore(), expectedVersion: 2 }).then(() => null, (e) => e);
+    assert.ok(res && res.code === 'PILOT_DRIVER_IDS_REQUIRED', String(res && res.message));
+    assert.equal(io.calls.length, 0);
+    assert.equal(io.docs.get('config/partnerOrdersV2').creationOpen, false);
+  } finally { if (saved !== undefined) process.env[lot.DRIVER_IDS_ENV] = saved; }
 });
 
 test('réouverture : version périmée ou absente refusée avant tout appel', async () => {
@@ -174,7 +198,7 @@ test('S1 : devis antérieur 800fead3… jamais réutilisé ; wallets ou commande
   assert.equal(io.calls.length, 0);
 });
 
-test('REOPEN : DRY-RUN sans réseau, production refusée, arguments inconnus (--force) refusés', async () => {
+test('REOPEN : DRY-RUN sans réseau, production refusée, arguments inconnus (--force) refusés', () => withDrivers(async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = () => { throw new Error('réseau interdit'); };
   try {
@@ -188,7 +212,7 @@ test('REOPEN : DRY-RUN sans réseau, production refusée, arguments inconnus (--
     await assert.rejects(runner.main([...base, '--force'], {}, () => {}), (e) => e.code === 'BAD_ARGUMENT');
     await assert.rejects(runner.main([...base, '--execute', '--confirm', 'RUN S0 t7e-lot-1 az-express-preprod 306761725053'], {}, () => {}), (e) => e.code === 'CONFIRMATION_REQUIRED');
   } finally { globalThis.fetch = realFetch; }
-});
+}));
 
 // ── Fermeture d'urgence indépendante ─────────────────────────────────────────────────────────────────────────────────────────────
 const emergencyIo = (config, over = {}) => {

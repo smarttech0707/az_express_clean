@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../services/permission_primer.dart';
 
 class FleetRegister extends StatefulWidget {
   const FleetRegister({super.key});
@@ -27,6 +28,7 @@ class _FleetRegisterState extends State<FleetRegister> {
   File? _idPhotoFile;
 
   Future<void> _takeSelfie() async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.camera, context: context)) return;
     final img = await ImagePicker().pickImage(
       source: ImageSource.camera,
       preferredCameraDevice: CameraDevice.front,
@@ -36,6 +38,7 @@ class _FleetRegisterState extends State<FleetRegister> {
   }
 
   Future<void> _pickIdPhoto(ImageSource source) async {
+    if (!await PermissionPrimer.prepareImage(source, context: context)) return;
     final picked =
         await ImagePicker().pickImage(source: source, imageQuality: 80);
     if (picked != null && mounted)

@@ -203,6 +203,8 @@ const v2prepared = (ageMs, extra = {}) => order(ageMs, {
 
 test('émulateur 7C-2 : trois passes simultanées en phase 2 → un seul essai, élargissement sans rappel des premiers livreurs', options, async () => {
   const oid = `retry_${Date.now()}_p2`;
+  // Commande v2 : seuls les livreurs listés explicitement dans le pilote peuvent être notifiés (Mission 7E-55). Config retirée par afterEach.
+  await db.doc('config/partnerOrdersV2').set({ pilotPartnerIds: ['rRetry'], pilotClientIds: ['cRetry'], pilotDriverIds: ['dP1', 'dP2'], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 1 });
   await db.doc(`orders/${oid}`).set(v2prepared(14 * 60_000, { status: 'broadcast', notifiedDriverIds: ['dP1'], lastDispatchAtMs: Date.now() - 13 * 60_000 }));
   await db.doc('livreurs/dP1').set(driver({ pendingOrderId: oid }));
   await db.doc('livreurs/dP2').set(driver({ lat: 6.76, lng: -3.49 }));
@@ -251,4 +253,50 @@ test('émulateur 7C-2 : livreur assigné silencieux — acceptation et remise en
     }
     await db.doc('livreurs/dS1').delete();
   }
+});
+
+// ── Mission 7E-55 : liste blanche des livreurs du pilote (partnerOrdersV2.pilotDriverIds), commande v2 ──
+
+test.afterEach(async () => {
+  if (!emulated) return;
+  await db.doc('config/partnerOrdersV2').delete();
+  for (const id of ['dAuth', 'dOther']) await db.doc('livreurs/' + id).delete();
+});
+
+test('émulateur 7E-55 : commande v2 sans configuration de pilote → aucun livreur notifié (refus par défaut), commande intacte', options, async () => {
+  const oid = `retry_${Date.now()}_nocfg`;
+  await db.doc(`orders/${oid}`).set(v2prepared(60_000));
+  await db.doc('livreurs/dAuth').set(driver());
+  await run();
+  const o = await read(`orders/${oid}`);
+  assert.equal(o.status, 'pending');
+  assert.equal(o.driverId, undefined);
+  assert.deepEqual(o.notifiedDriverIds || [], []);
+});
+
+test('émulateur 7E-55 : liste vide ou absente → personne ; livreur listé servi, livreur non listé jamais notifié ni accepté', options, async () => {
+  const base = { pilotPartnerIds: ['rRetry'], pilotClientIds: ['cRetry'], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, version: 1 };
+  await db.doc('livreurs/dAuth').set(driver());
+  await db.doc('livreurs/dOther').set(driver({ lat: 6.7401 }));
+  for (const [label, extra] of [['liste absente', {}], ['liste vide', { pilotDriverIds: [] }]]) {
+    await db.doc('config/partnerOrdersV2').set({ ...base, ...extra });
+    const oid = `retry_${Date.now()}_${label.replace(/ /g, '')}`;
+    await db.doc(`orders/${oid}`).set(v2prepared(60_000));
+    await run();
+    const o = await read(`orders/${oid}`);
+    assert.equal(o.status, 'pending', label);
+    assert.equal(o.driverId, undefined, label);
+  }
+  await db.doc('config/partnerOrdersV2').set({ ...base, pilotDriverIds: ['dAuth'] });
+  const oid = `retry_${Date.now()}_listed`;
+  await db.doc(`orders/${oid}`).set(v2prepared(60_000));
+  await run();
+  const o = await read(`orders/${oid}`);
+  assert.equal(o.driverId, 'dAuth', 'le livreur listé est servi');
+  assert.ok(!(o.notifiedDriverIds || []).includes('dOther'), 'le livreur non listé n’est jamais notifié');
+  // Un livreur non listé ne peut pas accepter la commande, même s'il connaît son identifiant.
+  const oid2 = `retry_${Date.now()}_forced`;
+  await db.doc(`orders/${oid2}`).set(v2prepared(60_000, { status: 'broadcast', notifiedDriverIds: ['dOther'] }));
+  await assert.rejects(accept(req('dOther', { orderId: oid2 })), (e) => e.code === 'permission-denied' && /DRIVER_NOT_IN_PILOT/.test(e.message));
+  assert.equal((await read(`orders/${oid2}`)).driverId, undefined);
 });

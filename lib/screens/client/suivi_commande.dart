@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -16,6 +17,18 @@ import 'order_tracking_map.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/fade_slide_in.dart';
 import '../../widgets/glass_kit.dart';
+
+/// Message affiché au client quand le paiement wallet échoue. Les codes viennent des Cloud Functions ; on n'affiche jamais
+/// l'état interne d'un compte tiers (bénéficiaire) ni de donnée personnelle.
+@visibleForTesting
+String paymentErrorMessage(String raw) {
+  if (raw.contains('SOLDE_INSUFFISANT')) return 'Solde insuffisant. Rechargez votre wallet.';
+  if (raw.contains('BENEFICIARY_ACCOUNT_CLOSED') || raw.contains('ORDER_UNDER_REVIEW')) {
+    return 'Ce paiement est suspendu : le support AZ Express va le traiter. Rien n\'a été débité.';
+  }
+  if (raw.contains('PAYMENT_ORDER_NOT_PAYABLE')) return 'Cette commande ne peut plus être payée.';
+  return 'Erreur paiement : $raw';
+}
 
 class SuiviCommandePage extends StatelessWidget {
   const SuiviCommandePage({super.key});
@@ -96,40 +109,19 @@ class _OrderCard extends StatelessWidget {
   final OrderModel order;
   const _OrderCard({required this.order});
 
-  void _showPhotoDialog(BuildContext context, String url, String title) {
-    showDialog(
-      context: context,
-      builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(title,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15)),
-            ),
-            ClipRRect(
-              borderRadius:
-                  const BorderRadius.vertical(bottom: Radius.circular(16)),
-              child: Image.network(url, fit: BoxFit.cover),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _callDriver(BuildContext context, String driverId) async {
+  // SEC-01 / S6.9 : le numéro n'est plus lu directement sur `livreurs` —
+  // `getDriverPhoneForOrderCF` (S6.8) vérifie elle-même, côté serveur, que
+  // l'appelant est bien le client de cette commande avant de le renvoyer.
+  // Aucun repli vers la lecture directe en cas d'échec.
+  Future<void> _callDriver(BuildContext context, String orderId) async {
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection("livreurs")
-          .doc(driverId)
-          .get();
-      if (!doc.exists) return;
-      final phone =
-          ((doc.data() as Map?) ?? {})["phone"]?.toString().trim() ?? "";
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('getDriverPhoneForOrderCF')
+          .call({'orderId': orderId});
+      final phone = (((result.data as Map?)?['data'] as Map?)?['phone']
+              as String?)
+          ?.trim() ??
+          '';
       if (phone.isEmpty) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -142,6 +134,14 @@ class _OrderCard extends StatelessWidget {
         Uri.parse("tel:$phone"),
         mode: LaunchMode.externalApplication,
       );
+    } on FirebaseFunctionsException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.code == 'resource-exhausted'
+              ? 'Trop de tentatives, réessayez plus tard.'
+              : "Numéro du livreur indisponible")),
+        );
+      }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -287,218 +287,16 @@ class _OrderCard extends StatelessWidget {
           if (order.type == 'pharmacie') _PharmacieOrderBanner(order: order),
 
           // Driver info (if assigned)
+          // SEC-01 / S6.10 : extrait dans `_DriverContactCard` (StatefulWidget
+          // dédié) pour mémoriser les Futures (livreur public + téléphone via
+          // `getDriverPhoneForOrderCF`) au niveau du cycle de vie du widget,
+          // au lieu de les recréer à chaque reconstruction de cette carte
+          // `StatelessWidget` — voir ce widget plus bas dans ce fichier.
           if (hasDriver)
-            FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection("livreurs")
-                  .doc(order.driverId)
-                  .get(),
-              builder: (context, snap) {
-                if (!snap.hasData || !snap.data!.exists) {
-                  return const SizedBox.shrink();
-                }
-                final driver = snap.data!.data() as Map<String, dynamic>;
-                final driverPhoto = driver["photoUrl"] as String?;
-                final acceptanceSelfie = order.driverAcceptanceSelfie;
-                final hasVerification = driverPhoto != null &&
-                    driverPhoto.isNotEmpty &&
-                    acceptanceSelfie != null;
-
-                return Container(
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: hasVerification
-                          ? Colors.green.shade200
-                          : Colors.grey.shade200,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 6)
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Infos livreur
-                      Row(
-                        children: [
-                          // Photo de profil
-                          GestureDetector(
-                            onTap: driverPhoto != null && driverPhoto.isNotEmpty
-                                ? () => _showPhotoDialog(context, driverPhoto,
-                                    "Photo de profil du livreur")
-                                : null,
-                            child: CircleAvatar(
-                              radius: 26,
-                              backgroundColor: AppColors.primary,
-                              backgroundImage:
-                                  driverPhoto != null && driverPhoto.isNotEmpty
-                                      ? NetworkImage(driverPhoto)
-                                      : null,
-                              child: driverPhoto == null || driverPhoto.isEmpty
-                                  ? const Icon(Icons.delivery_dining,
-                                      color: Colors.white, size: 22)
-                                  : null,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  driver["name"] ?? "Livreur",
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 15),
-                                ),
-                                Text(driver["phone"] ?? "",
-                                    style: const TextStyle(
-                                        color: Colors.grey, fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                          if (hasVerification)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.green.shade50,
-                                borderRadius: BorderRadius.circular(20),
-                                border:
-                                    Border.all(color: Colors.green.shade200),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.verified,
-                                      color: Colors.green, size: 14),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    "Vérifié",
-                                    style: TextStyle(
-                                        color: Colors.green,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-
-                      // Photos de vérification
-                      if (hasVerification) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.green.shade50,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Row(
-                                children: [
-                                  Icon(Icons.security,
-                                      color: Colors.green, size: 14),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    "Vérification d'identité",
-                                    style: TextStyle(
-                                      color: Colors.green,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  // Photo de profil (inscription)
-                                  Expanded(
-                                    child: GestureDetector(
-                                      onTap: () => _showPhotoDialog(context,
-                                          driverPhoto, "Photo d'inscription"),
-                                      child: Column(
-                                        children: [
-                                          ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            child: Image.network(
-                                              driverPhoto,
-                                              height: 90,
-                                              fit: BoxFit.cover,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            "Inscription",
-                                            style: TextStyle(
-                                                color: Colors.grey.shade600,
-                                                fontSize: 11),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  const Icon(Icons.compare_arrows,
-                                      color: Colors.green),
-                                  const SizedBox(width: 8),
-                                  // Selfie d'acceptation
-                                  Expanded(
-                                    child: GestureDetector(
-                                      onTap: () => _showPhotoDialog(
-                                          context,
-                                          acceptanceSelfie,
-                                          "Selfie de confirmation"),
-                                      child: Column(
-                                        children: [
-                                          ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            child: Image.network(
-                                              acceptanceSelfie,
-                                              height: 90,
-                                              fit: BoxFit.cover,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            "Confirmation",
-                                            style: TextStyle(
-                                                color: Colors.grey.shade600,
-                                                fontSize: 11),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              const Text(
-                                "Comparez les deux photos pour confirmer\nque c'est bien votre livreur.",
-                                style: TextStyle(
-                                    color: Colors.green, fontSize: 11),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              },
+            _DriverContactCard(
+              orderId: order.id,
+              driverId: order.driverId!,
+              acceptanceSelfie: order.driverAcceptanceSelfie,
             ),
 
           // ETA when active
@@ -528,11 +326,21 @@ class _OrderCard extends StatelessWidget {
                 onPressed: () async {
                   String driverName = "le livreur";
                   if (order.driverId != null) {
+                    // SEC-01 / S6.1 : seul le nom est nécessaire pour le
+                    // dialogue de notation → projection publique
+                    // `driver_public`.
                     final doc = await FirebaseFirestore.instance
-                        .collection("livreurs")
+                        .collection("driver_public")
                         .doc(order.driverId)
                         .get();
-                    if (doc.exists) driverName = doc["name"] ?? driverName;
+                    // `driver_public.name` peut être en retard de quelques
+                    // secondes (synchronisation serveur) : accès par clé
+                    // directe (`doc["name"]`) lèverait si le champ n'est pas
+                    // encore présent, d'où l'accès nullable.
+                    if (doc.exists) {
+                      driverName =
+                          doc.data()?['name'] as String? ?? driverName;
+                    }
                   }
                   if (context.mounted) {
                     showDialog(
@@ -701,7 +509,7 @@ class _OrderCard extends StatelessWidget {
                     icon: Icons.call,
                     label: "Appeler",
                     color: Colors.green,
-                    onTap: () => _callDriver(context, order.driverId ?? ''),
+                    onTap: () => _callDriver(context, order.id),
                   ),
 
                 const Spacer(),
@@ -783,6 +591,310 @@ class _OrderCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+void _showDriverPhotoDialog(BuildContext context, String url, String title) {
+  showDialog(
+    context: context,
+    builder: (_) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(title,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          ),
+          ClipRRect(
+            borderRadius:
+                const BorderRadius.vertical(bottom: Radius.circular(16)),
+            child: Image.network(url, fit: BoxFit.cover),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ============================================================
+// CARTE CONTACT LIVREUR — photo/nom publics (`livreurs`) + téléphone via
+// `getDriverPhoneForOrderCF` (SEC-01 / S6.8-S6.10)
+// ============================================================
+//
+// StatefulWidget dédié (plutôt qu'un `FutureBuilder` inline dans la carte
+// `StatelessWidget` parente) : les deux Futures (fiche livreur publique,
+// téléphone via la Callable) sont créés UNE SEULE FOIS par `initState()` et
+// mémorisés dans l'État, pas recréés à chaque reconstruction du widget
+// (ex. quand la commande parente émet un nouveau snapshot). `didUpdateWidget`
+// ne les recrée que si `orderId` ou `driverId` change réellement (nouvelle
+// commande affichée, ou réattribution du livreur) — jamais de polling, jamais
+// de cache global : la mémorisation est strictement locale à cette instance
+// de widget.
+class _DriverContactCard extends StatefulWidget {
+  final String orderId;
+  final String driverId;
+  final String? acceptanceSelfie;
+
+  const _DriverContactCard({
+    required this.orderId,
+    required this.driverId,
+    this.acceptanceSelfie,
+  });
+
+  @override
+  State<_DriverContactCard> createState() => _DriverContactCardState();
+}
+
+class _DriverContactCardState extends State<_DriverContactCard> {
+  late Future<DocumentSnapshot> _driverFuture;
+  late Future<String?> _phoneFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _startFutures();
+  }
+
+  @override
+  void didUpdateWidget(_DriverContactCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.orderId != widget.orderId ||
+        oldWidget.driverId != widget.driverId) {
+      // Nouvelle commande affichée, ou livreur réattribué : les deux
+      // Futures sont relancés — jamais de numéro obsolète conservé.
+      _startFutures();
+    }
+  }
+
+  void _startFutures() {
+    _driverFuture = FirebaseFirestore.instance
+        .collection('livreurs')
+        .doc(widget.driverId)
+        .get();
+    _phoneFuture = _fetchPhone();
+  }
+
+  // SEC-01 / S6.10 : seul `orderId` est transmis à la Callable — jamais
+  // `driverId` ni un numéro. Le serveur relit lui-même le livreur réellement
+  // affecté à cette commande (voir docs/SEC01_S6_8_PHONE_CALLABLE_IMPLEMENTATION.md).
+  // Aucun repli vers une lecture directe de `livreurs.phone` : un refus, une
+  // limite de débit ou toute autre erreur se traduit par `null` (numéro
+  // absent), jamais par une valeur fabriquée ou périmée.
+  Future<String?> _fetchPhone() async {
+    try {
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('getDriverPhoneForOrderCF')
+          .call({'orderId': widget.orderId});
+      return ((result.data as Map?)?['data'] as Map?)?['phone'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<DocumentSnapshot>(
+      future: _driverFuture,
+      builder: (context, snap) {
+        if (!snap.hasData || !snap.data!.exists) {
+          return const SizedBox.shrink();
+        }
+        final driver = snap.data!.data() as Map<String, dynamic>;
+        final driverPhoto = driver["photoUrl"] as String?;
+        final acceptanceSelfie = widget.acceptanceSelfie;
+        final hasVerification = driverPhoto != null &&
+            driverPhoto.isNotEmpty &&
+            acceptanceSelfie != null;
+
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color:
+                  hasVerification ? Colors.green.shade200 : Colors.grey.shade200,
+            ),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Infos livreur
+              Row(
+                children: [
+                  // Photo de profil
+                  GestureDetector(
+                    onTap: driverPhoto != null && driverPhoto.isNotEmpty
+                        ? () => _showDriverPhotoDialog(context, driverPhoto,
+                            "Photo de profil du livreur")
+                        : null,
+                    child: CircleAvatar(
+                      radius: 26,
+                      backgroundColor: AppColors.primary,
+                      backgroundImage: driverPhoto != null && driverPhoto.isNotEmpty
+                          ? NetworkImage(driverPhoto)
+                          : null,
+                      child: driverPhoto == null || driverPhoto.isEmpty
+                          ? const Icon(Icons.delivery_dining,
+                              color: Colors.white, size: 22)
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          driver["name"] ?? "Livreur",
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        FutureBuilder<String?>(
+                          future: _phoneFuture,
+                          builder: (context, phoneSnap) {
+                            return Text(phoneSnap.data ?? "",
+                                style: const TextStyle(
+                                    color: Colors.grey, fontSize: 12));
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (hasVerification)
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.verified, color: Colors.green, size: 14),
+                          SizedBox(width: 4),
+                          Text(
+                            "Vérifié",
+                            style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+
+              // Photos de vérification
+              if (hasVerification) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.security, color: Colors.green, size: 14),
+                          SizedBox(width: 6),
+                          Text(
+                            "Vérification d'identité",
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          // Photo de profil (inscription)
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => _showDriverPhotoDialog(
+                                  context, driverPhoto, "Photo d'inscription"),
+                              child: Column(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Image.network(
+                                      driverPhoto,
+                                      height: 90,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    "Inscription",
+                                    style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.compare_arrows, color: Colors.green),
+                          const SizedBox(width: 8),
+                          // Selfie d'acceptation
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => _showDriverPhotoDialog(context,
+                                  acceptanceSelfie, "Selfie de confirmation"),
+                              child: Column(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Image.network(
+                                      acceptanceSelfie,
+                                      height: 90,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    "Confirmation",
+                                    style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        "Comparez les deux photos pour confirmer\nque c'est bien votre livreur.",
+                        style: TextStyle(color: Colors.green, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -1086,9 +1198,7 @@ class _WalletPayButtonState extends State<_WalletPayButton> {
       final msg = e.toString();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(msg.contains('SOLDE_INSUFFISANT')
-              ? 'Solde insuffisant. Rechargez votre wallet.'
-              : 'Erreur paiement : $msg'),
+          content: Text(paymentErrorMessage(msg)),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
         ),

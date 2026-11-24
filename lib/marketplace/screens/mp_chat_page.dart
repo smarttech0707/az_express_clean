@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/mp_product.dart';
 import '../mp_constants.dart';
 import '../../widgets/stream_error_state.dart';
+import '../../services/permission_primer.dart';
 
 // ── Chat page marketplace ─────────────────────────────────────────────────────
 // chatId = mp_{productId}_{buyerUid}
@@ -127,6 +128,10 @@ class _MpChatPageState extends State<MpChatPage> {
   // ── Enregistrement vocal ──────────────────────────────────────────────────
 
   Future<void> _startRecording() async {
+    if (!await PermissionPrimer.prepareMicrophone(context: context)) {
+      _snack('Micro non autorisé : vous pouvez continuer en écrivant');
+      return;
+    }
     final ok = await _recorder.hasPermission();
     if (!ok) {
       final status = await Permission.microphone.request();

@@ -37,7 +37,10 @@ $emptyGcloud = Join-Path $root 'test-env\runtime\gcloud-empty'
 New-Item -ItemType Directory -Force $emptyGcloud | Out-Null
 $env:CLOUDSDK_CONFIG = $emptyGcloud
 $TestPackage = 'com.azexpress.app.test'
-$target = Join-Path $root 'android\app\src\debug\google-services.json'
+# APP_BUILD_NUMBER obligatoire (version minimale) : deduit de pubspec.yaml, refus si absent, nul ou invalide.
+$appBuildNumber = & (Join-Path $root 'scripts\get-app-build-number.ps1')
+if ($LASTEXITCODE -ne 0 -or -not $appBuildNumber) { throw 'APP_BUILD_NUMBER absent, nul ou invalide (pubspec.yaml) : build annule.' }
+$target =Join-Path $root 'android\app\src\debug\google-services.json'
 $apk = Join-Path $root 'build\app\outputs\flutter-apk\app-debug.apk'
 if (Test-Path $target) { throw "Déjà présent : $target (build précédent interrompu ? vérifiez puis supprimez-le)." }
 
@@ -60,7 +63,7 @@ try {
   # Le paquet est imposé par -P (explicite). Une variable ORG_GRADLE_PROJECT_* n'était pas transmise de façon
   # fiable par Flutter : Gradle compilait alors com.azexpress.app et le plugin Google Services échouait.
   flutter build apk --debug `
-    --dart-define=USE_FIREBASE_EMULATORS=true "--dart-define=EMULATOR_HOST=$EmulatorHost" "--dart-define=TEST_MAPS_API_KEY=$TestMapsKey" `
+    --dart-define=USE_FIREBASE_EMULATORS=true "--dart-define=EMULATOR_HOST=$EmulatorHost" "--dart-define=TEST_MAPS_API_KEY=$TestMapsKey" "--dart-define=APP_BUILD_NUMBER=$appBuildNumber" `
     --android-project-arg=azTestSuffix=.test "--android-project-arg=azTestMapsKey=$TestMapsKey"
   if ($LASTEXITCODE -ne 0) { throw 'flutter build a échoué.' }
 

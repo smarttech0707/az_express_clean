@@ -62,7 +62,7 @@ const failure = () => Object.assign(new Error('simulated provider timeout'), { c
 
 function harness({ primary = 'gemini', scripts, config = {}, seed = {} } = {}) {
   const data = database({ 'clients/u': { wallet: 10000 },
-    'ai_consents/u': { granted: true, version: 1 },
+    'ai_consents/u': { granted: true, version: 1, providers: ['anthropic', 'google'] },
     'settings/ai': { defaultProvider: primary, allowedProviders: ['gemini', 'claude'],
       fallbackEnabled: true, ...config }, ...seed });
   const requests = [], turns = [], counts = { gemini: 0, claude: 0, openai: 0, payment: 0, recharge: 0 };
@@ -309,13 +309,15 @@ test('replay ledger is invocation-local: a new user message may intentionally re
   const h = harness({ scripts: { gemini: [[call('get_wallet_balance')], 'Premier', [call('get_wallet_balance')], 'Second'] } });
   await h.chat(); await h.chat(); assert.equal(h.reads.get('clients/u'), 2);
 });
-test('OpenAI tool flag alone cannot authorize an incompatible canonical adapter', async () => {
+test('OpenAI cannot be selected even with the tool flag and a settings/ai allow-list naming it (M2.14)', async () => {
   const previous = process.env.AI_OPENAI_TOOL_CALLING_ENABLED;
   process.env.AI_OPENAI_TOOL_CALLING_ENABLED = 'true';
   try {
     const h = harness({ config: { toolProvider: 'openai', allowedProviders: ['openai','gemini'], fallbackProviders: ['gemini'] },
       scripts: { gemini: ['Compatible'] } });
-    assert.equal((await h.chat()).reply, 'Compatible'); assert.equal(h.counts.openai, 0);
+    // La liste effective est plafonnée à claude/gemini : openai refusé, aucune requête n'atteint OpenAI.
+    try { await h.chat(); } catch (_) { /* refus attendu */ }
+    assert.equal(h.counts.openai, 0);
   } finally {
     if (previous === undefined) delete process.env.AI_OPENAI_TOOL_CALLING_ENABLED;
     else process.env.AI_OPENAI_TOOL_CALLING_ENABLED = previous;

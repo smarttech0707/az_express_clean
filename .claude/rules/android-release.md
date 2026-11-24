@@ -15,5 +15,5 @@ Références : `docs/claude/INDEX.md` (prompts 62, 63, 68, 69, 81, 82), `docs/DI
 - Manifeste : `uses-feature` caméra / localisation / micro / bluetooth en `required="false"` ; `AD_ID` et `ACCESS_ADSERVICES_AD_ID` retirés (`tools:node="remove"`). Ne pas les réintroduire.
 - `ACCESS_BACKGROUND_LOCATION` exige une déclaration Play Console dédiée. Clé Maps injectée via `${MAPS_API_KEY}` (`local.properties`).
 - Conformité à maintenir : politique de confidentialité (FeexPay, Anthropic / AZ IA déclarés), page publique `/delete-account`, Data Safety.
-- Builds : `flutter build appbundle --release` ; l'avertissement « strip debug symbols » vient de l'environnement local (cmdline-tools).
+- Builds de release : `py scripts/build_mobile.py appbundle` (ou `apk`), jamais `flutter build appbundle --release` en direct : le script injecte `APP_BUILD_NUMBER` (= `+N` de `pubspec.yaml`, donc le `versionCode`) et refuse un numéro absent ou nul ; un build à 0 n'est jamais invité à se mettre à jour (`MinVersionService`). `.\run.ps1 -build appbundle` délègue au script. L'avertissement « strip debug symbols » vient de l'environnement local (cmdline-tools).
 - Les `.aab` à la racine du dépôt sont des artefacts de distribution : ne pas les supprimer ni les committer sans demande.

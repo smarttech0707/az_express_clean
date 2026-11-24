@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../constants/app_constants.dart';
 import '../../constants/support_categories.dart';
 import '../../theme/app_theme.dart';
+import '../../services/permission_primer.dart';
 
 Map<String, dynamic> buildSupportTicketData({
   required String userId,
@@ -119,6 +120,7 @@ class _NewTicketTabState extends State<_NewTicketTab> {
 
   Future<void> _pickScreenshot() async {
     try {
+      if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
       final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery,
         imageQuality: 70,

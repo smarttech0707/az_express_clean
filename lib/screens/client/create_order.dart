@@ -22,8 +22,10 @@ import '../../models/order_model.dart';
 import '../../models/route_model.dart';
 import '../../widgets/scale_button.dart';
 import '../../widgets/address_picker_widget.dart';
+import '../../widgets/route_estimate_notice.dart';
 import '../../widgets/route_polyline.dart';
 import '../../theme/app_theme.dart';
+import '../../services/permission_primer.dart';
 
 // Centre d'Abengourou — point de référence pour les calculs de distance
 const double _abgLat = 6.7273;
@@ -296,9 +298,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _deliveryResult!.latitude,
       _deliveryResult!.longitude,
     );
-    final hasRealRoute =
-        _previewRoute.isNotEmpty && _previewRoute.distanceKm > 0;
-    final dist = hasRealRoute ? _previewRoute.distanceKm : haversine;
+    final resolved = RouteModel.resolveTariffDistance(
+      route: _previewRoute,
+      haversineFallbackKm: haversine,
+    );
+    final hasRealRoute = resolved.isRealRoute;
+    final dist = resolved.distanceKm;
+    final isEstimate = !hasRealRoute;
     final tarif = TarifService.compute(
       clientLat: _deliveryResult!.latitude,
       clientLng: _deliveryResult!.longitude,
@@ -322,6 +328,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               : (tarif.isNight
                   ? 'Tarif nuit — zone centrale'
                   : 'Tarif jour — zone centrale'),
+          isEstimate: isEstimate,
         ));
   }
 
@@ -331,7 +338,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Future<AddressResult?> _getGpsPosition() async {
     var perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
+      perm = await PermissionPrimer.requestLocation(context: mounted ? context : null);
     }
     if (perm == LocationPermission.denied ||
         perm == LocationPermission.deniedForever) {
@@ -733,6 +740,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               shoppingBudget:
                   int.tryParse(_shoppingBudgetCtrl.text.trim()) ?? 0,
             ),
+            if (_breakdown!.isEstimate) ...[
+              const SizedBox(height: 10),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: RouteEstimateNotice(),
+              ),
+            ],
             const SizedBox(height: 14),
             _PaymentMethodCard(
               selected: _paymentMethod,

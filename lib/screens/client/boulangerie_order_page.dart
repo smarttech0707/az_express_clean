@@ -12,6 +12,7 @@ import '../../services/firestore_service.dart';
 import '../../services/wallet_payment_compatibility.dart';
 import '../../providers/active_city_provider.dart';
 import '../../widgets/stream_error_state.dart';
+import '../../services/permission_primer.dart';
 
 class BoulangerieOrderPage extends StatefulWidget {
   final String boulangerieId;
@@ -98,7 +99,7 @@ class _BoulangerieOrderPageState extends State<BoulangerieOrderPage> {
     try {
       final perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
-        await Geolocator.requestPermission();
+        await PermissionPrimer.requestLocation(context: mounted ? context : null);
       }
       final pos = await Geolocator.getCurrentPosition(
           locationSettings:

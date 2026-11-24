@@ -1,0 +1,26 @@
+[
+  {
+    "path": "/partenaire/abcdefghijklmnopqrst",
+    "status": 200,
+    "contentType": "text/html; charset=utf-8",
+    "cacheControl": null
+  },
+  {
+    "path": "/qr-public/partner.7a75a2746918585ac31c0e3d8c8b298a034ec595e44e7ec5ad92d3698e1c8e22.js",
+    "status": 200,
+    "contentType": "application/javascript; charset=utf-8",
+    "cacheControl": null
+  },
+  {
+    "path": "/.well-known/assetlinks.json",
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "cacheControl": null
+  },
+  {
+    "path": "/.well-known/apple-app-site-association",
+    "status": 200,
+    "contentType": "false",
+    "cacheControl": null
+  }
+]

@@ -15,6 +15,20 @@ const CONSENT_VERSION = 1;
 const CONSENT_PROVIDERS = Object.freeze(['anthropic', 'google']);
 const COLLECTION = 'ai_consents';
 
+// Correspondance fournisseur technique (aiRouter) → fournisseur nommé dans le consentement. Un fournisseur absent de
+// cette table n'est JAMAIS considéré comme consenti.
+const CONSENT_PROVIDER_BY_ROUTER = Object.freeze({ claude: 'anthropic', gemini: 'google' });
+
+// Fournisseurs (noms du routeur) auxquels CE consentement permet de transmettre des données. Lit la liste enregistrée
+// dans le document : un consentement sans liste, ou invalide, ne couvre aucun fournisseur. Les consentements déjà
+// enregistrés (providers = ['anthropic','google']) restent valides sans migration.
+function consentedRouterProviders(consent) {
+  if (!isConsentValid(consent) || !Array.isArray(consent.providers)) return [];
+  return Object.keys(CONSENT_PROVIDER_BY_ROUTER)
+    .filter((router) => consent.providers.includes(CONSENT_PROVIDER_BY_ROUTER[router])
+      && CONSENT_PROVIDERS.includes(CONSENT_PROVIDER_BY_ROUTER[router]));
+}
+
 async function getConsent(db, uid) {
   const snap = await db.collection(COLLECTION).doc(uid).get();
   return snap.exists ? snap.data() : null;
@@ -50,4 +64,4 @@ async function setConsent({ db, admin, logAudit, uid, granted, version }) {
   return { ok: true };
 }
 
-module.exports = { CONSENT_VERSION, CONSENT_PROVIDERS, COLLECTION, getConsent, isConsentValid, hasValidConsent, setConsent };
+module.exports = { CONSENT_VERSION, CONSENT_PROVIDERS, CONSENT_PROVIDER_BY_ROUTER, consentedRouterProviders, COLLECTION, getConsent, isConsentValid, hasValidConsent, setConsent };

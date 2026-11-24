@@ -4,41 +4,46 @@ import 'package:az_express/models/delivery_zone.dart';
 import 'package:az_express/models/local_place.dart';
 import 'package:az_express/services/active_city_service.dart';
 import 'package:az_express/services/geo_cache_store.dart';
+import 'package:az_express/services/maps_proxy_client.dart';
 import 'package:az_express/services/places_search_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Lot 1.2.1 — Google ne répond plus jamais via un appel HTTP direct : ce
+// client ne simule plus que Nominatim (sans clé, inchangé). La réponse
+// Google éventuelle est désormais simulée via `MapsProxyClient.debugCall`.
 class _RecordingHttpClient extends http.BaseClient {
   final requests = <Uri>[];
-  final bool returnGoogleResult;
-
-  _RecordingHttpClient({this.returnGoogleResult = false});
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     requests.add(request.url);
-    final isGoogle = request.url.host == 'maps.googleapis.com';
-    final body = isGoogle && returnGoogleResult
-        ? jsonEncode({
-            'predictions': [
-              {
-                'place_id': 'google-1',
-                'description': 'Gabriel, Agnibilékrou',
-                'structured_formatting': {
-                  'main_text': 'Gabriel',
-                  'secondary_text': 'Agnibilékrou',
-                },
-              },
-            ],
-          })
-        : '[]';
     return http.StreamedResponse(
-      Stream.value(utf8.encode(body)),
+      Stream.value(utf8.encode('[]')),
       200,
       request: request,
     );
   }
+}
+
+/// Installe (ou retire, si `null`) un proxy qui renvoie une suggestion
+/// "Gabriel, Agnibilékrou" pour mapsAutocompleteCF ; enregistre chaque appel.
+void _setGoogleProxy(List<String> calls, {required bool returnResult}) {
+  MapsProxyClient.debugCall = (name, payload) async {
+    calls.add(name);
+    if (!returnResult) return null;
+    return {
+      'predictions': [
+        {
+          'placeId': 'google-1',
+          'mainText': 'Gabriel',
+          'secondaryText': 'Agnibilékrou',
+          'description': 'Gabriel, Agnibilékrou',
+        },
+      ],
+    };
+  };
 }
 
 DeliveryZone agnibilekrou() => const DeliveryZone(
@@ -75,10 +80,12 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     PlacesSearchService.debugResetSearchState();
     await GeoCacheStore.write('geo_cache_nominatim_v1', {});
+    MapsProxyClient.debugCall = null;
   });
 
   tearDown(() {
     PlacesSearchService.debugResetSearchState();
+    MapsProxyClient.debugCall = null;
   });
 
   test('Nominatim utilise le nom, le centre et le rayon de la ville active',
@@ -102,6 +109,8 @@ void main() {
   test('Google ne part pas sans demande explicite d’élargissement', () async {
     final client = _RecordingHttpClient();
     PlacesSearchService.debugSetHttpClient(client);
+    final proxyCalls = <String>[];
+    _setGoogleProxy(proxyCalls, returnResult: true);
 
     final result = await PlacesSearchService.search(
       'gabriel',
@@ -113,6 +122,7 @@ void main() {
     expect(client.requests.map((uri) => uri.host), [
       'nominatim.openstreetmap.org',
     ]);
+    expect(proxyCalls, isEmpty, reason: 'le proxy Maps ne doit pas être sollicité');
     expect(
       PlacesSearchService.lastSearchState,
       PlacesSearchState.awaitingExpansion,
@@ -120,8 +130,10 @@ void main() {
   });
 
   test('Google part après expansion explicite si Nominatim est vide', () async {
-    final client = _RecordingHttpClient(returnGoogleResult: true);
+    final client = _RecordingHttpClient();
     PlacesSearchService.debugSetHttpClient(client);
+    final proxyCalls = <String>[];
+    _setGoogleProxy(proxyCalls, returnResult: true);
 
     final result = await PlacesSearchService.expandSearch(
       'gabriel',
@@ -132,8 +144,8 @@ void main() {
     expect(result.single.source, 'google');
     expect(client.requests.map((uri) => uri.host), [
       'nominatim.openstreetmap.org',
-      'maps.googleapis.com',
     ]);
+    expect(proxyCalls, [MapsProxyClient.autocomplete]);
     expect(
       PlacesSearchService.lastSearchState,
       PlacesSearchState.expanded,
@@ -141,8 +153,10 @@ void main() {
   });
 
   test('une requête de quatre caractères n’atteint jamais Google', () async {
-    final client = _RecordingHttpClient(returnGoogleResult: true);
+    final client = _RecordingHttpClient();
     PlacesSearchService.debugSetHttpClient(client);
+    final proxyCalls = <String>[];
+    _setGoogleProxy(proxyCalls, returnResult: true);
 
     await PlacesSearchService.expandSearch(
       'abcd',
@@ -150,16 +164,15 @@ void main() {
       queryExecutor: noLocalResults,
     );
 
-    expect(
-      client.requests.where((uri) => uri.host == 'maps.googleapis.com'),
-      isEmpty,
-    );
+    expect(proxyCalls, isEmpty);
   });
 
   test('les résultats Google ne sont pas persistés dans le cache disque',
       () async {
-    final client = _RecordingHttpClient(returnGoogleResult: true);
+    final client = _RecordingHttpClient();
     PlacesSearchService.debugSetHttpClient(client);
+    final proxyCalls = <String>[];
+    _setGoogleProxy(proxyCalls, returnResult: true);
 
     await PlacesSearchService.expandSearch(
       'gabriel',

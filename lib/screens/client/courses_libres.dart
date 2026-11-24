@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../../services/permission_primer.dart';
 
 class CoursesLibres extends StatefulWidget {
   const CoursesLibres({super.key});
@@ -61,7 +62,7 @@ class _CoursesLibresState extends State<CoursesLibres> {
     setState(() => _sending = true);
 
     try {
-      final perm = await Geolocator.requestPermission();
+      final perm = await PermissionPrimer.requestLocation(context: context);
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
         if (mounted) {

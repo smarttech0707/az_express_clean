@@ -1,12 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 // ignore: depend_on_referenced_packages
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:az_express/models/order_model.dart';
 import 'package:az_express/services/firestore_service.dart';
 import 'package:az_express/screens/driver/driver_dashboard.dart';
+import 'package:az_express/services/permission_primer.dart';
 
 // Acceptation d'une course par un livreur SANS photo de profil (champ `photoUrl` absent de livreurs/{uid}).
 // Régression : `driverDoc["photoUrl"]` levait « Bad state: field "photoUrl" does not exist » après l'envoi du
@@ -41,6 +44,17 @@ class _FakePicker extends ImagePickerPlatform {
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    PermissionPrimer.debugReset();
+    // permission_handler : caméra « refusée » (statut 0) pour que l'explication s'affiche avant l'invite.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('flutter.baseflow.com/permissions/methods'), (call) async {
+      if (call.method == 'checkPermissionStatus') return 0;
+      return null;
+    });
+  });
+
   Future<void> open(WidgetTester t, _FakeService service) async {
     await t.binding.setSurfaceSize(const Size(1000, 1400));
     await t.pumpWidget(MaterialApp(
@@ -91,7 +105,12 @@ void main() {
 
     await t.tap(find.text('Accepter'));
     await t.pump();
-    await t.pump(const Duration(milliseconds: 100));
+    await t.pump(const Duration(milliseconds: 400));
+    // M2.9 : l'explication précède l'invite caméra ; la caméra n'est ouverte qu'après « Continuer ».
+    expect(picker.calls, 0);
+    await t.tap(find.byKey(const Key('permission_primer_continue')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400));
 
     expect(picker.calls, 1);
     expect(service.acceptCalls, 0);
@@ -109,12 +128,36 @@ void main() {
 
     await t.tap(find.text('Accepter'));
     await t.pump();
-    await t.pump(const Duration(milliseconds: 300));
+    await t.pump(const Duration(milliseconds: 400));
+    // M2.9 : l'explication précède l'invite caméra ; la caméra n'est ouverte qu'après « Continuer ».
+    expect(picker.calls, 0);
+    await t.tap(find.byKey(const Key('permission_primer_continue')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400));
 
     // Firebase n'est pas initialisé dans ce test : l'envoi du selfie échoue, acceptOrderCF ne doit pas être appelée.
     expect(picker.calls, 1);
     expect(service.acceptCalls, 0);
     expect(find.textContaining('Erreur'), findsOneWidget);
+    await t.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('caméra non autorisée (« Plus tard ») : aucune photo, acceptation non lancée, écran non bloqué', (t) async {
+    final service = _FakeService();
+    final picker = _FakePicker(XFile('selfie-test.jpg'));
+    ImagePickerPlatform.instance = picker;
+    await open(t, service);
+
+    await t.tap(find.text('Accepter'));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400));
+    await t.tap(find.byKey(const Key('permission_primer_later')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400));
+
+    expect(picker.calls, 0);
+    expect(service.acceptCalls, 0);
+    expect(find.text('Accepter'), findsOneWidget);
     await t.pumpWidget(const SizedBox());
   });
 }

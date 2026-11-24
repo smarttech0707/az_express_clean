@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
+import '../../widgets/min_version_dialog.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -32,6 +33,10 @@ class _FleetDashboardState extends State<FleetDashboard>
   @override
   void initState() {
     super.initState();
+    // Version minimale du rôle flotte (config/app_versions.fleet) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleFleet,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer votre flotte.'));
     _tab = TabController(length: 3, vsync: this);
   }
 

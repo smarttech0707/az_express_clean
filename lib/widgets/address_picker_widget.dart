@@ -6,6 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../services/places_service.dart';
 import 'destination_picker.dart';
 import '../theme/app_theme.dart';
+import '../services/permission_primer.dart';
 
 // ── Résultat de la sélection d'adresse ─────────────────────────────────────
 class AddressResult {
@@ -97,7 +98,7 @@ class _AddressPickerWidgetState extends State<AddressPickerWidget> {
 
       LocationPermission perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
+        perm = await PermissionPrimer.requestLocation(context: mounted ? context : null);
       }
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {

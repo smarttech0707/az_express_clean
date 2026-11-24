@@ -4,6 +4,12 @@
 // calling azIaChat; only this server-side boundary knows about providers.
 function createAiGateway({ providerService, policyEngine }) {
   async function generateTurn(turn, context = {}) {
+    // Aucune donnée ne part sans la liste des fournisseurs couverts par le consentement de l'utilisateur (fail closed).
+    if (!Array.isArray(context.consentedProviders)) {
+      const err = new Error('CONSENT_REQUIRED');
+      err.code = 'CONSENT_REQUIRED';
+      throw err;
+    }
     const config = await providerService.getConfig();
     const tools = (turn.tools || []).filter((tool) => policyEngine.canExecute(tool.name, config));
     const result = await providerService.generateTurn({ ...turn, tools }, {
@@ -17,6 +23,7 @@ function createAiGateway({ providerService, policyEngine }) {
       recordUsage: false,
       preserveProviderDefaults: true,
       forceProvider: context.forceProvider,
+      consentedProviders: context.consentedProviders,
     });
     return {
       text: result.text || '',

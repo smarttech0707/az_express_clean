@@ -74,6 +74,12 @@ class RealtimeTrackingService extends ChangeNotifier {
   double get totalDistKm => _routeToClient.distanceKm + _routeToDest.distanceKm;
   int get totalPrice => _routeToClient.estimatedPrice;
 
+  /// `true` quand un tronçon affiché n'est pas un itinéraire routier réel
+  /// (ligne droite de repli) : l'écran doit le signaler près de la durée.
+  bool get routeIsEstimate =>
+      (_routeToClient.isNotEmpty && _routeToClient.isEstimate) ||
+      (_routeToDest.isNotEmpty && _routeToDest.isEstimate);
+
   /// Bascule la cible de routage vers la destination de livraison.
   /// Appelé quand le statut commande passe à `picked_up`.
   void switchToDelivery(LatLng deliveryDest) {
@@ -107,8 +113,12 @@ class RealtimeTrackingService extends ChangeNotifier {
   void _startFirestoreListener() {
     // Ne rien écouter si pas encore de livreur assigné (évite doc path vide)
     if (_driverId.isEmpty) return;
+    // SEC-01 / S6.2 : tous les champs consommés par `DriverLocationModel.fromMap`
+    // (lat/lng/heading/speed/updatedAt/isOnline/name/photoUrl) sont dans la
+    // projection publique `driver_public` → plus besoin de la collection
+    // privée `livreurs` pour ce suivi.
     _firestoreSub = FirebaseFirestore.instance
-        .collection('livreurs')
+        .collection('driver_public')
         .doc(_driverId)
         .snapshots()
         .listen(_onFirestoreUpdate, onError: (_) {});

@@ -12,6 +12,10 @@
 // Rien de financier n'est supprimé : soldes, transactions, commandes et réservations sont conservés (politique de
 // conservation non validée). Les mots de passe hachés, fichiers personnels et sessions sont supprimés.
 
+const { closingTombstone, markAuthDeletedTx } = require('./accountClosureProtocol');
+const { inspectObligations, inspectWithdrawals } = require('./accountObligationsInspector');
+const { INSPECTOR_TERMINAL_STATUSES } = require('./accountObligations');
+
 const MANUAL_ROLES = Object.freeze(['artisan', 'pharmacie', 'event_provider']);
 const METHODS = Object.freeze(['callback', 'in_person', 'document']);
 const FINANCIAL = ['wallet', 'walletBalance', 'balance', 'debt', 'pendingBalance', 'reservedBalance', 'pendingWithdrawal', 'commissionDebt'];
@@ -82,16 +86,40 @@ function buildManualAccountDeletion({
     const query = role === 'pharmacie'
       ? db.collection('orders').where('pharmacieId', '==', target.id)
       : role === 'event_provider' ? db.collection('event_reservations').where('providerIds', 'array-contains', target.id) : null;
-    if (!query) return null;
-    const snap = await query.limit(201).get();
-    if (snap.size >= 201) return 'history_requires_manual_review';
-    for (const doc of snap.docs) {
-      const d = doc.data();
-      if (!TERMINAL.has(d.status) || d.refundPending === true || d.needsReview === true || d.paymentStatus === 'pending') {
-        return 'active_or_unresolved_operation';
+    if (query) {
+      const snap = await query.limit(201).get();
+      if (snap.size >= 201) return 'history_requires_manual_review';
+      for (const doc of snap.docs) {
+        const d = doc.data();
+        if (!TERMINAL.has(d.status) || d.refundPending === true || d.needsReview === true || d.paymentStatus === 'pending') {
+          return 'active_or_unresolved_operation';
+        }
       }
     }
-    return null;
+    // L2 (D-12) : le moteur s'ajoute au contrôle ci-dessus, dans une transaction (lectures cohérentes) ; échec de lecture = refus.
+    if (role === 'pharmacie') {
+      const engine = await db.runTransaction((tx) => inspectObligations(tx, db, {
+        role: 'pharmacie', ids: [target.id], terminalStatuses: INSPECTOR_TERMINAL_STATUSES.manualAccountDeletion, atMs: clock(), accountUid: target.id,
+      }));
+      if (engine.blocking !== false) return engine.reason || 'financial_state_ambiguous';
+    }
+    return withdrawalBlocker(role, target);
+  }
+
+  // L2.3 : retraits (`withdrawal_requests.userId`) classés par le même inspecteur que les suppressions automatiques — aucune logique
+  // de classification ici. Le `userId` d'un retrait est l'identifiant de session de l'appelant (initiateWithdrawal) : on contrôle donc
+  // l'identifiant du profil ET l'identifiant de session connu (fail-closed : un retrait rattaché à l'un ou l'autre bloque).
+  // Une exception de lecture se propage : la demande n'avance pas, rien n'est supprimé.
+  async function withdrawalBlocker(role, target) {
+    const sessionField = role === 'artisan' ? 'artisanUid' : role === 'pharmacie' ? 'currentUid' : 'ownerId';
+    const ids = [...new Set([target.id, target.data[sessionField]].filter((id) => typeof id === 'string' && id && !id.includes('/')))];
+    return db.runTransaction(async (tx) => {
+      for (const accountUid of ids) {
+        const result = await inspectWithdrawals(tx, db, { accountUid });
+        if (result.blocking !== false) return result.reason || 'financial_regularization_required';
+      }
+      return null;
+    });
   }
 
   async function deleteQuery(query) {
@@ -141,7 +169,13 @@ function buildManualAccountDeletion({
       await bucket.deleteFiles({ prefix: `event_offers/${ownerId}/` });
       await deleteQuery(db.collection('event_offers').where('providerId', '==', target.id));
       await db.collection('event_provider_documents').doc(target.id).delete();
-      await db.collection('account_tombstones').doc(ownerId).set({ createdAt: FieldValue.serverTimestamp(), state: 'deleting', source: 'manual_event_provider' });
+      // Jamais d'écrasement : un tombstone existant (même scellé par la suppression automatique) est conservé tel quel.
+      await db.runTransaction(async (tx) => {
+        const ref = db.collection('account_tombstones').doc(ownerId);
+        if (!(await tx.get(ref)).exists) {
+          tx.create(ref, closingTombstone({ createdAt: FieldValue.serverTimestamp(), now: clock(), source: 'manual_event_provider' }));
+        }
+      });
       try {
         await auth.updateUser(ownerId, { disabled: true });
         await auth.revokeRefreshTokens(ownerId);
@@ -155,6 +189,7 @@ function buildManualAccountDeletion({
       } catch (error) {
         if (error?.code !== 'auth/user-not-found') throw error;
       }
+      await markAuthDeletedTx(db, { uid: ownerId, now: clock() });
       const patch = { isDeleted: true, deletionRequested: true, isSuspended: true, deletedAt: FieldValue.serverTimestamp() };
       for (const key of EVENT_PERSONAL) if (Object.hasOwn(target.data, key)) patch[key] = FieldDelete;
       await db.collection('event_providers').doc(target.id).update(patch);

@@ -135,7 +135,7 @@ const pharmacy = { name: 'Pharmacie Test', ownerName: 'Titulaire', phone: '07000
 test('pharmacie historique : identifiants et données personnelles supprimés, finances et commandes conservées', async () => {
   const h = setup({
     seed: { ...request('pharmacie'), 'pharmacies/p1': { ...pharmacy }, 'pharmacie_credentials/p1': { hash: 'h' },
-      'orders/o1': { pharmacieId: 'p1', status: 'delivered', budget: 1500 } },
+      'orders/o1': { pharmacieId: 'p1', status: 'delivered', budget: 1500, paymentMethod: 'cash' } }, // L2 : moteur d'obligations, un paiement inconnu est ambigu
     users: { 'anon-P': { providerData: [] } },
   });
   assert.equal((await h.run(h.req({}))).data.status, 'completed');

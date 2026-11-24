@@ -17,9 +17,11 @@ import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
 import '../home/home_screen.dart';
 import '../../widgets/immobilier/property_details_form_section.dart';
+import '../../widgets/min_version_dialog.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/stream_error_state.dart';
 import '../../widgets/logout_confirm_dialog.dart';
+import '../../services/permission_primer.dart';
 
 class AgentDashboardScreen extends StatefulWidget {
   const AgentDashboardScreen({super.key});
@@ -36,6 +38,10 @@ class _AgentDashboardScreenState extends State<AgentDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    // Version minimale du rôle agent immobilier (config/app_versions.immobilier) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleImmobilier,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer vos annonces.'));
     _load();
   }
 
@@ -511,6 +517,7 @@ class _ListingFormScreenState extends State<_ListingFormScreen> {
   Future<void> _pickImages() async {
     if (_totalMediaCount >= 10) return;
     try {
+      if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
       final files =
           await ImagePicker().pickMultiImage(imageQuality: 70, maxWidth: 1600);
       if (files.isEmpty) return;

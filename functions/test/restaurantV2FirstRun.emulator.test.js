@@ -62,6 +62,9 @@ const refused = async (promise, label) => {
 
 test.before(async () => {
   if (!emulated) return;
+  // Mission 7E-55 : aucun livreur n'est autorisé par défaut. L'administrateur fournit explicitement la liste (comme pour un vrai essai :
+  // export AZ_PILOT_DRIVER_IDS=<uid du livreur>) ; ici, le seul livreur fictif du lot.
+  process.env[lot.DRIVER_IDS_ENV] = DRIVER;
   process.env.DELIVERY_PROOFS_ENABLED = 'true';
   process.env.DELIVERY_PROOF_PEPPER = 'emulator-test-only-pepper-not-a-secret';
   admin = require('firebase-admin');
@@ -538,4 +541,38 @@ test('8. fermeture du pilote APRÈS la création : restaurant, livreur et preuve
     assert.deepEqual(state.completed, runner.ORDER_OF_STEPS);
   }
   setClock(NOW);
+});
+
+// ── Liste explicite des livreurs du pilote (Mission 7E-55) : outillage pur, sans émulateur ────────────────────────────────────
+test('L1. lot : sans liste de livreurs (absente, vide, espaces, invalide) l’ouverture est bloquée avec un message explicite, la fermeture reste possible', () => {
+  for (const driverIds of [undefined, [], '', '   ', [''], ['  '], ['a/b'], ['ok', 'a b'], [42], 'ok,,x', 'ok, ,x']) {
+    const plan = lot.pilotConfigPlan({ driverIds, env: {} });
+    assert.throws(() => plan.request, (e) => e instanceof lot.PilotDriverListError && e.code === 'PILOT_DRIVER_IDS_REQUIRED' && /livreur/i.test(e.message), JSON.stringify(driverIds));
+    assert.throws(() => plan.expectedDocument, lot.PilotDriverListError);
+    assert.deepEqual(plan.closing.patch, { creationOpen: false }, 'arrêt d’urgence indépendant de la liste');
+  }
+  assert.throws(() => lot.pilotConfigPlan({ driverIds: Array.from({ length: 51 }, (_, i) => `d${i}`), env: {} }).request, lot.PilotDriverListError);
+  // L'inventaire hors ligne reste lisible et signale le blocage au lieu de lever.
+  const saved = process.env[lot.DRIVER_IDS_ENV];
+  delete process.env[lot.DRIVER_IDS_ENV];
+  try {
+    const inv = lot.buildInventory().pilotConfig;
+    assert.equal(inv.written, false);
+    assert.match(inv.plan.blocked, /Aucun livreur n'est autorisé par défaut/);
+    assert.equal(inv.plan.request, undefined);
+  } finally { if (saved !== undefined) process.env[lot.DRIVER_IDS_ENV] = saved; }
+});
+
+test('L2. lot : un ou plusieurs livreurs explicites, dédoublonnés et triés, acceptés par la validation réelle, jamais ajoutés d’office', () => {
+  const one = lot.pilotConfigPlan({ driverIds: ['t7e-driver'], env: {} });
+  assert.deepEqual(one.request.patch.pilotDriverIds, ['t7e-driver']);
+  assert.deepEqual(one.expectedDocument, { pilotPartnerIds: ['t7e-resto'], pilotClientIds: ['t7e-client'], clientAccess: 'restricted', creationOpen: true, managementFrozen: false, pilotDriverIds: ['t7e-driver'], version: 1 });
+  const many = lot.pilotConfigPlan({ driverIds: [' zz-driver ', 'aa-driver', 'aa-driver'], env: {} });
+  assert.deepEqual(many.request.patch.pilotDriverIds, ['aa-driver', 'zz-driver']);
+  // Variable d'environnement : même résultat ; l'option explicite l'emporte.
+  assert.deepEqual(lot.pilotConfigPlan({ env: { [lot.DRIVER_IDS_ENV]: 'b-driver, a-driver' } }).request.patch.pilotDriverIds, ['a-driver', 'b-driver']);
+  assert.deepEqual(lot.pilotConfigPlan({ driverIds: ['x-driver'], env: { [lot.DRIVER_IDS_ENV]: 'b-driver' } }).request.patch.pilotDriverIds, ['x-driver']);
+  assert.throws(() => lot.pilotConfigPlan({ env: { [lot.DRIVER_IDS_ENV]: '' } }).request, lot.PilotDriverListError);
+  // Le plan ne contient jamais d'autre livreur que ceux fournis (pas d'ajout du livreur du lot).
+  assert.ok(!many.request.patch.pilotDriverIds.includes(lot.IDENTITIES.driver.uid));
 });

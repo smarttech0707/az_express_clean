@@ -27,6 +27,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/live_marker_cache.dart';
 import '../../event/screens/event_home_screen.dart';
 import '../../ekbine/screens/ek_home_screen.dart';
+import '../../services/permission_primer.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTES
@@ -83,7 +84,7 @@ class ClientMap extends StatefulWidget {
   const ClientMap({super.key, this.driversFeed});
 
   /// Injection de test uniquement. `null` en production → vraie requête
-  /// Firestore `livreurs` en ligne (voir [onlineDriversFeed]).
+  /// Firestore `driver_public` en ligne (voir [onlinePublicDriversFeed]).
   final LiveDriverFeed? driversFeed;
 
   @override
@@ -154,7 +155,7 @@ class _ClientMapState extends State<ClientMap> {
     // 2. Permission accordée ?
     LocationPermission perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
+      perm = await PermissionPrimer.requestLocation(context: mounted ? context : null);
     }
 
     if (perm == LocationPermission.deniedForever ||
@@ -208,7 +209,9 @@ class _ClientMapState extends State<ClientMap> {
   // ── Écoute des livreurs en temps réel ──────────────────────────────────────
   void _listenDrivers() {
     _driversSub?.cancel();
-    final feed = widget.driversFeed ?? onlineDriversFeed;
+    // SEC-01 / S6.14 : lecture publique (driver_public) — ce lecteur n'a
+    // besoin d'aucun champ privé, voir onlinePublicDriversFeed.
+    final feed = widget.driversFeed ?? onlinePublicDriversFeed;
     _driversSub = feed().listen(_onDriversSnapshot, onError: (_) {
       // Erreur Firestore silencieuse — on garde l'UI stable
     });

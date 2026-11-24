@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../widgets/scale_button.dart';
 import '../../services/auth_service.dart';
+import '../../services/permission_primer.dart';
 
 class DriverRegister extends StatefulWidget {
   const DriverRegister({super.key});
@@ -32,6 +33,7 @@ class _DriverRegisterState extends State<DriverRegister> {
 
   Future<void> _takeSelfie() async {
     try {
+      if (!await PermissionPrimer.prepareImage(ImageSource.camera, context: context)) return;
       final img = await ImagePicker().pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
@@ -51,6 +53,7 @@ class _DriverRegisterState extends State<DriverRegister> {
 
   Future<void> _pickIdPhoto(ImageSource source) async {
     try {
+      if (!await PermissionPrimer.prepareImage(source, context: context)) return;
       final picked = await ImagePicker().pickImage(
         source: source,
         imageQuality: 60,

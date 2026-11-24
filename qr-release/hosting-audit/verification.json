@@ -1,0 +1,564 @@
+[
+  {
+    "path": "/assets/AssetManifest.bin",
+    "verified": true,
+    "sourceHash": "6a01b24854bc2a414dd3dc1f5d09f4dc6766cc91810b43a7e829796c81e83e4d",
+    "decodedHash": "5b47a10b03a406cdac0d3cf0ac0675063b0c5f810ed87eb4bf77b8b85143bed7",
+    "cache": "max-age=3600",
+    "type": "application/octet-stream"
+  },
+  {
+    "path": "/__/firebase/init.json",
+    "verified": true,
+    "sourceHash": "bc85fcfa3dbe2995c9ec5294b5e9fb6967b0cca25b5269e40cff674943481fdc",
+    "decodedHash": "f10fdde200b8402bcfdd4bd0daf16e0fe60474dc87ebbf95e84ae505e9e4713a",
+    "cache": "max-age=3600",
+    "type": "application/json"
+  },
+  {
+    "path": "/assets/AssetManifest.bin.json",
+    "verified": true,
+    "sourceHash": "1dc5e5627713892d6790ba3ed74f0dcd60baed17f7eb0f25caa17ced07b84bf2",
+    "decodedHash": "4dcb1d38ee3df9f28d295fbaccd1b16b950e77024304d2d1117b2c375d698c0d",
+    "cache": "max-age=3600",
+    "type": "application/json"
+  },
+  {
+    "path": "/__/firebase/init.js",
+    "verified": true,
+    "sourceHash": "ba5b69af63737cb7ae0b321315ed82cf68928eea061e3af0b9e1ffbdb3cc5347",
+    "decodedHash": "51574660238be5b3a0c0be81893e0be74ffa7e0a3a267b13831f19c35c4d9578",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/assets/FontManifest.json",
+    "verified": true,
+    "sourceHash": "e38b95988f5d060cf9b7ce97cb5ac9236d6f4cc04a11d69567df97b2b4cbc5e5",
+    "decodedHash": "cd7e03645bc44b2dd47b7cb626f51c4ecbf55a197ab77241628b47ac165fbe21",
+    "cache": "max-age=3600",
+    "type": "application/json"
+  },
+  {
+    "path": "/assets/assets/motorbike.png",
+    "verified": true,
+    "sourceHash": "5ae822161cbf7470188150be37466ad3394072d7fce690035cb2cc4549fa6d5d",
+    "decodedHash": "4bd63571cc54c3e06af5256a488b79852830a117d755488a3f83fc13c63ec215",
+    "verification": "gzip level 9 reconstructed from identity response",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/assets/assets/payment/moov.png",
+    "verified": true,
+    "sourceHash": "60e1290c9befe01e929ab84099205fc64305bd2cc056cd40c1b5c9b4d3d84ca3",
+    "decodedHash": "fa589d6d8efeff9436af7f4457da50fb519619a719b0d63348620ada96cedd95",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/assets/assets/logo.png",
+    "verified": true,
+    "sourceHash": "667bdef60e67a10cd191ff147754761e91ab2faae164137f9b2868f2b569362e",
+    "decodedHash": "8329c381fa1f7e3fce148f0b3ef4c155b404d04e8ea2089915663668e363b851",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/assets/assets/payment/mtn.png",
+    "verified": true,
+    "sourceHash": "6eb8853eee58326b703d8b94d1e55dbab062d8544e0cc87e1e54679ba27b74d7",
+    "decodedHash": "61a6ec089ed45e4af2417254105a7a1fb12b3c3f2be8bcdb073fbfd84f198c90",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/assets/NOTICES",
+    "verified": true,
+    "sourceHash": "1f842cfd877ab930936a834af2b913445b57bbfd570d85f8e3ff9586907a31a1",
+    "decodedHash": "1be3aebe31f7aa2a1f5dcf903f17fda561926fc8a46bb040810c9d31f37a7490",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/assets/assets/payment/orange.png",
+    "verified": true,
+    "sourceHash": "e2cdb0745050efa9c0c23540a5df8b0daa7e26cc86db1a298a2f040e34f7993f",
+    "decodedHash": "03dc61fc54b7f4412ae83ad13a325741c733f4c34387ed5fbe755c8582e47226",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/assets/assets/payment/wave.png",
+    "verified": true,
+    "sourceHash": "b5177367757dc45cd78d1f91860b60dc61331b4c5711d7102254c3f4ca569454",
+    "decodedHash": "c4f74481deb56c9dd5d661f411ab26c5a7e5a74859e48e19130141ec6e6d9cae",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/assets/packages/cupertino_icons/assets/CupertinoIcons.ttf",
+    "verified": true,
+    "sourceHash": "d41473de1f7708a0702d7f19327693486512db442f6ab0cf7774e6d6576f9fcb",
+    "decodedHash": "3d90c370aa4cf00dc57ee2b902f6652147c0f81e03e483df584a9c08b1687c9d",
+    "cache": "max-age=3600",
+    "type": "font/ttf"
+  },
+  {
+    "path": "/assets/fonts/MaterialIcons-Regular.otf",
+    "verified": true,
+    "sourceHash": "7e8b2e31bff6333f3b4bcd4eab7df516fa23719b445550307a16bd2600a47dba",
+    "decodedHash": "7c78ef3045a7874d14ba0ab219564788742cec99062dc2ab06bd3a7bd85e0116",
+    "cache": "max-age=3600",
+    "type": "font/otf"
+  },
+  {
+    "path": "/assets/packages/flutter_sound_web/howler/howler.js",
+    "verified": true,
+    "sourceHash": "037b4958cd39fabfe1ab9de926f007c9543b708a1adae8dcee4f2f9846f12efa",
+    "decodedHash": "6198e656ba0c27506cbf9e5bc07360dabdee5f1105a2eaacd6bffaf70f18d70d",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/assets/packages/flutter_sound_web/src/flutter_sound.js",
+    "verified": true,
+    "sourceHash": "28891a32e469e34c737573798d661843696630ff438c77664e3e56ce904aee62",
+    "decodedHash": "8ce290cb881dcd9e4445f6ebb1463a792ebca261fde2fd0cf7803aeb23f48192",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/assets/packages/flutter_sound_web/src/flutter_sound_player.js",
+    "verified": true,
+    "sourceHash": "547be52706d4d1ab0f66d67576586fc49b6e0222773cbd80a4b8ab9e62ac97a9",
+    "decodedHash": "4da0a20bec292eb4001b35db2f3741338cea6d2402289050547cda2b7b975f67",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/assets/packages/flutter_sound_web/src/flutter_sound_recorder.js",
+    "verified": true,
+    "sourceHash": "bb2efe7a86e3a14d30848bcb33c05d816cb125b9d50bc1881b4c5a02e61b9208",
+    "decodedHash": "6d538babd30c0b9578c3502c71f658c21d1dfa1c8dcf16871e7c652002e91c7e",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/assets/packages/record_web/assets/js/record.fixwebmduration.js",
+    "verified": true,
+    "sourceHash": "1fc25bdf0caea69215cf80a96cbf0d717fc7c10a58f82861c24fe9a5559ea48a",
+    "decodedHash": "c345ad5d2fffb357ada647b9b690693452a2001bc5912f1e9066876ce016399b",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/assets/packages/flutter_sound_web/src/flutter_sound_stream_processor.js",
+    "verified": true,
+    "sourceHash": "b2403873834d64dad92f93df0b9f81f1cf6dec697645254fce103a51dec089b8",
+    "decodedHash": "ab4422dad0804ddc26d73ff8a718264edd2c79748623ff140be872c48a63e8e3",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/assets/packages/record_web/assets/js/record.worklet.js",
+    "verified": true,
+    "sourceHash": "9724a9661b90f2a6a439aeab485cd69110f30548de42264c49c1fcb5c1ebb44a",
+    "decodedHash": "ba7e0f4c841480ee78c0b54e7eadd44455b916fefdb07410ee46159d82dcc08e",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/assets/shaders/ink_sparkle.frag",
+    "verified": true,
+    "sourceHash": "e6b209e167e1957de7bfd709fff6f751be0e621c6f9eea1413c686a4cf59d248",
+    "decodedHash": "2dca5ab93d4ec29e963f996f3916320ba60825e9537dfb149a68008c7a16b026",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/assets/shaders/stretch_effect.frag",
+    "verified": true,
+    "sourceHash": "c7ea7ea2d613db8d5334a40a3651848e6e035bc130e0fece2387159ab6c3b34c",
+    "decodedHash": "ab412f07a5b9b50b67a885b24dbe16929738ae28630407d6490c924caf0a3220",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/canvaskit/canvaskit.js",
+    "verified": true,
+    "sourceHash": "db08a6a57409c21d7f49480efe19572e1297ede88534b7e26450ae56a71dab68",
+    "decodedHash": "7361b744487f98262f77ac507006b3eae37830430048ab7811a626b79f34a52c",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/canvaskit/chromium/canvaskit.js",
+    "verified": true,
+    "sourceHash": "812bce89bed6fe777fae96ba357deaebaef4a4e28cb781e6769ada65470e1686",
+    "decodedHash": "d2aceb0e24ead163ab289a165ca0e26a36fa26d7118f5a295b8854d59d892896",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/canvaskit/canvaskit.js.symbols",
+    "verified": true,
+    "sourceHash": "aab1b52bf1740b61ee3229277091501520eb95e5c47dbdfa1e5001634fc0d045",
+    "decodedHash": "43dd0e78dfb29b1e3826c4ff987e9c5c982e51e1d28f40753f693f412dd1b298",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/canvaskit/chromium/canvaskit.js.symbols",
+    "verified": true,
+    "sourceHash": "748509b21a9d59f7ba8f126593097e4cdd2ffcbcf310b14a8e803b91faa2f591",
+    "decodedHash": "23a68c0f21677d699eaf86516fb2081556b313d1e429d61c4cb7fbfeb84d9986",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/canvaskit/experimental_webparagraph/canvaskit.js",
+    "verified": true,
+    "sourceHash": "8c114fd508f1fe11c3421890dde12f3bbbe2f24b7f6cdc7469648e8f9b67ed2c",
+    "decodedHash": "803f7bab5f280fb6793495573bc83e6f70110916f75878a79c41e30b86585df8",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/canvaskit/experimental_webparagraph/canvaskit.js.symbols",
+    "verified": true,
+    "sourceHash": "4a8e9a9e8f0bc4eae28b59d1318ef575ceca47e20b0f32cb0a81d587dbcd9e06",
+    "decodedHash": "5746d266932128f390441e40139649b186e2c80322be100867b0aef69b34db0e",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/canvaskit/skwasm.js",
+    "verified": true,
+    "sourceHash": "ece349e6deae6211996545c22ab1a1f164feef9780c637e1d3386055b29cfe42",
+    "decodedHash": "e0316a798a929008cf9221d9ae0e8a4e0a5f07869ff2c0ad68a71f56ab9998a4",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/canvaskit/skwasm.js.symbols",
+    "verified": true,
+    "sourceHash": "ba008aebfe066cee5ef55da6f428c270bade01ba860df494aa99ae789e39b491",
+    "decodedHash": "5e13d39db7315f06e6edd2cd3f4bf3a970bbf0cf33d128a38b6fccf4d25fec8b",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/canvaskit/chromium/canvaskit.wasm",
+    "verified": true,
+    "sourceHash": "4714d5c030553a61d9a807ad8c36201ad80d9ec787450800b844f8ba90ebe0cf",
+    "decodedHash": "c2fc2864763540922c71d464e983bebf97b3a5312fd01c6a8988969747d13314",
+    "cache": "max-age=31536000, immutable",
+    "type": "application/wasm"
+  },
+  {
+    "path": "/canvaskit/skwasm_heavy.js",
+    "verified": true,
+    "sourceHash": "71fb0619a4b847ff8eaec734723babbd9f25c670d571249ea7f08eea6b84c98a",
+    "decodedHash": "fbf1c3374cd28b38ea4c48f8189012263c40e78e0a55323a557443c97a58c58c",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/canvaskit/skwasm_heavy.js.symbols",
+    "verified": true,
+    "sourceHash": "a106e4f2bcd308a3daa2fd85c7262c879d0b2e1a351cd95eec9b6d69b0145afc",
+    "decodedHash": "5dbcc8bc79d9af9aba141a682ac0378f17242ae62b2338be2b979361694c8ca2",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/canvaskit/experimental_webparagraph/canvaskit.wasm",
+    "verified": true,
+    "sourceHash": "b153352489d2044130122ce4ab385859c1602a91513c959c423e0dddc28c32f9",
+    "decodedHash": "6b916e684369558b9a4fdd774fedf2717d7481cf0b7dffb28e084129512bbd3f",
+    "cache": "max-age=31536000, immutable",
+    "type": "application/wasm"
+  },
+  {
+    "path": "/canvaskit/wimp.js",
+    "verified": true,
+    "sourceHash": "ab9ace374c09f6a3f1793d47ecc18ddf06a521093d9cd71adae0cc53b8f7ee72",
+    "decodedHash": "3f2cc5ae040789508b6914897a9858389a496b3a7cadcc71ef120cca99f70586",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/canvaskit/wimp.js.symbols",
+    "verified": true,
+    "sourceHash": "f938b40adad1eb44b4bcf515a3ebb1aee09696890ec7d3c58dc2141feabf85e9",
+    "decodedHash": "f86ba748d1f9c522e9eeffe39db4e1ef32605beaf52d2a87bc51a9368e772017",
+    "cache": "max-age=3600",
+    "type": "text/html; charset=UTF-8"
+  },
+  {
+    "path": "/canvaskit/skwasm.wasm",
+    "verified": true,
+    "sourceHash": "82cfca6f76209d8af36b3a825ada979e803995a8df4b0504f26835bfd0a55521",
+    "decodedHash": "084a99454e405ad9e396803f5c02369562c92210ad9ff83a053ca68a1047a8f4",
+    "cache": "max-age=31536000, immutable",
+    "type": "application/wasm"
+  },
+  {
+    "path": "/distribution/latest.json",
+    "verified": true,
+    "sourceHash": "25cd440d0b777218cdd283a411379a06aa7f6785fd718644912dcd824f33405e",
+    "decodedHash": "6ca2b085e78132d545014886c0b711cff323f7d2b4b14ec04ebedbc869fc23e4",
+    "cache": "no-store",
+    "type": "application/json; charset=utf-8"
+  },
+  {
+    "path": "/canvaskit/skwasm_heavy.wasm",
+    "verified": true,
+    "sourceHash": "9029616b1338180d9da08bb63df2b142ceb346a68344f49d84ce7f4e62bc8734",
+    "decodedHash": "8b8279650b1847d8259ad4591c5cb7cb635b513134ec7565f85b1aa4271d896c",
+    "cache": "max-age=31536000, immutable",
+    "type": "application/wasm"
+  },
+  {
+    "path": "/distribution/qr/az-express-affiche-a4.svg",
+    "verified": true,
+    "sourceHash": "eb3f3dd3f945f99a0113e2daac479f68bd62987cde7227b687aabb10404eaffb",
+    "decodedHash": "380fddcfe2ba53debf0b3aa7e83379c81fa0faac4c208899e66d18c756e4fd5f",
+    "cache": "max-age=3600",
+    "type": "image/svg+xml"
+  },
+  {
+    "path": "/distribution/qr/az-express-affiche-a4.png",
+    "verified": true,
+    "sourceHash": "15327db1ff2976f51693b871c73150ff3fbc90d58d10a5a96cc040169f4301a7",
+    "decodedHash": "879d0ddc300cef06ea8ca16497c6739d9906b87e663dd5a783feb94ae9d50227",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/canvaskit/canvaskit.wasm",
+    "verified": true,
+    "sourceHash": "995a1a4ad41b194c7b14a241c18a3a3039ce27726aa3baa82a657ff8d1aeae97",
+    "decodedHash": "6bdfaa51c76845c02ea90153d44f56f99da51de44a7ee0ea15ccaeb33ed8f476",
+    "cache": "max-age=31536000, immutable",
+    "type": "application/wasm"
+  },
+  {
+    "path": "/distribution/qr/az-express-qr-logo.png",
+    "verified": true,
+    "sourceHash": "0e69b2933c5b719a0b33824414f4383f0ffd1e56e57dcad72de3781c8d3f8c3c",
+    "decodedHash": "a262ba151b6862c09f026b8d0e80cf4bca778e65aab1512851864b9948d810d2",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/distribution/qr/az-express-qr.png",
+    "verified": true,
+    "sourceHash": "fe177d0efe32d32caf28cce9ddf97a7f9713060cad994fcc5d57ed820e04389b",
+    "decodedHash": "e7a0e642592065259d92f361f872a21948e63c924cabcf966f7ccc274c032a4e",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/distribution/qr/az-express-qr.svg",
+    "verified": true,
+    "sourceHash": "1e39e64480780311c08a9bf1577818f53498ec88f0cc30086536c1d04c4b8ce6",
+    "decodedHash": "a1ad38ed8ca4362e680b6d19b8cf13efbd64ace0b512a7761479221c817e75f5",
+    "cache": "max-age=3600",
+    "type": "image/svg+xml"
+  },
+  {
+    "path": "/distribution/qr/az-express-qr-logo.svg",
+    "verified": true,
+    "sourceHash": "1f267d6f438c1aca70c1aa59c04eb3cfbe279881047e3f0e4af10deb4ccb105c",
+    "decodedHash": "74173ebf4d4fbe04c64023eb18fbcc08001e84d787b8d96bc22731e6e2715a0d",
+    "cache": "max-age=3600",
+    "type": "image/svg+xml"
+  },
+  {
+    "path": "/favicon.png",
+    "verified": true,
+    "sourceHash": "19880e004e8357a51f6a64f5d1fdc8828a6432fe9c781f8acb6b730eced2cd13",
+    "decodedHash": "7ab2525f4b86b65d3e4c70358a17e5a1aaf6f437f99cbcc046dad73d59bb9015",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/flutter.js",
+    "verified": true,
+    "sourceHash": "f18220d166d49cbef02491208c46f2c5e54db9739184e304fc55b199b5724407",
+    "decodedHash": "a483fd28f51ed2fadd0da3fade5b672eba56310d549d736ce62eabf624a6a578",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/flutter_service_worker.js",
+    "verified": true,
+    "sourceHash": "c73b271847ffc78c576de35e95f6b46187eefb1d97dcb08eb9d84c45954ff310",
+    "decodedHash": "dbfbe64ae5be5b462abb97338eb9af783ed4ed57a8c73a53c2a44488a26f6416",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/flutter_bootstrap.js",
+    "verified": true,
+    "sourceHash": "887969270e587bf3a11b452e042495370a1ba3017b2782a7b347a09f1549084d",
+    "decodedHash": "9099e524511fd08d88d82a6263ac40d624be2f4bbc7748faa62a4e2ba0197959",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/icons/Icon-192.png",
+    "verified": true,
+    "sourceHash": "5fd961c51d8eb53baacac01f8e53743a76f66a43390a11f5df042e8c618ad64a",
+    "decodedHash": "3dce99077602f70421c1c6b2a240bc9b83d64d86681d45f2154143310c980be3",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/icons/Icon-512.png",
+    "verified": true,
+    "sourceHash": "1de493563deb283e6ad70f0d5a89cfd61e37343df3b919c9862c5a41699ac5bc",
+    "decodedHash": "baccb205ae45f0b421be1657259b4943ac40c95094ab877f3bcbe12cd544dcbe",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/icons/Icon-maskable-192.png",
+    "verified": true,
+    "sourceHash": "f7ac56197638aec92f195c5344d15395c2cbf8a5ae74e846c5b4156b64f05e38",
+    "decodedHash": "d2c842e22a9f4ec9d996b23373a905c88d9a203b220c5c151885ad621f974b5c",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/icons/Icon-maskable-512.png",
+    "verified": true,
+    "sourceHash": "ea58e5c49bc4dcdc5db0a9fe2f25b2a3152f85ef9094f0d020de0aa318451a1d",
+    "decodedHash": "6aee06cdcab6b2aef74b1734c4778f4421d2da100b0ff9e52b21b55240202929",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/index.html",
+    "verified": true,
+    "sourceHash": "63743e6ad0f12b9e3994796f53d9392f1450c96b43c971d255d74bcdcc555ff1",
+    "decodedHash": "5daacb7e7381a7cfdd19aeb624491ebc90faf00fb0069e9d607f6ceae1b30aac",
+    "cache": "no-cache",
+    "type": "text/html; charset=utf-8"
+  },
+  {
+    "path": "/manifest.json",
+    "verified": true,
+    "sourceHash": "4ba3472814e5e5e0a7fcfc02920234ff3225b51e898144d7f274620d1ee603fc",
+    "decodedHash": "cf2c5e32b3f60e5768fd177e3d783f95e7d53233ba9a862de6138bdce1de1da4",
+    "cache": "max-age=3600",
+    "type": "application/json"
+  },
+  {
+    "path": "/splash/img/dark-1x.png",
+    "verified": true,
+    "sourceHash": "4a4b7bff7a01532fc2d8610f800e99415da37e9803fbaf24fa9564ef83ae08a2",
+    "decodedHash": "d9f58af4d54fa3580cb682a7dd05e64cada9156fcea2b039ec02a9a4155d5a86",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/splash/img/dark-2x.png",
+    "verified": true,
+    "sourceHash": "23368a75e8beff6ecce2098214e1366dd248502648c5dd41a0ad91df751a7fb8",
+    "decodedHash": "0cb9b9ac41a2301662d763b86607a61ab1a49b0e36bb50dbd0475925b2ae7170",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/canvaskit/wimp.wasm",
+    "verified": true,
+    "sourceHash": "7a810e7dd1b916989a0dc093cc5755abe03ce0ffbb0869ea5c012c51970da7d6",
+    "decodedHash": "5c34d37553d9ff2cf4be0de2288914b524fae40588aeadaa51facb1ec6d7eab4",
+    "cache": "max-age=31536000, immutable",
+    "type": "application/wasm"
+  },
+  {
+    "path": "/splash/img/dark-3x.png",
+    "verified": true,
+    "sourceHash": "b86d685b69acb8371a969b356139b633d57c79a159cdcb2c2c858670d6752446",
+    "decodedHash": "a6062bc77c892a3369a0729c28a7a172ce6969aff63a26ca926dac5a78a30ad4",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/splash/img/light-1x.png",
+    "verified": true,
+    "sourceHash": "4a4b7bff7a01532fc2d8610f800e99415da37e9803fbaf24fa9564ef83ae08a2",
+    "decodedHash": "d9f58af4d54fa3580cb682a7dd05e64cada9156fcea2b039ec02a9a4155d5a86",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/splash/img/dark-4x.png",
+    "verified": true,
+    "sourceHash": "4b9c255e1b5932ce9a0ac2801fcaf8fbed22b3302c7c6d36651b4f695a329c3c",
+    "decodedHash": "9ca295f3ca0af369246a7c904a632748dac9904db31c337ce8805acfcd4ec043",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/main.dart.js",
+    "verified": true,
+    "sourceHash": "a44c7348b8e1742cafd3a8bd26f5238e6df3a9a81f9a02fc210f5c60f814b5ee",
+    "decodedHash": "86635bd3a2bac6168c2b61332a2e7df013d185237211c645114c875c440cf0a2",
+    "cache": "max-age=31536000, immutable",
+    "type": "text/javascript; charset=utf-8"
+  },
+  {
+    "path": "/splash/img/light-2x.png",
+    "verified": true,
+    "sourceHash": "23368a75e8beff6ecce2098214e1366dd248502648c5dd41a0ad91df751a7fb8",
+    "decodedHash": "0cb9b9ac41a2301662d763b86607a61ab1a49b0e36bb50dbd0475925b2ae7170",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/splash/img/light-3x.png",
+    "verified": true,
+    "sourceHash": "b86d685b69acb8371a969b356139b633d57c79a159cdcb2c2c858670d6752446",
+    "decodedHash": "a6062bc77c892a3369a0729c28a7a172ce6969aff63a26ca926dac5a78a30ad4",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/splash/img/light-4x.png",
+    "verified": true,
+    "sourceHash": "4b9c255e1b5932ce9a0ac2801fcaf8fbed22b3302c7c6d36651b4f695a329c3c",
+    "decodedHash": "9ca295f3ca0af369246a7c904a632748dac9904db31c337ce8805acfcd4ec043",
+    "cache": "max-age=3600",
+    "type": "image/png"
+  },
+  {
+    "path": "/telecharger/index.html",
+    "verified": true,
+    "sourceHash": "152f035d38c59aa45f6702fcc716a209dc1c50ecf5d544ed9ac5a42fe19c48f0",
+    "decodedHash": "985acbe0f9474a718ab8baa54b89828f28970ccc7717fc04caec0f2fe3601582",
+    "cache": "no-cache",
+    "type": "text/html; charset=utf-8"
+  },
+  {
+    "path": "/version.json",
+    "verified": true,
+    "sourceHash": "20f9268a7f9659f7c7513e91764689a0c88acd0ee2d879b9a2224cae675fba7b",
+    "decodedHash": "ba29f45d078572cc6e8657dcd5edc7e30ca7312649cfdb293a4a2bd26a1f82ff",
+    "verification": "gzip level 9 reconstructed from identity response",
+    "cache": "max-age=3600",
+    "type": "application/json"
+  },
+  {
+    "path": "/downloads/az-express-latest.apk",
+    "verified": true,
+    "sourceHash": "4284bf97615df3a4889262515dea66329a191144dd6cbbdde7b5a5218c60e7d7",
+    "decodedHash": "7b60fab2532080e504701f819f5527cb04dca8ecd1a668de99037ac520687986",
+    "cache": "public, max-age=300",
+    "type": "application/vnd.android.package-archive"
+  }
+]

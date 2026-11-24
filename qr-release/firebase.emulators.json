@@ -1,0 +1,14 @@
+{
+  "firestore": {
+    "rules": "rules/firestore.qr.rules"
+  },
+  "emulators": {
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8198
+    },
+    "ui": {
+      "enabled": false
+    }
+  }
+}

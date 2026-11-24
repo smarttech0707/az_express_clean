@@ -9,7 +9,7 @@ function publicView(kind,data){
   // phone, wallet, credentials or tokens to anonymous visitors.
   return {kind,name:typeof data.name==='string'?data.name.slice(0,160):'Etablissement AZ Express'};
 }
-function buildPartnerQr({db,auth,HttpsError,baseUrl='https://az-express-b0469.web.app',newId=randomUUID}){
+function buildPartnerQr({db,auth,HttpsError,baseUrl='https://az-express-b0469.web.app',newId=randomUUID,requireSuperAdmin,checkRateLimit,logAudit}){
   async function ensure(tx,kind,id){
     const source=await tx.get(db.collection(COLLECTIONS[kind]).doc(id));
     const ref=db.collection('partner_qr').doc(keyFor(kind,id));
@@ -58,22 +58,32 @@ function buildPartnerQr({db,auth,HttpsError,baseUrl='https://az-express-b0469.we
     catch(e){if(!['not-found','failed-precondition'].includes(e.code))throw e;}
   }
   async function grant(request){
-    const actor=request.auth?.uid,{uid,kind,establishmentId:id,active}=request.data||{};
-    if(!actor)throw new HttpsError('unauthenticated','Connexion requise');
+    // Guard administratif centralisé (readValidAdmin + enforceAdminSecondFactor) :
+    // seul chemin désormais, l'ancienne vérification manuelle du rôle/isActive
+    // ne protégeait jamais contre un mot de passe seul (pas de second facteur,
+    // pas de rate-limit, pas d'audit). Comportement métier inchangé.
+    await requireSuperAdmin({request,db});
+    const actor=request.auth.uid,{uid,kind,establishmentId:id,active}=request.data||{};
     if(!validId(uid)||!Object.hasOwn(COLLECTIONS,kind)||!validId(id)||typeof active!=='boolean')throw new HttpsError('invalid-argument','Parametres invalides');
-    // Validate the actor before looking up any target Auth account.
-    const actorProfile=(await db.collection('admins').doc(actor).get()).data();
-    if(actorProfile?.role!=='super'||actorProfile?.isActive!==true)throw new HttpsError('permission-denied','Super-admin requis');
     if(active){
       let user;
       try{user=await auth.getUser(uid);}catch(_){throw new HttpsError('failed-precondition','Compte Firebase cible non verifie');}
       if(user.uid!==uid||user.disabled||!user.providerData?.length)throw new HttpsError('failed-precondition','Compte personnel permanent requis');
     }
+    await checkRateLimit(actor,'partner_qr_grant',10,3600);
     await db.runTransaction(async tx=>{
+      // Re-vérification dans la transaction (protection déjà existante avant
+      // cette correction) : couvre une démotion concurrente de l'acteur entre
+      // le `requireSuperAdmin` ci-dessus et l'écriture.
       const [a,t,source]=await Promise.all([tx.get(db.collection('admins').doc(actor)),tx.get(db.collection('account_tombstones').doc(uid)),tx.get(db.collection(COLLECTIONS[kind]).doc(id))]);
       if(a.data()?.role!=='super'||a.data()?.isActive!==true)throw new HttpsError('permission-denied','Super-admin requis');
       if(active&&(t.exists||!source.exists))throw new HttpsError('failed-precondition','Compte ou etablissement indisponible');
       tx.set(db.collection('partner_qr_managers').doc(uid).collection('establishments').doc(keyFor(kind,id)),{kind,establishmentId:id,active,grantedBy:actor});
+    });
+    await logAudit({
+      userId:actor,userType:'admin',
+      action:active?'grant_partner_qr_manager':'revoke_partner_qr_manager',
+      targetId:uid,metadata:{kind,establishmentId:id,active},
     });
     return {saved:true};
   }

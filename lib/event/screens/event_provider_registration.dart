@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../theme/app_theme.dart';
 import '../../models/professional_subscription.dart';
 import '../services/event_service.dart';
+import '../../services/permission_primer.dart';
 
 const eventRegistrationCategories = <String, List<String>>{
   'Location': [
@@ -418,6 +419,7 @@ class _EventProviderRegistrationState extends State<EventProviderRegistration> {
       );
 
   Future<void> _pickSingle(String target) async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final file = await picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 75,
@@ -434,6 +436,7 @@ class _EventProviderRegistrationState extends State<EventProviderRegistration> {
   }
 
   Future<void> _pickGallery() async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final files = await picker.pickMultiImage(imageQuality: 75, maxWidth: 1600);
     final valid = <XFile>[];
     for (final file in files.take(10)) {
@@ -443,6 +446,7 @@ class _EventProviderRegistrationState extends State<EventProviderRegistration> {
   }
 
   Future<void> _pickVideo() async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final file = await picker.pickVideo(
       source: ImageSource.gallery,
       maxDuration: const Duration(minutes: 3),

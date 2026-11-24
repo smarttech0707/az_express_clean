@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'permission_primer.dart';
 
 /// Résultat d'une tentative de localisation du CLIENT lui-même (jamais celle
 /// de l'annonce) — voir Mission 6. Jamais persisté, jamais journalisé,
@@ -159,7 +160,7 @@ class MapNavigationService {
       }
       LocationPermission perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
+        perm = await PermissionPrimer.requestLocation();
       }
       if (perm == LocationPermission.deniedForever) {
         return const ClientGpsResult(ClientGpsState.deniedForever);

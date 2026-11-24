@@ -40,6 +40,12 @@ Le contrôle refuse des valeurs vides, une identité incorrecte et un fichier
 Les valeurs ne sont jamais affichées par le script. Ne pas utiliser de logs
 Flutter verbeux pour publier les commandes internes de compilation.
 
+`APP_BUILD_NUMBER` (lu par la version minimale, `lib/services/min_version_service.dart`) est ajouté
+au fichier temporaire par le script : `--build-number` pour l'IPA, sinon le `+N` de `pubspec.yaml`
+(identique au `versionCode` Android). Le script refuse un numéro absent ou nul, ou déjà présent dans
+la configuration. `.\run.ps1 -build apk|appbundle|ipa` délègue à ce script ; `.\run.ps1` et
+`-release` ajoutent le même numéro à `flutter run`. Les builds web n'ont pas de numéro (jamais bloqués).
+
 Un appel direct à `flutter build` contourne ce contrôle : utiliser ce script
 pour les releases Android et le workflow corrigé pour iOS. Ne pas ajouter les
 fichiers Firebase ou `.env` à Git.

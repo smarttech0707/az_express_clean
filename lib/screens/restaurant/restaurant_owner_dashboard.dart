@@ -20,6 +20,7 @@ import '../../widgets/stream_error_state.dart';
 import '../../widgets/partner_v2_order_card.dart';
 import '../../widgets/min_version_dialog.dart';
 import '../../utils/storage_cleanup.dart';
+import '../../services/permission_primer.dart';
 
 class RestaurantOwnerDashboard extends StatefulWidget {
   final String ownerId;
@@ -498,6 +499,7 @@ class _MenuTab extends StatelessWidget {
               Center(
                 child: GestureDetector(
                   onTap: () async {
+                    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
                     final img = await ImagePicker().pickImage(
                         source: ImageSource.gallery, imageQuality: 80);
                     if (img != null) setS(() => pickedImage = File(img.path));

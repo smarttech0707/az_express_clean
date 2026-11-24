@@ -5,6 +5,7 @@ const { assertNewAccountActivity } = require('./accountAdmission');
 const {
   CATALOG_VERSION, CatalogRefusal, resolveBlanchisserieConfig, priceCatalogRequest, canonicalParams,
 } = require('./catalogTariff');
+const { resolveDispatchGeography } = require('./dispatch');
 
 // quoteCatalogCF + createCatalogOrderFromQuoteCF — Colis, Blanchisserie, Eau & Boissons.
 //
@@ -15,11 +16,30 @@ const {
 // Le client ne fournit que des CHOIX (type, kilos, produits, quantités) et des textes ; tous les montants sont posés
 // par le serveur. La commande garde exactement la forme des écrans actuels (acceptation, livraison, annulation et
 // commission fonctionnent sans changement ; annulation = cancelOrderCF).
-// Nouveaux points d'entrée uniquement : aucun écran actuel ne les appelle, aucun parcours existant n'est modifié.
+// Correction (audit release) : ces deux fonctions sont en réalité déjà appelées sans condition par
+// blanchisserie_page.dart/colis_page.dart/eau_boissons_page.dart (via CatalogOrderService) — le commentaire précédent
+// ("aucun écran actuel ne les appelle") était erroné/obsolète, corrigé ici.
+//
+// Géolocalisation (correction release readiness) : `createCatalogOrderFromQuoteCF` exigeait auparavant un point de
+// collecte/livraison mais écrivait `latitude: 0, longitude: 0` — rejeté par `assertValidDispatchPoint` (dispatch.js),
+// ce qui empêchait silencieusement toute attribution à un livreur (la commande expirait et était remboursée sans
+// jamais être proposée). Le point réel (`lat`/`lng`, GPS ou géocodage de l'adresse côté Flutter) est désormais exigé
+// et validé ici, puis résolu en ville/zone via `resolveDispatchGeography` (dispatch.js), exactement comme
+// deliveryQuote.js. Ces 3 services n'ont qu'une seule adresse de service (pas de collecte/livraison distinctes) :
+// le même point sert de collecte ET de livraison pour le dispatch.
 
 const SERVICES = Object.freeze(['colis', 'blanchisserie', 'eau_boissons']);
 const PAYMENT_METHODS = Object.freeze(['wallet', 'cash']);
 const QUOTE_TTL_MS = 10 * 60 * 1000;
+const COORDINATE_SOURCES = Object.freeze(['gps', 'google']);
+
+// Point GPS réellement exploitable : fini, dans les bornes, jamais (0,0) (coordonnée « non renseignée » côté app).
+function validCoordinate(lat, lng) {
+  return typeof lat === 'number' && typeof lng === 'number' &&
+    Number.isFinite(lat) && Number.isFinite(lng) &&
+    lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 &&
+    !(lat === 0 && lng === 0);
+}
 
 const envelope = (success, code, message, data = null) => ({ success, error: success ? null : code, message, data, code });
 
@@ -127,8 +147,13 @@ function buildQuoteCatalogCF({ db, admin, onCall, HttpsError, checkRateLimit, no
 }
 
 // ── createCatalogOrderFromQuoteCF ──────────────────────────────────────────
+// `resolveGeography` injectable (même patron que deliveryQuote.js) : les tests fournissent un résolveur simulé plutôt
+// que de peupler une collection `zones_livraison` complète.
+const defaultGeography = (db, args) => resolveDispatchGeography(db, args);
+
 function buildCreateCatalogOrderFromQuoteCF({
   db, admin, onCall, HttpsError, checkRateLimit, logAudit, now = () => Date.now(), newOrderId = () => crypto.randomUUID(),
+  resolveGeography = defaultGeography,
 }) {
   return onCall(async (request) => {
     const uid = requireClientAuth(request, HttpsError);
@@ -139,12 +164,37 @@ function buildCreateCatalogOrderFromQuoteCF({
     if (!SERVICES.includes(d.service)) return envelope(false, 'SERVICE_NOT_SUPPORTED', 'Service non pris en charge');
     // Mobile money non pris en charge ici : refus explicite (jamais traité comme du cash).
     if (!PAYMENT_METHODS.includes(d.paymentMethod)) return envelope(false, 'PAYMENT_METHOD_UNSUPPORTED', 'Mode de paiement non pris en charge');
+    // Correction release readiness : un point de service valide est désormais EXIGÉ. Jamais de confiance aveugle dans
+    // les coordonnées du client — validées ici, puis revérifiées par resolveDispatchGeography (ville desservie).
+    // Jamais (0,0) de secours : une commande sans point exploitable est refusée plutôt que créée invisible au dispatch.
+    if (!validCoordinate(d.lat, d.lng)) {
+      return envelope(false, 'LOCATION_REQUIRED', 'Position de livraison requise (GPS ou adresse localisée).');
+    }
+    const coordinateSource = COORDINATE_SOURCES.includes(d.coordinateSource) ? d.coordinateSource : 'gps';
     await checkRateLimit(uid, 'create_catalog_order', 10, 60);
     const paymentMethod = d.paymentMethod;
     const quoteRef = db.collection('tariff_quotes').doc(d.quoteId);
     const clientRef = db.collection('clients').doc(uid);
     const orderId = newOrderId();
     const orderRef = db.collection('orders').doc(orderId);
+
+    // Géographie de dispatch dérivée du SERVEUR (resolveDispatchGeography, dispatch.js), jamais des villes envoyées par
+    // le client. Lecture hors transaction (collection de référence), avant tout débit : une zone non desservie ne coûte
+    // rien. Ces 3 services n'ont qu'un seul point de service : il sert à la fois de collecte et de livraison.
+    let geography;
+    try {
+      geography = await resolveGeography(db, {
+        pickupLat: d.lat, pickupLng: d.lng, deliveryLat: d.lat, deliveryLng: d.lng,
+        pickupCoordinateSource: coordinateSource, deliveryCoordinateSource: coordinateSource,
+      });
+    } catch (err) {
+      // Même convention que deliveryQuote.js : on reconnaît l'erreur par son `code`, pas par son type exact
+      // (resolveGeography est injectable pour les tests, voir deliveryQuote.test.js).
+      if (err && (err.code === 'outside-service' || err.code === 'invalid-coordinates')) {
+        return envelope(false, err.code === 'outside-service' ? 'OUTSIDE_SERVICE' : 'INVALID_COORDINATES', err.message);
+      }
+      throw err;
+    }
 
     let priced; let texts;
     let cfg;
@@ -205,7 +255,12 @@ function buildCreateCatalogOrderFromQuoteCF({
           budget: priced.budget, shoppingBudget: priced.shoppingBudget,
           status: 'pending', type: d.service,
           ...priced.orderFields, ...texts.fields,
-          latitude: 0, longitude: 0,
+          latitude: d.lat, longitude: d.lng, deliveryLatitude: d.lat, deliveryLongitude: d.lng,
+          destLat: d.lat, destLng: d.lng,
+          pickupCityId: geography.pickupCityId, deliveryCityId: geography.deliveryCityId,
+          pickupZoneId: geography.pickupZoneId || null, deliveryZoneId: geography.deliveryZoneId || null,
+          cityResolutionStatus: geography.cityResolutionStatus,
+          pickupCoordinateSource: coordinateSource, deliveryCoordinateSource: coordinateSource,
           clientId: uid, paymentMethod, isPaid: paymentMethod === 'wallet',
           tariffQuoteId: d.quoteId, quotedAmount: q.amount, catalogVersion: CATALOG_VERSION, source: 'catalog_quote',
           createdAt: admin.firestore.FieldValue.serverTimestamp(),

@@ -1,21 +1,35 @@
 import 'dart:async';
 
 import 'package:az_express/services/google_routes_service.dart';
+import 'package:az_express/services/maps_proxy_client.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
 
+// Lot 1.2.1 — ces tests exerçaient le chemin Google direct (`debugDirectionsGet`),
+// supprimé (plus aucun appel Google direct depuis Flutter). Même comportement
+// testé (déduplication des appels concurrents, indépendance par trajet, retry
+// après échec, cache), désormais via le seul chemin réseau restant : le proxy
+// serveur (`MapsProxyClient.debugCall`).
 void main() {
   const origin = LatLng(6.73, -3.49);
   const destination = LatLng(6.74, -3.48);
 
-  setUp(GoogleRoutesService.debugResetCache);
-  tearDown(GoogleRoutesService.debugResetCache);
+  setUp(() {
+    GoogleRoutesService.debugResetCache();
+    // Lot 1.2.2 — le retry existe désormais dans MapsProxyClient ; aucun
+    // délai réel pendant les tests.
+    MapsProxyClient.debugRetryDelay = (_) => Duration.zero;
+  });
+  tearDown(() {
+    GoogleRoutesService.debugResetCache();
+    MapsProxyClient.debugCall = null;
+    MapsProxyClient.debugRetryDelay = null;
+  });
 
   test('two identical concurrent routes share one request', () async {
-    final response = Completer<http.Response>();
+    final response = Completer<Map<String, dynamic>?>();
     var requests = 0;
-    GoogleRoutesService.debugDirectionsGet = (_) {
+    MapsProxyClient.debugCall = (_, __) {
       requests++;
       return response.future;
     };
@@ -31,14 +45,14 @@ void main() {
 
     expect(requests, 1);
     expect(identical(first, second), isTrue);
-    response.complete(http.Response('', 500));
+    response.complete(null); // proxy indisponible → repli local
     expect(await first, await second);
   });
 
   test('three identical concurrent routes share one request', () async {
-    final response = Completer<http.Response>();
+    final response = Completer<Map<String, dynamic>?>();
     var requests = 0;
-    GoogleRoutesService.debugDirectionsGet = (_) {
+    MapsProxyClient.debugCall = (_, __) {
       requests++;
       return response.future;
     };
@@ -54,15 +68,15 @@ void main() {
     expect(requests, 1);
     expect(futures.skip(1).every((future) => identical(future, futures.first)),
         isTrue);
-    response.complete(http.Response('', 500));
+    response.complete(null);
     final routes = await Future.wait(futures);
     expect(routes.map((route) => route.distanceKm).toSet(), hasLength(1));
   });
 
   test('different routes remain independent', () async {
-    final responses = <Completer<http.Response>>[];
-    GoogleRoutesService.debugDirectionsGet = (_) {
-      final response = Completer<http.Response>();
+    final responses = <Completer<Map<String, dynamic>?>>[];
+    MapsProxyClient.debugCall = (_, __) {
+      final response = Completer<Map<String, dynamic>?>();
       responses.add(response);
       return response.future;
     };
@@ -78,14 +92,14 @@ void main() {
 
     expect(responses, hasLength(2));
     for (final response in responses) {
-      response.complete(http.Response('', 500));
+      response.complete(null);
     }
     await Future.wait([first, second]);
   });
 
   test('a failed request is removed so a later request retries', () async {
     var requests = 0;
-    GoogleRoutesService.debugDirectionsGet = (_) async {
+    MapsProxyClient.debugCall = (_, __) async {
       requests++;
       throw StateError('transient test failure');
     };
@@ -99,14 +113,25 @@ void main() {
       destination: destination,
     );
 
-    expect(requests, 2);
+    // Lot 1.2.2 : `StateError` (ni permission-denied/unauthenticated, ni
+    // FirebaseFunctionsException) est jugée transitoire et réessayée une
+    // fois par MapsProxyClient.call. Chacun des deux appels à
+    // getRouteModel ci-dessus épuise donc 2 tentatives (jamais plus) avant
+    // de retomber sur l'estimation locale : 2 appels distincts × 2
+    // tentatives = 4, pas 2 comme avant l'introduction du retry.
+    expect(requests, 4);
   });
 
   test('a completed route keeps using the existing result cache', () async {
     var requests = 0;
-    GoogleRoutesService.debugDirectionsGet = (_) async {
+    MapsProxyClient.debugCall = (_, __) async {
       requests++;
-      return http.Response(_successResponse, 200);
+      return {
+        'encodedPolyline': '??',
+        'distanceMeters': 1000,
+        'durationSeconds': 120,
+        'isEstimate': false,
+      };
     };
 
     final first = await GoogleRoutesService.getRouteModel(
@@ -122,16 +147,3 @@ void main() {
     expect(second, same(first));
   });
 }
-
-const _successResponse = '''
-{
-  "status": "OK",
-  "routes": [{
-    "legs": [{
-      "distance": {"value": 1000},
-      "duration": {"value": 120}
-    }],
-    "overview_polyline": {"points": "??"}
-  }]
-}
-''';

@@ -12,6 +12,7 @@ import 'event_provider_registration.dart';
 import '../../widgets/pro_back_button.dart';
 import '../../widgets/stream_error_state.dart';
 import '../../widgets/account_deletion_dialog.dart';
+import '../../services/permission_primer.dart';
 
 class EventProviderPortal extends StatefulWidget {
   const EventProviderPortal({super.key});
@@ -634,7 +635,10 @@ class _OfferFormState extends State<_OfferForm> {
         providerName: widget.profile.shopName,
         values: values,
       );
-      final picked = media == 'video'
+      final allowed = await PermissionPrimer.prepareImage(ImageSource.gallery, context: mounted ? context : null);
+      final picked = !allowed
+          ? null
+          : media == 'video'
           ? await ImagePicker().pickVideo(
               source: ImageSource.gallery,
               maxDuration: const Duration(minutes: 3),

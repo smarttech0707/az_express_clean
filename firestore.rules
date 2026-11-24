@@ -79,6 +79,35 @@ service cloud.firestore {
     function isRealUser() {
       return isAuth() && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
+    // SEC-01 / driver_public (phase additive S2, restreint en S5.3.5) : liste blanche
+    // stricte. `isAvailable`, `isOnDelivery`, `avgRating`, `ratingCount` ET, depuis
+    // S5.3.5, `name`/`photoUrl`/`isOnline` sont exclusivement posés par le mécanisme
+    // serveur (`functions/driverPublicSync.js`, synchronisation depuis `livreurs`) —
+    // le livreur ne peut plus les écrire directement dans `driver_public` (cf. les
+    // branches create/update ci-dessous) ; seuls les 5 champs GPS restent écrits par le
+    // client (`lib/services/driver_public_projection.dart`, phase S4). `vehicleType`
+    // n'existe pas dans le schéma réel de `livreurs` à ce jour (aucun écran driver ne
+    // l'écrit) : volontairement absent tant qu'une source de vérité n'existe pas.
+    function driverPublicKeysValid() {
+      return request.resource.data.keys().hasOnly([
+        'name', 'photoUrl', 'lat', 'lng', 'heading', 'speed', 'updatedAt',
+        'isOnline', 'isAvailable', 'isOnDelivery', 'avgRating', 'ratingCount']);
+    }
+    function driverPublicTypesValid() {
+      let d = request.resource.data;
+      return (!('name' in d) || (d.name is string && d.name.size() <= 160))
+        && (!('photoUrl' in d) || (d.photoUrl is string && d.photoUrl.size() <= 2048))
+        && (!('lat' in d) || (d.lat is number && d.lat >= -90 && d.lat <= 90))
+        && (!('lng' in d) || (d.lng is number && d.lng >= -180 && d.lng <= 180))
+        && (!('heading' in d) || d.heading is number)
+        && (!('speed' in d) || d.speed is number)
+        && (!('updatedAt' in d) || d.updatedAt == request.time)
+        && (!('isOnline' in d) || d.isOnline is bool)
+        && (!('isAvailable' in d) || d.isAvailable is bool)
+        && (!('isOnDelivery' in d) || d.isOnDelivery is bool)
+        && (!('avgRating' in d) || d.avgRating is number)
+        && (!('ratingCount' in d) || (d.ratingCount is int && d.ratingCount >= 0));
+    }
     // Master Prompt "Corrections finales avant publication" — Bug Critique #1 :
     // l'accès par crochet ([field]) lève une erreur d'évaluation (donc refuse
     // silencieusement l'écriture) si le champ est absent d'un des deux côtés,
@@ -365,8 +394,26 @@ service cloud.firestore {
     }
 
     match /livreurs/{livreurId} {
-      // Lecture par tous les authentifiés (anonymes inclus pour la carte client)
-      allow read:   if isAuth();
+      // SEC-01 / S6.16-S6.17 : CANDIDAT DE TEST — jamais la regle de production.
+      // Propose le resserrement etudie en S6.15 : proprietaire, super-admin,
+      // sous-admin avec une des permissions reellement utilisees par un ecran
+      // lisant livreurs (livreurs, carte, classement, gains), et patron de
+      // flotte restreint a ses propres livreurs affilies via ownerId.
+      // S6.17 : CORRECTION — admin_dashboard.dart (ecran d'accueil admin,
+      // atteint par TOUT admin actif juste apres connexion, SANS
+      // verification de permission specifique) execute des comptages non
+      // filtres sur livreurs ; seule une condition valable pour tout admin
+      // actif (independante de resource.data) peut satisfaire une requete
+      // non filtree. isActiveAdmin() (super OU sous-admin actif, quelle que
+      // soit sa permission) remplace les hasAdminPermission(...) distincts
+      // de S6.15/S6.16 : ceux-ci etaient insuffisants (ils n'auraient pas
+      // couvert un sous-admin sans aucune des 4 permissions, pourtant
+      // toujours capable d'atteindre ce tableau de bord) et redondants une
+      // fois isActiveAdmin() present (tout sous-admin actif passe deja par
+      // cette condition, quelle que soit sa permission).
+      allow read: if isOwner(livreurId)
+        || isActiveAdmin()
+        || (isRealUser() && resource.data.get('ownerId', null) == uid());
       allow create: if isAdmin();
       // Le livreur peut mettre à jour son propre doc :
       // - sans toucher au wallet (GPS, isOnline, token…)
@@ -421,6 +468,53 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if isAdmin();
       }
+    }
+
+    // SEC-01 : projection publique de `livreurs` (Mission driver_public, phase additive
+    // S2 — voir docs/DRIVER_PUBLIC_MIGRATION_PLAN.md). N'affecte EN RIEN la règle
+    // ci-dessus : `livreurs` reste lisible par tout authentifié, inchangé. Écrite depuis
+    // S4 (projection GPS cliente) et S5.2/S5.3.3 (synchronisation serveur des champs
+    // non-GPS depuis `livreurs`) ; aucune lecture applicative ne l'utilise encore
+    // (migration des lecteurs prévue, non commencée — voir S6, hors périmètre ici).
+    match /driver_public/{driverId} {
+      // Carte des visiteurs anonymes et sélection de destination : lecture publique,
+      // anonymes compris, comme `livreurs` aujourd'hui — mais plus aucun champ privé.
+      allow read: if isAuth();
+      // Première écriture (aucun document préexistant) : seuls les 5 champs GPS sont
+      // légitimement écrits par le livreur à la création (cf. driver_public_projection.dart,
+      // phase S4). `name`/`photoUrl`/`isOnline`, comme les 4 champs serveur, ne doivent
+      // même pas être envoyés par le livreur à ce stade (S5.3.5 : ces 3 champs sont
+      // désormais exclusivement posés par la synchronisation serveur
+      // `functions/driverPublicSync.js`, qui relit `livreurs` — aucun écran livreur n'a
+      // besoin d'écrire ces champs directement ici, confirmé par inventaire du code).
+      // `exists(livreurs/driverId)` empêche un utilisateur quelconque (client, etc.) de
+      // fabriquer une fiche publique « livreur » à son propre uid : seul un compte déjà
+      // créé par l'administration dans `livreurs` peut avoir une projection publique.
+      allow create: if isOwner(driverId) && isRealUser()
+        && exists(/databases/$(database)/documents/livreurs/$(driverId))
+        && driverPublicKeysValid() && driverPublicTypesValid()
+        && !('avgRating' in request.resource.data)
+        && !('ratingCount' in request.resource.data)
+        && !('isAvailable' in request.resource.data)
+        && !('isOnDelivery' in request.resource.data)
+        && !('name' in request.resource.data)
+        && !('photoUrl' in request.resource.data)
+        && !('isOnline' in request.resource.data);
+      // Mise à jour : les 4 champs serveur, PLUS (depuis S5.3.5) `name`/`photoUrl`/
+      // `isOnline`, ne peuvent jamais changer de valeur ici, même s'ils sont déjà
+      // présents (échec silencieux volontaire plutôt qu'un contournement) — seule la
+      // synchronisation serveur (Admin SDK, hors règles) les modifie. Le livreur garde
+      // l'écriture directe des 5 champs GPS (lat/lng/heading/speed/updatedAt), seul
+      // usage client réel à ce jour.
+      allow update: if isOwner(driverId) && isRealUser()
+        && exists(/databases/$(database)/documents/livreurs/$(driverId))
+        && driverPublicKeysValid() && driverPublicTypesValid()
+        && unchanged('avgRating') && unchanged('ratingCount')
+        && unchanged('isAvailable') && unchanged('isOnDelivery')
+        && unchanged('name') && unchanged('photoUrl') && unchanged('isOnline');
+      // Suppression réservée à l'administration, comme `livreurs` : un livreur ne
+      // supprime jamais lui-même sa fiche publique (cohérence avec la clôture de compte).
+      allow delete: if isAdmin();
     }
 
     match /driver_requests/{requestId} {
@@ -1492,7 +1586,10 @@ service cloud.firestore {
       // config/partnerOrdersV2 (pilote Restaurant/Boulangerie v2, arrêt d'urgence) : AUCUNE écriture client, même super-administrateur.
       // Seule setPartnerOrdersConfig (Admin SDK) la modifie, avec validation, version et audit. Les règles et les fonctions
       // continuent de la LIRE (get() dans legacyPartnerCreationBlocked n'est pas soumis à ces règles de lecture).
-      allow write: if isAdmin() && configId != 'partnerOrdersV2';
+      // config/app_versions (version minimale, M2.2) et config/app_release_registry (dernier build publié vérifié) :
+      // AUCUNE écriture client, même super-administrateur. Seule setAppVersionsConfigCF (Admin SDK) modifie app_versions,
+      // avec validation, garde du dernier build publié, version et audit ; le registre est écrit à la main par l'Admin SDK.
+      allow write: if isAdmin() && !(configId in ['partnerOrdersV2', 'app_versions', 'app_release_registry']);
     }
 
     // ── Config business (commissions, seuils) — réservée aux admins ─────────

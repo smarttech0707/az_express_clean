@@ -95,10 +95,31 @@ LiveDriverSnapshot liveDriverSnapshotFromQuery(
 }
 
 /// Flux de production, inchangé fonctionnellement : `livreurs` en ligne en
-/// temps réel, adapté à [LiveDriverSnapshot].
+/// temps réel, adapté à [LiveDriverSnapshot]. Réservé aux lecteurs qui ont
+/// réellement besoin d'un champ privé (ex. `phone` pour l'outil de suivi
+/// admin, [admin_live_tracking_page.dart]) — ne pas introduire de nouveau
+/// consommateur sans justification, voir [onlinePublicDriversFeed] pour tout
+/// lecteur qui n'a besoin que des champs publics.
 Stream<LiveDriverSnapshot> onlineDriversFeed() {
   return FirebaseFirestore.instance
       .collection('livreurs')
+      .where('isOnline', isEqualTo: true)
+      .snapshots()
+      .map(liveDriverSnapshotFromQuery);
+}
+
+/// SEC-01 / S6.14 : même flux (livreurs en ligne), mais lu depuis la
+/// projection publique `driver_public` plutôt que `livreurs`. `isOnline` fait
+/// partie des 7 champs synchronisés par `syncDriverPublicOnLivreur*`
+/// (déployées, Lot 1) — le filtre reste donc exact. Pour tout lecteur
+/// n'ayant besoin que des champs publics (`name`, `photoUrl`, `lat`, `lng`,
+/// `heading`, `speed`, `updatedAt`, `isOnline`, `isAvailable`,
+/// `isOnDelivery`, `avgRating`, `ratingCount`) — ex. [client_map.dart], qui
+/// n'utilise que `lat`/`lng`/`name` (son usage de `vehicle` lisait un champ
+/// jamais écrit sur `livreurs`, confirmé mort, donc sans perte réelle ici).
+Stream<LiveDriverSnapshot> onlinePublicDriversFeed() {
+  return FirebaseFirestore.instance
+      .collection('driver_public')
       .where('isOnline', isEqualTo: true)
       .snapshots()
       .map(liveDriverSnapshotFromQuery);

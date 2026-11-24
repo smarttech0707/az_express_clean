@@ -33,9 +33,10 @@ import 'driver_transfer_page.dart';
 import 'driver_cash_remittance_page.dart';
 import 'driver_rides_page.dart';
 import '../../constants/app_constants.dart';
-import '../../services/min_version_service.dart';
+import '../../widgets/min_version_dialog.dart';
 import '../../delivery_proofs/delivery_transfer_service.dart';
 import 'driver_profil.dart';
+import '../../services/permission_primer.dart';
 
 class DriverDashboard extends StatefulWidget {
   final String driverId;
@@ -66,7 +67,9 @@ class _DriverDashboardState extends State<DriverDashboard>
   double _avgRating = 0.0;
   bool _sosSent = false;
   StreamSubscription<DocumentSnapshot>? _driverSub;
+  StreamSubscription<DocumentSnapshot>? _driverPublicSub;
   StreamSubscription<OrderModel?>? _pendingSub;
+  StreamSubscription<OrderModel?>? _deliverySub;
   StreamSubscription<DocumentSnapshot>? _broadcastOrderSub;
   String? _watchedPendingOrderId;
   OrderModel? _pendingRequest;
@@ -94,7 +97,18 @@ class _DriverDashboardState extends State<DriverDashboard>
       'low_balance',
     });
     _listenPendingRequest();
+    _listenActiveDelivery();
     _loadDeliveredCount();
+  }
+
+  /// Localisation arrière-plan iOS : seulement tant qu'une commande est acceptée ou récupérée (voir
+  /// `DriverLocationService.setDeliveryActive`). Ouvrir le tableau de bord ou être disponible ne l'active pas.
+  void _listenActiveDelivery() {
+    _deliverySub = _firestore.driverActiveOrder(widget.driverId).listen(
+          (order) => DriverLocationService.instance
+              .setDeliveryActive(order != null),
+          onError: (_) {},
+        );
   }
 
   void _listenPendingRequest() {
@@ -117,10 +131,24 @@ class _DriverDashboardState extends State<DriverDashboard>
       final data = snap.data() ?? {};
       setState(() {
         _wallet = (data['wallet'] as num? ?? 0).toInt();
-        _avgRating = (data['avgRating'] as num? ?? 0).toDouble();
       });
       // Détection des commandes broadcast via pendingOrderId
       _handleBroadcastOrder(data['pendingOrderId'] as String?);
+    });
+    // SEC-01 / S6.4 : `avgRating` est un champ public (synchronisé par le
+    // serveur depuis S5.3.5, jamais écrit par le livreur lui-même) → lu
+    // séparément depuis la projection `driver_public`, pendant que `wallet`
+    // et `pendingOrderId` (privés) restent sur `livreurs` ci-dessus.
+    _driverPublicSub = FirebaseFirestore.instance
+        .collection('driver_public')
+        .doc(widget.driverId)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      final data = snap.data() ?? {};
+      setState(() {
+        _avgRating = (data['avgRating'] as num? ?? 0).toDouble();
+      });
     });
   }
 
@@ -382,10 +410,13 @@ class _DriverDashboardState extends State<DriverDashboard>
     WidgetsBinding.instance.removeObserver(this);
     NotificationService.unregisterTapHandler();
     _driverSub?.cancel();
+    _driverPublicSub?.cancel();
     _pendingSub?.cancel();
+    _deliverySub?.cancel();
     _broadcastOrderSub?.cancel();
     _player.dispose();
-    DriverLocationService.instance.stopTracking();
+    DriverLocationService.instance.stopTracking().whenComplete(
+        () => DriverLocationService.instance.setDeliveryActive(false));
     super.dispose();
   }
 
@@ -405,7 +436,7 @@ class _DriverDashboardState extends State<DriverDashboard>
 
   Future<void> _getLocation() async {
     try {
-      await Geolocator.requestPermission();
+      await PermissionPrimer.requestLocation(context: context, driver: true);
       final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
@@ -532,6 +563,7 @@ class _DriverDashboardState extends State<DriverDashboard>
                           ? null
                           : () async {
                               final picker = ImagePicker();
+                              if (!await PermissionPrimer.prepareImage(ImageSource.camera, context: context)) return;
                               final file = await picker.pickImage(
                                   source: ImageSource.camera, imageQuality: 75);
                               if (file == null) return;
@@ -1490,28 +1522,10 @@ class _DriverDashboardState extends State<DriverDashboard>
   /// Version minimale (préparation de la fermeture de l'acceptation directe) :
   /// sans document `config/app_versions` ou sans `enforce: true`, aucun blocage.
   Future<void> _checkMinVersion() async {
-    final r = await MinVersionService().check('driver');
-    if (!mounted || r.status == MinVersionStatus.ok) return;
-    final required = r.status == MinVersionStatus.updateRequired;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: !required,
-      builder: (ctx) => PopScope(
-        canPop: !required,
-        child: AlertDialog(
-          title: const Text('Mise à jour disponible'),
-          content: Text(r.message ??
-              (required
-                  ? 'Installez la dernière version pour continuer à accepter des courses.'
-                  : 'Une nouvelle version est disponible.')),
-          actions: [
-            if (!required)
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx), child: const Text('Plus tard')),
-          ],
-        ),
-      ),
-    );
+    if (!mounted) return;
+    await showMinVersionDialogIfNeeded(context, minVersionRoleDriver,
+        blockedMessage:
+            'Installez la dernière version pour continuer à accepter des courses.');
   }
 
   /// « Signaler un problème » : avant récupération la course est libérée
@@ -1770,6 +1784,16 @@ class OrderRequestDialogState extends State<OrderRequestDialog> {
     try {
       // 1. Prendre selfie de confirmation
       final picker = ImagePicker();
+      if (!await PermissionPrimer.prepareImage(ImageSource.camera, context: context)) {
+        // Caméra non autorisée : comme une annulation, on relance le compte à rebours sans bloquer l'écran.
+        if (!mounted || _closed) return;
+        setState(() {
+          _acceptingWithSelfie = false;
+          _secondsLeft = 30;
+        });
+        _startTimer();
+        return;
+      }
       final img = await picker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,

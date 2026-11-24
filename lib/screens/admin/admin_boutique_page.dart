@@ -451,7 +451,8 @@ class _AddProductPageState extends State<_AddProductPage> {
         title: Text(widget.existing != null
             ? "Modifier le produit"
             : "Ajouter un produit"),
-        backgroundColor: AppColors.primary,
+        // Blanc sur l'orange vif de marque = 2,9:1 ; même teinte AA que l'AppBar de la liste.
+        backgroundColor: AppColors.primaryAction,
         foregroundColor: Colors.white,
         centerTitle: true,
       ),

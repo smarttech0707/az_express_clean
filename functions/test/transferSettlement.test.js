@@ -110,7 +110,7 @@ test('commande annulée ou non retenue : aucun règlement', async () => {
 test('livreur introuvable : aucune écriture partielle', async () => {
   const h = setup();
   h.db.store.delete('livreurs/dB');
-  await assert.rejects(h.call('root', { action: 'approve', orderId: 'o1' }), /introuvable/);
+  await assert.rejects(h.call('root', { action: 'approve', orderId: 'o1' }), /BENEFICIARY_ACCOUNT_CLOSED/); // L4.5 : profil absent = refus de garde (message adapté)
   assert.equal(get(h, 'livreurs/dA').wallet, 300);
   assert.equal(get(h, 'transfer_settlements/o1').status, 'pending_review');
 });

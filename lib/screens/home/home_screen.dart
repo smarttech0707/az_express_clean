@@ -24,6 +24,7 @@ import '../seller/seller_dashboard.dart';
 import '../pro/pro_portal.dart';
 import '../support/support_screen.dart';
 import '../../ekbine/screens/ek_home_screen.dart';
+import '../../services/permission_primer.dart';
 
 // LOT 3 Premium V1 (pilote) — refonte visuelle uniquement. Aucune navigation,
 // aucune logique de connexion/permissions/Firebase n'a été modifiée dans ce
@@ -157,7 +158,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     try {
       final perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
-        await Geolocator.requestPermission();
+        await PermissionPrimer.requestLocation(context: mounted ? context : null);
       }
       final pos = await Geolocator.getCurrentPosition(
         locationSettings:

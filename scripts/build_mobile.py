@@ -20,14 +20,45 @@ IOS_FIELDS = {
 }
 
 
+# Largest versionCode Google Play accepts; also keeps the value inside Dart's int.fromEnvironment range.
+MAX_BUILD_NUMBER = 2100000000
+
+
 def positive_int(value):
     try:
         number = int(value)
     except ValueError as error:
         raise argparse.ArgumentTypeError('must be a positive integer') from error
-    if number < 1:
-        raise argparse.ArgumentTypeError('must be a positive integer')
+    if number < 1 or number > MAX_BUILD_NUMBER:
+        raise argparse.ArgumentTypeError(
+            f'must be a positive integer up to {MAX_BUILD_NUMBER}')
     return number
+
+
+def pubspec_build_number(text):
+    match = re.search(r'^version:\s*\S+\+(\d+)\s*$', text, re.M)
+    if not match:
+        raise ValueError('pubspec.yaml version has no build number (+N).')
+    return int(match.group(1))
+
+
+def resolve_build_number(override, pubspec_text):
+    """Number the app reports as APP_BUILD_NUMBER (the minimum-version check reads it).
+
+    It must equal the number Flutter embeds in the binary: the IPA override when
+    given, otherwise the pubspec `+N`. 0 would silently disable the check, so refuse it.
+    """
+    number = override if override is not None else pubspec_build_number(pubspec_text)
+    if isinstance(number, bool) or not isinstance(number, int) or not 1 <= number <= MAX_BUILD_NUMBER:
+        raise ValueError(
+            f'APP_BUILD_NUMBER must be a positive integer up to {MAX_BUILD_NUMBER}.')
+    return number
+
+
+def with_build_number(values, build_number):
+    if 'APP_BUILD_NUMBER' in values:
+        raise ValueError('APP_BUILD_NUMBER must not be set in the configuration file.')
+    return {**values, 'APP_BUILD_NUMBER': str(build_number)}
 
 
 def validate(values, platform, source):
@@ -88,6 +119,9 @@ def main():
     try:
         values = configuration(platform, path)
         validate(values, platform, (ROOT / 'lib/firebase_options.dart').read_text())
+        build_number = resolve_build_number(
+            args.build_number, (ROOT / 'pubspec.yaml').read_text(encoding='utf-8'))
+        values = with_build_number(values, build_number)
     except ValueError as error:
         # JSON/plist errors can contain input; only our validation errors are safe.
         if type(error) is ValueError:
@@ -96,7 +130,7 @@ def main():
     except Exception:
         parser.exit(2, 'Unable to read Firebase configuration.\n')
     if args.check_only:
-        print(f'Firebase {platform}: validation PASS (values hidden).')
+        print(f'Firebase {platform}: validation PASS (values hidden). APP_BUILD_NUMBER={build_number}.')
         return 0
     flutter = shutil.which('flutter')
     if not flutter:

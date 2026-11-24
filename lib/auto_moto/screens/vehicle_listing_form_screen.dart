@@ -13,6 +13,7 @@ import '../vehicle_formatters.dart';
 import '../vehicle_listing_form_data.dart';
 import '../vehicle_listing_repository.dart';
 import '../vehicle_media_service.dart';
+import '../../services/permission_primer.dart';
 
 typedef VehicleListingSaver = Future<void> Function(VehicleListing listing);
 
@@ -394,10 +395,15 @@ class _VehicleListingFormScreenState extends State<VehicleListingFormScreen> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: items.length,
-            onReorderItem: (oldIndex, newIndex) {
+            onReorder: (oldIndex, newIndex) {
               final imageCount = _media.imageCount;
               if (oldIndex >= imageCount || newIndex > imageCount) return;
-              setState(() => _media.reorderImage(oldIndex, newIndex));
+              // onReorder fournit l'index d'insertion AVANT retrait de
+              // l'élément déplacé : vers le bas, il faut le décaler de 1 pour
+              // obtenir la position finale attendue par reorderImage.
+              final targetIndex = oldIndex < newIndex ? newIndex - 1 : newIndex;
+              if (targetIndex == oldIndex) return;
+              setState(() => _media.reorderImage(oldIndex, targetIndex));
             },
             itemBuilder: (context, index) {
               final item = items[index];
@@ -467,6 +473,7 @@ class _VehicleListingFormScreenState extends State<VehicleListingFormScreen> {
 
   Future<void> _pickImages() async {
     final remaining = VehicleMediaService.maxImages - _media.imageCount;
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final files = await _picker.pickMultiImage(
       imageQuality: 80,
       maxWidth: 1600,
@@ -477,6 +484,7 @@ class _VehicleListingFormScreenState extends State<VehicleListingFormScreen> {
   }
 
   Future<void> _takePhoto() async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.camera, context: context)) return;
     final file = await _picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 80,
@@ -509,6 +517,7 @@ class _VehicleListingFormScreenState extends State<VehicleListingFormScreen> {
   }
 
   Future<void> _pickVideo() async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final file = await _picker.pickVideo(
       source: ImageSource.gallery,
       maxDuration: const Duration(seconds: 30),

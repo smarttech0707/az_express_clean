@@ -3,6 +3,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireAdminPermission, requireSuperAdmin } = require('./adminGuards');
 const { hashSecret: defaultHashSecret } = require('./passwordHash');
+const { assertTargetNotClosing } = require('./accountAdmission');
 const {
   generateTemporaryPassword: defaultGeneratePassword,
   MUST_CHANGE_CLAIM,
@@ -198,6 +199,8 @@ async function assertTargetBelongsToKind({
     db.collection('admins').doc(uid).get(),
     db.collection(collection).doc(uid).get(),
   ]);
+  // Mission 7E-68 : jamais de changement de mot de passe sur un compte en cours de suppression ou supprimé.
+  await assertTargetNotClosing(db, HttpsError, [uid]);
 
   const refuse = () => {
     throw new HttpsError('permission-denied', 'Cible invalide pour ce type de partenaire.');

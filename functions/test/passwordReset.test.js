@@ -9,6 +9,8 @@ function fakeDb(seed) {
   function ref(path) {
     return {
       id: path.split('/').pop(),
+      // Lecture simple d'un document (garde de quarantaine 7E-68 : account_tombstones/{id}).
+      get: async () => ({ exists: store.has(path), data: () => store.get(path) }),
       update: async (data) => store.set(path, { ...(store.get(path) || {}), ...data }),
       set: async (data) => store.set(path, data),
     };

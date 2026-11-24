@@ -11,6 +11,7 @@ const { getBillingMode, decideBilling, assertAcceptedTotal } = require('./billin
 const { isLegacyPartnerOrder, getLegacyPartnerPolicy } = require('./legacyPartnerPolicy');
 const { initialCashPayment } = require('./cashPayment');
 const { assertNewAccountActivity } = require('./accountAdmission');
+const { closureGuard, assertBeneficiariesCreditable, flagPartyFields, assertClosureActor, withRefusalTrace, assertNotUnderReview, REVIEW_REASON, toMillis } = require('./accountClosureActor');
 
 // Fabriques pour payOrderFromWalletCF / cancelOrderCF / deliverOrderCF —
 // séparées de index.js pour rester testables sans initialiser Firebase Admin
@@ -45,6 +46,8 @@ function partnerCollection(sellerType) {
 // depuis son wallet. medicineAmount reste attesté par le client (le prix réel
 // payé en pharmacie n'a pas d'autre source de vérité côté serveur) —
 // comportement déjà existant, juste borné pour éviter un montant aberrant.
+const PAY_REFUSED_STATUSES = new Set(['cancelled', 'expired', 'refunded', 'failed', 'rejected']);
+
 function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit, logAudit }) {
   return onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
@@ -61,7 +64,7 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
     let driverHeld = false;
     let orderForSettlement = null;
 
-    await db.runTransaction(async (tx) => {
+    await withRefusalTrace(db, admin, { fn: 'payOrderFromWalletCF', orderId: String(orderId) }, () => db.runTransaction(async (tx) => {
       const orderSnap = await tx.get(orderRef);
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
       const order = orderSnap.data();
@@ -81,9 +84,23 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
       if (!driverId) {
         throw new HttpsError('failed-precondition', "Aucun livreur n'est encore assigné");
       }
+      assertNotUnderReview(HttpsError, order);
+      // L3 : une commande déjà terminée ou annulée n'est pas réglable (le client en quarantaine ne peut rien payer de plus).
+      if (PAY_REFUSED_STATUSES.has(order.status)) {
+        throw new HttpsError('failed-precondition', 'PAYMENT_ORDER_NOT_PAYABLE: commande non payable', { code: 'PAYMENT_ORDER_NOT_PAYABLE' });
+      }
       pharmacieId    = order.pharmacieId || null;
       deliveryAmount = Number(order.budget || 0);
       total          = deliveryAmount + medAmount;
+      // L3 (D6-a) / L4 : client en quarantaine = commande engagée avant la quarantaine. Un bénéficiaire crédité en quarantaine,
+      // scellé, anonymisé ou absent => paiement refusé en entier, sans aucune écriture : la somme serait prélevée au client sans
+      // pouvoir être versée et aucun mécanisme de retenue sûr n'existe pour la part pharmacie. Lectures de la garde avant écritures.
+      const payBeneficiaries = [];
+      if (order.settlementHold !== true) payBeneficiaries.push({ collection: 'livreurs', id: driverId });
+      if (pharmacieId && medAmount > 0) payBeneficiaries.push({ collection: 'pharmacies', id: pharmacieId });
+      const closure = await closureGuard(tx, db, HttpsError, {
+        fn: 'payOrderFromWalletCF', uid, engagedAtMs: toMillis(order.createdAt), beneficiaries: payBeneficiaries,
+      });
 
       const clientRef = db.collection('clients').doc(uid);
       const driverRef = db.collection('livreurs').doc(driverId);
@@ -107,6 +124,7 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
         // Flutter (suivi_commande.dart cherche la sous-chaîne SOLDE_INSUFFISANT).
         throw new HttpsError('failed-precondition', `SOLDE_INSUFFISANT:${clientWallet}:${total}`);
       }
+      closure.applyTo(tx);
       tx.update(clientRef, { wallet: clientWallet - total });
 
       // Course transférée entre livreurs : la part livreur est retenue (partage
@@ -123,8 +141,27 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
         tx.update(pharmRef, { wallet: pharmWallet + medAmount });
       }
 
+      // Journaux dans la MÊME transaction, à identifiants déterministes : un retry ne peut ni les perdre ni les doubler.
+      const stamp = admin.firestore.FieldValue.serverTimestamp();
+      tx.set(clientRef.collection('wallet_transactions').doc(`pay_order_${orderId}`), {
+        type: 'payment', amount: total,
+        description: `Paiement commande — livraison ${deliveryAmount} FCFA` + (medAmount > 0 ? ` + médicaments ${medAmount} FCFA` : ''),
+        orderId, createdAt: stamp,
+      });
+      if (!driverHeld) {
+        tx.set(driverRef.collection('wallet_transactions').doc(`earning_pay_order_${orderId}`), {
+          type: 'earning', amount: deliveryAmount, description: 'Paiement client (wallet) — livraison', orderId, createdAt: stamp,
+        });
+      }
+      if (pharmRef) {
+        tx.set(pharmRef.collection('wallet_transactions').doc(`earning_pay_order_${orderId}`), {
+          type: 'earning', amount: medAmount, description: 'Paiement client — médicaments', orderId, createdAt: stamp,
+        });
+      }
       tx.update(orderRef, {
         isPaid: true,
+        paidAt: stamp,
+        paidBy: uid,
         paymentMethod: 'wallet',
         ...(medAmount > 0 ? { medicineAmount: medAmount } : {}),
         ...(driverHeld ? { heldDriverEarning: deliveryAmount, settlementStatus: 'pending_admin_review' } : {}),
@@ -136,29 +173,7 @@ function buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit
         tx.set(db.collection('transfer_settlements').doc(String(orderId)), settlementDocument(
           String(orderId), { ...orderForSettlement, budget: deliveryAmount }, 'wallet', nowMs));
       }
-    });
-
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    await db.collection('clients').doc(uid).collection('wallet_transactions').add({
-      type: 'payment', amount: total,
-      description: `Paiement commande — livraison ${deliveryAmount} FCFA` +
-        (medAmount > 0 ? ` + médicaments ${medAmount} FCFA` : ''),
-      orderId, createdAt: now,
-    });
-    if (!driverHeld) {
-      await db.collection('livreurs').doc(driverId).collection('wallet_transactions').add({
-        type: 'earning', amount: deliveryAmount,
-        description: 'Paiement client (wallet) — livraison',
-        orderId, createdAt: now,
-      });
-    }
-    if (pharmacieId && medAmount > 0) {
-      await db.collection('pharmacies').doc(pharmacieId).collection('wallet_transactions').add({
-        type: 'earning', amount: medAmount,
-        description: 'Paiement client — médicaments',
-        orderId, createdAt: now,
-      });
-    }
+    }));
 
     await logAudit({
       userId: uid, userType: 'client', action: 'pay_order_wallet', targetId: orderId,
@@ -214,7 +229,9 @@ async function recordPickedUpCancelRequest(db, admin, { orderRef, uid }) {
   });
 }
 
-async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason, adminDecision }) {
+// `closure` ({ fn }) : seul cancelOrderCF le fournit (L3). Il active la garde de fermeture du client (quarantaine, commande engagée
+// avant) et le traitement des bénéficiaires fermés (DR1) ; les autres appelants (AZ IA, expiration, admin) restent inchangés.
+async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason, adminDecision, closure = null }) {
   if (['delivered', 'cancelled'].includes(order.status)) {
     throw new Error('ORDER_NOT_CANCELLABLE');
   }
@@ -361,6 +378,52 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
     }
   }
 
+  // L3 (DR1) / L4 : le client est TOUJOURS remboursé. Remboursement de commission dû à un livreur en quarantaine, scellé,
+  // anonymisé ou absent : aucun crédit sur ce compte ; la commission reste côté AZ (commissionStatus inchangé : elle reste due) et
+  // le montant est tracé dans un signalement écrit dans la même transaction. Le DÉBIT du vendeur marketplace : appliqué en
+  // quarantaine (restitution) ; vendeur scellé / anonymisé / absent => annulation REFUSÉE (sous-cas non tranché : ni débit,
+  // ni remboursement, ni compensation inventés — voir rapport L4).
+  const payerRefunds = needsDriverRefund && (tracedCommission || walletProofAmount !== null) && !!payerId;
+  let closedParties = [];
+  if (closure && closure.admin === true) {
+    // L4.5 (écart justifié : cancelOrderTx est seul à connaître les crédits prévus) : annulation ADMINISTRATIVE. Client remboursé,
+    // payeur de commission remboursé et vendeur débité sont tous vérifiés AVANT toute écriture ; un seul fermé / absent / illisible
+    // => refus de toute l'annulation (ni crédit partiel, ni skip/apply, ni détournement). Le client n'est donc plus « toujours remboursé ».
+    const adminParties = [];
+    if (boutiqueRefund || needsClientRefund) adminParties.push({ collection: 'clients', id: order.clientId });
+    if (payerRefunds) adminParties.push({ collection: 'livreurs', id: payerId });
+    if (needsSellerDebit && sellerId) adminParties.push({ collection: sellerCol, id: sellerId });
+    await assertBeneficiariesCreditable(tx, db, closure.HttpsError, adminParties);
+  } else if (closure) {
+    const parties = [];
+    if (payerRefunds) {
+      parties.push({ collection: 'livreurs', id: payerId, onQuarantine: 'skip', onClosed: 'skip', amount: tracedCommission ? order.commissionAmount : walletProofAmount });
+    }
+    if (needsSellerDebit && sellerId) parties.push({ collection: sellerCol, id: sellerId, onQuarantine: 'apply', onClosed: 'refuse' });
+    const guard = await closureGuard(tx, db, closure.HttpsError, {
+      fn: closure.fn, uid, engagedAtMs: toMillis(order.createdAt), beneficiaries: parties,
+    });
+    guard.applyTo(tx);
+    closedParties = guard.skipped;
+  }
+  const payerClosed = payerRefunds && closedParties.some((c) => c.collection === 'livreurs' && c.id === payerId);
+  if (closedParties.length > 0) {
+    tx.set(db.collection('reconciliation_flags').doc(`${orderRef.id}_beneficiary_closed`), {
+      orderId: orderRef.id, type: 'beneficiary_closed', status: 'open', needsReview: true,
+      // Somme NON versée : la commission débitée au livreur à l'acceptation reste côté AZ (commissionStatus inchangé 'charged',
+      // journal `commission_<commande>_<livreur>` existant) ; rien n'est créé ni déplacé. Ce signalement ne la RETIENT pas : il la
+      // rend rapprochable (commande, bénéficiaire, montant, motif, journal source).
+      currency: 'XOF', kind: 'commission_refund_omitted',
+      parties: closedParties.map((c) => ({
+        collection: c.collection, id: c.id, state: c.state, reason: c.reason, amountWithheld: c.amount,
+        sourceJournalId: `commission_${orderRef.id}_${c.id}`,
+      })),
+      ...flagPartyFields(closedParties),
+      createdAtMs: Date.now(),
+    });
+    tx.update(orderRef, { needsReview: true, reviewReason: REVIEW_REASON.OMITTED, reviewFlagId: `${orderRef.id}_beneficiary_closed` });
+  }
+
   if (driverState) {
     const patch = terminalDriverPatch(driverState, orderRef.id, admin);
     if (Object.keys(patch).length) tx.update(driverRef, patch);
@@ -424,7 +487,7 @@ async function cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCom
       reason: reason || 'cancel', proofRejectReason, createdAtMs: Date.now(),
     });
   }
-  if (needsDriverRefund && (tracedCommission || walletProofAmount !== null)) {
+  if (needsDriverRefund && (tracedCommission || walletProofAmount !== null) && !payerClosed) {
     driverId     = payerId;
     driverRefund = tracedCommission ? order.commissionAmount : walletProofAmount;
     if (payerSnap && payerSnap.exists) {
@@ -504,7 +567,7 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
     let refundInfo;
     let pickedUpBlocked = false;
 
-    await runLifecycleTransaction(db, async (tx) => {
+    await withRefusalTrace(db, admin, { fn: 'cancelOrderCF', orderId: String(orderId) }, () => runLifecycleTransaction(db, async (tx) => {
       pickedUpBlocked = false;
       const orderSnap = await tx.get(orderRef);
       if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
@@ -514,8 +577,10 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
         throw new HttpsError('permission-denied', "Cette commande n'est pas la vôtre");
       }
 
+      // L3 : acteur contrôlé AVANT toute autre issue (y compris la demande de litige après récupération, qui écrit la commande).
+      await assertClosureActor(tx, db, HttpsError, { fn: 'cancelOrderCF', uid, engagedAtMs: toMillis(order.createdAt) });
       try {
-        refundInfo = await cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason: 'client_cancel' });
+        refundInfo = await cancelOrderTx(tx, { db, admin, orderRef, order, uid, calculateCommission, reason: 'client_cancel', closure: { fn: 'cancelOrderCF', HttpsError } });
       } catch (err) {
         if (err.message === 'ORDER_NOT_CANCELLABLE') {
           throw new HttpsError('failed-precondition', 'Cette commande ne peut plus être annulée');
@@ -531,7 +596,7 @@ function buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAu
         }
         throw err;
       }
-    });
+    }));
 
     if (pickedUpBlocked) {
       const recorded = await recordPickedUpCancelRequest(db, admin, { orderRef, uid });
@@ -642,7 +707,7 @@ function buildDeliverOrder({
     let neutralized = null; // commission rendue : course historique sans rémunération
     let v2Credits = null; // commande partenaire v2 wallet : { partner, driver } crédités dans la transaction
 
-    await runLifecycleTransaction(db, async (tx) => {
+    await withRefusalTrace(db, admin, { fn: requireProof ? 'confirmOrderDeliveryWithProof' : 'deliverOrderCF', orderId: String(orderId) }, () => runLifecycleTransaction(db, async (tx) => {
       neutralized = null;
       v2Credits = null;
       replayed = false;
@@ -726,6 +791,32 @@ function buildDeliverOrder({
         throw new HttpsError('failed-precondition', 'Montants de la commande incohérents : contactez le support');
       }
 
+      // L3 : le livreur lié à la commande peut la terminer pendant sa quarantaine (acceptée avant) ; partenaire à créditer fermé
+      // (anonymisé, absent, scellé) => livraison refusée sans écriture (DR2). Confirmation administrative : inchangée.
+      // L4.1 : partenaire à créditer en quarantaine, scellé, anonymisé, absent ou illisible => livraison REFUSÉE sans écriture
+      // financière (trace + commande en revue). Livrer en omettant le crédit exigerait de conserver la part du partenaire dans un
+      // mécanisme financier sûr et récupérable ; il n'en existe pas pour un partenaire (un signalement n'est pas une réserve).
+      // L4.2 : la confirmation administrative n'échappe plus au contrôle du bénéficiaire (partenaire à créditer) : un compte fermé
+      // reçoit zéro crédit et l'opération entière est refusée, sans retenue ni règlement fictif ; sa dette reste due (hors système).
+      let closure = null;
+      const partnerCredited = !!sid && !isPrepaidPartner && (payMethod === 'wallet' || order.isPaid === true || partnerV2);
+      if (adminInfo) {
+        // L4.3 : TOUS les comptes touchés par la confirmation sont vérifiés dans la même transaction, avant toute écriture : le livreur
+        // de la commande (toujours — il reçoit gain, compteurs et libération), le partenaire crédité, et le payeur d'une commission
+        // éventuellement rendue s'il diffère du livreur. L'un d'eux fermé, absent ou illisible => refus de l'opération entière,
+        // jamais de crédit partiel à l'autre.
+        const adminBeneficiaries = [{ collection: 'livreurs', id: uid }];
+        if (partnerCredited) adminBeneficiaries.push({ collection: partnerCollection(sType), id: sid });
+        if (commissionInfo && commissionInfo.payerId !== uid) adminBeneficiaries.push({ collection: 'livreurs', id: commissionInfo.payerId });
+        await assertBeneficiariesCreditable(tx, db, HttpsError, adminBeneficiaries);
+      } else {
+        assertNotUnderReview(HttpsError, order);
+        closure = await closureGuard(tx, db, HttpsError, {
+          fn: requireProof ? 'confirmOrderDeliveryWithProof' : 'deliverOrderCF', uid, engagedAtMs: toMillis(order.acceptedAt),
+          beneficiaries: partnerCredited ? [{ collection: partnerCollection(sType), id: sid }] : [],
+        });
+      }
+
       const driverState = await readDriverState(tx, db, uid, String(orderId));
       const driverSnap = { exists: driverState.exists, data: () => driverState.data };
       const driverPatch = terminalDriverPatch(driverState, String(orderId), admin);
@@ -777,6 +868,7 @@ function buildDeliverOrder({
         }
       }
 
+      if (closure) closure.applyTo(tx);
       if (checkedProof) {
         tx.update(checkedProof.proofRef, checkedProof.consumeUpdate);
         tx.update(checkedProof.sessionRef, {
@@ -1034,7 +1126,7 @@ function buildDeliverOrder({
           walletTarget === 'cash' ? 'cash' : 'wallet', nowMs));
         tx.update(orderRef, { settlementStatus: 'pending_admin_review' });
       }
-    });
+    }));
 
     if (replayed) return { success: true, replay: true };
 

@@ -77,25 +77,6 @@ void main() {
 
   Future<void> openEditor(WidgetTester tester, num balance) async {
     store.seed(balance);
-    // Diagnostic visuel préexistant du SwitchListTile, hors correctif wallet.
-    // On le comptabilise explicitement ; toute autre erreur reste fatale.
-    final previousErrorHandler = FlutterError.onError;
-    var knownVisualDiagnostics = 0;
-    FlutterError.onError = (details) {
-      if (details.exception is FlutterError &&
-          details.exceptionAsString().startsWith(
-              'ListTile background color or ink splashes may be invisible.')) {
-        knownVisualDiagnostics++;
-      } else {
-        previousErrorHandler!(details);
-      }
-    };
-    addTearDown(() {
-      FlutterError.onError = previousErrorHandler;
-      expect(knownVisualDiagnostics, greaterThan(0),
-          reason:
-              'retirer cette attente lorsque le défaut visuel sera corrigé');
-    });
     await tester.pumpWidget(const MaterialApp(home: AdminSellersPage()));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(PopupMenuButton<String>));

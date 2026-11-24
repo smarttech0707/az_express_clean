@@ -22,6 +22,7 @@ class _WebNavBarState extends State<WebNavBar> {
     ('Commerçants', '/commercants'),
     ('Livreurs', '/livreurs'),
     ('À propos', '/a-propos'),
+    ('FAQ', '/faq'),
     ('Contact', '/contact'),
   ];
 

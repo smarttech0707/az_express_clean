@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../web_theme.dart';
 import '../widgets/web_navbar.dart';
 import '../widgets/web_footer.dart';
@@ -190,7 +189,7 @@ class _HeroText extends StatelessWidget {
             _HeroButton(
               label: '📱 Télécharger l\'App',
               isPrimary: false,
-              onTap: () => launchUrl(Uri.parse('https://play.google.com')),
+              onTap: () => context.go('/telecharger'),
             ),
             _HeroButton(
               label: '🛵 Devenir Livreur',
@@ -212,14 +211,14 @@ class _HeroText extends StatelessWidget {
               title: 'Google Play',
               subtitle: 'Télécharger sur',
               color: const Color(0xFF34A853),
-              onTap: () => launchUrl(Uri.parse('https://play.google.com')),
+              onTap: () => context.go('/telecharger'),
             ),
             _StoreBadge(
               icon: Icons.apple_rounded,
               title: 'App Store',
               subtitle: 'Disponible sur',
               color: const Color(0xFF555555),
-              onTap: () => launchUrl(Uri.parse('https://apps.apple.com')),
+              onTap: () => context.go('/telecharger'),
             ),
           ],
         ).animate(delay: 650.ms).fadeIn(duration: 600.ms),
@@ -1279,7 +1278,7 @@ class _AppDownloadSection extends StatelessWidget {
             color: kOrange.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(20),
           ),
-          child: Text('DISPONIBLE MAINTENANT',
+          child: Text('APPLICATION MOBILE',
               style: GoogleFonts.inter(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
@@ -1296,7 +1295,7 @@ class _AppDownloadSection extends StatelessWidget {
             )),
         const SizedBox(height: 14),
         Text(
-            'Ton wallet, tes commandes, ta boutique.\nGratuit sur Android et iOS.',
+            'Ton wallet, tes commandes, ta boutique.\nGratuite, bientôt sur les stores.',
             style: GoogleFonts.inter(
                 fontSize: 15, color: kTextMuted, height: 1.6)),
       ],
@@ -1310,14 +1309,14 @@ class _AppDownloadSection extends StatelessWidget {
           color: Color(0xFF34A853),
           icon: Icons.android_rounded,
           store: 'Google Play',
-          url: 'https://play.google.com',
+          url: '/telecharger',
         ),
         SizedBox(height: 12),
         _BigBadge(
           color: Color(0xFF555555),
           icon: Icons.apple_rounded,
           store: 'App Store',
-          url: 'https://apps.apple.com',
+          url: '/telecharger',
         ),
       ],
     );
@@ -1348,7 +1347,7 @@ class _BigBadgeState extends State<_BigBadge> {
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
-        onTap: () => launchUrl(Uri.parse(widget.url)),
+        onTap: () => context.go(widget.url),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           width: 200,

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { runLifecycleTransaction, readDriverState, terminalDriverPatch } = require('./driverLifecycle');
 const { cancelOrderTx, cancelOrderPostTx, isPickedUp, PREPAID_PARTNER_TYPES } = require('./orderActions');
 const { readAmounts } = require('./orderAmounts');
+const { assertBeneficiariesCreditable } = require('./accountClosureActor');
 
 // Litiges après récupération du colis (livraisons ordinaires).
 //
@@ -376,6 +377,7 @@ function buildAdminOrderDispute({
         const info = await cancelOrderTx(tx, {
           db, admin, orderRef, order, uid: order.clientId, calculateCommission,
           reason: 'admin_dispute_cancel', adminDecision: { refundFee: true },
+          closure: { admin: true, HttpsError },
         });
         // Garde-fou : jamais plus que ce que le client a réellement payé.
         if (info.clientRefund > paid) {
@@ -430,6 +432,11 @@ function buildAdminOrderDispute({
     if (!clientSnap.exists || !driverState.exists) {
       throw new HttpsError('failed-precondition', 'Wallet client ou livreur introuvable : aucun mouvement effectué');
     }
+    // L4.5 : client ET livreur vérifiés avant toute écriture ; l'un des deux fermé / absent / illisible => refus de toute la
+    // décision (aucun crédit partiel, aucune décision enregistrée, commande non livrée).
+    await assertBeneficiariesCreditable(tx, db, HttpsError, [
+      { collection: 'clients', id: order.clientId }, { collection: 'livreurs', id: order.driverId },
+    ]);
     const driverPatch = terminalDriverPatch(driverState, orderRef.id, admin);
     tx.update(clientRef, { wallet: Number(clientSnap.data().wallet || 0) + plan.clientRefund });
     tx.update(driverState.ref, {

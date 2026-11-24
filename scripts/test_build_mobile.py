@@ -2,7 +2,8 @@ import unittest
 import plistlib
 import tempfile
 from pathlib import Path
-from build_mobile import IOS_FIELDS, build_command, configuration, validate
+from build_mobile import (IOS_FIELDS, build_command, configuration, resolve_build_number,
+                          validate, with_build_number)
 
 
 class ValidationTest(unittest.TestCase):
@@ -64,6 +65,36 @@ class BuildCommandTest(unittest.TestCase):
     def test_build_number_override_is_ipa_only(self):
         with self.assertRaisesRegex(ValueError, 'only for IPA'):
             build_command('flutter', 'apk', Path('defines.json'), build_number=12)
+
+
+class BuildNumberTest(unittest.TestCase):
+    """APP_BUILD_NUMBER feeds the minimum-version check: absent or 0 would disable it silently."""
+
+    def test_pubspec_number_used_by_default(self):
+        self.assertEqual(resolve_build_number(None, 'name: x\nversion: 1.0.10+11\n'), 11)
+
+    def test_ipa_override_wins_and_matches_binary(self):
+        self.assertEqual(resolve_build_number(42, 'version: 1.0.10+11\n'), 42)
+
+    def test_missing_or_zero_pubspec_number_refused(self):
+        for text in ['version: 1.0.10\n', 'name: x\n', 'version: 1.0.10+0\n']:
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                resolve_build_number(None, text)
+
+    def test_zero_override_refused(self):
+        with self.assertRaises(ValueError):
+            resolve_build_number(0, 'version: 1.0.10+11\n')
+
+    def test_defines_carry_build_number_as_string(self):
+        self.assertEqual(with_build_number({'A': 'b'}, 11), {'A': 'b', 'APP_BUILD_NUMBER': '11'})
+
+    def test_config_file_cannot_override_it(self):
+        with self.assertRaises(ValueError):
+            with_build_number({'APP_BUILD_NUMBER': '99'}, 11)
+
+    def test_real_pubspec_has_a_positive_number(self):
+        text = (Path(__file__).resolve().parents[1] / 'pubspec.yaml').read_text(encoding='utf-8')
+        self.assertGreaterEqual(resolve_build_number(None, text), 1)
 
 
 if __name__ == '__main__':

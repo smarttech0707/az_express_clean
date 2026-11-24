@@ -11,13 +11,15 @@ cd D:\az_express_clean
 $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 & $adb devices                      # R9PN9018DDJ doit être « device »
 flutter devices
-flutter run -d R9PN9018DDJ --dart-define-from-file=.env
+.\run.ps1 -Device R9PN9018DDJ                 # injecte APP_BUILD_NUMBER (pubspec.yaml) ; refus si absent, nul ou invalide
 ```
-Variante sans session `flutter run` (installation d'un APK debug) :
+Variante sans session `flutter run` (installation d'un APK debug) : le numéro de build est obligatoire (même source que `run.ps1`), un build à 0 ne serait jamais invité à se mettre à jour :
 ```powershell
-flutter build apk --debug --dart-define-from-file=.env
+$n = & .\scripts\get-app-build-number.ps1; if ($LASTEXITCODE -ne 0) { throw 'APP_BUILD_NUMBER invalide' }
+flutter build apk --debug --dart-define-from-file=.env --dart-define=APP_BUILD_NUMBER=$n
 & $adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
+(`.\run.ps1 -DryRun -Device R9PN9018DDJ` affiche la commande sans lancer Flutter.) Les builds de release passent par `py scripts/build_mobile.py` (voir `docs/MOBILE_FIREBASE_BUILD.md`).
 Outils utiles pendant les tests :
 ```powershell
 & $adb shell cmd uimode night yes     # mode sombre   (night no = clair, night auto = système)
@@ -93,11 +95,15 @@ cp ../az_express_clean/ios/Runner/GoogleService-Info.plist ios/Runner/
 flutter pub get
 cd ios && pod install && cd ..
 flutter devices                               # repérer l'identifiant de l'iPhone
-flutter run -d <ID_IPHONE> --dart-define-from-file=.env
+# APP_BUILD_NUMBER obligatoire (suffixe +N de pubspec.yaml) : un build à 0 ne serait jamais invité à se mettre à jour
+N=$(sed -n 's/^version:[[:space:]]*[^[:space:]]*+\([0-9][0-9]*\)[[:space:]]*$/\1/p' pubspec.yaml)
+case "$N" in ''|0*|*[!0-9]*) echo "APP_BUILD_NUMBER invalide (pubspec.yaml)";; *)
+  flutter run -d <ID_IPHONE> --dart-define-from-file=.env --dart-define=APP_BUILD_NUMBER=$N;; esac
 ```
 Avec Xcode :
 ```bash
-flutter build ios --debug --no-codesign --dart-define-from-file=.env   # génère la config Dart
+# N : calculé comme ci-dessus (ne lancer la commande que s'il est valide)
+flutter build ios --debug --no-codesign --dart-define-from-file=.env --dart-define=APP_BUILD_NUMBER=$N   # génère la config Dart
 open ios/Runner.xcworkspace
 ```
 Dans Xcode : cible **Runner** → *Signing & Capabilities* → votre équipe → choisir l'iPhone en haut → ⌘R. (Premier lancement : sur l'iPhone, Réglages → Général → VPN et gestion de l'appareil → faire confiance au développeur.)

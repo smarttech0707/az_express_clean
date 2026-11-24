@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../utils/partner_location_validator.dart';
+import '../services/permission_primer.dart';
 
 class PartnerLocationInput extends StatefulWidget {
   const PartnerLocationInput({
@@ -24,7 +25,7 @@ class _PartnerLocationInputState extends State<PartnerLocationInput> {
   Future<Position> _currentPosition() async {
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+      permission = await PermissionPrimer.requestLocation(context: mounted ? context : null);
     }
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {

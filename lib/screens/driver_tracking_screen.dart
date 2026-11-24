@@ -14,6 +14,7 @@ import '../services/driver_location_service.dart';
 import '../services/google_routes_service.dart';
 import '../widgets/driver_marker.dart';
 import '../widgets/pro_back_button.dart';
+import '../widgets/route_estimate_notice.dart';
 import '../widgets/route_polyline.dart';
 import '../theme/app_theme.dart';
 
@@ -52,6 +53,8 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 
   // ── Abonnement au stream DLS (lecture seule — plus d'écriture Firestore ici)
   StreamSubscription<Position>? _posSub;
+  // Filtre GPS fin (5 m) uniquement pendant que cet écran est visible ; rendu à la fermeture et en arrière-plan.
+  final FinePrecisionScope _precision = FinePrecisionScope();
 
   // ── Routes ─────────────────────────────────────────────────────────────────
   RouteModel _routeToClient = RouteModel.empty();
@@ -59,6 +62,11 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   bool _routeLoading = false;
   LatLng? _lastRouteCalcPos;
   static const _recalcThresholdM = 80.0;
+
+  /// `true` quand la distance/durée affichée vient d'une ligne droite de
+  /// repli (pas d'un itinéraire routier réel) : le livreur doit le savoir.
+  bool get _routeIsEstimate =>
+      RouteModel.shouldShowEstimateNotice([_routeToClient, _routeToDest]);
 
   // ── Points de référence ────────────────────────────────────────────────────
   late LatLng _clientPos;
@@ -75,6 +83,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _precision.acquire();
 
     final o = widget.order;
     _clientPos = LatLng(o.latitude, o.longitude);
@@ -96,6 +105,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _precision.onLifecycle(state);
     if (state == AppLifecycleState.resumed) {
       // C4 — Reprise automatique si le stream GPS a été tué en arrière-plan
       DriverLocationService.instance.resumeIfNeeded().then((_) {
@@ -498,6 +508,11 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
           ],
         ]),
 
+        if (_routeIsEstimate) ...[
+          const SizedBox(height: 10),
+          const RouteEstimateNotice(),
+        ],
+
         const SizedBox(height: 14),
 
         // ── Boutons navigation ───────────────────────────────────────────────
@@ -567,6 +582,7 @@ class _DriverTrackingScreenState extends State<DriverTrackingScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _precision.release();
     _posSub?.cancel();
     _pulseCtrl.dispose();
     _mapCtrl?.dispose();

@@ -100,7 +100,7 @@ function harness({ consent, scripts = {} } = {}) {
 
 const rejects = (promise, message) => assert.rejects(promise, (e) => e.code === 'failed-precondition' && e.message === message);
 const noModelCall = (h) => { assert.equal(h.counts.claude, 0); assert.equal(h.counts.gemini, 0); assert.equal(h.bodies.length, 0); };
-const OK = { granted: true, version: CONSENT_VERSION };
+const OK = { granted: true, version: CONSENT_VERSION, providers: ['anthropic', 'google'] };
 
 test('absence de consentement : refus CONSENT_REQUIRED, aucun appel Anthropic/Gemini, aucune lecture de données', async () => {
   const h = harness();

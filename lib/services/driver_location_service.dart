@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppLifecycleState;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -7,8 +8,10 @@ import 'package:geolocator/geolocator.dart';
 
 import '../models/local_place.dart';
 import 'active_city_service.dart';
+import 'driver_public_projection.dart';
 import 'fcm_policy.dart';
 import 'notification_service.dart';
+import 'permission_primer.dart';
 
 /// État du suivi GPS — utilisé par l'UI pour afficher le bon indicateur.
 enum GpsTrackingState {
@@ -35,29 +38,109 @@ class _AzKeepAliveHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp) async {}
 }
 
+/// Bail de haute précision GPS : jeton unique remis par [DriverLocationService.acquirePrecisionLease]. Tant qu'au moins un
+/// bail existe, le flux GPS du service utilise le filtre fin (5 m) au lieu du filtre normal (50 m). [applied] se termine
+/// quand le flux a pris en compte le changement (utile aux tests ; l'appelant n'a pas besoin de l'attendre).
+class PrecisionLease {
+  PrecisionLease._();
+  Future<void> applied = Future<void>.value();
+}
+
+/// Détenteur d'un bail pour un écran : un seul bail à la fois, libération idempotente, bail rendu quand l'application
+/// quitte le premier plan (aucun filtre fin inutile en arrière-plan) et repris au retour.
+class FinePrecisionScope {
+  FinePrecisionScope([DriverLocationService? service])
+      : _service = service ?? DriverLocationService.instance;
+
+  final DriverLocationService _service;
+  PrecisionLease? _lease;
+
+  bool get isActive => _lease != null;
+
+  void acquire() => _lease ??= _service.acquirePrecisionLease();
+
+  Future<void> release() {
+    final lease = _lease;
+    _lease = null;
+    return lease == null ? Future<void>.value() : _service.releasePrecisionLease(lease);
+  }
+
+  void onLifecycle(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        acquire();
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        release();
+      case AppLifecycleState.inactive:
+        break; // transitoire (centre de contrôle, appel entrant) : on garde le bail
+    }
+  }
+}
+
 /// Service singleton de localisation GPS pour le livreur.
 ///
 /// - Expose [positionStream] (broadcast) — écran carte s'y abonne en lecture seule.
 /// - Écrit dans Firestore avec double throttle : 5 s ET 15 m minimum entre deux saves.
 /// - Lance un [ForegroundService] Android pour survivre au verrouillage écran / OEM killers.
 class DriverLocationService {
+  /// Le service de premier plan `FlutterForegroundTask` n'existe que sur Android (notification persistante exigée par l'OS
+  /// pour survivre au verrouillage). Sur iOS il ne ferait rien d'utile (gestionnaire vide) et ressemblerait à un maintien
+  /// en vie sans fonction (guideline Apple 2.5.4) : il n'y est jamais lancé.
+  @visibleForTesting
+  static bool usesAndroidForegroundService({
+    required bool isWeb,
+    required TargetPlatform platform,
+  }) =>
+      !isWeb && platform == TargetPlatform.android;
+
+  /// iOS : la localisation en arrière-plan n'est autorisée QUE pendant une livraison en cours (commande acceptée ou
+  /// récupérée). Livreur seulement connecté ou disponible : suivi au premier plan uniquement, sans pastille bleue.
+  /// Android : inchangé (le service de premier plan couvre déjà tout le suivi).
+  @visibleForTesting
+  static bool allowsBackgroundLocation({
+    required bool isWeb,
+    required TargetPlatform platform,
+    required bool deliveryActive,
+  }) =>
+      !isWeb && platform == TargetPlatform.iOS && deliveryActive;
+
   // iOS suspend l'app en arrière-plan sauf si les mises à jour de position sont explicitement autorisées
   // (UIBackgroundModes `location` seul ne suffit pas) ; la pastille bleue est exigée par Apple.
-  static LocationSettings _streamSettings() {
-    // mètres — throttle Firestore 15m, hausse 10→50m pour réduire écrits GPS
-    const distanceFilter = 50;
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+  @visibleForTesting
+  static LocationSettings streamSettings({
+    required bool isWeb,
+    required TargetPlatform platform,
+    required bool deliveryActive,
+    bool fine = false,
+  }) {
+    // mètres — throttle Firestore 15m, hausse 10→50m pour réduire écrits GPS ; 5 m seulement sous bail de précision
+    final distanceFilter = fine ? fineDistanceFilter : normalDistanceFilter;
+    if (!isWeb && platform == TargetPlatform.iOS) {
+      final background = allowsBackgroundLocation(
+          isWeb: isWeb, platform: platform, deliveryActive: deliveryActive);
       return AppleSettings(
         accuracy: LocationAccuracy.high,
         activityType: ActivityType.automotiveNavigation,
         distanceFilter: distanceFilter,
         pauseLocationUpdatesAutomatically: false,
-        showBackgroundLocationIndicator: true,
-        allowBackgroundLocationUpdates: true,
+        showBackgroundLocationIndicator: background,
+        allowBackgroundLocationUpdates: background,
       );
     }
-    return const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: distanceFilter);
+    return LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: distanceFilter);
   }
+
+  static const normalDistanceFilter = 50;
+  static const fineDistanceFilter = 5;
+
+  bool get _fineNow => _leases.isNotEmpty;
+
+  bool get _backgroundNow => allowsBackgroundLocation(
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+      deliveryActive: _deliveryActive);
 
   static DriverLocationService? _instance;
   static DriverLocationService get instance =>
@@ -82,6 +165,19 @@ class DriverLocationService {
   Position? _lastSavedPos;
   String _fcmToken = '';
   bool _foregroundStarted = false;
+  bool _deliveryActive = false;
+  final Set<PrecisionLease> _leases = {};
+  int _streamGeneration = 0;
+
+  /// Points d'injection pour les tests (le vrai flux GPS et le vrai service Android passent par des plugins natifs).
+  @visibleForTesting
+  Stream<Position> Function(LocationSettings settings) positionStreamFactory =
+      (settings) => Geolocator.getPositionStream(locationSettings: settings);
+  @visibleForTesting
+  Future<void> Function() foregroundServiceStarter = _startAndroidForegroundTask;
+  @visibleForTesting
+  Future<void> Function() foregroundServiceStopper = _stopAndroidForegroundTask;
+
   final ActiveCityService _activeCityService = ActiveCityService();
   String? _registeredCityId;
 
@@ -164,7 +260,7 @@ class DriverLocationService {
     await _loadRegisteredCityId(driverId);
 
     // ── Permissions ──────────────────────────────────────────────────────────
-    final perm = await Geolocator.requestPermission();
+    final perm = await PermissionPrimer.requestLocation(driver: true);
     if (perm == LocationPermission.deniedForever) {
       _gpsState = GpsTrackingState.permanentlyDenied;
       return _gpsState;
@@ -174,7 +270,7 @@ class DriverLocationService {
       return _gpsState;
     }
 
-    // ── ForegroundService Android ────────────────────────────────────────────
+    // ── Service de premier plan : Android uniquement (no-op sur iOS) ─────────
     await _ensureForegroundService();
 
     // ── Token FCM ────────────────────────────────────────────────────────────
@@ -195,19 +291,7 @@ class DriverLocationService {
     } catch (_) {}
 
     // ── Stream continu ───────────────────────────────────────────────────────
-    _positionSub = Geolocator.getPositionStream(
-      locationSettings: _streamSettings(),
-    ).listen(
-      (pos) {
-        _emit(pos);
-        _maybeSave(pos);
-      },
-      onError: (_) {
-        _gpsState = GpsTrackingState.error;
-        _positionSub?.cancel();
-        _positionSub = null;
-      },
-    );
+    await _subscribeToStream();
 
     // Heartbeat véritablement périodique — indépendant du stream de
     // position, garantit une écriture au moins toutes les
@@ -243,9 +327,91 @@ class DriverLocationService {
     await startTracking(_currentDriverId!);
   }
 
+  // ── Livraison active (localisation arrière-plan iOS) ──────────────────────
+
+  /// `true` tant qu'une commande du livreur est acceptée ou récupérée ; `false` à la livraison, à l'annulation ou quand le
+  /// livreur quitte le tableau de bord. Sur iOS, c'est le SEUL état qui active la localisation en arrière-plan (et la
+  /// pastille bleue) : le flux GPS est alors recréé avec les réglages adaptés, sans jamais en laisser deux ouverts.
+  /// Sans flux actif, le choix est mémorisé et appliqué au prochain démarrage ; sur Android rien ne change.
+  Future<void> setDeliveryActive(bool active) async {
+    if (_deliveryActive == active) return;
+    final backgroundBefore = _backgroundNow;
+    _deliveryActive = active;
+    if (_positionSub == null || _backgroundNow == backgroundBefore) return;
+    await _subscribeToStream();
+  }
+
+  // ── Bail de haute précision (écran de navigation) ──────────────────────────
+
+  /// Demande le filtre fin (5 m). Plusieurs baux simultanés partagent le MÊME flux ; la libération d'un bail ne touche pas
+  /// les autres ; le dernier libéré rétablit 50 m. Sans flux actif, le bail est appliqué au prochain démarrage. Le bail ne
+  /// change JAMAIS l'autorisation d'arrière-plan (seule la livraison la donne, iOS) ni le service de premier plan Android.
+  PrecisionLease acquirePrecisionLease() {
+    final lease = PrecisionLease._();
+    final fineBefore = _fineNow;
+    _leases.add(lease);
+    if (_positionSub != null && !fineBefore) lease.applied = _subscribeToStream();
+    return lease;
+  }
+
+  /// Rend un bail (idempotent : un bail inconnu, déjà rendu ou effacé par l'arrêt du suivi est ignoré).
+  Future<void> releasePrecisionLease(PrecisionLease lease) async {
+    if (!_leases.remove(lease)) return;
+    if (_positionSub != null && !_fineNow) await _subscribeToStream();
+  }
+
+  /// Vrai si un flux GPS est ouvert avec le filtre fin.
+  bool get fineLocationActive => _positionSub != null && _fineNow;
+
+  @visibleForTesting
+  int get debugLeaseCount => _leases.length;
+
+  /// Vrai si un flux GPS est ouvert avec la localisation arrière-plan autorisée (iOS, livraison en cours).
+  bool get backgroundLocationActive => _positionSub != null && _backgroundNow;
+
+  /// Ouvre le flux GPS en fermant d'abord l'éventuel flux précédent : jamais deux abonnements. Le compteur de génération
+  /// annule un appel plus ancien qui se terminerait après un arrêt ou un autre appel.
+  Future<void> _subscribeToStream() async {
+    final generation = ++_streamGeneration;
+    final previous = _positionSub;
+    _positionSub = null;
+    await previous?.cancel();
+    if (generation != _streamGeneration || _currentDriverId == null) return;
+    _positionSub = positionStreamFactory(streamSettings(
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+      deliveryActive: _deliveryActive,
+      fine: _fineNow,
+    )).listen(
+      (pos) {
+        _emit(pos);
+        _maybeSave(pos);
+      },
+      onError: (_) {
+        _gpsState = GpsTrackingState.error;
+        _positionSub?.cancel();
+        _positionSub = null;
+      },
+    );
+  }
+
+  /// Test seulement : ouvre le flux pour [driverId] sans permission, Firestore ni FCM.
+  @visibleForTesting
+  Future<void> debugAttach(String driverId) async {
+    _currentDriverId = driverId;
+    await _subscribeToStream();
+  }
+
+  @visibleForTesting
+  Future<void> debugEnsureForegroundService() => _ensureForegroundService();
+
+  @visibleForTesting
+  bool get debugForegroundStarted => _foregroundStarted;
+
   // ── Arrêt propre ──────────────────────────────────────────────────────────
 
   Future<void> stopTracking() async {
+    _leases.clear(); // fin du suivi : plus aucun bail (ceux encore détenus par des écrans deviennent inoffensifs)
     await _stopStream();
     _currentDriverId = null;
     _lastSave = null;
@@ -325,6 +491,11 @@ class DriverLocationService {
       // une reconnexion, la dernière position pouvait rester absente/stale
       // jusqu'au prochain heartbeat.
       _lastSave = DateTime.now();
+      // SEC-01 / driver_public (phase S4) : projection publique au même rythme que
+      // l'écriture `livreurs` ci-dessus (même throttle, pas de timer supplémentaire).
+      // `writeDriverPublicGpsProjection` ne lève jamais : une erreur ici n'affecte ni
+      // `_lastSave` ni l'écriture `livreurs`, déjà effectuée avec succès à cet instant.
+      unawaited(writeDriverPublicGpsProjection(_currentDriverId!, pos));
     } catch (e) {
       _lastSave = null;
       debugPrint('[DLS] Firestore write error: $e');
@@ -358,8 +529,10 @@ class DriverLocationService {
   }
 
   Future<void> _stopStream() async {
-    await _positionSub?.cancel();
+    _streamGeneration++; // annule un abonnement en cours de création
+    final sub = _positionSub;
     _positionSub = null;
+    await sub?.cancel();
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
   }
@@ -368,34 +541,13 @@ class DriverLocationService {
 
   Future<void> _ensureForegroundService() async {
     if (_foregroundStarted) return;
+    // iOS / web : jamais de service de premier plan (voir [usesAndroidForegroundService]).
+    if (!usesAndroidForegroundService(
+        isWeb: kIsWeb, platform: defaultTargetPlatform)) {
+      return;
+    }
     try {
-      FlutterForegroundTask.init(
-        androidNotificationOptions: AndroidNotificationOptions(
-          channelId: 'az_tracking',
-          channelName: 'AZ Express — GPS actif',
-          channelDescription:
-              'Maintient la localisation GPS pendant la livraison',
-          channelImportance: NotificationChannelImportance.LOW,
-          priority: NotificationPriority.LOW,
-        ),
-        iosNotificationOptions: const IOSNotificationOptions(
-          showNotification: false,
-          playSound: false,
-        ),
-        foregroundTaskOptions: ForegroundTaskOptions(
-          eventAction: ForegroundTaskEventAction.repeat(30000),
-          autoRunOnBoot: false,
-          allowWakeLock: true,
-          allowWifiLock: false,
-        ),
-      );
-
-      await FlutterForegroundTask.startService(
-        serviceId: 1001,
-        notificationTitle: 'AZ Express — Livraison en cours',
-        notificationText: 'GPS actif · position transmise en temps réel',
-        callback: azTrackingCallback,
-      );
+      await foregroundServiceStarter();
       _foregroundStarted = true;
     } catch (e) {
       debugPrint('[DLS] ForegroundService error: $e');
@@ -403,10 +555,44 @@ class DriverLocationService {
     }
   }
 
+  static Future<void> _startAndroidForegroundTask() async {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'az_tracking',
+        channelName: 'AZ Express — GPS actif',
+        channelDescription:
+            'Maintient la localisation GPS pendant la livraison',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(
+        showNotification: false,
+        playSound: false,
+      ),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(30000),
+        autoRunOnBoot: false,
+        allowWakeLock: true,
+        allowWifiLock: false,
+      ),
+    );
+
+    await FlutterForegroundTask.startService(
+      serviceId: 1001,
+      notificationTitle: 'AZ Express — Livraison en cours',
+      notificationText: 'GPS actif · position transmise en temps réel',
+      callback: azTrackingCallback,
+    );
+  }
+
+  static Future<void> _stopAndroidForegroundTask() async {
+    await FlutterForegroundTask.stopService();
+  }
+
   Future<void> _stopForegroundService() async {
     if (!_foregroundStarted) return;
     try {
-      await FlutterForegroundTask.stopService();
+      await foregroundServiceStopper();
       _foregroundStarted = false;
     } catch (_) {}
   }

@@ -117,8 +117,11 @@ class _ConversationTile extends StatefulWidget {
 }
 
 class _ConversationTileState extends State<_ConversationTile> {
+  // SEC-01 / S6.1 : nom seul, affiché quel que soit le rôle du lecteur
+  // (client authentifié) → projection publique `driver_public` au lieu de
+  // la collection privée `livreurs`.
   late final Future<DocumentSnapshot> _driverFuture = FirebaseFirestore.instance
-      .collection("livreurs")
+      .collection("driver_public")
       .doc(widget.driverId)
       .get();
 

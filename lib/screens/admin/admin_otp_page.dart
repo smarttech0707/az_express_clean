@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 
 import '../../services/auth_service.dart';
 import '../../services/notification_service.dart';
@@ -12,7 +13,8 @@ import 'admin_mfa_security.dart';
 
 enum AdminMfaMode { signIn, enrollment }
 
-@visibleForTesting
+/// Partagé avec `lib/web/admin_auth_service.dart` : même politique
+/// d'enrôlement MFA Admin sur mobile et sur Web, une seule implémentation.
 class AdminEnrollmentSecret {
   String? _password;
 
@@ -29,7 +31,7 @@ class AdminEnrollmentSecret {
   void clear() => _password = null;
 }
 
-@visibleForTesting
+/// Partagé avec `lib/web/admin_auth_service.dart` (voir [AdminEnrollmentSecret]).
 Future<T> prepareAdminEnrollmentSession<T>({
   required AdminEnrollmentSecret? secret,
   required Future<void> Function(String password) reauthenticate,
@@ -43,7 +45,7 @@ Future<T> prepareAdminEnrollmentSession<T>({
   return getSession();
 }
 
-@visibleForTesting
+/// Partagé avec `lib/web/admin_auth_service.dart` (voir [AdminEnrollmentSecret]).
 String adminOtpErrorMessage(String code) => switch (code) {
       'requires-recent-login' =>
         'Votre session n’est plus assez récente. Reconnectez-vous avec votre mot de passe pour recommencer l’inscription 2FA.',
@@ -54,7 +56,7 @@ String adminOtpErrorMessage(String code) => switch (code) {
       _ => adminMfaErrorMessage(code),
     };
 
-@visibleForTesting
+/// Partagé avec `lib/web/admin_auth_service.dart` (voir [AdminEnrollmentSecret]).
 String normalizeAdminMfaPhone(String phone) => AuthService.toE164(phone.trim());
 
 /// Traduit les facteurs Firebase en descripteurs neutres pour
@@ -265,9 +267,17 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
       );
     } on FirebaseAuthException catch (e) {
       _onVerificationFailed(e);
-    } catch (e) {
+    } catch (e, stack) {
+      // Diagnostic temporaire (M2.9-bis) : code/message/details natifs d'une
+      // PlatformException, jamais le contenu d'un mot de passe/jeton/secret.
+      // À retirer une fois la cause confirmée — ne pas committer en l'état.
       debugPrint('[ADMIN_MFA] création challenge échouée '
           'type=${e.runtimeType}');
+      if (e is PlatformException) {
+        debugPrint('[ADMIN_MFA] PlatformException code=${e.code} '
+            'message=${e.message} details=${e.details}');
+      }
+      debugPrint('[ADMIN_MFA] stack=$stack');
       if (mounted) {
         setState(() {
           _sending = false;

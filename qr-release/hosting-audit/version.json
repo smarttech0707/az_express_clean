@@ -1,0 +1,63 @@
+﻿{
+    "name":  "sites/az-express-b0469/versions/3c2331e0f6a31a3e",
+    "status":  "FINALIZED",
+    "config":  {
+                   "headers":  [
+                                   {
+                                       "headers":  {
+                                                       "Cache-Control":  "max-age=31536000, immutable"
+                                                   },
+                                       "glob":  "**/*.@(js|css|wasm)"
+                                   },
+                                   {
+                                       "headers":  {
+                                                       "X-Content-Type-Options":  "nosniff",
+                                                       "Cache-Control":  "no-store",
+                                                       "Content-Type":  "application/json; charset=utf-8"
+                                                   },
+                                       "glob":  "**/distribution/latest.json"
+                                   },
+                                   {
+                                       "headers":  {
+                                                       "Cache-Control":  "public, max-age=300",
+                                                       "Content-Disposition":  "attachment; filename=\"AZ-Express.apk\"",
+                                                       "Content-Type":  "application/vnd.android.package-archive",
+                                                       "X-Content-Type-Options":  "nosniff"
+                                                   },
+                                       "glob":  "**/*.apk"
+                                   },
+                                   {
+                                       "headers":  {
+                                                       "X-XSS-Protection":  "1; mode=block",
+                                                       "Cache-Control":  "no-cache",
+                                                       "X-Frame-Options":  "SAMEORIGIN",
+                                                       "X-Content-Type-Options":  "nosniff",
+                                                       "Referrer-Policy":  "strict-origin-when-cross-origin",
+                                                       "Permissions-Policy":  "geolocation=(self), camera=(self), microphone=(self)"
+                                                   },
+                                       "glob":  "index.html"
+                                   },
+                                   {
+                                       "headers":  {
+                                                       "Strict-Transport-Security":  "max-age=31536000; includeSubDomains"
+                                                   },
+                                       "glob":  "**"
+                                   },
+                                   {
+                                       "headers":  {
+                                                       "X-Content-Type-Options":  "nosniff",
+                                                       "Cache-Control":  "no-cache"
+                                                   },
+                                       "glob":  "**/telecharger{,/**}"
+                                   }
+                               ],
+                   "rewrites":  [
+                                    {
+                                        "glob":  "**",
+                                        "path":  "/index.html"
+                                    }
+                                ]
+               },
+    "fileCount":  "70",
+    "versionBytes":  "54874888"
+}
