@@ -1,0 +1,30 @@
+--- active-export
++++ firestore.qr.rules
+@@ -1,6 +1,11 @@
+ rules_version = '2';
+ service cloud.firestore {
+   match /databases/{database}/documents {
++    // QR registries are accessible only through the server.
++    match /partner_qr/{id} { allow read, write: if false; }
++    match /partner_qr_tokens/{id} { allow read, write: if false; }
++    match /partner_qr_managers/{uid}/{document=**} { allow read, write: if false; }
++
+ 
+     function isAuth() {
+       return request.auth != null;
+@@ -240,6 +245,7 @@
+       allow read:   if isOwner(sellerId) || hasAdminPermission('demandes_vendeurs');
+       allow create: if hasAdminPermission('demandes_vendeurs');
+       allow update: if hasAdminPermission('demandes_vendeurs') || (isOwner(sellerId)
++          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive','isSuspended','isDeleted','status','deletionRequested'])
+         && unchanged('wallet')
+         && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
+         && unchanged('vipStatus') && unchanged('vipExpiresAt')
+@@ -325,6 +331,7 @@
+       // Le propriétaire peut mettre à jour son profil, mais pas les champs financiers
+       allow update: if isAdmin() ||
+         (isOwner(boulangerieId)
++          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive','isSuspended','isDeleted','status','deletionRequested'])
+           && unchanged('wallet')
+           && unchanged('subscriptionStatus')
+           && unchanged('subscriptionExpiresAt')

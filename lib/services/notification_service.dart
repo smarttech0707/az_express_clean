@@ -1,7 +1,13 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import 'fcm_policy.dart';
+import 'notification_tap_coordinator.dart';
+import 'permission_primer.dart';
 
 // ── Handler background — doit être top-level (hors classe) ───────────
 @pragma('vm:entry-point')
@@ -17,26 +23,58 @@ class NotificationService {
 
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
 
+  static const _apnsTokenWaitAttempts = 20;
+  static const _apnsTokenWaitInterval = Duration(milliseconds: 500);
+
   // NavigatorKey partagé — fourni par main.dart
   static GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   // Badge non-lu — observé par les widgets via ValueListenableBuilder
   static final ValueNotifier<int> unreadCount = ValueNotifier(0);
 
-  // Callback enregistré par le dashboard actif (driver ou client)
-  // Arguments : type, orderId, status
-  static void Function(String type, String? orderId, String? status)?
-      _tapCallback;
+  static final NotificationTapCoordinator _tapCoordinator =
+      NotificationTapCoordinator(supportedTypes: const {
+    'order_update',
+    'driver_found',
+    'order_confirmed',
+    'order_cancelled',
+    'no_driver_found',
+    'mission_end',
+    'recharge',
+    'new_order',
+    'low_balance',
+    'new_seller_order',
+    'new_pharmacie_order',
+    'new_boulangerie_order',
+    'admin_new_driver',
+    'admin_new_service_provider',
+    'vehicle_chat_message',
+  });
+  static int _tapHandlerGeneration = 0;
 
   static void registerTapHandler(
-      void Function(String type, String? orderId, String? status) cb) {
-    _tapCallback = cb;
+    NotificationTapHandler handler, {
+    required Set<String> acceptedTypes,
+  }) {
+    final generation = ++_tapHandlerGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (generation != _tapHandlerGeneration) return;
+      _tapCoordinator.registerHandler(
+        handler,
+        acceptedTypes: acceptedTypes,
+      );
+    });
   }
 
-  static void unregisterTapHandler() => _tapCallback = null;
+  static void unregisterTapHandler() {
+    _tapHandlerGeneration++;
+    _tapCoordinator.unregisterHandler();
+  }
 
   static void triggerTap(String type, String? orderId, String? status) {
-    _tapCallback?.call(type, orderId, status);
+    _tapCoordinator.receive(
+      NotificationTap(type: type, orderId: orderId, status: status),
+    );
   }
 
   // Utilisateur connecté (pour mise à jour du token lors du refresh)
@@ -45,11 +83,13 @@ class NotificationService {
 
   // ── Initialisation principale ─────────────────────────────────────
   Future<void> init() async {
+    // Build de test (DISABLE_FCM) : ni permission, ni écouteur, ni handler d'arrière-plan, ni suivi du jeton.
+    if (FcmPolicy.disabled) return;
     // Enregistrer le handler background
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // Demander la permission
-    await _fcm.requestPermission(alert: true, badge: true, sound: true);
+    // La permission n'est plus demandée au lancement : elle l'est après la connexion, avec explication
+    // (voir [requestPermissionWithExplanation], mission M2.9).
 
     // iOS : afficher la notification même quand l'app est au premier plan
     await _fcm.setForegroundNotificationPresentationOptions(
@@ -74,10 +114,11 @@ class NotificationService {
 
   // ── Sauvegarder le token d'un utilisateur dans Firestore ──────────
   Future<void> saveToken(String userId, String collection) async {
+    if (FcmPolicy.disabled) return; // aucun jeton écrit sur le compte (voir FcmPolicy)
     try {
       _userId = userId;
       _userCollection = collection;
-      final token = await _fcm.getToken();
+      final token = await getTokenWhenReady();
       if (token == null) return;
       await FirebaseFirestore.instance
           .collection(collection)
@@ -86,13 +127,59 @@ class NotificationService {
       // Synchroniser le badge non-lu au démarrage (clients uniquement)
       if (collection == 'clients') _syncUnreadCount(userId);
     } catch (_) {}
+    // Connexion réussie : moment opportun pour expliquer puis demander les notifications (sans bloquer la connexion).
+    unawaited(requestPermissionWithExplanation());
+  }
+
+  /// Explique l'utilité des notifications puis demande l'autorisation système, une seule fois (jamais au lancement).
+  Future<void> requestPermissionWithExplanation() {
+    if (FcmPolicy.disabled) return Future.value();
+    return PermissionPrimer.requestNotifications(
+      isAuthorized: () async {
+        final s = await _fcm.getNotificationSettings();
+        return s.authorizationStatus == AuthorizationStatus.authorized ||
+            s.authorizationStatus == AuthorizationStatus.provisional;
+      },
+      requestSystem: () async {
+        await _fcm.requestPermission(alert: true, badge: true, sound: true);
+      },
+    );
+  }
+
+  /// Retourne le token FCM uniquement lorsque sa dépendance APNs est prête.
+  ///
+  /// Sur iOS, Firebase refuse `getToken()` tant qu'APNs n'a pas fourni son
+  /// token. L'attente est volontairement bornée à dix secondes et ne concerne
+  /// pas Android. Aucun token n'est journalisé.
+  Future<String?> getTokenWhenReady() async {
+    // APK de test : FCM dialoguerait avec les serveurs Google (jeton, Installations), ce que le mode
+    // émulateurs interdit ; hors réseau, ces demandes bouclent et épuisent les threads du processus.
+    if (!FcmPolicy.allowsRegistration()) return null;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      for (var attempt = 0; attempt < _apnsTokenWaitAttempts; attempt++) {
+        final apnsToken = await _fcm.getAPNSToken();
+        if (apnsToken?.isNotEmpty == true) {
+          return _fcm.getToken();
+        }
+        if (attempt < _apnsTokenWaitAttempts - 1) {
+          await Future<void>.delayed(_apnsTokenWaitInterval);
+        }
+      }
+      debugPrint(
+        '[NotificationService] Token APNs indisponible après attente bornée; '
+        'token FCM non demandé.',
+      );
+      return null;
+    }
+    return _fcm.getToken();
   }
 
   // ── Synchronise le badge non-lu depuis Firestore ──────────────────
   Future<void> _syncUnreadCount(String uid) async {
     try {
       final snap = await FirebaseFirestore.instance
-          .collection('clients').doc(uid)
+          .collection('clients')
+          .doc(uid)
           .collection('notifications')
           .where('isRead', isEqualTo: false)
           .count()
@@ -110,14 +197,16 @@ class NotificationService {
     if (n == null) return;
     try {
       await FirebaseFirestore.instance
-          .collection('clients').doc(uid)
-          .collection('notifications').add({
-        'title':     n.title ?? '',
-        'body':      n.body ?? '',
-        'type':      message.data['type'] ?? '',
-        'orderId':   message.data['orderId'],
-        'status':    message.data['status'],
-        'isRead':    false,
+          .collection('clients')
+          .doc(uid)
+          .collection('notifications')
+          .add({
+        'title': n.title ?? '',
+        'body': n.body ?? '',
+        'type': message.data['type'] ?? '',
+        'orderId': message.data['orderId'],
+        'status': message.data['status'],
+        'isRead': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
       unreadCount.value++;
@@ -128,7 +217,8 @@ class NotificationService {
   static Future<void> markAllRead(String uid) async {
     try {
       final snap = await FirebaseFirestore.instance
-          .collection('clients').doc(uid)
+          .collection('clients')
+          .doc(uid)
           .collection('notifications')
           .where('isRead', isEqualTo: false)
           .get();
@@ -146,8 +236,11 @@ class NotificationService {
   static Future<void> deleteNotification(String uid, String notifId) async {
     try {
       await FirebaseFirestore.instance
-          .collection('clients').doc(uid)
-          .collection('notifications').doc(notifId).delete();
+          .collection('clients')
+          .doc(uid)
+          .collection('notifications')
+          .doc(notifId)
+          .delete();
     } catch (_) {}
   }
 
@@ -155,7 +248,8 @@ class NotificationService {
   static Stream<QuerySnapshot<Map<String, dynamic>>> streamNotifications(
       String uid) {
     return FirebaseFirestore.instance
-        .collection('clients').doc(uid)
+        .collection('clients')
+        .doc(uid)
         .collection('notifications')
         .orderBy('createdAt', descending: true)
         .limit(100)
@@ -164,12 +258,12 @@ class NotificationService {
 
   // ── Token rafraîchi → mettre à jour Firestore ─────────────────────
   void _onTokenRefresh(String token) {
+    if (FcmPolicy.disabled) return;
     if (_userId == null || _userCollection == null) return;
     FirebaseFirestore.instance
         .collection(_userCollection!)
         .doc(_userId!)
-        .set({'fcmToken': token}, SetOptions(merge: true))
-        .catchError((e) {
+        .set({'fcmToken': token}, SetOptions(merge: true)).catchError((e) {
       debugPrint('[NotificationService] Erreur refresh token FCM : $e');
     });
   }
@@ -190,10 +284,25 @@ class NotificationService {
 
   // ── Tap sur notification → navigation ─────────────────────────────
   void _handleTap(RemoteMessage message) {
-    final type    = message.data['type']    as String?;
-    final orderId = message.data['orderId'] as String?;
-    final status  = message.data['status']  as String?;
-    _tapCallback?.call(type ?? '', orderId, status);
+    final type = message.data['type'] as String?;
+    final orderId = type == 'vehicle_chat_message'
+        ? message.data['conversationId'] as String?
+        : message.data['orderId'] as String?;
+    final status = message.data['status'] as String?;
+    _tapCoordinator.receive(NotificationTap(
+      type: type ?? '',
+      orderId: orderId,
+      status: status,
+      dedupeKey: _dedupeKey(message),
+    ));
+  }
+
+  String? _dedupeKey(RemoteMessage message) {
+    final messageId = message.messageId;
+    if (messageId?.isNotEmpty == true) return 'message:$messageId';
+    final sentAt = message.sentTime?.millisecondsSinceEpoch;
+    if (sentAt == null) return null;
+    return 'sent:$sentAt:${message.data['type']}:${message.data['orderId']}';
   }
 
   // ── Bannière locale (sans FCM) — ETA, recherche élargie, etc. ────
@@ -276,6 +385,7 @@ class NotificationService {
       case 'admin_new_service_provider':
         return Icons.store_rounded;
       case 'message':
+      case 'vehicle_chat_message':
         return Icons.chat_bubble_rounded;
       case 'recharge':
         return Icons.account_balance_wallet_rounded;

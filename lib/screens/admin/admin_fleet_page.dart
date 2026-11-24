@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminFleetPage extends StatefulWidget {
   const AdminFleetPage({super.key});
@@ -31,8 +32,8 @@ class _AdminFleetPageState extends State<AdminFleetPage>
       body: NestedScrollView(
         headerSliverBuilder: (context, _) => [
           SliverAppBar(
-            expandedHeight: (MediaQuery.of(context).size.height * 0.18)
-                .clamp(130.0, 190.0),
+            expandedHeight:
+                (MediaQuery.of(context).size.height * 0.18).clamp(130.0, 190.0),
             floating: false,
             pinned: true,
             backgroundColor: const Color(0xFF6A1B9A),
@@ -75,17 +76,11 @@ class _AdminFleetPageState extends State<AdminFleetPage>
             title: const Text("Flottes",
                 style: TextStyle(color: Colors.white, fontSize: 18)),
             centerTitle: true,
-            bottom: TabBar(
-              controller: _tabs,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white60,
-              tabs: const [
-                Tab(text: "En attente"),
-                Tab(text: "Approuvés"),
-                Tab(text: "Rejetés"),
-              ],
-            ),
+            bottom: AzTabBar(
+          labels: const ["En attente", "Approuvés", "Rejetés"],
+          controller: _tabs,
+          backgroundColor: const Color(0xFF6A1B9A),
+        ),
           ),
         ],
         body: TabBarView(
@@ -348,8 +343,7 @@ class _FleetCardState extends State<_FleetCard> {
                     size: 13, color: Colors.grey),
                 const SizedBox(width: 4),
                 Text(dateStr,
-                    style: const TextStyle(
-                        fontSize: 12, color: Colors.grey)),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
               ],
             ),
 
@@ -371,8 +365,7 @@ class _FleetCardState extends State<_FleetCard> {
                               side: const BorderSide(color: Colors.red),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
@@ -393,8 +386,7 @@ class _FleetCardState extends State<_FleetCard> {
                               backgroundColor: const Color(0xFF6A1B9A),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
@@ -464,9 +456,7 @@ class _StatusBadge extends StatelessWidget {
           const SizedBox(width: 4),
           Text(label,
               style: TextStyle(
-                  color: color,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold)),
+                  color: color, fontSize: 11, fontWeight: FontWeight.bold)),
         ],
       ),
     );

@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -33,7 +34,7 @@ class PharmacieLogin extends StatefulWidget {
 
 class _PharmacieLoginState extends State<PharmacieLogin> {
   final _phoneCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
+  final _passCtrl = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
   bool _autoResuming = true;
@@ -63,25 +64,27 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
         return;
       }
       final data = doc.data()!;
-      NotificationService().saveToken(lastId, 'pharmacies');
       final fbUser = FirebaseAuth.instance.currentUser;
-      if (fbUser != null) {
-        FirebaseFirestore.instance
-            .collection('pharmacies').doc(lastId)
-            .update({'currentUid': fbUser.uid}).catchError((_) {});
+      if (fbUser == null || data['currentUid'] != fbUser.uid) {
+        await prefs.remove(kPharmacieLastIdPrefKey);
+        if (mounted) setState(() => _autoResuming = false);
+        return;
       }
+      NotificationService().saveToken(lastId, 'pharmacies');
       if (data['mustChangePassword'] == true) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => PharmacieChangePassword(pharmacieId: lastId, pharmacieData: data),
+            builder: (_) => PharmacieChangePassword(
+                pharmacieId: lastId, pharmacieData: data),
           ),
         );
       } else {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => PharmacieDashboard(pharmacieId: lastId, pharmacieData: data),
+            builder: (_) =>
+                PharmacieDashboard(pharmacieId: lastId, pharmacieData: data),
           ),
         );
       }
@@ -99,7 +102,7 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
 
   Future<void> _login() async {
     final phone = _phoneCtrl.text.trim().replaceAll(' ', '');
-    final pass  = _passCtrl.text.trim();
+    final pass = _passCtrl.text.trim();
 
     if (phone.isEmpty || pass.isEmpty) {
       _snack('Veuillez remplir tous les champs', Colors.orange);
@@ -127,12 +130,14 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
         // permission-denied, affichant une erreur Firestore brute au lieu
         // du message générique ci-dessous.
         if (!mounted) return;
-        _snack('Numéro non trouvé. Si vous venez de vous inscrire, patientez '
-            'que l\'administrateur valide votre demande.', Colors.red);
+        _snack(
+            'Numéro non trouvé. Si vous venez de vous inscrire, patientez '
+            'que l\'administrateur valide votre demande.',
+            Colors.red);
         return;
       }
 
-      final doc  = snap.docs.first;
+      final doc = snap.docs.first;
       final data = doc.data();
 
       // Vérification côté serveur (mot de passe haché, jamais comparé en
@@ -140,7 +145,7 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
       final fn = FirebaseFunctions.instanceFor(region: 'europe-west1');
       final result = await fn.httpsCallable('pharmacieLogin').call({
         'pharmacieId': doc.id,
-        'password':    pass,
+        'password': pass,
       });
       final loginData = Map<String, dynamic>.from(result.data as Map);
 
@@ -152,16 +157,12 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
 
       NotificationService().saveToken(doc.id, 'pharmacies');
       AuthService().logAuthEvent('login', 'pharmacie');
-      // Lie l'UID Firebase anonyme au document pharmacie pour isPharmacieOwnerOfOrder()
-      final fbUser = FirebaseAuth.instance.currentUser;
-      if (fbUser != null) {
-        FirebaseFirestore.instance
-            .collection('pharmacies').doc(doc.id)
-            .update({'currentUid': fbUser.uid}).catchError((_) {});
-      }
+      // pharmacieLogin lie currentUid côté serveur uniquement après validation
+      // du mot de passe. Le client ne peut jamais s'attribuer ce document.
       // Master Prompt 128 — seul l'identifiant est conservé (jamais le mot
       // de passe), pour restaurer la session au prochain lancement.
-      (await SharedPreferences.getInstance()).setString(kPharmacieLastIdPrefKey, doc.id);
+      (await SharedPreferences.getInstance())
+          .setString(kPharmacieLastIdPrefKey, doc.id);
       if (!mounted) return;
 
       if (mustChangePassword) {
@@ -208,7 +209,9 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
     if (_autoResuming) {
       return Scaffold(
         backgroundColor: const Color(0xFFF5F5F5),
-        body: Center(child: CircularProgressIndicator(color: red)),
+        body: BackOverlay(
+            color: red,
+            child: Center(child: CircularProgressIndicator(color: red))),
       );
     }
     return Scaffold(
@@ -253,27 +256,24 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
             Text('Gérez votre statut et vos commandes',
                 style: GoogleFonts.urbanist(
                     fontSize: 13, color: Colors.grey.shade600)),
-
             const SizedBox(height: 36),
-
             TextField(
               controller: _phoneCtrl,
               keyboardType: TextInputType.phone,
               decoration: InputDecoration(
                 labelText: 'Numéro de téléphone',
                 prefixIcon: Icon(Icons.phone_outlined, color: red),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: BorderSide(color: red, width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 16),
-
             TextField(
               controller: _passCtrl,
               obscureText: _obscure,
@@ -289,17 +289,16 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
                   ),
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: BorderSide(color: red, width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
-
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -320,9 +319,9 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
                     context,
                     MaterialPageRoute(
                       builder: (_) => GenericForgotPasswordPage(
-                        userType:    'pharmacie',
+                        userType: 'pharmacie',
                         accentColor: red,
-                        title:       'Mot de passe oublié',
+                        title: 'Mot de passe oublié',
                       ),
                     ),
                   ),
@@ -333,9 +332,7 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
                 ),
               ],
             ),
-
             const SizedBox(height: 12),
-
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -362,4 +359,3 @@ class _PharmacieLoginState extends State<PharmacieLogin> {
     );
   }
 }
-

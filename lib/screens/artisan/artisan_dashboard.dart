@@ -1,14 +1,16 @@
-﻿import 'dart:io';
+import 'dart:convert';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../../widgets/scale_button.dart';
+import '../../widgets/min_version_dialog.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/account_deletion_dialog.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 import 'artisan_login.dart' show kArtisanLastDocIdPrefKey;
+import '../../services/permission_primer.dart';
 
 class ArtisanDashboard extends StatefulWidget {
   final String docId;
@@ -32,7 +34,11 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
   @override
   void initState() {
     super.initState();
-    _photos = (widget.initialData['photos'] as List?)?.cast<String>() ?? [];
+    // Version minimale du rôle artisan (config/app_versions.artisan) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleArtisan,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer votre profil.'));
+    _photos =(widget.initialData['photos'] as List?)?.cast<String>() ?? [];
   }
 
   Future<void> _pickAndUpload(ImageSource source) async {
@@ -41,22 +47,24 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
       return;
     }
     final picker = ImagePicker();
+    if (!await PermissionPrimer.prepareImage(source, context: context)) return;
     final picked = await picker.pickImage(
         source: source, imageQuality: 75, maxWidth: 1280);
     if (picked == null) return;
 
     setState(() => _uploading = true);
     try {
-      final file = File(picked.path);
-      final ref = FirebaseStorage.instance.ref(
-          'service_providers/${widget.docId}/photo_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await ref.putFile(file);
-      final url = await ref.getDownloadURL();
+      // Écriture faite par le serveur : la session artisan est anonyme (les règles Storage/Firestore refusent
+      // l'écriture directe), et le serveur vérifie que cette session est bien celle liée à CE profil.
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('manageArtisanPhotosCF')
+          .call({
+        'action': 'add',
+        'docId': widget.docId,
+        'imageBase64': base64Encode(await picked.readAsBytes()),
+      });
+      final url = (result.data as Map)['data']['url'] as String;
       final updated = [..._photos, url];
-      await FirebaseFirestore.instance
-          .collection('service_providers')
-          .doc(widget.docId)
-          .update({'photos': updated});
       setState(() => _photos = updated);
       _snack("Photo ajoutée avec succès !", Colors.green);
     } catch (e) {
@@ -71,7 +79,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text("Supprimer la photo"),
-        content: const Text("Voulez-vous supprimer cette photo de votre profil ?"),
+        content:
+            const Text("Voulez-vous supprimer cette photo de votre profil ?"),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -89,15 +98,10 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
 
     setState(() => _uploading = true);
     try {
-      // Delete from Storage
-      try {
-        await FirebaseStorage.instance.refFromURL(_photos[index]).delete();
-      } catch (_) {}
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('manageArtisanPhotosCF')
+          .call({'action': 'delete', 'docId': widget.docId, 'url': _photos[index]});
       final updated = [..._photos]..removeAt(index);
-      await FirebaseFirestore.instance
-          .collection('service_providers')
-          .doc(widget.docId)
-          .update({'photos': updated});
       setState(() => _photos = updated);
       _snack("Photo supprimée", Colors.green);
     } catch (e) {
@@ -127,8 +131,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 8),
             ListTile(
-              leading: const Icon(Icons.camera_alt,
-                  color: Color(0xFF1565C0)),
+              leading: const Icon(Icons.camera_alt, color: Color(0xFF1565C0)),
               title: const Text("Prendre une photo"),
               onTap: () {
                 Navigator.pop(context);
@@ -136,8 +139,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library,
-                  color: Color(0xFF1565C0)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF1565C0)),
               title: const Text("Choisir depuis la galerie"),
               onTap: () {
                 Navigator.pop(context);
@@ -163,9 +166,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
               child: Center(
                 child: Image.network(_photos[index],
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) =>
-                        const Icon(Icons.broken_image,
-                            color: Colors.white, size: 64)),
+                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
+                        color: Colors.white, size: 64)),
               ),
             ),
             Positioned(
@@ -181,8 +183,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                     padding: const EdgeInsets.all(8),
                     decoration: const BoxDecoration(
                         color: Colors.black54, shape: BoxShape.circle),
-                    child: const Icon(Icons.close,
-                        color: Colors.white, size: 22),
+                    child:
+                        const Icon(Icons.close, color: Colors.white, size: 22),
                   ),
                 ),
               ),
@@ -257,6 +259,13 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
         centerTitle: true,
         actions: [
           IconButton(
+            icon: const Icon(Icons.delete_forever_rounded),
+            tooltip: "Supprimer mon compte",
+            onPressed: () => showAccountDeletionRequestDialog(context,
+                role: 'artisan',
+                initialPhone: widget.initialData['phone'] as String?),
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
             tooltip: "Déconnexion",
@@ -322,8 +331,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                               if (address.isNotEmpty)
                                 Row(children: [
                                   Icon(Icons.location_on,
-                                      size: 12,
-                                      color: Colors.grey.shade500),
+                                      size: 12, color: Colors.grey.shade500),
                                   const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
@@ -349,16 +357,13 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                                 : Colors.grey.shade100,
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                                color: isAvailable
-                                    ? Colors.green
-                                    : Colors.grey),
+                                color:
+                                    isAvailable ? Colors.green : Colors.grey),
                           ),
                           child: Text(
                             isAvailable ? "Actif" : "Masqué",
                             style: TextStyle(
-                                color: isAvailable
-                                    ? Colors.green
-                                    : Colors.grey,
+                                color: isAvailable ? Colors.green : Colors.grey,
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold),
                           ),
@@ -389,8 +394,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                   const SizedBox(height: 6),
                   Text(
                     "Ajoutez des photos de vos réalisations pour attirer plus de clients.",
-                    style:
-                        TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                    style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
                   ),
 
                   const SizedBox(height: 16),
@@ -404,7 +408,8 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                            color: const Color(0xFF1565C0).withValues(alpha: 0.2),
+                            color:
+                                const Color(0xFF1565C0).withValues(alpha: 0.2),
                             width: 1.5),
                       ),
                       child: Column(
@@ -455,8 +460,7 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
                                 color: const Color(0xFFE3F2FD),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                    color: const Color(0xFF1565C0),
-                                    width: 1.5),
+                                    color: const Color(0xFF1565C0), width: 1.5),
                               ),
                               child: const Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -542,4 +546,3 @@ class _ArtisanDashboardState extends State<ArtisanDashboard> {
     );
   }
 }
-

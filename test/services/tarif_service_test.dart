@@ -71,7 +71,9 @@ void main() {
       expect(r.expressPrice, 1000);
     });
 
-    test('tarif jour complet dans la zone centrale : standard 500 / express 1000', () {
+    test(
+        'tarif jour complet dans la zone centrale : standard 500 / express 1000',
+        () {
       final r = TarifService.compute(
         clientLat: TarifService.centerLat,
         clientLng: TarifService.centerLng,
@@ -82,7 +84,9 @@ void main() {
       expect(r.isNight, false);
     });
 
-    test('tarif nuit complet dans la zone centrale : standard 1000 / express 1500', () {
+    test(
+        'tarif nuit complet dans la zone centrale : standard 1000 / express 1500',
+        () {
       final r = TarifService.compute(
         clientLat: TarifService.centerLat,
         clientLng: TarifService.centerLng,

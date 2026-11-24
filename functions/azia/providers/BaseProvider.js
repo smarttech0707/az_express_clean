@@ -14,11 +14,7 @@
 // `messages` : [{ role: 'user'|'assistant', content: string }]
 // `opts`     : { model?, temperature?, maxTokens?, system?, mediaType? }
 //
-// Ce contrat couvre uniquement génération de texte/chat/vision simple — pas
-// l'appel d'outils (tool-calling), qui reste spécifique à Claude aujourd'hui
-// (seul fournisseur réellement câblé aux outils AZ IA existants). Voir
-// AIProviderService.js pour la justification de cette limite volontaire.
-// ═══════════════════════════════════════════════════════════════════════════
+// Canonical history requires an explicit adapter capability.
 class BaseProvider {
   constructor(name) {
     if (new.target === BaseProvider) {
@@ -41,6 +37,29 @@ class BaseProvider {
 
   async generateVision(_prompt, _imageBase64, _opts) {
     throw new Error(`${this.name} ne supporte pas generateVision()`);
+  }
+
+  supportsTools() {
+    return false;
+  }
+
+  supportsCanonicalHistory() {
+    return false;
+  }
+
+  // Canonical cross-provider contract. Providers that do not expose native
+  // tool calling still support safe, text-only turns through this default.
+  async generateTurn({ systemPrompt, messages, tools = [], images, temperature, maxTokens, model }) {
+    if (tools.length > 0) {
+      const error = new Error(`${this.name} ne supporte pas les appels d'outils AZ IA`);
+      error.code = 'provider_tools_unsupported';
+      throw error;
+    }
+    const opts = { system: systemPrompt, temperature, maxTokens, model };
+    const result = images?.base64
+      ? await this.generateVision(messages.at(-1)?.content || '', images.base64, { ...opts, mediaType: images.mediaType })
+      : await this.generateChat(messages, opts);
+    return { ...result, toolCalls: [], finishReason: 'stop' };
   }
 }
 

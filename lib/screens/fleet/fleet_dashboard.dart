@@ -1,7 +1,9 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
+import '../../widgets/min_version_dialog.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../../services/firestore_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/driver_earnings_summary.dart';
@@ -31,6 +33,10 @@ class _FleetDashboardState extends State<FleetDashboard>
   @override
   void initState() {
     super.initState();
+    // Version minimale du rôle flotte (config/app_versions.fleet) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleFleet,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer votre flotte.'));
     _tab = TabController(length: 3, vsync: this);
   }
 
@@ -48,7 +54,9 @@ class _FleetDashboardState extends State<FleetDashboard>
   Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'fleet_owner');
     await FirebaseAuth.instance.signOut();
-    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (_) {}
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
@@ -67,16 +75,39 @@ class _FleetDashboardState extends State<FleetDashboard>
         foregroundColor: Colors.white,
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.account_circle_outlined),
-            tooltip: 'Mon compte',
-            onPressed: () => showPartnerAccountSheet(
-              context,
-              role: 'fleet_owner',
-              roleLabel: 'Patron de flotte',
-              name: widget.ownerName,
-              onLogout: _logout,
-            ),
+          StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('fleet_owners')
+                .doc(widget.ownerId)
+                .snapshots(),
+            builder: (context, snap) {
+              final photoUrl = snap.hasData && snap.data!.exists
+                  ? (snap.data!.data() as Map<String, dynamic>)['photoUrl']
+                      as String?
+                  : null;
+              return IconButton(
+                icon: const Icon(Icons.account_circle_outlined),
+                tooltip: 'Mon compte',
+                onPressed: () => showPartnerAccountSheet(
+                  context,
+                  role: 'fleet_owner',
+                  roleLabel: 'Patron de flotte',
+                  name: widget.ownerName,
+                  onLogout: _logout,
+                  photoUrl: photoUrl,
+                  photoStoragePath:
+                      'fleet_photos/${widget.ownerId}/profile.jpg',
+                  onPhotoUploaded: (url) => FirebaseFirestore.instance
+                      .collection('fleet_owners')
+                      .doc(widget.ownerId)
+                      .update({'photoUrl': url}),
+                  onPhotoDeleted: () => FirebaseFirestore.instance
+                      .collection('fleet_owners')
+                      .doc(widget.ownerId)
+                      .update({'photoUrl': FieldValue.delete()}),
+                ),
+              );
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
@@ -102,7 +133,8 @@ class _FleetDashboardState extends State<FleetDashboard>
         children: [
           _LiveTab(ownerId: widget.ownerId),
           _GainsTab(ownerId: widget.ownerId),
-          _CreateDriverTab(ownerId: widget.ownerId, ownerName: widget.ownerName),
+          _CreateDriverTab(
+              ownerId: widget.ownerId, ownerName: widget.ownerName),
         ],
       ),
     );
@@ -145,8 +177,8 @@ class _LiveTab extends StatelessWidget {
                 ));
               }
             },
-            child: const Text("Confirmer",
-                style: TextStyle(color: Colors.white)),
+            child:
+                const Text("Confirmer", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -162,15 +194,16 @@ class _LiveTab extends StatelessWidget {
           .snapshots(),
       builder: (context, snap) {
         if (snap.hasError) {
-          return const StreamErrorState(message: "Impossible de charger vos livreurs.");
+          return const StreamErrorState(
+              message: "Impossible de charger vos livreurs.");
         }
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
 
         final drivers = snap.data!.docs;
-        final online = drivers.where((d) =>
-            (d.data() as Map)["isOnline"] == true).length;
+        final online =
+            drivers.where((d) => (d.data() as Map)["isOnline"] == true).length;
 
         if (drivers.isEmpty) {
           return Center(
@@ -205,17 +238,11 @@ class _LiveTab extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   _statBadge("${drivers.length}", "Total", Icons.group),
-                  Container(
-                      width: 1,
-                      height: 40,
-                      color: Colors.white24),
+                  Container(width: 1, height: 40, color: Colors.white24),
                   _statBadge("$online", "En ligne", Icons.wifi),
-                  Container(
-                      width: 1,
-                      height: 40,
-                      color: Colors.white24),
-                  _statBadge(
-                      "${drivers.length - online}", "Hors ligne", Icons.wifi_off),
+                  Container(width: 1, height: 40, color: Colors.white24),
+                  _statBadge("${drivers.length - online}", "Hors ligne",
+                      Icons.wifi_off),
                 ],
               ),
             ),
@@ -224,7 +251,7 @@ class _LiveTab extends StatelessWidget {
             Expanded(
               child: ListView.builder(
                 physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: drivers.length,
                 itemBuilder: (context, i) {
                   final doc = drivers[i];
@@ -271,8 +298,8 @@ class _LiveTab extends StatelessWidget {
                                 decoration: BoxDecoration(
                                   color: isOnline ? Colors.green : Colors.grey,
                                   shape: BoxShape.circle,
-                                  border: Border.all(
-                                      color: Colors.white, width: 2),
+                                  border:
+                                      Border.all(color: Colors.white, width: 2),
                                 ),
                               ),
                             ),
@@ -288,8 +315,7 @@ class _LiveTab extends StatelessWidget {
                               Text(
                                 data["name"] ?? "—",
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15),
+                                    fontWeight: FontWeight.bold, fontSize: 15),
                               ),
                               Text(
                                 data["phone"] ?? "—",
@@ -333,7 +359,8 @@ class _LiveTab extends StatelessWidget {
                             Text(
                               "$wallet FCFA",
                               style: TextStyle(
-                                color: wallet < 200 ? Colors.red : Colors.orange,
+                                color:
+                                    wallet < 200 ? Colors.red : Colors.orange,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13,
                               ),
@@ -348,7 +375,8 @@ class _LiveTab extends StatelessWidget {
                                 decoration: BoxDecoration(
                                   color: Colors.blue.shade50,
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.blue.shade200),
+                                  border:
+                                      Border.all(color: Colors.blue.shade200),
                                 ),
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -390,8 +418,7 @@ class _LiveTab extends StatelessWidget {
                 fontSize: 22,
                 fontWeight: FontWeight.bold)),
         Text(label,
-            style:
-                const TextStyle(color: Colors.white70, fontSize: 11)),
+            style: const TextStyle(color: Colors.white70, fontSize: 11)),
       ],
     );
   }
@@ -436,7 +463,8 @@ class _GainsTabState extends State<_GainsTab> {
                 .snapshots(),
             builder: (context, snap) {
               if (snap.hasError) {
-                return const StreamErrorState(message: "Impossible de charger vos livreurs.");
+                return const StreamErrorState(
+                    message: "Impossible de charger vos livreurs.");
               }
               if (!snap.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -449,7 +477,7 @@ class _GainsTabState extends State<_GainsTab> {
               }
               return ListView.builder(
                 physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: drivers.length,
                 itemBuilder: (context, i) {
                   final doc = drivers[i];
@@ -479,9 +507,7 @@ class _GainsTabState extends State<_GainsTab> {
             color: selected ? const Color(0xFF6A1B9A) : Colors.white,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: selected
-                  ? const Color(0xFF6A1B9A)
-                  : Colors.grey.shade300,
+              color: selected ? const Color(0xFF6A1B9A) : Colors.grey.shade300,
             ),
           ),
           child: Text(
@@ -504,9 +530,7 @@ class _DriverEarningsCard extends StatelessWidget {
   final Map<String, dynamic> driverData;
   final int period;
   const _DriverEarningsCard(
-      {required this.driverId,
-      required this.driverData,
-      required this.period});
+      {required this.driverId, required this.driverData, required this.period});
 
   @override
   Widget build(BuildContext context) {
@@ -533,9 +557,7 @@ class _DriverEarningsCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 4)
-            ],
+            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
           ),
           child: Row(
             children: [
@@ -571,8 +593,8 @@ class _DriverEarningsCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text("Wallet",
-                      style: TextStyle(
-                          color: Colors.grey.shade500, fontSize: 11)),
+                      style:
+                          TextStyle(color: Colors.grey.shade500, fontSize: 11)),
                   Text(
                     "${driverData['wallet'] ?? 0} FCFA",
                     style: const TextStyle(
@@ -609,8 +631,7 @@ class _DriverEarningsCard extends StatelessWidget {
 class _CreateDriverTab extends StatefulWidget {
   final String ownerId;
   final String ownerName;
-  const _CreateDriverTab(
-      {required this.ownerId, required this.ownerName});
+  const _CreateDriverTab({required this.ownerId, required this.ownerName});
 
   @override
   State<_CreateDriverTab> createState() => _CreateDriverTabState();
@@ -651,33 +672,11 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
     setState(() => _loading = true);
 
     try {
-      final credential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
-        email: "$id@az-driver.ci",
-        password: pass,
-      );
-      final driverUid = credential.user!.uid;
-
-      // Créer le doc livreur avec ownerId du patron
-      await FirebaseFirestore.instance
-          .collection("livreurs")
-          .doc(driverUid)
-          .set({
-        "name": name,
-        "phone": phone,
-        "identifiant": id,
-        "ownerId": widget.ownerId,
-        "ownerName": widget.ownerName,
-        "wallet": 500,
-        "isOnline": false,
-        "createdAt": Timestamp.now(),
-      });
-
-      // Firebase Auth signe automatiquement le nouveau livreur à la création.
-      // On déconnecte ce compte et on restaure une session anonyme pour que
-      // les règles Firestore (isAuth()) continuent de fonctionner sur ce device.
-      await FirebaseAuth.instance.signOut();
-      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+      // Création côté serveur (compte Auth + document livreur, rattaché à CETTE flotte) : la session du patron
+      // n'est pas touchée et aucun compte Auth orphelin ne reste en cas d'échec.
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('createFleetDriverCF')
+          .call({'name': name, 'phone': phone, 'identifiant': id, 'password': pass});
 
       if (!mounted) return;
       setState(() => _loading = false);
@@ -725,13 +724,10 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
           ],
         ),
       );
-    } on FirebaseAuthException catch (e) {
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
       setState(() => _loading = false);
-      if (e.code == 'email-already-in-use') {
-        _snack("Cet identifiant est déjà utilisé", Colors.red);
-      } else {
-        _snack("Erreur : ${e.message}", Colors.red);
-      }
+      _snack(e.message ?? "Création impossible", Colors.red);
     } catch (e) {
       setState(() => _loading = false);
       _snack("Erreur inattendue", Colors.red);
@@ -746,12 +742,11 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
           Icon(icon, size: 16, color: const Color(0xFF6A1B9A)),
           const SizedBox(width: 8),
           Text("$label : ",
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 13)),
+              style:
+                  const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
           Expanded(
             child: Text(value,
-                style: const TextStyle(
-                    fontSize: 13, color: Color(0xFF6A1B9A))),
+                style: const TextStyle(fontSize: 13, color: Color(0xFF6A1B9A))),
           ),
         ],
       ),
@@ -821,14 +816,13 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
               hintText: "Minimum 6 caractères",
               prefixIcon: const Icon(Icons.lock),
               suffixIcon: IconButton(
-                icon: Icon(
-                    _showPass ? Icons.visibility_off : Icons.visibility),
+                icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility),
                 onPressed: () => setState(() => _showPass = !_showPass),
               ),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: Theme.of(context).colorScheme.surface,
             ),
           ),
 
@@ -853,8 +847,7 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
                   : const Icon(Icons.add_circle, color: Colors.white),
               label: Text(
                 _loading ? "Création..." : "Créer le compte",
-                style:
-                    const TextStyle(fontSize: 17, color: Colors.white),
+                style: const TextStyle(fontSize: 17, color: Colors.white),
               ),
             ),
           ),
@@ -895,12 +888,10 @@ class _CreateDriverTabState extends State<_CreateDriverTab> {
         labelText: label,
         hintText: hint,
         prefixIcon: Icon(icon),
-        border:
-            OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }
 }
-

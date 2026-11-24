@@ -30,7 +30,8 @@ class AdminSosPage extends StatelessWidget {
             .snapshots(),
         builder: (context, snap) {
           if (snap.hasError) {
-            return const StreamErrorState(message: "Impossible de charger les alertes SOS.");
+            return const StreamErrorState(
+                message: "Impossible de charger les alertes SOS.");
           }
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -69,14 +70,13 @@ class AdminSosPage extends StatelessWidget {
                 _SectionHeader(
                     label: 'Actives (${active.length})', color: Colors.red),
                 const SizedBox(height: 10),
-                ...active.map((d) =>
-                    _SosCard(doc: d, onResolve: () => _resolve(d.id))),
+                ...active.map(
+                    (d) => _SosCard(doc: d, onResolve: () => _resolve(d.id))),
               ],
               if (resolved.isNotEmpty) ...[
                 const SizedBox(height: 20),
                 _SectionHeader(
-                    label: 'Résolues (${resolved.length})',
-                    color: Colors.grey),
+                    label: 'Résolues (${resolved.length})', color: Colors.grey),
                 const SizedBox(height: 10),
                 ...resolved.map((d) => _SosCard(doc: d, resolved: true)),
               ],
@@ -172,8 +172,7 @@ class _SosCard extends StatelessWidget {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color:
-                        resolved ? Colors.grey.shade100 : Colors.red.shade50,
+                    color: resolved ? Colors.grey.shade100 : Colors.red.shade50,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -202,8 +201,8 @@ class _SosCard extends StatelessWidget {
                 ),
                 if (!resolved)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: Colors.red.shade50,
                       borderRadius: BorderRadius.circular(20),
@@ -221,8 +220,8 @@ class _SosCard extends StatelessWidget {
                   )
                 else
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: Colors.green.shade50,
                       borderRadius: BorderRadius.circular(20),
@@ -247,8 +246,8 @@ class _SosCard extends StatelessWidget {
                   mode: LaunchMode.externalApplication,
                 ),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(10),

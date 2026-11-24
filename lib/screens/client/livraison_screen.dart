@@ -6,91 +6,276 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../models/delivery_zone.dart';
 import '../../models/local_place.dart';
-import '../../models/order_model.dart';
 import '../../models/route_model.dart';
-import '../../services/firestore_service.dart';
+import '../../providers/active_city_provider.dart';
+import '../../services/delivery_order_service.dart';
+import '../../services/delivery_quote_service.dart';
+import '../../services/quoted_checkout.dart';
 import '../../services/google_routes_service.dart';
 import '../../services/places_search_service.dart';
 import '../../services/places_service.dart';
 import '../../services/tarif_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/driver_marker.dart';
 import '../../widgets/glass_kit.dart';
+import '../../widgets/quoted_checkout_runner.dart';
+import '../../widgets/route_estimate_notice.dart';
 import '../../widgets/route_polyline.dart';
 import '../customer_tracking_screen.dart';
+import '../../services/permission_primer.dart';
 
 const LatLng _abengourou = LatLng(6.7273, -3.4961);
 
 enum _ActiveField { none, departure, destination }
 
+@visibleForTesting
+bool livraisonCashOnDeliveryEnabled(dynamic value) => value as bool? ?? true;
+
+@visibleForTesting
+String livraisonPaymentAfterCodUpdate({
+  required String currentPayment,
+  required bool cashOnDeliveryEnabled,
+}) =>
+    !cashOnDeliveryEnabled && currentPayment == 'cash'
+        ? 'wallet'
+        : currentPayment;
+
+@visibleForTesting
+int parseLivraisonShoppingBudget(String value) =>
+    (int.tryParse(value.trim()) ?? 0).clamp(0, 9999999);
+
+@visibleForTesting
+bool shouldShowLivraisonSearchExpansion({
+  required String query,
+  required bool searched,
+  required bool searching,
+  required bool hasResults,
+  required PlacesSearchState searchState,
+}) =>
+    searched &&
+    !searching &&
+    !hasResults &&
+    query.trim().length >= 5 &&
+    searchState == PlacesSearchState.awaitingExpansion;
+
+/// Les champs Livraison à texte sombre peuvent laisser leur fond hériter de
+/// [InputDecorationTheme]. En mode sombre iOS, ce fond hérité est sombre et
+/// rend le texte local presque invisible. On verrouille donc seulement ce fond
+/// pour la combinaison qui présente ce contraste incohérent.
+@visibleForTesting
+bool shouldUseLightLivraisonPremiumFieldFill({
+  required TargetPlatform platform,
+  required Brightness brightness,
+}) =>
+    platform == TargetPlatform.iOS && brightness == Brightness.dark;
+
+/// Les lieux populaires sont affichés sur une surface dépendante du thème.
+/// Leurs couleurs doivent donc être explicites, sans hériter d'un thème natif
+/// différent selon la plateforme.
+@visibleForTesting
+Color? livraisonPopularPlaceTitleColor({
+  required TargetPlatform platform,
+  required Brightness brightness,
+}) =>
+    AppColors.premiumTextPrimary(brightness);
+
+@visibleForTesting
+Color livraisonPopularPlaceSubtitleColor({
+  required TargetPlatform platform,
+  required Brightness brightness,
+}) =>
+    AppColors.premiumTextSecondary(brightness);
+
+typedef LivraisonReverseGeocoder = Future<String?> Function(
+  double latitude,
+  double longitude,
+);
+
+@visibleForTesting
+Future<LocalPlace> buildLivraisonGpsPlace({
+  required double latitude,
+  required double longitude,
+  required String district,
+  required bool resolveAddress,
+  LivraisonReverseGeocoder reverseGeocoder = PlacesService.reverseGeocode,
+}) async {
+  final address =
+      resolveAddress ? await reverseGeocoder(latitude, longitude) : null;
+  return LocalPlace.fromExternal(
+    name: address?.split(',').first ?? 'Ma position actuelle',
+    address: address ?? 'Position GPS',
+    latitude: latitude,
+    longitude: longitude,
+    category: 'quartier',
+    district: district,
+    source: 'gps',
+  );
+}
+
+@visibleForTesting
+String activeLivraisonCityName(ActiveCityProvider provider) {
+  final cityId = provider.activeCityId;
+  if (cityId == null) return '';
+  for (final city in provider.activeCities) {
+    if (city.cityId == cityId) return city.name ?? '';
+  }
+  return '';
+}
+
+/// Pourquoi la ville n'a pas pu être déterminée par le GPS.
+enum LivraisonLocationIssue {
+  denied,
+  deniedForever,
+  unavailable,
+  outsideService,
+}
+
+@visibleForTesting
+String livraisonLocationIssueMessage(LivraisonLocationIssue? issue) =>
+    switch (issue) {
+      LivraisonLocationIssue.denied =>
+        'La localisation est refusée. Autorisez-la pour détecter votre ville.',
+      LivraisonLocationIssue.deniedForever =>
+        'La localisation est désactivée pour AZ Express. Activez-la dans les '
+            'réglages de votre téléphone.',
+      LivraisonLocationIssue.unavailable =>
+        'Votre position est indisponible pour le moment.',
+      LivraisonLocationIssue.outsideService =>
+        'Vous semblez hors des zones desservies par AZ Express.',
+      null => 'Nous n\'avons pas pu déterminer votre ville.',
+    };
+
+/// Villes proposées dans le sélecteur de recherche : actives et localisables.
+/// Ce choix ne sert qu'à cadrer la recherche d'adresses.
+@visibleForTesting
+List<({String cityId, String name})> livraisonSelectableCities(
+  Iterable<DeliveryZone> cities,
+) =>
+    [
+      for (final city in cities)
+        if (city.cityId != null && city.name != null && city.hasUsableGeometry)
+          (cityId: city.cityId!, name: city.name!),
+    ];
+
+/// Le sélecteur n'apparaît que si le GPS n'a pas résolu de ville.
+@visibleForTesting
+bool shouldShowLivraisonCityPicker({required String? activeCityId}) =>
+    activeCityId == null;
+
+@visibleForTesting
+String? livraisonOrderCoordinateSource(String source) => switch (source) {
+      'gps' => 'gps',
+      'map' => 'map_pin',
+      'firestore' => 'local_place',
+      'osm' || 'nominatim' => 'nominatim',
+      'google' || 'google_poi' => 'google',
+      _ => null,
+    };
+
 const _catItems = <(String, String, Color)>[
-  ('documents',   '📄 Documents',   Color(0xFF1565C0)),
-  ('colis',       '📦 Colis',       AppColors.primary),
+  ('documents', '📄 Documents', Color(0xFF1565C0)),
+  ('colis', '📦 Colis', AppColors.primary),
   ('medicaments', '💊 Médicaments', Color(0xFF2E7D32)),
-  ('repas',       '🍔 Repas',       Color(0xFFE53935)),
-  ('autre',       '🎁 Autre',       Color(0xFF607D8B)),
+  ('repas', '🍔 Repas', Color(0xFFE53935)),
+  ('autre', '🎁 Autre', Color(0xFF607D8B)),
 ];
 
 class LivraisonScreen extends StatefulWidget {
-  const LivraisonScreen({super.key});
+  final bool startStartupServices;
+
+  const LivraisonScreen({
+    super.key,
+    this.startStartupServices = true,
+  });
   @override
   State<LivraisonScreen> createState() => _LivraisonScreenState();
 }
 
 class _LivraisonScreenState extends State<LivraisonScreen>
     with TickerProviderStateMixin {
-
+  Brightness get _brightness => Theme.of(context).brightness;
+  Color get _premiumSurfaceElevated =>
+      AppColors.premiumSurfaceElevated(_brightness);
+  Color get _premiumBorder => AppColors.premiumBorder(_brightness);
+  Color get _premiumText => _brightness == Brightness.dark
+      ? AppColors.premiumTextPrimaryDark
+      : AppColors.premiumTextPrimaryLight;
+  Color get _premiumMuted => _brightness == Brightness.dark
+      ? AppColors.premiumTextMutedDark
+      : AppColors.premiumTextMutedLight;
   // ── Animations ─────────────────────────────────────────────────────────────
-  late final AnimationController _routeAnim = AnimationController(
-    vsync: this, duration: const Duration(milliseconds: 500),
-  );
-  late final AnimationController _pulseCtrl = AnimationController(
-    vsync: this, duration: const Duration(milliseconds: 1200),
-  );
+  late final AnimationController _routeAnim;
+  late final AnimationController _pulseCtrl;
 
   // ── Carte ──────────────────────────────────────────────────────────────────
   GoogleMapController? _mapCtrl;
-  Set<Marker>          _markers   = {};
-  Set<Polyline>        _polylines = {};
-  BitmapDescriptor?    _clientIcon;
-  BitmapDescriptor?    _destIcon;
+  Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
+  BitmapDescriptor? _clientIcon;
+  BitmapDescriptor? _destIcon;
 
   // ── Lieux sélectionnés ─────────────────────────────────────────────────────
   LocalPlace? _departure;
   LocalPlace? _destination;
 
   // ── Recherche ──────────────────────────────────────────────────────────────
-  _ActiveField     _activeField = _ActiveField.none;
-  final _depCtrl   = TextEditingController();
-  final _destCtrl  = TextEditingController();
-  final _depFocus  = FocusNode();
+  _ActiveField _activeField = _ActiveField.none;
+  final _depCtrl = TextEditingController();
+  final _destCtrl = TextEditingController();
+  final _depFocus = FocusNode();
   final _destFocus = FocusNode();
+  // Cibles explicites du bouton clavier "Suivant" (Nom → Téléphone) — un
+  // FocusScope.nextFocus() générique ne traverse pas correctement jusqu'à
+  // ces champs à travers les Padding/SizedBox intermédiaires de la Column.
+  final _pickupContactPhoneFocus = FocusNode();
+  final _recipientPhoneFocus = FocusNode();
   List<LocalPlace> _suggestions = [];
-  bool             _searching   = false;
-  bool             _searched    = false;
-  Timer?           _debounce;
+  bool _searching = false;
+  bool _searched = false;
+  bool _awaitingExpansion = false;
+  bool _expandingSearch = false;
+  Timer? _debounce;
+  List<LocalPlace> _popularPlaces = const [];
+  String? _popularPlacesCityId;
+  // Ville choisie à la main quand le GPS ne résout rien. Elle cadre UNIQUEMENT
+  // la recherche d'adresses : jamais la ville de livraison, les zones
+  // desservies ni les tarifs (voir `ActiveCityProvider`, inchangé).
+  String? _searchCityId;
+  LivraisonLocationIssue? _locationIssue;
 
   // ── Route ──────────────────────────────────────────────────────────────────
-  RouteModel _route        = RouteModel.empty();
-  bool       _routeLoading = false;
+  RouteModel _route = RouteModel.empty();
+
+  /// Logique de creation de livraison partagee avec le web
+  /// (voir lib/services/delivery_order_service.dart).
+  final _deliveryOrders = DeliveryOrderService();
+  final _quotedCheckout = QuotedCheckout(DeliveryQuoteService());
+  bool _routeLoading = false;
 
   // ── Commande ───────────────────────────────────────────────────────────────
-  final _colisCtrl              = TextEditingController();
-  final _recipientCtrl          = TextEditingController(); // téléphone destinataire
-  final _pickupContactNameCtrl  = TextEditingController();
+  final _colisCtrl = TextEditingController();
+  final _recipientCtrl = TextEditingController(); // téléphone destinataire
+  final _pickupContactNameCtrl = TextEditingController();
   final _pickupContactPhoneCtrl = TextEditingController();
-  final _recipientNameCtrl      = TextEditingController();
-  final _poidsCtrl              = TextEditingController();
+  final _recipientNameCtrl = TextEditingController();
+  final _poidsCtrl = TextEditingController();
+  final _shoppingBudgetCtrl = TextEditingController();
   String _deliveryMode = 'standard';
-  String _category     = 'colis';
-  String _payment      = 'cash';
-  int    _wallet       = 0;
+  String _category = 'colis';
+  String _payment = 'cash';
+  int _wallet = 0;
+  bool _codEnabled = true;
   StreamSubscription? _walletSub;
-  bool   _sending      = false;
-  bool   _gpsLoading   = false;
+  bool _sending = false;
+  bool _gpsLoading = false;
+  bool _selectingDestinationOnMap = false;
+  LatLng _mapCenter = _abengourou;
 
   // ── Phases du parcours ─────────────────────────────────────────────────────
   // 1 = sélection point récupération
@@ -102,12 +287,21 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
   // ── Getters calculés ──────────────────────────────────────────────────────
 
+  // Un itinéraire `isEstimate` (ligne droite de repli, voir RouteModel) n'est
+  // pas un itinéraire routier réel : TarifService.compute retombe alors sur
+  // son propre calcul à vol d'oiseau (routeDistanceKm: null) plutôt que de
+  // traiter l'estimation du proxy/legacy comme une distance routière
+  // confirmée. Même barème, même fonction : seule la distance fournie change.
   TarifResult? get _tarifResult {
     if (_destination == null) return null;
+    final isRealRoute = RouteModel.resolveTariffDistance(
+      route: _route,
+      haversineFallbackKm: 0,
+    ).isRealRoute;
     return TarifService.compute(
       clientLat: _destination!.latitude,
       clientLng: _destination!.longitude,
-      routeDistanceKm: _route.distanceKm > 0 ? _route.distanceKm : null,
+      routeDistanceKm: isRealRoute ? _route.distanceKm : null,
     );
   }
 
@@ -125,7 +319,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     return '${_route.etaMinutes + 15}–${_route.etaMinutes + 40} min';
   }
 
-  int get _expressPrice  => _tarifResult?.expressPrice  ?? 0;
+  int get _expressPrice => _tarifResult?.expressPrice ?? 0;
   int get _standardPrice => _tarifResult?.standardPrice ?? 0;
 
   String get _categoryLabel {
@@ -140,96 +334,293 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   @override
   void initState() {
     super.initState();
+    _routeAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
     _loadIcons();
-    _getGPS();
-    _listenWallet();
+    if (widget.startStartupServices) {
+      _getGPS(_ActiveField.departure, false);
+      _listenWallet();
+    }
     _depFocus.addListener(_onDepFocusChange);
     _destFocus.addListener(_onDestFocusChange);
   }
 
   void _loadIcons() {
     _clientIcon = DriverMarkerIcon.getClientIcon();
-    _destIcon   = DriverMarkerIcon.getDestIcon();
+    _destIcon = DriverMarkerIcon.getDestIcon();
   }
 
-  Future<void> _getGPS() async {
+  Future<void> _getGPS([
+    _ActiveField target = _ActiveField.departure,
+    bool resolveAddress = true,
+    bool fillField = true,
+  ]) async {
     if (_gpsLoading) return;
+    final cityProvider = context.read<ActiveCityProvider>();
     _gpsLoading = true;
     try {
-      final perm = await Geolocator.requestPermission();
+      final perm = await PermissionPrimer.requestLocation(context: context);
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) { return; }
+          perm == LocationPermission.deniedForever) {
+        await _recordLocationIssue(
+          cityProvider,
+          perm == LocationPermission.deniedForever
+              ? LivraisonLocationIssue.deniedForever
+              : LivraisonLocationIssue.denied,
+        );
+        return;
+      }
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy:  LocationAccuracy.high,
+          accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 10),
         ),
       );
-      // Utilise PlacesService.reverseGeocode : Nominatim (gratuit) + cache 2h
-      final addr = await PlacesService.reverseGeocode(
-          pos.latitude, pos.longitude);
-
-      final place = LocalPlace.fromExternal(
-        name:      addr?.split(',').first ?? 'Ma position',
-        address:   addr ?? 'Position GPS',
-        latitude:  pos.latitude,
+      await cityProvider.resolveGps(
+        latitude: pos.latitude,
         longitude: pos.longitude,
-        category:  'quartier',
-        district:  'Abengourou',
-        source:    'gps',
+      );
+      if (cityProvider.activeCityId == null) {
+        // Position obtenue mais hors des villes desservies : pas de ville
+        // active, donc la recherche passe par la ville choisie à la main.
+        await _recordLocationIssue(
+          cityProvider,
+          cityProvider.cityResolutionStatus == 'outside_service'
+              ? LivraisonLocationIssue.outsideService
+              : LivraisonLocationIssue.unavailable,
+        );
+      } else if (mounted) {
+        setState(() {
+          _locationIssue = null;
+          _searchCityId = null;
+        });
+      }
+      if (!fillField) {
+        // « Réessayer la localisation » ne sert qu'à déterminer la ville : une
+        // adresse déjà choisie à la main n'est jamais remplacée par la position.
+        await _loadPopularPlaces(cityProvider);
+        return;
+      }
+      final place = await buildLivraisonGpsPlace(
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+        district: activeLivraisonCityName(cityProvider),
+        resolveAddress: resolveAddress,
       );
       if (!mounted) return;
       setState(() {
-        _departure    = place;
-        _depCtrl.text = place.name;
+        if (target == _ActiveField.destination) {
+          _destination = place;
+          _destCtrl.text = place.name;
+          _selectingDestinationOnMap = false;
+        } else {
+          _departure = place;
+          _depCtrl.text = place.name;
+        }
       });
       _updateMarkers();
+      await _loadPopularPlaces(cityProvider);
+      if (_departure != null && _destination != null) _calcRoute();
       _mapCtrl?.animateCamera(
           CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 15));
     } catch (_) {
+      // Délai dépassé, service de localisation coupé, erreur plateforme :
+      // on l'indique au lieu de laisser une recherche vide sans explication.
+      await _recordLocationIssue(
+          cityProvider, LivraisonLocationIssue.unavailable);
     } finally {
       if (mounted) setState(() => _gpsLoading = false);
     }
+  }
+
+  /// Mémorise la raison de l'échec GPS et charge la liste des villes (utile au
+  /// sélecteur même quand `resolveGps` n'a jamais été appelé).
+  Future<void> _recordLocationIssue(
+    ActiveCityProvider cityProvider,
+    LivraisonLocationIssue issue,
+  ) async {
+    try {
+      await cityProvider.initialize();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _locationIssue = issue);
+  }
+
+  Future<void> _selectSearchCity(String cityId) async {
+    final cityProvider = context.read<ActiveCityProvider>();
+    setState(() {
+      _searchCityId = cityId;
+      _suggestions = [];
+      _searched = false;
+      _awaitingExpansion = false;
+    });
+    try {
+      await _loadPopularPlaces(cityProvider);
+    } catch (_) {
+      // Les lieux populaires sont facultatifs : ils ne bloquent pas la recherche.
+    }
+    final query =
+        (_activeField == _ActiveField.destination ? _destCtrl : _depCtrl)
+            .text
+            .trim();
+    if (mounted && query.length >= PlacesSearchService.minQueryLength) {
+      setState(() => _searching = true);
+      await _runSearch(query);
+    }
+  }
+
+  /// Ville servant au cadrage de la recherche : celle du GPS si elle est
+  /// résolue, sinon celle choisie à la main.
+  String? _effectiveSearchCityId(ActiveCityProvider cityProvider) =>
+      cityProvider.activeCityId ?? _searchCityId;
+
+  Future<void> _loadPopularPlaces(ActiveCityProvider cityProvider) async {
+    final cityId = _effectiveSearchCityId(cityProvider);
+    if (cityId == null) {
+      if (mounted) {
+        setState(() {
+          _popularPlaces = const [];
+          _popularPlacesCityId = null;
+        });
+      }
+      return;
+    }
+    final places = await PlacesSearchService.popularPlaces(
+      cityService: cityProvider.service,
+      contextCityId: _searchCityId,
+    );
+    if (!mounted || _effectiveSearchCityId(cityProvider) != cityId) return;
+    setState(() {
+      _popularPlaces = places;
+      _popularPlacesCityId = cityId;
+    });
   }
 
   void _listenWallet() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     _walletSub = FirebaseFirestore.instance
-        .collection('clients').doc(uid).snapshots()
+        .collection('clients')
+        .doc(uid)
+        .snapshots()
         .listen((s) {
       if (mounted) {
-        setState(() => _wallet = (s.data()?['wallet'] as num?)?.toInt() ?? 0);
+        final data = s.data();
+        final codEnabled =
+            livraisonCashOnDeliveryEnabled(data?['cashOnDeliveryEnabled']);
+        setState(() {
+          _wallet = (data?['wallet'] as num?)?.toInt() ?? 0;
+          _codEnabled = codEnabled;
+          _payment = livraisonPaymentAfterCodUpdate(
+            currentPayment: _payment,
+            cashOnDeliveryEnabled: codEnabled,
+          );
+        });
       }
     });
   }
 
   void _onDepFocusChange() {
     if (_depFocus.hasFocus) {
-      setState(() { _activeField = _ActiveField.departure; _searched = false; });
+      setState(() {
+        _activeField = _ActiveField.departure;
+        _searched = false;
+      });
     }
   }
 
   void _onDestFocusChange() {
     if (_destFocus.hasFocus) {
-      setState(() { _activeField = _ActiveField.destination; _searched = false; });
+      setState(() {
+        _activeField = _ActiveField.destination;
+        _searched = false;
+      });
     }
   }
 
   void _onSearchChanged(String query) {
     _debounce?.cancel();
-    if (query.trim().length < 2) {
-      setState(() { _suggestions = []; _searching = false; _searched = false; });
+    if (query.trim().length < PlacesSearchService.minQueryLength) {
+      setState(() {
+        _suggestions = [];
+        _searching = false;
+        _searched = false;
+        _awaitingExpansion = false;
+      });
       return;
     }
     setState(() => _searching = true);
-    _debounce = Timer(const Duration(milliseconds: 300), () => _runSearch(query.trim()));
+    _debounce = Timer(
+        const Duration(milliseconds: 300), () => _runSearch(query.trim()));
   }
 
   Future<void> _runSearch(String query) async {
-    final results = await PlacesSearchService.search(query);
+    final results = await PlacesSearchService.search(
+      query,
+      cityService: context.read<ActiveCityProvider>().service,
+      contextCityId: _searchCityId,
+    );
     if (!mounted) return;
-    setState(() { _suggestions = results; _searching = false; _searched = true; });
+    setState(() {
+      _suggestions = results;
+      _searching = false;
+      _searched = true;
+      _awaitingExpansion = PlacesSearchService.lastSearchState ==
+          PlacesSearchState.awaitingExpansion;
+    });
+  }
+
+  Future<void> _expandSearch() async {
+    final query = (_activeField == _ActiveField.departure
+            ? _depCtrl.text
+            : _destCtrl.text)
+        .trim();
+    if (!shouldShowLivraisonSearchExpansion(
+      query: query,
+      searched: _searched,
+      searching: _searching,
+      hasResults: _suggestions.isNotEmpty,
+      searchState: _awaitingExpansion
+          ? PlacesSearchState.awaitingExpansion
+          : PlacesSearchState.idle,
+    )) {
+      return;
+    }
+
+    setState(() {
+      _expandingSearch = true;
+      _searching = true;
+    });
+    final suggestions = await PlacesSearchService.expandSearch(
+      query,
+      cityService: context.read<ActiveCityProvider>().service,
+      contextCityId: _searchCityId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _suggestions = suggestions
+          .map((suggestion) => LocalPlace(
+                id: suggestion.placeId,
+                name: suggestion.mainText,
+                category: 'other',
+                district: suggestion.secondaryText,
+                address: suggestion.description,
+                latitude: suggestion.latitude ?? 0,
+                longitude: suggestion.longitude ?? 0,
+                source: suggestion.source,
+              ))
+          .toList(growable: false);
+      _searching = false;
+      _expandingSearch = false;
+      _awaitingExpansion = false;
+      _searched = true;
+    });
   }
 
   Future<void> _selectPlace(LocalPlace place) async {
@@ -251,28 +642,67 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
     if (_activeField == _ActiveField.departure) {
       setState(() {
-        _departure    = resolved;
+        _departure = resolved;
         _depCtrl.text = resolved.name;
-        _activeField  = _ActiveField.none;
-        _suggestions  = [];
-        _searching    = false;
-        if (_phase == 1) _phase = 2;
+        _activeField = _ActiveField.none;
+        _suggestions = [];
+        _searching = false;
       });
       _depFocus.unfocus();
       _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(resolved.latLng, 16));
     } else {
       setState(() {
-        _destination   = resolved;
+        _destination = resolved;
         _destCtrl.text = resolved.name;
-        _activeField   = _ActiveField.none;
-        _suggestions   = [];
-        _searching     = false;
+        _selectingDestinationOnMap = false;
+        _activeField = _ActiveField.none;
+        _suggestions = [];
+        _searching = false;
         if (_phase == 3) _phase = 4;
       });
       _destFocus.unfocus();
       _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(resolved.latLng, 16));
     }
 
+    _updateMarkers();
+    if (resolved.source != 'firestore') {
+      await PlacesSearchService.autoLearn(
+        resolved,
+        cityService: context.read<ActiveCityProvider>().service,
+      );
+    }
+    if (_departure != null && _destination != null) _calcRoute();
+  }
+
+  Future<void> _resolveMapCenter() async {
+    if ((_phase != 1 && _phase != 3) ||
+        (_phase == 3 && !_selectingDestinationOnMap) ||
+        _activeField != _ActiveField.none) {
+      return;
+    }
+
+    final center = _mapCenter;
+    final proposedName = (_phase == 3 ? _destCtrl.text : _depCtrl.text).trim();
+    final place = LocalPlace.fromExternal(
+      name: proposedName.isEmpty
+          ? 'Point sélectionné sur la carte'
+          : proposedName,
+      address: 'Position sélectionnée sur la carte',
+      latitude: center.latitude,
+      longitude: center.longitude,
+      category: 'quartier',
+      district: '',
+      source: 'map',
+    );
+    setState(() {
+      if (_phase == 3) {
+        _destination = place;
+        _destCtrl.text = place.name;
+      } else {
+        _departure = place;
+        _depCtrl.text = place.name;
+      }
+    });
     _updateMarkers();
     if (_departure != null && _destination != null) _calcRoute();
   }
@@ -282,21 +712,27 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     if (!_departure!.hasCoords || !_destination!.hasCoords) return;
     setState(() => _routeLoading = true);
     final route = await GoogleRoutesService.getRouteModel(
-      origin:      _departure!.latLng,
+      origin: _departure!.latLng,
       destination: _destination!.latLng,
     );
     if (!mounted) return;
     setState(() {
-      _route        = route;
+      _route = route;
       _routeLoading = false;
-      _polylines    = RoutePolylineBuilder.buildForClient(
+      _polylines = RoutePolylineBuilder.buildForClient(
           routeToClient: route, routeToDest: RouteModel.empty());
     });
     _routeAnim.forward(from: 0);
-    _pulseCtrl..reset()..repeat(reverse: true);
-    final pts = [_departure!.latLng, _destination!.latLng,
+    _pulseCtrl
+      ..reset()
+      ..repeat(reverse: true);
+    final pts = [
+      _departure!.latLng,
+      _destination!.latLng,
       ...route.points.take(3),
-      ...route.points.skip(route.points.length > 3 ? route.points.length - 3 : 0)];
+      ...route.points
+          .skip(route.points.length > 3 ? route.points.length - 3 : 0)
+    ];
     final bounds = RoutePolylineBuilder.boundsFor(pts);
     if (bounds != null) {
       _mapCtrl?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
@@ -307,22 +743,24 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     final m = <Marker>{};
     if (_departure != null && _departure!.hasCoords) {
       m.add(Marker(
-        markerId:   const MarkerId('dep'),
-        position:   _departure!.latLng,
-        icon:       _clientIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        markerId: const MarkerId('dep'),
+        position: _departure!.latLng,
+        icon: _clientIcon ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         infoWindow: InfoWindow(title: _departure!.name),
-        zIndexInt:  2,
-        anchor:     const Offset(0.5, 1),
+        zIndexInt: 2,
+        anchor: const Offset(0.5, 1),
       ));
     }
     if (_destination != null && _destination!.hasCoords) {
       m.add(Marker(
-        markerId:   const MarkerId('dest'),
-        position:   _destination!.latLng,
-        icon:       _destIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        markerId: const MarkerId('dest'),
+        position: _destination!.latLng,
+        icon: _destIcon ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
         infoWindow: InfoWindow(title: _destination!.name),
-        zIndexInt:  1,
-        anchor:     const Offset(0.5, 1),
+        zIndexInt: 1,
+        anchor: const Offset(0.5, 1),
       ));
     }
     setState(() => _markers = m);
@@ -331,39 +769,70 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Navigation entre phases ───────────────────────────────────────────────
 
   void _goBack() {
-    if (_phase == 1) { Navigator.pop(context); return; }
-    if (_phase == 2) { setState(() => _phase = 1); return; }
-    if (_phase == 3) { setState(() => _phase = 2); return; }
+    // Confirmé sur appareil réel : `_activeField` (qui pilote l'overlay de
+    // recherche plein écran) n'est remis à `none` que par une sélection de
+    // lieu réussie — jamais par un retour arrière. Sans ce reset, revenir en
+    // arrière depuis une phase où le focus était resté actif sur le champ de
+    // recherche laisse l'overlay de suggestions s'afficher par-dessus une
+    // phase qui n'a pourtant aucun champ de recherche (ex. phase 2),
+    // masquant entièrement son contenu réel.
+    if (_activeField != _ActiveField.none) {
+      _activeField = _ActiveField.none;
+      _depFocus.unfocus();
+      _destFocus.unfocus();
+    }
+    if (_phase == 1) {
+      Navigator.pop(context);
+      return;
+    }
+    if (_phase == 2) {
+      setState(() => _phase = 1);
+      return;
+    }
+    if (_phase == 3) {
+      setState(() => _phase = 2);
+      return;
+    }
     if (_phase == 4) {
       setState(() {
         _phase = 3;
         _destination = null;
         _destCtrl.clear();
-        _route     = RouteModel.empty();
+        _route = RouteModel.empty();
         _polylines = {};
       });
       _updateMarkers();
       return;
     }
-    if (_phase == 5) { setState(() => _phase = 4); return; }
-    if (_phase == 6) { setState(() => _phase = 5); return; }
+    if (_phase == 5) {
+      setState(() => _phase = 4);
+      return;
+    }
+    if (_phase == 6) {
+      setState(() => _phase = 5);
+      return;
+    }
   }
 
   void _goToDeliverySearch() {
     if (_pickupContactNameCtrl.text.trim().isEmpty) {
-      _snack('Veuillez saisir le nom de la personne qui remet le colis', Colors.orange);
+      _snack('Veuillez saisir le nom de la personne qui remet le colis',
+          Colors.orange);
       return;
     }
     if (_pickupContactPhoneCtrl.text.trim().isEmpty) {
-      _snack('Veuillez saisir le numéro de téléphone de l\'expéditeur', Colors.orange);
+      _snack('Veuillez saisir le numéro de téléphone de l\'expéditeur',
+          Colors.orange);
       return;
     }
-    setState(() { _phase = 3; _activeField = _ActiveField.destination; });
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (mounted) _destFocus.requestFocus();
+    setState(() {
+      _phase = 3;
+      _activeField = _ActiveField.none;
+      _selectingDestinationOnMap = false;
     });
     if (_departure != null) {
-      _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(_departure!.latLng, 14));
+      _mapCtrl
+          ?.animateCamera(CameraUpdate.newLatLngZoom(_departure!.latLng, 14));
     }
   }
 
@@ -373,7 +842,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       return;
     }
     if (_recipientCtrl.text.trim().isEmpty) {
-      _snack('Veuillez saisir le numéro de téléphone du destinataire', Colors.orange);
+      _snack('Veuillez saisir le numéro de téléphone du destinataire',
+          Colors.orange);
       return;
     }
     setState(() => _phase = 5);
@@ -388,7 +858,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     setState(() => _phase = 6);
     _pulseCtrl.repeat(reverse: true);
     if (_departure != null && _destination != null) {
-      final pts = [_departure!.latLng, _destination!.latLng, ..._route.points.take(3)];
+      final pts = [
+        _departure!.latLng,
+        _destination!.latLng,
+        ..._route.points.take(3)
+      ];
       final bounds = RoutePolylineBuilder.boundsFor(pts);
       if (bounds != null) {
         _mapCtrl?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 120));
@@ -401,6 +875,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   Future<void> _sendOrder() async {
     if (_departure == null || _destination == null) return;
     setState(() => _sending = true);
+    final cityService = context.read<ActiveCityProvider>().service;
 
     try {
       var user = FirebaseAuth.instance.currentUser;
@@ -410,19 +885,13 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       }
 
       final price = _selectedPrice;
-      if (_payment == 'wallet') {
-        if (_wallet < price) {
-          _snack('Solde insuffisant ($_wallet FCFA)', Colors.red);
-          setState(() => _sending = false);
-          return;
-        }
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final ref  = FirebaseFirestore.instance.collection('clients').doc(user!.uid);
-          final snap = await tx.get(ref);
-          final bal  = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
-          if (bal < price) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(ref, {'wallet': bal - price});
-        });
+      final shoppingBudget =
+          parseLivraisonShoppingBudget(_shoppingBudgetCtrl.text);
+      final totalAmount = price + shoppingBudget;
+      if (_payment == 'wallet' && _wallet < totalAmount) {
+        _snack('Solde insuffisant ($_wallet FCFA)', Colors.red);
+        setState(() => _sending = false);
+        return;
       }
 
       String? clientName;
@@ -430,61 +899,192 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       if (user?.uid != null) {
         try {
           final profile = await FirebaseFirestore.instance
-              .collection('clients').doc(user!.uid).get();
-          clientName  = profile.data()?['name']  as String?;
+              .collection('clients')
+              .doc(user!.uid)
+              .get();
+          clientName = profile.data()?['name'] as String?;
           clientPhone = profile.data()?['phone'] as String?;
         } catch (_) {}
       }
 
       final modeLabel = _deliveryMode == 'express' ? 'EXPRESS' : 'STANDARD';
-      final catLabel  = _categoryLabel;
+      final catLabel = _categoryLabel;
       final colisDesc = _colisCtrl.text.trim();
-      final poids     = _poidsCtrl.text.trim();
-      final descFull  = [
+      final poids = _poidsCtrl.text.trim();
+      final descFull = [
         if (colisDesc.isNotEmpty) colisDesc,
         if (poids.isNotEmpty) 'Poids: $poids kg',
       ].join(' · ');
-      final orderId   = const Uuid().v4();
-      final pkName    = _pickupContactNameCtrl.text.trim();
-      final pkPhone   = _pickupContactPhoneCtrl.text.trim();
-      final rcpName   = _recipientNameCtrl.text.trim();
-      final rcpPhone  = _recipientCtrl.text.trim();
+      final orderId = const Uuid().v4();
+      final pkName = _pickupContactNameCtrl.text.trim();
+      final pkPhone = _pickupContactPhoneCtrl.text.trim();
+      final rcpName = _recipientNameCtrl.text.trim();
+      final rcpPhone = _recipientCtrl.text.trim();
+      final activeCityId = cityService.activeCityId;
+      final zones = await Future.wait([
+        cityService.resolveZone(
+          latitude: _departure!.latitude,
+          longitude: _departure!.longitude,
+        ),
+        cityService.resolveZone(
+          latitude: _destination!.latitude,
+          longitude: _destination!.longitude,
+        ),
+      ]);
 
-      final order = OrderModel(
-        id:              orderId,
-        description:     descFull.isNotEmpty
+      // Construction et soumission déléguées à DeliveryOrderService : la même
+      // implémentation sert désormais au web, pour qu'il n'existe qu'UN seul
+      // chemin de débit wallet et qu'un seul schéma de commande. Tous les
+      // champs transmis ici sont ceux déjà écrits auparavant — comportement
+      // mobile inchangé.
+      final order = _deliveryOrders.buildOrder(
+        orderId: orderId,
+        clientId: user!.uid,
+        price: price,
+        shoppingBudget: shoppingBudget,
+        description: descFull.isNotEmpty
             ? '[$modeLabel][$catLabel] $descFull'
             : '[$modeLabel][$catLabel] Livraison — ${_destination!.name}',
-        budget:          price,
-        status:          'pending',
-        latitude:        _departure!.latitude,
-        longitude:       _departure!.longitude,
+        pickupLat: _departure!.latitude,
+        pickupLng: _departure!.longitude,
+        destLat: _destination!.latitude,
+        destLng: _destination!.longitude,
         deliveryAddress: _destination!.address,
-        destLat:         _destination!.latitude,
-        destLng:         _destination!.longitude,
-        type:            'livraison',
-        clientId:        user?.uid,
-        clientName:      clientName,
-        clientPhone:     clientPhone,
-        paymentMethod:   _payment,
-        isPaid:          _payment == 'wallet',
-        forSelf:         true,
-        deliveryMode:    _deliveryMode,
-        pickupContactName:  pkName.isNotEmpty  ? pkName  : null,
+        deliveryMode: _deliveryMode,
+        paymentMethod: _payment,
+        clientName: clientName,
+        clientPhone: clientPhone,
+        pickupContactName: pkName.isNotEmpty ? pkName : null,
         pickupContactPhone: pkPhone.isNotEmpty ? pkPhone : null,
-        recipientName:      rcpName.isNotEmpty  ? rcpName  : null,
-        recipientPhone:     rcpPhone.isNotEmpty ? rcpPhone : null,
+        recipientName: rcpName.isNotEmpty ? rcpName : null,
+        recipientPhone: rcpPhone.isNotEmpty ? rcpPhone : null,
+        pickupCityId: activeCityId,
+        deliveryCityId: activeCityId,
+        pickupZoneId: zones[0]?.id,
+        deliveryZoneId: zones[1]?.id,
+        pickupCoordinateSource:
+            livraisonOrderCoordinateSource(_departure!.source),
+        deliveryCoordinateSource:
+            livraisonOrderCoordinateSource(_destination!.source),
+        gpsDetectedCityId: cityService.gpsDetectedCityId,
+        activeCityId: activeCityId,
+        citySelectionSource: cityService.citySelectionSource,
+        cityResolutionStatus: cityService.cityResolutionStatus,
       );
 
-      await FirestoreService().createOrder(order);
-      if (_destination!.source != 'firestore') PlacesSearchService.autoLearn(_destination!);
+      // Parcours « devis officiel » (--dart-define=AZ_QUOTED_ORDERS=true) : le prix
+      // est calculé par le serveur, confirmé par le client, puis la commande est
+      // créée et le wallet débité dans UNE transaction serveur. Inactif par défaut ;
+      // mobile money et comptes anonymes restent sur le parcours historique ci-dessous.
+      if (QuotedOrderConfig.eligible(
+          isAnonymous: user.isAnonymous,
+          service: 'livraison',
+          paymentMethod: _payment)) {
+        if (!mounted) return;
+        final result = await runQuotedCheckoutWithUi(
+          context,
+          checkout: _quotedCheckout,
+          uid: user.uid,
+          request: QuoteRequest(
+            serviceType: 'livraison',
+            mode: _deliveryMode,
+            pickupLat: _departure!.latitude,
+            pickupLng: _departure!.longitude,
+            destLat: _destination!.latitude,
+            destLng: _destination!.longitude,
+            // Le serveur (officialTariff.js) plafonne déjà toute distance
+            // déclarée à vol d'oiseau × facteur routier, mais on ne présente
+            // pas une estimation locale comme une distance routière confirmée.
+            routeDistanceKm: RouteModel.resolveTariffDistance(
+              route: _route,
+              haversineFallbackKm: 0,
+            ).isRealRoute
+                ? _route.distanceKm
+                : null,
+          ),
+          paymentMethod: _payment,
+          walletBalance: _wallet,
+          draft: order,
+          shoppingBudget: shoppingBudget,
+        );
+        if (!mounted) return;
+        await _handleQuotedResult(result);
+        return;
+      }
+
+      if (_payment == 'wallet') {
+        // LOT 6.2 SECURITY : vérifie que ce build peut encore satisfaire la
+        // règle Firestore durcie (lastPaidOrderId) avant de tenter le débit
+        // — une app trop ancienne voit un message clair plutôt qu'un
+        // permission-denied brut. Repli permissif si la vérification
+        // échoue elle-même (voir WalletPaymentCompatibilityService).
+        // Reste ici : ce contrôle a besoin d'un BuildContext.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          setState(() => _sending = false);
+          return;
+        }
+      }
+      await _deliveryOrders.submit(order);
       if (!mounted) return;
-      Navigator.pushReplacement(context,
-          MaterialPageRoute(builder: (_) => CustomerTrackingScreen(order: order)));
+      Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (_) => CustomerTrackingScreen(
+                    order: order,
+                    pickupLabel: _departure!.name,
+                    deliveryLabel: _destination!.name,
+                    orderDistanceKm: _route.distanceKm,
+                    orderEtaMinutes: _route.etaMinutes,
+                    orderEtaText: _etaRange,
+                    deliveryPrice: price,
+                    deliveryMode: _deliveryMode,
+                    paymentMethod: _payment,
+                  )));
     } catch (e) {
       if (!mounted) return;
       setState(() => _sending = false);
       _snack('Erreur : $e', Colors.red);
+    }
+  }
+
+  Future<void> _handleQuotedResult(QuotedCheckoutResult result) async {
+    switch (result) {
+      case CheckoutCreated(:final orderId):
+        final created = await finalizeQuotedOrder(orderId);
+        if (!mounted) return;
+        if (created == null) {
+          setState(() => _sending = false);
+          _snack('Commande enregistrée. Retrouvez-la dans « Mes commandes ».',
+              Colors.green);
+          return;
+        }
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+                builder: (_) => CustomerTrackingScreen(
+                      order: created,
+                      pickupLabel: _departure!.name,
+                      deliveryLabel: _destination!.name,
+                      orderDistanceKm: _route.distanceKm,
+                      orderEtaMinutes: _route.etaMinutes,
+                      orderEtaText: _etaRange,
+                      deliveryPrice: created.budget,
+                      deliveryMode: _deliveryMode,
+                      paymentMethod: _payment,
+                    )));
+      case CheckoutCancelled():
+        setState(() => _sending = false);
+      case CheckoutFailed():
+        setState(() => _sending = false);
+        _snack(quotedFailureMessage(result), Colors.red);
+      case CheckoutUncertain():
+        setState(() => _sending = false);
+        _snack(
+            'Réponse non reçue. Vérifiez « Mes commandes » avant de recommencer.',
+            Colors.orange);
     }
   }
 
@@ -494,7 +1094,10 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   void _dismissKeyboard() {
     _depFocus.unfocus();
     _destFocus.unfocus();
-    setState(() { _activeField = _ActiveField.none; _suggestions = []; });
+    setState(() {
+      _activeField = _ActiveField.none;
+      _suggestions = [];
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -503,64 +1106,101 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
   @override
   Widget build(BuildContext context) {
-    final topPad       = MediaQuery.of(context).padding.top;
-    final bottomPad    = MediaQuery.of(context).padding.bottom;
+    final topPad = MediaQuery.of(context).padding.top;
+    final bottomPad = MediaQuery.of(context).padding.bottom;
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
 
     return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) { if (!didPop) _goBack(); },
+      // À la première étape, l'écran est une vraie route empilée : laisser
+      // Flutter la dépiler préserve le bouton Retour Android et le geste
+      // interactif iOS. Les étapes suivantes restent dans le même parcours
+      // et sont donc gérées par _goBack ci-dessous.
+      canPop: _phase == 1,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _goBack();
+      },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemUiOverlayStyle.dark,
+        value: Theme.of(context).brightness == Brightness.dark
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
         child: Scaffold(
           backgroundColor: Colors.black,
           resizeToAvoidBottomInset: false,
           body: Stack(children: [
-
             // ── Carte plein écran ────────────────────────────────────────────
             Positioned.fill(
               child: GoogleMap(
                 initialCameraPosition:
                     const CameraPosition(target: _abengourou, zoom: 13),
-                markers:             _markers,
-                polylines:           _polylines,
-                myLocationEnabled:   false,
+                markers: _markers,
+                polylines: _polylines,
+                myLocationEnabled: false,
                 zoomControlsEnabled: false,
-                mapToolbarEnabled:   false,
-                compassEnabled:      false,
-                onMapCreated:        (c) => _mapCtrl = c,
-                onTap:               (_) => _dismissKeyboard(),
+                mapToolbarEnabled: false,
+                compassEnabled: false,
+                onMapCreated: (c) {
+                  _mapCtrl = c;
+                  debugPrint('[MAP_DIAG] onMapCreated OK');
+                },
+                onCameraMove: (position) => _mapCenter = position.target,
+                onCameraIdle: () {
+                  debugPrint('[MAP_DIAG] onCameraIdle center=$_mapCenter');
+                  _resolveMapCenter();
+                },
+                onTap: (_) => _dismissKeyboard(),
               ),
             ),
+
+            if ((_phase == 1 || (_phase == 3 && _selectingDestinationOnMap)) &&
+                _activeField == _ActiveField.none)
+              const IgnorePointer(
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: 112),
+                    child: _PickupMapPin(),
+                  ),
+                ),
+              ),
 
             // ── Top bar flottante ────────────────────────────────────────────
             Positioned(
               top: topPad + 8,
-              left: 16, right: 16,
+              left: 16,
+              right: 16,
               child: _buildTopBar(),
             ),
 
             // ── Bouton GPS ───────────────────────────────────────────────────
-            if (_activeField == _ActiveField.none)
+            // Phase 1 uniquement : _getGPS() écrase _departure (le point de
+            // récupération) sans aucun retour visuel dans les phases 2-6 —
+            // affiché partout, il permettait de modifier silencieusement le
+            // point déjà confirmé depuis n'importe quelle étape ultérieure.
+            if (_activeField == _ActiveField.none &&
+                (_phase == 1 || _phase == 3))
               Positioned(
                 right: 16,
                 bottom: _panelMinHeight(bottomPad) + 12,
                 child: _CircleBtn(
-                    icon: Icons.my_location_rounded, onTap: _getGPS),
+                  icon: Icons.my_location_rounded,
+                  onTap: () => _getGPS(_phase == 3
+                      ? _ActiveField.destination
+                      : _ActiveField.departure),
+                ),
               ),
 
             // ── Panel bas flottant ───────────────────────────────────────────
             Positioned(
-              bottom: keyboardHeight, left: 0, right: 0,
+              bottom: keyboardHeight,
+              left: 0,
+              right: 0,
               child: _buildBottomPanel(bottomPad),
             ),
 
             // ── Overlay suggestions (par-dessus tout) ───────────────────────
             if (_activeField != _ActiveField.none)
               Positioned.fill(
-                child: _buildSuggestionsOverlay(topPad),
+                child: _buildSuggestionsOverlay(topPad, keyboardHeight),
               ),
-
           ]),
         ),
       ),
@@ -575,6 +1215,15 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Top bar ───────────────────────────────────────────────────────────────
 
   Widget _buildTopBar() {
+    final brightness = Theme.of(context).brightness;
+    final surface = AppColors.premiumSurface(brightness);
+    final border = AppColors.premiumBorder(brightness);
+    final textPrimary = brightness == Brightness.dark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+    final muted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     const titles = [
       '📍 Où récupérons-nous ?',
       '👤 Qui remet le colis ?',
@@ -588,14 +1237,15 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       GestureDetector(
         onTap: _goBack,
         child: Container(
-          width: 44, height: 44,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: AppShadow.md,
+            color: surface,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: border),
+            boxShadow: AppShadow.sm,
           ),
-          child: const Icon(Icons.arrow_back_rounded,
-              size: 20, color: AppColors.text),
+          child: Icon(Icons.arrow_back_rounded, size: 20, color: textPrimary),
         ),
       ),
       const SizedBox(width: 10),
@@ -604,34 +1254,38 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: 14),
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
+            color: surface,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: border),
             boxShadow: AppShadow.sm,
           ),
           child: Row(children: [
             Expanded(
               child: Text(titles[_phase - 1],
-                style: GoogleFonts.urbanist(
-                    fontSize: 13, fontWeight: FontWeight.w700,
-                    color: AppColors.text),
-                overflow: TextOverflow.ellipsis),
+                  style: GoogleFonts.urbanist(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: textPrimary),
+                  overflow: TextOverflow.ellipsis),
             ),
             const SizedBox(width: 8),
             // Progress dots
             Row(
-              children: List.generate(6, (i) => AnimatedContainer(
-                duration: const Duration(milliseconds: 280),
-                curve: Curves.easeOutCubic,
-                margin: const EdgeInsets.only(left: 3),
-                width:  i < _phase ? 14 : 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: i < _phase
-                      ? AppColors.primary
-                      : AppColors.divider,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              )),
+              children: List.generate(
+                  6,
+                  (i) => AnimatedContainer(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeOutCubic,
+                        margin: const EdgeInsets.only(left: 3),
+                        width: i < _phase ? 14 : 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: i < _phase
+                              ? AppColors.primary
+                              : muted.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      )),
             ),
           ]),
         ),
@@ -642,18 +1296,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Panel bas ─────────────────────────────────────────────────────────────
 
   Widget _buildBottomPanel(double bottomPad) {
-    final screenH      = MediaQuery.of(context).size.height;
-    final topPad       = MediaQuery.of(context).padding.top;
-    final keyboardH    = MediaQuery.of(context).viewInsets.bottom;
-    final maxPanelH    = screenH - topPad - 72 - keyboardH;
+    final brightness = Theme.of(context).brightness;
+    final screenH = MediaQuery.of(context).size.height;
+    final topPad = MediaQuery.of(context).padding.top;
+    final keyboardH = MediaQuery.of(context).viewInsets.bottom;
+    final maxPanelH = screenH - topPad - 72 - keyboardH;
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
-      switchInCurve:  Curves.easeOutCubic,
+      switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (child, anim) => SlideTransition(
-        position: Tween(begin: const Offset(0, 0.08), end: Offset.zero)
-            .animate(anim),
+        position:
+            Tween(begin: const Offset(0, 0.08), end: Offset.zero).animate(anim),
         child: FadeTransition(opacity: anim, child: child),
       ),
       child: KeyedSubtree(
@@ -661,12 +1316,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxPanelH),
           child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            decoration: BoxDecoration(
+              color: AppColors.premiumSurface(brightness),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border(
+                top: BorderSide(color: AppColors.premiumBorder(brightness)),
+              ),
               boxShadow: [
-                BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, -8)),
-                BoxShadow(color: Color(0x08000000), blurRadius: 8,  offset: Offset(0, -2)),
+                BoxShadow(
+                    color: Colors.black.withValues(
+                        alpha: brightness == Brightness.dark ? 0.28 : 0.10),
+                    blurRadius: 22,
+                    offset: const Offset(0, -8)),
               ],
             ),
             child: _buildPanelContent(bottomPad),
@@ -678,80 +1340,73 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
   Widget _buildPanelContent(double bottomPad) {
     switch (_phase) {
-      case 1: return _buildPickupSearchPanel(bottomPad);
-      case 2: return _buildPickupContactPanel(bottomPad);
-      case 3: return _buildDeliverySearchPanel(bottomPad);
-      case 4: return _buildDeliveryContactPanel(bottomPad);
-      case 5: return _buildColisDetailsPanel(bottomPad);
-      case 6: return _buildConfirmPanel(bottomPad);
-      default: return const SizedBox();
+      case 1:
+        return _buildPickupSearchPanel(bottomPad);
+      case 2:
+        return _buildPickupContactPanel(bottomPad);
+      case 3:
+        return _buildDeliverySearchPanel(bottomPad);
+      case 4:
+        return _buildDeliveryContactPanel(bottomPad);
+      case 5:
+        return _buildColisDetailsPanel(bottomPad);
+      case 6:
+        return _buildConfirmPanel(bottomPad);
+      default:
+        return const SizedBox();
     }
   }
 
   // ── Phase 1 : sélection point récupération ───────────────────────────────
 
   Widget _buildPickupSearchPanel(double bottomPad) {
-    return Padding(
+    return SingleChildScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.fromLTRB(20, 14, 20, bottomPad + 16),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         _handle(),
         const SizedBox(height: 14),
-
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Où récupérons-nous votre colis ?',
+                  style: GoogleFonts.urbanist(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      color: _premiumText)),
+              const SizedBox(height: 4),
+              Text('Recherchez une adresse ou déplacez la carte.',
+                  style:
+                      GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
         _buildSearchField(
-          ctrl:      _depCtrl,
-          focus:     _depFocus,
-          hint:      'Chercher une adresse, un quartier…',
-          icon:      Icons.radio_button_checked_rounded,
+          ctrl: _depCtrl,
+          focus: _depFocus,
+          hint: 'Chercher une adresse, un quartier…',
+          icon: Icons.radio_button_checked_rounded,
           iconColor: const Color(0xFF22C55E),
-          field:     _ActiveField.departure,
+          field: _ActiveField.departure,
         ),
         const SizedBox(height: 10),
-
-        ScaleTap(
-          onTap: _getGPS,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
-            ),
-            child: Row(children: [
-              Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.my_location_rounded,
-                    color: AppColors.primary, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Ma position actuelle',
-                    style: GoogleFonts.urbanist(
-                        fontSize: 13, fontWeight: FontWeight.w600,
-                        color: AppColors.primary)),
-                  Text('Utiliser le GPS',
-                    style: GoogleFonts.urbanist(
-                        fontSize: 11, color: AppColors.textMuted)),
-                ],
-              )),
-              const Icon(Icons.chevron_right_rounded,
-                  color: AppColors.primary, size: 20),
-            ]),
-          ),
+        _pickupLocationCard(),
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+            _pickupQuickChip('Ma position', Icons.my_location_rounded, _getGPS),
+            _pickupQuickChip('Lieux récents', Icons.history_rounded, () {
+              _depFocus.requestFocus();
+            }),
+          ]),
         ),
-
-        if (_departure != null) ...[
-          const SizedBox(height: 12),
-          _primaryBtn(
-            label: 'Confirmer ce lieu',
-            onTap: () => setState(() => _phase = 2),
-          ),
-        ],
+        const SizedBox(height: 14),
+        _pickupConfirmButton(
+            _departure != null && _departure!.hasCoords && !_gpsLoading),
       ]),
     );
   }
@@ -772,22 +1427,28 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
         // Adresse sélectionnée
         _addressChip(
-          name:   _departure?.name ?? '—',
-          label:  'Point de récupération',
-          color:  const Color(0xFF22C55E),
-          icon:   Icons.radio_button_checked_rounded,
+          name: _departure?.name ?? '—',
+          label: 'Point de récupération',
+          color: const Color(0xFF22C55E),
+          icon: Icons.radio_button_checked_rounded,
           onEdit: () => setState(() => _phase = 1),
         ),
         const SizedBox(height: 16),
 
-        _premiumField(ctrl: _pickupContactNameCtrl,
-            hint: 'Nom complet de la personne', icon: Icons.person_outline_rounded,
+        _premiumField(
+            ctrl: _pickupContactNameCtrl,
+            hint: 'Nom complet de la personne',
+            icon: Icons.person_outline_rounded,
             type: TextInputType.name,
-            textInputAction: TextInputAction.next),
+            textInputAction: TextInputAction.next,
+            nextFocusNode: _pickupContactPhoneFocus),
         const SizedBox(height: 10),
-        _premiumField(ctrl: _pickupContactPhoneCtrl,
-            hint: '07 XX XX XX XX', icon: Icons.phone_outlined,
-            type: TextInputType.phone),
+        _premiumField(
+            ctrl: _pickupContactPhoneCtrl,
+            hint: '07 XX XX XX XX',
+            icon: Icons.phone_outlined,
+            type: TextInputType.phone,
+            focusNode: _pickupContactPhoneFocus),
         const SizedBox(height: 20),
 
         _primaryBtn(
@@ -806,17 +1467,33 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         _handle(),
         const SizedBox(height: 14),
-
         _buildSearchField(
-          ctrl:      _destCtrl,
-          focus:     _destFocus,
-          hint:      'Chercher une adresse, un quartier…',
-          icon:      Icons.place_rounded,
+          ctrl: _destCtrl,
+          focus: _destFocus,
+          hint: 'Chercher une adresse, un quartier…',
+          icon: Icons.place_rounded,
           iconColor: AppColors.primary,
-          field:     _ActiveField.destination,
-          autoFocus: true,
+          field: _ActiveField.destination,
         ),
-
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+            _pickupQuickChip(
+              'Ma position',
+              Icons.my_location_rounded,
+              () => _getGPS(_ActiveField.destination),
+            ),
+            _pickupQuickChip(
+              'Choisir sur la carte',
+              Icons.map_outlined,
+              () {
+                _dismissKeyboard();
+                setState(() => _selectingDestinationOnMap = true);
+              },
+            ),
+          ]),
+        ),
         if (_destination != null) ...[
           const SizedBox(height: 12),
           _primaryBtn(
@@ -843,16 +1520,16 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         const SizedBox(height: 12),
 
         _addressChip(
-          name:   _destination?.name ?? '—',
-          label:  'Point de livraison',
-          color:  AppColors.primary,
-          icon:   Icons.place_rounded,
+          name: _destination?.name ?? '—',
+          label: 'Point de livraison',
+          color: AppColors.primary,
+          icon: Icons.place_rounded,
           onEdit: () {
             setState(() {
               _phase = 3;
               _destination = null;
               _destCtrl.clear();
-              _route     = RouteModel.empty();
+              _route = RouteModel.empty();
               _polylines = {};
             });
             _updateMarkers();
@@ -860,14 +1537,20 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         ),
         const SizedBox(height: 16),
 
-        _premiumField(ctrl: _recipientNameCtrl,
-            hint: 'Nom complet du destinataire', icon: Icons.person_outline_rounded,
+        _premiumField(
+            ctrl: _recipientNameCtrl,
+            hint: 'Nom complet du destinataire',
+            icon: Icons.person_outline_rounded,
             type: TextInputType.name,
-            textInputAction: TextInputAction.next),
+            textInputAction: TextInputAction.next,
+            nextFocusNode: _recipientPhoneFocus),
         const SizedBox(height: 10),
-        _premiumField(ctrl: _recipientCtrl,
-            hint: '07 XX XX XX XX', icon: Icons.phone_outlined,
-            type: TextInputType.phone),
+        _premiumField(
+            ctrl: _recipientCtrl,
+            hint: '07 XX XX XX XX',
+            icon: Icons.phone_outlined,
+            type: TextInputType.phone,
+            focusNode: _recipientPhoneFocus),
         const SizedBox(height: 20),
 
         _primaryBtn(label: 'Continuer', onTap: _goToColisDetails),
@@ -878,6 +1561,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Phase 5 : détails du colis ───────────────────────────────────────────
 
   Widget _buildColisDetailsPanel(double bottomPad) {
+    final shouldUseLightFill = shouldUseLightLivraisonPremiumFieldFill(
+      platform: Theme.of(context).platform,
+      brightness: Theme.of(context).brightness,
+    );
+
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(20, 14, 20, bottomPad + 16),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -893,7 +1581,7 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           mainAxisSpacing: 10,
           childAspectRatio: 0.95,
           children: _catItems.map((cat) {
-            final sel   = _category == cat.$1;
+            final sel = _category == cat.$1;
             final parts = cat.$2.split(' ');
             final emoji = parts.first;
             final label = parts.skip(1).join(' ');
@@ -910,8 +1598,11 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                     width: sel ? 2.0 : 1.0,
                   ),
                   boxShadow: sel
-                      ? [BoxShadow(color: cat.$3.withValues(alpha: 0.15),
-                          blurRadius: 10)]
+                      ? [
+                          BoxShadow(
+                              color: cat.$3.withValues(alpha: 0.15),
+                              blurRadius: 10)
+                        ]
                       : null,
                 ),
                 child: Column(
@@ -919,7 +1610,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
                   children: [
                     Text(emoji, style: const TextStyle(fontSize: 26)),
                     const SizedBox(height: 6),
-                    Text(label,
+                    Text(
+                      label,
                       style: GoogleFonts.urbanist(
                         fontSize: 11,
                         fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
@@ -936,37 +1628,82 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
         const SizedBox(height: 16),
 
-        _premiumField(ctrl: _colisCtrl,
+        _premiumField(
+            ctrl: _colisCtrl,
             hint: 'Description (optionnel)',
-            icon: Icons.edit_note_rounded, maxLines: 2),
+            icon: Icons.edit_note_rounded,
+            maxLines: 2),
         const SizedBox(height: 10),
 
         // Champ poids optionnel
         Container(
           decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
+            color: shouldUseLightFill ? AppColors.bg : _premiumSurfaceElevated,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: _premiumBorder),
           ),
           child: TextField(
             controller: _poidsCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
+            style: GoogleFonts.urbanist(
+                fontSize: 14,
+                color: shouldUseLightFill ? AppColors.text : _premiumText),
             decoration: InputDecoration(
-              hintText:  'Poids en kg (optionnel)',
-              hintStyle: GoogleFonts.urbanist(fontSize: 13, color: AppColors.textLight),
+              filled: shouldUseLightFill ? true : null,
+              fillColor: shouldUseLightFill ? AppColors.bg : null,
+              hintText: 'Poids en kg (optionnel)',
+              hintStyle: GoogleFonts.urbanist(
+                  fontSize: 13,
+                  color:
+                      shouldUseLightFill ? AppColors.textLight : _premiumMuted),
               prefixIcon: const Padding(
                 padding: EdgeInsets.only(left: 12, right: 8),
-                child: Icon(Icons.scale_rounded, color: AppColors.textMuted, size: 18),
+                child: Icon(Icons.scale_rounded,
+                    color: AppColors.textMuted, size: 18),
               ),
               prefixIconConstraints: const BoxConstraints(),
               suffixText: 'kg',
               suffixStyle: GoogleFonts.urbanist(
-                  fontSize: 13, color: AppColors.textMuted,
+                  fontSize: 13,
+                  color: AppColors.textMuted,
                   fontWeight: FontWeight.w600),
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 14),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: shouldUseLightFill ? AppColors.bg : _premiumSurfaceElevated,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: _premiumBorder),
+          ),
+          child: TextField(
+            controller: _shoppingBudgetCtrl,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onChanged: (_) => setState(() {}),
+            style: GoogleFonts.urbanist(
+                fontSize: 14,
+                color: shouldUseLightFill ? AppColors.text : _premiumText),
+            decoration: InputDecoration(
+              filled: shouldUseLightFill ? true : null,
+              fillColor: shouldUseLightFill ? AppColors.bg : null,
+              hintText: 'Budget d’achat (optionnel)',
+              hintStyle: GoogleFonts.urbanist(
+                  fontSize: 13,
+                  color:
+                      shouldUseLightFill ? AppColors.textLight : _premiumMuted),
+              helperText: 'Montant des achats, hors frais de livraison',
+              prefixIcon: const Icon(Icons.shopping_basket_outlined,
+                  color: AppColors.textMuted, size: 18),
+              suffixText: 'FCFA',
+              border: InputBorder.none,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             ),
           ),
         ),
@@ -980,7 +1717,9 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Phase 5 : confirmation ────────────────────────────────────────────────
 
   Widget _buildConfirmPanel(double bottomPad) {
-    final hasFunds  = _wallet >= _selectedPrice;
+    final shoppingBudget =
+        parseLivraisonShoppingBudget(_shoppingBudgetCtrl.text);
+    final hasFunds = _wallet >= _selectedPrice + shoppingBudget;
     final modeColor = _deliveryMode == 'express'
         ? AppColors.primary
         : const Color(0xFF22C55E);
@@ -995,32 +1734,32 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.divider),
+            color: _premiumSurfaceElevated,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: _premiumBorder),
           ),
           child: Column(children: [
             _routeRow(
-              icon:    Icons.radio_button_checked_rounded,
-              color:   const Color(0xFF22C55E),
-              label:   'Récupération',
-              name:    _departure?.name ?? '—',
+              icon: Icons.radio_button_checked_rounded,
+              color: const Color(0xFF22C55E),
+              label: 'Récupération',
+              name: _departure?.name ?? '—',
               contact: _pickupContactNameCtrl.text.trim(),
-              phone:   _pickupContactPhoneCtrl.text.trim(),
-              onEdit:  () => setState(() => _phase = 2),
+              phone: _pickupContactPhoneCtrl.text.trim(),
+              onEdit: () => setState(() => _phase = 2),
             ),
             Padding(
               padding: const EdgeInsets.only(left: 14),
-              child: Container(width: 1.5, height: 18, color: AppColors.divider),
+              child: Container(width: 1.5, height: 18, color: _premiumBorder),
             ),
             _routeRow(
-              icon:    Icons.place_rounded,
-              color:   AppColors.primary,
-              label:   'Livraison',
-              name:    _destination?.name ?? '—',
+              icon: Icons.place_rounded,
+              color: AppColors.primary,
+              label: 'Livraison',
+              name: _destination?.name ?? '—',
               contact: _recipientNameCtrl.text.trim(),
-              phone:   _recipientCtrl.text.trim(),
-              onEdit:  () => setState(() => _phase = 4),
+              phone: _recipientCtrl.text.trim(),
+              onEdit: () => setState(() => _phase = 4),
             ),
           ]),
         ),
@@ -1031,28 +1770,30 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: AppColors.bg,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.divider),
+            color: _premiumSurfaceElevated,
+            borderRadius: AppRadius.premiumLgR,
+            border: Border.all(color: _premiumBorder),
           ),
           child: Row(children: [
             Text(_categoryLabel,
-              style: GoogleFonts.urbanist(
-                  fontSize: 13, fontWeight: FontWeight.w600,
-                  color: AppColors.text)),
+                style: GoogleFonts.urbanist(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _premiumText)),
             if (_poidsCtrl.text.isNotEmpty) ...[
               const SizedBox(width: 8),
               Text('· ${_poidsCtrl.text} kg',
-                style: GoogleFonts.urbanist(
-                    fontSize: 12, color: AppColors.textMuted)),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted)),
             ],
             const Spacer(),
             GestureDetector(
               onTap: () => setState(() => _phase = 5),
               child: Text('Modifier',
-                style: GoogleFonts.urbanist(
-                    fontSize: 11, fontWeight: FontWeight.w600,
-                    color: AppColors.primary)),
+                  style: GoogleFonts.urbanist(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary)),
             ),
           ]),
         ),
@@ -1064,46 +1805,64 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           Container(
             padding: const EdgeInsets.symmetric(vertical: 10),
             decoration: BoxDecoration(
-              color: AppColors.bg,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.divider),
+              color: _premiumSurfaceElevated,
+              borderRadius: AppRadius.premiumLgR,
+              border: Border.all(color: _premiumBorder),
             ),
             child: Row(children: [
-              Expanded(child: _miniStat(Icons.straighten_rounded,
-                  'Distance', _route.distanceText, const Color(0xFF1565C0))),
-              Container(width: 1, height: 26, color: AppColors.divider),
-              Expanded(child: _miniStat(Icons.access_time_rounded,
-                  'Délai', _etaRange, const Color(0xFF22C55E))),
-              Container(width: 1, height: 26, color: AppColors.divider),
-              Expanded(child: _miniStat(
-                  _deliveryMode == 'express'
-                      ? Icons.rocket_launch_rounded
-                      : Icons.electric_bike_rounded,
-                  'Mode',
-                  _deliveryMode == 'express' ? 'Express' : 'Standard',
-                  modeColor)),
+              Expanded(
+                  child: _miniStat(Icons.straighten_rounded, 'Distance',
+                      _route.distanceText, const Color(0xFF1565C0))),
+              Container(width: 1, height: 26, color: _premiumBorder),
+              Expanded(
+                  child: _miniStat(Icons.access_time_rounded, 'Délai',
+                      _etaRange, const Color(0xFF22C55E))),
+              Container(width: 1, height: 26, color: _premiumBorder),
+              Expanded(
+                  child: _miniStat(
+                      _deliveryMode == 'express'
+                          ? Icons.rocket_launch_rounded
+                          : Icons.electric_bike_rounded,
+                      'Mode',
+                      _deliveryMode == 'express' ? 'Express' : 'Standard',
+                      modeColor)),
             ]),
           ),
+
+        if (_route.isNotEmpty && _route.isEstimate) ...[
+          const SizedBox(height: 8),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: RouteEstimateNotice(),
+          ),
+        ],
 
         const SizedBox(height: 12),
 
         // Mode Standard / Express
         _buildModeCard(
-          mode: 'standard', icon: Icons.electric_bike_rounded,
-          title: 'STANDARD', subtitle: 'Économique · groupage possible',
+          mode: 'standard',
+          icon: Icons.electric_bike_rounded,
+          title: 'STANDARD',
+          subtitle: 'Économique · groupage possible',
           etaText: _route.etaMinutes > 0
               ? '${_route.etaMinutes + 15}–${_route.etaMinutes + 40} min'
               : '30–60 min',
-          price: _standardPrice, iconColor: const Color(0xFF22C55E),
+          price: _standardPrice,
+          iconColor: const Color(0xFF22C55E),
         ),
         const SizedBox(height: 8),
         _buildModeCard(
-          mode: 'express', icon: Icons.rocket_launch_rounded,
-          title: 'EXPRESS', subtitle: 'Prioritaire · livreur dédié',
+          mode: 'express',
+          icon: Icons.rocket_launch_rounded,
+          title: 'EXPRESS',
+          subtitle: 'Prioritaire · livreur dédié',
           etaText: _route.etaMinutes > 0
               ? '${(_route.etaMinutes * 0.8).ceil()}–${_route.etaMinutes + 5} min'
               : '10–20 min',
-          price: _expressPrice, iconColor: AppColors.primary, badge: 'Prioritaire',
+          price: _expressPrice,
+          iconColor: AppColors.primary,
+          badge: 'Prioritaire',
         ),
 
         const SizedBox(height: 12),
@@ -1120,49 +1879,90 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             border: Border.all(color: modeColor.withValues(alpha: 0.22)),
           ),
           child: Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              Text('Total à payer',
-                style: GoogleFonts.urbanist(
-                    fontSize: 13, fontWeight: FontWeight.w700,
-                    color: AppColors.text)),
-              if (_tarifResult?.isNight == true)
-                Text('🌙 Tarif nuit',
-                  style: GoogleFonts.urbanist(
-                      fontSize: 11, color: AppColors.textMuted)),
-            ])),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text('Frais de livraison',
+                      style: GoogleFonts.urbanist(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: _premiumText)),
+                  if (_tarifResult?.isNight == true)
+                    Text('🌙 Tarif nuit',
+                        style: GoogleFonts.urbanist(
+                            fontSize: 11, color: _premiumMuted)),
+                ])),
             Text(_selectedPrice > 0 ? '$_selectedPrice FCFA' : '—',
-              style: GoogleFonts.urbanist(
-                  fontSize: 22, fontWeight: FontWeight.w800,
-                  color: modeColor)),
+                style: GoogleFonts.urbanist(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: modeColor)),
           ]),
         ),
+
+        if (shoppingBudget > 0) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: _premiumSurfaceElevated,
+              borderRadius: AppRadius.premiumLgR,
+              border: Border.all(color: _premiumBorder),
+            ),
+            child: Column(children: [
+              Row(children: [
+                const Expanded(child: Text('Budget d’achat')),
+                Text('$shoppingBudget FCFA'),
+              ]),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: Text('Total à payer',
+                      style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
+                ),
+                Text('${_selectedPrice + shoppingBudget} FCFA',
+                    style: GoogleFonts.urbanist(fontWeight: FontWeight.w800)),
+              ]),
+            ]),
+          ),
+        ],
 
         const SizedBox(height: 14),
 
         // Paiement
         Text('Mode de paiement',
-          style: GoogleFonts.urbanist(
-              fontSize: 13, fontWeight: FontWeight.w700,
-              color: AppColors.text)),
+            style: GoogleFonts.urbanist(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: _premiumText)),
         const SizedBox(height: 10),
 
-        _payRow(icon: Icons.money_rounded, color: const Color(0xFF22C55E),
-            label: 'Espèces', sub: 'Payer au livreur à la livraison', value: 'cash'),
+        _payRow(
+            icon: Icons.money_rounded,
+            color: _codEnabled ? const Color(0xFF22C55E) : Colors.grey,
+            label: 'Espèces',
+            sub: _codEnabled
+                ? 'Payer au livreur à la livraison'
+                : 'Désactivé — 3 fausses commandes détectées',
+            value: 'cash',
+            disabled: !_codEnabled),
         const SizedBox(height: 8),
-        _payRow(icon: Icons.smartphone_rounded, color: const Color(0xFF1565C0),
-            label: 'Mobile Money', sub: 'Orange Money · MTN MoMo · Wave',
+        _payRow(
+            icon: Icons.smartphone_rounded,
+            color: const Color(0xFF1565C0),
+            label: 'Mobile Money',
+            sub: 'Orange Money · MTN MoMo · Wave',
             value: 'mobile_money'),
-        if (_wallet > 0) ...[
-          const SizedBox(height: 8),
-          _payRow(
-            icon: Icons.account_balance_wallet_rounded,
-            color: hasFunds ? const Color(0xFF6A1B9A) : Colors.grey,
-            label: hasFunds ? 'Wallet · $_wallet FCFA' : 'Solde insuffisant',
-            sub:   hasFunds ? 'Paiement immédiat' : 'Rechargez votre wallet',
-            value: 'wallet', disabled: !hasFunds,
-          ),
-        ],
+        const SizedBox(height: 8),
+        _payRow(
+          icon: Icons.account_balance_wallet_rounded,
+          color: hasFunds ? const Color(0xFF6A1B9A) : Colors.grey,
+          label: hasFunds ? 'Wallet · $_wallet FCFA' : 'Solde insuffisant',
+          sub: hasFunds ? 'Paiement immédiat' : 'Rechargez votre wallet',
+          value: 'wallet',
+          disabled: !hasFunds,
+        ),
 
         const SizedBox(height: 18),
 
@@ -1179,29 +1979,44 @@ class _LivraisonScreenState extends State<LivraisonScreen>
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 18),
               decoration: BoxDecoration(
-                gradient: (_sending || _routeLoading) ? null : const LinearGradient(
-                  colors: [Color(0xFFE65100), AppColors.primary, Color(0xFFFF8C42)],
-                  begin: Alignment.topLeft, end: Alignment.bottomRight,
-                ),
+                gradient: (_sending || _routeLoading)
+                    ? null
+                    : const LinearGradient(
+                        colors: [
+                          Color(0xFFE65100),
+                          AppColors.primary,
+                          Color(0xFFFF8C42)
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
                 color: (_sending || _routeLoading) ? AppColors.divider : null,
                 borderRadius: BorderRadius.circular(18),
-                boxShadow: (_sending || _routeLoading) ? null : [
-                  BoxShadow(color: AppColors.primary.withValues(alpha: 0.40),
-                      blurRadius: 20, offset: const Offset(0, 8)),
-                ],
+                boxShadow: (_sending || _routeLoading)
+                    ? null
+                    : [
+                        BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.40),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8)),
+                      ],
               ),
               child: _sending
-                  ? const Center(child: SizedBox(width: 24, height: 24,
-                      child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2.5)))
+                  ? const Center(
+                      child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2.5)))
                   : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                       const Icon(Icons.delivery_dining_rounded,
                           color: Colors.white, size: 24),
                       const SizedBox(width: 10),
                       Text('Commander un livreur',
-                        style: GoogleFonts.urbanist(
-                            fontSize: 16, fontWeight: FontWeight.w800,
-                            color: Colors.white)),
+                          style: GoogleFonts.urbanist(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white)),
                     ]),
             ),
           ),
@@ -1212,7 +2027,8 @@ class _LivraisonScreenState extends State<LivraisonScreen>
           const Icon(Icons.lock_rounded, size: 11, color: AppColors.textLight),
           const SizedBox(width: 4),
           Text('Vos données sont sécurisées',
-            style: GoogleFonts.urbanist(fontSize: 11, color: AppColors.textLight)),
+              style: GoogleFonts.urbanist(
+                  fontSize: 11, color: AppColors.textLight)),
         ]),
       ]),
     );
@@ -1221,14 +2037,14 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   // ── Mode Standard / Express ───────────────────────────────────────────────
 
   Widget _buildModeCard({
-    required String   mode,
+    required String mode,
     required IconData icon,
-    required String   title,
-    required String   subtitle,
-    required String   etaText,
-    required int      price,
-    required Color    iconColor,
-    String?           badge,
+    required String title,
+    required String subtitle,
+    required String etaText,
+    required int price,
+    required Color iconColor,
+    String? badge,
   }) {
     final sel = _deliveryMode == mode;
     return ScaleTap(
@@ -1238,74 +2054,91 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: sel ? iconColor.withValues(alpha: 0.06) : AppColors.bg,
-          borderRadius: BorderRadius.circular(16),
+          color: sel
+              ? iconColor.withValues(
+                  alpha: _brightness == Brightness.dark ? 0.14 : 0.06)
+              : _premiumSurfaceElevated,
+          borderRadius: AppRadius.premiumLgR,
           border: Border.all(
-            color: sel ? iconColor : AppColors.divider,
+            color: sel ? AppColors.primary : _premiumBorder,
             width: sel ? 2 : 1,
           ),
           boxShadow: sel
-              ? [BoxShadow(color: iconColor.withValues(alpha: 0.12), blurRadius: 10)]
+              ? [
+                  BoxShadow(
+                      color: iconColor.withValues(alpha: 0.12), blurRadius: 10)
+                ]
               : null,
         ),
         child: Row(children: [
           Container(
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
-              color: sel ? iconColor.withValues(alpha: 0.14) : AppColors.divider.withValues(alpha: 0.5),
+              color: sel
+                  ? iconColor.withValues(alpha: 0.14)
+                  : _premiumBorder.withValues(alpha: 0.65),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon,
-                color: sel ? iconColor : AppColors.textLight, size: 22),
+            child: Icon(icon, color: sel ? iconColor : _premiumMuted, size: 22),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Column(
+          Expanded(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
                 Text(title,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 13, fontWeight: FontWeight.w800,
-                      color: sel ? iconColor : AppColors.text)),
+                    style: GoogleFonts.urbanist(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: sel ? iconColor : _premiumText)),
                 if (badge != null) ...[
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: iconColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(badge,
-                      style: GoogleFonts.urbanist(
-                          fontSize: 9, fontWeight: FontWeight.w700,
-                          color: iconColor)),
+                        style: GoogleFonts.urbanist(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: iconColor)),
                   ),
                 ],
               ]),
               Text(subtitle,
-                style: GoogleFonts.urbanist(
-                    fontSize: 11, color: AppColors.textMuted)),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 11, color: _premiumMuted)),
               Row(children: [
-                const Icon(Icons.access_time_rounded, size: 11, color: Colors.grey),
+                const Icon(Icons.access_time_rounded,
+                    size: 11, color: Colors.grey),
                 const SizedBox(width: 3),
                 Text(etaText,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 10, color: AppColors.textLight,
-                      fontWeight: FontWeight.w600)),
+                    style: GoogleFonts.urbanist(
+                        fontSize: 10,
+                        color: _premiumMuted,
+                        fontWeight: FontWeight.w600)),
               ]),
             ],
           )),
           const SizedBox(width: 10),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(price > 0 ? '$price F' : '—',
-              style: GoogleFonts.urbanist(
-                  fontSize: 15, fontWeight: FontWeight.w800,
-                  color: sel ? iconColor : AppColors.text)),
+                style: GoogleFonts.urbanist(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: sel ? iconColor : AppColors.text)),
             const SizedBox(height: 4),
             Icon(
-              sel ? Icons.radio_button_checked_rounded
+              sel
+                  ? Icons.radio_button_checked_rounded
                   : Icons.radio_button_unchecked_rounded,
-              color: sel ? iconColor : AppColors.textLight, size: 20,
+              color: sel ? iconColor : AppColors.textLight,
+              size: 20,
             ),
           ]),
         ]),
@@ -1315,10 +2148,18 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
   // ── Suggestions overlay ───────────────────────────────────────────────────
 
-  Widget _buildSuggestionsOverlay(double topPad) {
+  Widget _buildSuggestionsOverlay(double topPad, double keyboardHeight) {
+    final brightness = Theme.of(context).brightness;
     return Container(
-      color: Colors.white,
+      color: AppColors.premiumSurface(brightness),
       margin: EdgeInsets.only(top: topPad + 60),
+      // Scaffold a resizeToAvoidBottomInset:false, donc cette zone n'est
+      // jamais compensée automatiquement pour le clavier (contrairement au
+      // panel bas, décalé manuellement) — sans ce padding, "Aucun lieu
+      // trouvé" et le bas de la liste de suggestions se retrouvaient
+      // visuellement cachés derrière le clavier, toujours présents mais
+      // invisibles/hors de portée pour l'utilisateur.
+      padding: EdgeInsets.only(bottom: keyboardHeight),
       child: Column(children: [
         if (_searching)
           LinearProgressIndicator(
@@ -1330,16 +2171,17 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
           child: _buildSearchField(
-            ctrl:      _activeField == _ActiveField.departure ? _depCtrl : _destCtrl,
-            focus:     _activeField == _ActiveField.departure ? _depFocus : _destFocus,
-            hint:      'Chercher une adresse…',
-            icon:      _activeField == _ActiveField.departure
+            ctrl: _activeField == _ActiveField.departure ? _depCtrl : _destCtrl,
+            focus:
+                _activeField == _ActiveField.departure ? _depFocus : _destFocus,
+            hint: 'Chercher une adresse…',
+            icon: _activeField == _ActiveField.departure
                 ? Icons.radio_button_checked_rounded
                 : Icons.place_rounded,
             iconColor: _activeField == _ActiveField.departure
                 ? const Color(0xFF22C55E)
                 : AppColors.primary,
-            field:     _activeField,
+            field: _activeField,
           ),
         ),
         const Divider(height: 1),
@@ -1348,23 +2190,168 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     );
   }
 
+  /// Résultats, précédés d'un sélecteur de ville tant que le GPS n'a pas
+  /// résolu de ville. Même rendu pour « Où récupérer ? » et « Où livrons-nous ? ».
   Widget _buildResultsList() {
+    final cityProvider = context.watch<ActiveCityProvider>();
+    if (!shouldShowLivraisonCityPicker(
+        activeCityId: cityProvider.activeCityId)) {
+      return _buildResultsBody();
+    }
+    final panel = _buildCityContextPanel(cityProvider);
+    // Aucune ville choisie : la recherche ne peut rien renvoyer ; on évite un
+    // trompeur « Aucun lieu trouvé » et on n'affiche que le sélecteur.
+    if (_searchCityId == null) {
+      return SingleChildScrollView(child: panel);
+    }
+    return Column(children: [panel, Expanded(child: _buildResultsBody())]);
+  }
+
+  Widget _buildCityContextPanel(ActiveCityProvider cityProvider) {
+    final cities = livraisonSelectableCities(cityProvider.activeCities);
+    final issue = _locationIssue;
+    return Padding(
+      key: const Key('city-context-panel'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.location_off_rounded,
+                size: 20, color: AppColors.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                livraisonLocationIssueMessage(issue),
+                key: const Key('city-context-message'),
+                style: GoogleFonts.urbanist(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _premiumMuted),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            'Choisissez la ville pour chercher une adresse. La livraison reste '
+            'limitée aux zones desservies.',
+            style: GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final city in cities)
+                ChoiceChip(
+                  key: Key('search-city-${city.cityId}'),
+                  label: Text(city.name),
+                  selected: _searchCityId == city.cityId,
+                  onSelected: (_) => _selectSearchCity(city.cityId),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                key: const Key('retry-location-button'),
+                onPressed: _gpsLoading
+                    ? null
+                    : () => _getGPS(_activeField, false, false),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Réessayer la localisation'),
+              ),
+              if (issue == LivraisonLocationIssue.deniedForever)
+                TextButton.icon(
+                  key: const Key('open-location-settings-button'),
+                  onPressed: Geolocator.openAppSettings,
+                  icon: const Icon(Icons.settings_rounded, size: 18),
+                  label: const Text('Ouvrir les réglages'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResultsBody() {
     final hasQuery = (_activeField == _ActiveField.departure
-            ? _depCtrl.text : _destCtrl.text)
-        .trim().length >= 2;
+                ? _depCtrl.text
+                : _destCtrl.text)
+            .trim()
+            .length >=
+        2;
 
     if (!hasQuery && !_searched) return _buildQuickPlaces();
     if (_searched && !_searching && _suggestions.isEmpty) {
-      return Center(child: Column(
+      final query = (_activeField == _ActiveField.departure
+              ? _depCtrl.text
+              : _destCtrl.text)
+          .trim();
+      final showExpansion = shouldShowLivraisonSearchExpansion(
+        query: query,
+        searched: _searched,
+        searching: _searching,
+        hasResults: _suggestions.isNotEmpty,
+        searchState: _awaitingExpansion
+            ? PlacesSearchState.awaitingExpansion
+            : PlacesSearchState.idle,
+      );
+      return Center(
+          child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.search_off_rounded, size: 56, color: AppColors.divider),
+          Icon(Icons.search_off_rounded, size: 56, color: _premiumBorder),
           const SizedBox(height: 12),
           Text('Aucun lieu trouvé',
-            style: GoogleFonts.urbanist(fontSize: 15, color: AppColors.textMuted)),
+              style: GoogleFonts.urbanist(fontSize: 15, color: _premiumMuted)),
           const SizedBox(height: 4),
           Text('Essayez : "Cafétou", "CHU", "Marché"…',
-            style: GoogleFonts.urbanist(fontSize: 12, color: AppColors.textLight)),
+              style: GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted)),
+          const SizedBox(height: 18),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _pickupQuickChip(
+                'Utiliser ma position actuelle',
+                Icons.my_location_rounded,
+                () => _getGPS(_activeField),
+              ),
+              _pickupQuickChip(
+                'Choisir un point sur la carte',
+                Icons.map_outlined,
+                () {
+                  final target = _activeField;
+                  _dismissKeyboard();
+                  if (target == _ActiveField.destination) {
+                    setState(() => _selectingDestinationOnMap = true);
+                  }
+                },
+              ),
+            ],
+          ),
+          if (showExpansion) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('expand-place-search-button'),
+              onPressed: _expandingSearch ? null : _expandSearch,
+              icon: const Icon(Icons.travel_explore_rounded),
+              label: const Text('Élargir la recherche'),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Cette action interroge un service externe.',
+              style: GoogleFonts.urbanist(
+                fontSize: 11,
+                color: _premiumMuted,
+              ),
+            ),
+          ],
         ],
       ));
     }
@@ -1375,21 +2362,28 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       separatorBuilder: (_, __) =>
           const Divider(height: 1, indent: 60, color: Color(0xFFE2E8F0)),
       itemBuilder: (_, i) => _PlaceTile(
-        place: _suggestions[i], onTap: () => _selectPlace(_suggestions[i])),
+          place: _suggestions[i], onTap: () => _selectPlace(_suggestions[i])),
     );
   }
 
   Widget _buildQuickPlaces() {
-    const quick = [
-      _QuickBtn('Commerce',                Icons.storefront_rounded,        Colors.orange,            6.7265, -3.4952),
-      _QuickBtn('Château d\'Eau',          Icons.water_drop_rounded,        Color(0xFF1565C0),        6.7270, -3.4958),
-      _QuickBtn('CHR Abengourou',          Icons.local_hospital_rounded,    Colors.red,               6.7301, -3.4889),
-      _QuickBtn('Pharmacie Prunelle-Marie',Icons.medical_services_rounded,  Color(0xFF2E7D32),        6.7282, -3.4972),
-      _QuickBtn('Quartier HKB',            Icons.location_city_rounded,     Color(0xFF6A1B9A),        6.7248, -3.4992),
-      _QuickBtn('Cafétou',                 Icons.restaurant_rounded,        Color(0xFF795548),        6.7292, -3.5008),
-      _QuickBtn('Gare Routière',           Icons.directions_bus_rounded,    Color(0xFF2E7D32),        6.7242, -3.4978),
-      _QuickBtn('Préfecture',              Icons.account_balance_rounded,   Color(0xFF1565C0),        6.7253, -3.4961),
-    ];
+    final cityProvider = context.watch<ActiveCityProvider>();
+    final cityName = _searchCityId != null && cityProvider.activeCityId == null
+        ? livraisonSelectableCities(cityProvider.activeCities)
+                .where((city) => city.cityId == _searchCityId)
+                .map((city) => city.name)
+                .firstOrNull ??
+            ''
+        : activeLivraisonCityName(cityProvider);
+    final titleColor = livraisonPopularPlaceTitleColor(
+      platform: Theme.of(context).platform,
+      brightness: Theme.of(context).brightness,
+    );
+    if (cityName.isEmpty ||
+        _popularPlacesCityId != _effectiveSearchCityId(cityProvider) ||
+        _popularPlaces.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
@@ -1397,37 +2391,40 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
           child: Text(
-            _activeField == _ActiveField.departure
-                ? 'Où êtes-vous ?'
-                : 'Lieux populaires à Abengourou',
+            'Lieux populaires à $cityName',
             style: GoogleFonts.urbanist(
-              fontSize: 11, fontWeight: FontWeight.w600,
-              color: AppColors.textMuted, letterSpacing: 0.3),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: _premiumMuted,
+                letterSpacing: 0.3),
           ),
         ),
-        ...quick.map((q) => ListTile(
-          leading: Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(
-              color: q.color.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(q.icon, color: q.color, size: 20),
-          ),
-          title: Text(q.name,
-              style: GoogleFonts.urbanist(fontSize: 14, fontWeight: FontWeight.w600)),
-          subtitle: Text('Abengourou, Côte d\'Ivoire',
-              style: GoogleFonts.urbanist(fontSize: 12, color: AppColors.textMuted)),
-          onTap: () => _selectPlace(LocalPlace.fromExternal(
-            name:      q.name,
-            address:   '${q.name}, Abengourou',
-            latitude:  q.lat,
-            longitude: q.lng,
-            category:  'admin',
-            district:  'Abengourou',
-            source:    'local',
-          )),
-        )),
+        ..._popularPlaces.map((place) => ListTile(
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.place_rounded,
+                    color: AppColors.primary, size: 20),
+              ),
+              title: Text(place.name,
+                  style: GoogleFonts.urbanist(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: titleColor)),
+              subtitle: Text(place.address,
+                  style: GoogleFonts.urbanist(
+                    fontSize: 12,
+                    color: livraisonPopularPlaceSubtitleColor(
+                      platform: Theme.of(context).platform,
+                      brightness: Theme.of(context).brightness,
+                    ),
+                  )),
+              onTap: () => _selectPlace(place),
+            )),
       ],
     );
   }
@@ -1438,48 +2435,54 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 
   Widget _contactIllustration({required bool isPickup}) {
     final colorA = isPickup ? const Color(0xFF22C55E) : AppColors.primary;
-    final iconA  = isPickup ? Icons.person_rounded : Icons.local_shipping_rounded;
-    final iconB  = isPickup ? Icons.inventory_2_rounded : Icons.person_rounded;
+    final iconA =
+        isPickup ? Icons.person_rounded : Icons.local_shipping_rounded;
+    final iconB = isPickup ? Icons.inventory_2_rounded : Icons.person_rounded;
     return SizedBox(
       height: 80,
       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         // Gauche
         Stack(clipBehavior: Clip.none, children: [
           Container(
-            width: 60, height: 60,
+            width: 60,
+            height: 60,
             decoration: BoxDecoration(
-              color: colorA.withValues(alpha: 0.12), shape: BoxShape.circle),
+                color: colorA.withValues(alpha: 0.12), shape: BoxShape.circle),
           ),
-          Positioned.fill(child: Center(
+          Positioned.fill(
+              child: Center(
             child: Icon(iconA, color: colorA, size: 30),
           )),
         ]),
 
         // Flèche
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.arrow_forward_rounded,
-                color: AppColors.divider, size: 22),
+            Icon(Icons.arrow_forward_rounded, color: _premiumBorder, size: 22),
           ]),
         ),
 
         // Droite
         Stack(clipBehavior: Clip.none, children: [
           Container(
-            width: 60, height: 60,
+            width: 60,
+            height: 60,
             decoration: BoxDecoration(
               color: AppColors.primary.withValues(alpha: 0.10),
               shape: BoxShape.circle,
             ),
           ),
-          Positioned.fill(child: Center(
+          Positioned.fill(
+              child: Center(
             child: Icon(iconB, color: AppColors.primary, size: 28),
           )),
           Positioned(
-            bottom: 0, right: 0,
+            bottom: 0,
+            right: 0,
             child: Container(
-              width: 20, height: 20,
+              width: 20,
+              height: 20,
               decoration: BoxDecoration(
                 color: AppColors.primary,
                 shape: BoxShape.circle,
@@ -1494,17 +2497,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     );
   }
 
-  Widget _handle() => Center(child: Container(
-    width: 36, height: 4,
-    decoration: BoxDecoration(
-      color: AppColors.divider, borderRadius: BorderRadius.circular(2)),
-  ));
+  Widget _handle() => Center(
+          child: Container(
+        width: 36,
+        height: 4,
+        decoration: BoxDecoration(
+            color: _premiumBorder, borderRadius: BorderRadius.circular(2)),
+      ));
 
   Widget _addressChip({
-    required String    name,
-    required String    label,
-    required Color     color,
-    required IconData  icon,
+    required String name,
+    required String label,
+    required Color color,
+    required IconData icon,
     required VoidCallback onEdit,
   }) {
     return GestureDetector(
@@ -1518,27 +2523,157 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         ),
         child: Row(children: [
           Container(
-            width: 32, height: 32,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.14), shape: BoxShape.circle),
+                color: color.withValues(alpha: 0.14), shape: BoxShape.circle),
             child: Icon(icon, color: color, size: 15),
           ),
           const SizedBox(width: 10),
-          Expanded(child: Column(
+          Expanded(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                style: GoogleFonts.urbanist(
-                    fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+                  style: GoogleFonts.urbanist(
+                      fontSize: 10, color: color, fontWeight: FontWeight.w600)),
               Text(name,
-                style: GoogleFonts.urbanist(
-                    fontSize: 13, fontWeight: FontWeight.w600,
-                    color: AppColors.text),
-                overflow: TextOverflow.ellipsis),
+                  style: GoogleFonts.urbanist(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _premiumText),
+                  overflow: TextOverflow.ellipsis),
             ],
           )),
           Icon(Icons.edit_rounded, size: 14, color: color),
         ]),
+      ),
+    );
+  }
+
+  Widget _pickupLocationCard() {
+    final isLoading = _gpsLoading;
+    final address = _departure;
+    return Semantics(
+      label: isLoading
+          ? 'Recherche de la position en cours'
+          : 'Point de récupération sélectionné',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
+        ),
+        child: Row(children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: isLoading
+                ? const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.location_on_rounded,
+                    color: AppColors.primary, size: 21),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                    isLoading
+                        ? 'Localisation en cours…'
+                        : 'Point de récupération',
+                    style: GoogleFonts.urbanist(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary)),
+                const SizedBox(height: 2),
+                Text(
+                  isLoading
+                      ? 'Nous vérifions l’adresse sélectionnée'
+                      : address?.address ??
+                          'Déplacez la carte ou recherchez une adresse',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style:
+                      GoogleFonts.urbanist(fontSize: 12, color: _premiumMuted),
+                ),
+              ],
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _pickupQuickChip(String label, IconData icon, VoidCallback onTap) {
+    return ActionChip(
+      avatar: Icon(icon, size: 16, color: AppColors.primary),
+      label: Text(label,
+          style: GoogleFonts.urbanist(
+              fontSize: 12, fontWeight: FontWeight.w600, color: _premiumText)),
+      onPressed: onTap,
+      backgroundColor: _premiumSurfaceElevated,
+      side: BorderSide(color: _premiumBorder),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  Widget _pickupConfirmButton(bool enabled) {
+    final label = _gpsLoading
+        ? 'Vérification de l’adresse…'
+        : 'Confirmer le point de récupération';
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: ScaleTap(
+        onTap: enabled ? () => setState(() => _phase = 2) : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            color: enabled ? null : AppColors.divider,
+            gradient: enabled
+                ? const LinearGradient(
+                    colors: [Color(0xFFE65100), AppColors.primary],
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                  )
+                : null,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            if (!enabled && _gpsLoading)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white),
+              )
+            else
+              const Icon(Icons.check_circle_outline_rounded,
+                  color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(label,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.urbanist(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+            ),
+          ]),
+        ),
       ),
     );
   }
@@ -1553,19 +2688,42 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     bool autoFocus = false,
   }) {
     final isActive = _activeField == field;
+    final shouldUseLightFill = shouldUseLightLivraisonPremiumFieldFill(
+      platform: Theme.of(context).platform,
+      brightness: Theme.of(context).brightness,
+    );
+    final brightness = Theme.of(context).brightness;
+    final surface = shouldUseLightFill
+        ? Colors.white
+        : AppColors.premiumSurfaceElevated(brightness);
+    final textPrimary = shouldUseLightFill
+        ? AppColors.text
+        : brightness == Brightness.dark
+            ? AppColors.premiumTextPrimaryDark
+            : AppColors.premiumTextPrimaryLight;
+    final textMuted = shouldUseLightFill
+        ? AppColors.textLight
+        : brightness == Brightness.dark
+            ? AppColors.premiumTextMutedDark
+            : AppColors.premiumTextMutedLight;
     return GestureDetector(
       onTap: () {
-        setState(() { _activeField = field; _searched = false; });
+        setState(() {
+          _activeField = field;
+          _searched = false;
+        });
         focus.requestFocus();
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          color: surface,
+          borderRadius: AppRadius.premiumLgR,
           border: Border.all(
-            color: isActive ? AppColors.primary : AppColors.border,
+            color: isActive
+                ? AppColors.primary
+                : AppColors.premiumBorder(brightness),
             width: isActive ? 1.5 : 1,
           ),
           boxShadow: isActive ? AppShadow.sm : AppShadow.xs,
@@ -1573,32 +2731,39 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         child: Row(children: [
           Icon(icon, color: iconColor, size: 18),
           const SizedBox(width: 10),
-          Expanded(child: TextField(
+          Expanded(
+              child: TextField(
             controller: ctrl,
-            focusNode:  focus,
-            autofocus:  autoFocus,
-            style: GoogleFonts.urbanist(fontSize: 13, color: AppColors.text),
+            focusNode: focus,
+            autofocus: autoFocus,
+            style: GoogleFonts.urbanist(fontSize: 13, color: textPrimary),
             decoration: InputDecoration(
-              hintText:       hint,
-              hintStyle:      GoogleFonts.urbanist(
-                  fontSize: 13, color: AppColors.textLight),
-              border:         InputBorder.none,
-              isDense:        true,
+              filled: shouldUseLightFill ? true : null,
+              fillColor: shouldUseLightFill ? Colors.white : null,
+              hintText: hint,
+              hintStyle: GoogleFonts.urbanist(fontSize: 13, color: textMuted),
+              border: InputBorder.none,
+              isDense: true,
               contentPadding: const EdgeInsets.symmetric(vertical: 12),
             ),
             onChanged: _onSearchChanged,
             onTap: () {
-              setState(() { _activeField = field; _searched = false; });
+              setState(() {
+                _activeField = field;
+                _searched = false;
+              });
             },
           )),
           if (ctrl.text.isNotEmpty)
             GestureDetector(
               onTap: () {
                 ctrl.clear();
-                setState(() { _suggestions = []; _searched = false; });
+                setState(() {
+                  _suggestions = [];
+                  _searched = false;
+                });
               },
-              child: const Icon(Icons.close_rounded,
-                  size: 16, color: AppColors.textLight),
+              child: Icon(Icons.close_rounded, size: 16, color: _premiumMuted),
             ),
         ]),
       ),
@@ -1612,32 +2777,68 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     TextInputType? type,
     int maxLines = 1,
     TextInputAction textInputAction = TextInputAction.done,
+    FocusNode? focusNode,
+    FocusNode? nextFocusNode,
   }) {
+    final shouldUseLightFill = shouldUseLightLivraisonPremiumFieldFill(
+      platform: Theme.of(context).platform,
+      brightness: Theme.of(context).brightness,
+    );
+    final brightness = Theme.of(context).brightness;
+    final surface = shouldUseLightFill
+        ? AppColors.bg
+        : AppColors.premiumSurfaceElevated(brightness);
+    final textPrimary = shouldUseLightFill
+        ? AppColors.text
+        : brightness == Brightness.dark
+            ? AppColors.premiumTextPrimaryDark
+            : AppColors.premiumTextPrimaryLight;
+    final textMuted = shouldUseLightFill
+        ? AppColors.textLight
+        : brightness == Brightness.dark
+            ? AppColors.premiumTextMutedDark
+            : AppColors.premiumTextMutedLight;
+
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.bg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
+        color: surface,
+        borderRadius: AppRadius.premiumLgR,
+        border: Border.all(color: AppColors.premiumBorder(brightness)),
       ),
       child: TextField(
         controller: ctrl,
+        focusNode: focusNode,
         keyboardType: type,
         maxLines: maxLines,
         textInputAction: textInputAction,
-        onSubmitted: (_) => FocusScope.of(context).unfocus(),
-        style: GoogleFonts.urbanist(fontSize: 14, color: AppColors.text),
+        // La flèche "Suivant" du clavier doit avancer le focus vers le champ
+        // suivant explicite, pas juste fermer le clavier — et pas via
+        // FocusScope.nextFocus() générique, qui ne traverse pas correctement
+        // les Padding/SizedBox intermédiaires de cette Column (vérifié sur
+        // appareil réel : le focus se perdait sans jamais atteindre le champ
+        // téléphone).
+        onSubmitted: (_) => nextFocusNode != null
+            ? nextFocusNode.requestFocus()
+            : FocusScope.of(context).unfocus(),
+        style: GoogleFonts.urbanist(fontSize: 14, color: textPrimary),
         textCapitalization: TextCapitalization.words,
         decoration: InputDecoration(
-          hintText:  hint,
-          hintStyle: GoogleFonts.urbanist(fontSize: 13, color: AppColors.textLight),
+          // Android conserve intégralement le rendu déjà validé. Sur
+          // iOS/iPadOS en mode sombre, empêcher InputDecorationTheme.dark de
+          // recouvrir ce champ clair avec `cardDark`, incompatible avec le
+          // texte explicitement défini ci-dessus.
+          filled: shouldUseLightFill ? true : null,
+          fillColor: shouldUseLightFill ? surface : null,
+          hintText: hint,
+          hintStyle: GoogleFonts.urbanist(fontSize: 13, color: textMuted),
           prefixIcon: Padding(
             padding: const EdgeInsets.only(left: 12, right: 8),
-            child: Icon(icon, color: AppColors.textMuted, size: 20),
+            child: Icon(icon, color: _premiumMuted, size: 20),
           ),
           prefixIconConstraints: const BoxConstraints(),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-              horizontal: 14, vertical: 16),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
         ),
       ),
     );
@@ -1652,19 +2853,24 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFFE65100), AppColors.primary, Color(0xFFFF8C42)],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.35),
-            blurRadius: 16, offset: const Offset(0, 6),
-          )],
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            )
+          ],
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Text(label,
-            style: GoogleFonts.urbanist(
-                fontSize: 16, fontWeight: FontWeight.w700,
-                color: Colors.white)),
+              style: GoogleFonts.urbanist(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white)),
           const SizedBox(width: 8),
           const Icon(Icons.arrow_forward_rounded,
               color: Colors.white, size: 22),
@@ -1674,38 +2880,42 @@ class _LivraisonScreenState extends State<LivraisonScreen>
   }
 
   Widget _routeRow({
-    required IconData  icon,
-    required Color     color,
-    required String    label,
-    required String    name,
-    required String    contact,
-    required String    phone,
+    required IconData icon,
+    required Color color,
+    required String label,
+    required String name,
+    required String contact,
+    required String phone,
     required VoidCallback onEdit,
   }) {
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Container(
-        width: 30, height: 30,
+        width: 30,
+        height: 30,
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
+            color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
         child: Icon(icon, color: color, size: 14),
       ),
       const SizedBox(width: 10),
-      Expanded(child: Column(
+      Expanded(
+          child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
-            style: GoogleFonts.urbanist(
-                fontSize: 10, color: AppColors.textMuted,
-                fontWeight: FontWeight.w600)),
+              style: GoogleFonts.urbanist(
+                  fontSize: 10,
+                  color: _premiumMuted,
+                  fontWeight: FontWeight.w600)),
           Text(name,
-            style: GoogleFonts.urbanist(
-                fontSize: 13, fontWeight: FontWeight.w600,
-                color: AppColors.text),
-            overflow: TextOverflow.ellipsis),
+              style: GoogleFonts.urbanist(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: _premiumText),
+              overflow: TextOverflow.ellipsis),
           if (contact.isNotEmpty)
             Text('👤 $contact${phone.isNotEmpty ? ' · $phone' : ''}',
-              style: GoogleFonts.urbanist(
-                  fontSize: 11, color: AppColors.textMuted)),
+                style:
+                    GoogleFonts.urbanist(fontSize: 11, color: _premiumMuted)),
         ],
       )),
       GestureDetector(
@@ -1713,14 +2923,15 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: _premiumSurfaceElevated,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.divider),
+            border: Border.all(color: _premiumBorder),
           ),
           child: Text('Modifier',
-            style: GoogleFonts.urbanist(
-                fontSize: 10, fontWeight: FontWeight.w600,
-                color: AppColors.text)),
+              style: GoogleFonts.urbanist(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: _premiumText)),
         ),
       ),
     ]);
@@ -1731,19 +2942,19 @@ class _LivraisonScreenState extends State<LivraisonScreen>
       Icon(icon, size: 14, color: color),
       const SizedBox(height: 2),
       Text(label,
-        style: GoogleFonts.urbanist(fontSize: 9, color: AppColors.textMuted)),
+          style: GoogleFonts.urbanist(fontSize: 9, color: _premiumMuted)),
       Text(value,
-        style: GoogleFonts.urbanist(
-            fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.text)),
+          style: GoogleFonts.urbanist(
+              fontSize: 11, fontWeight: FontWeight.w700, color: _premiumText)),
     ]);
   }
 
   Widget _payRow({
     required IconData icon,
-    required Color    color,
-    required String   label,
-    required String   sub,
-    required String   value,
+    required Color color,
+    required String label,
+    required String sub,
+    required String value,
     bool disabled = false,
   }) {
     final sel = _payment == value;
@@ -1753,16 +2964,20 @@ class _LivraisonScreenState extends State<LivraisonScreen>
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: sel ? color.withValues(alpha: 0.05) : AppColors.bg,
-          borderRadius: BorderRadius.circular(14),
+          color: sel
+              ? color.withValues(
+                  alpha: _brightness == Brightness.dark ? 0.14 : 0.05)
+              : _premiumSurfaceElevated,
+          borderRadius: AppRadius.premiumLgR,
           border: Border.all(
-            color: sel ? color : AppColors.divider,
+            color: sel ? AppColors.primary : _premiumBorder,
             width: sel ? 2 : 1,
           ),
         ),
         child: Row(children: [
           Container(
-            width: 36, height: 36,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
@@ -1770,22 +2985,26 @@ class _LivraisonScreenState extends State<LivraisonScreen>
             child: Icon(icon, color: color, size: 20),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Column(
+          Expanded(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                style: GoogleFonts.urbanist(
-                    fontSize: 13, fontWeight: FontWeight.w700,
-                    color: disabled ? AppColors.textLight : AppColors.text)),
+                  style: GoogleFonts.urbanist(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: disabled ? _premiumMuted : _premiumText)),
               Text(sub,
-                style: GoogleFonts.urbanist(
-                    fontSize: 11, color: AppColors.textMuted)),
+                  style:
+                      GoogleFonts.urbanist(fontSize: 11, color: _premiumMuted)),
             ],
           )),
           Icon(
-            sel ? Icons.radio_button_checked_rounded
+            sel
+                ? Icons.radio_button_checked_rounded
                 : Icons.radio_button_unchecked_rounded,
-            color: sel ? color : AppColors.textLight, size: 20,
+            color: sel ? color : AppColors.textLight,
+            size: 20,
           ),
         ]),
       ),
@@ -1810,10 +3029,13 @@ class _LivraisonScreenState extends State<LivraisonScreen>
     _pickupContactPhoneCtrl.dispose();
     _recipientNameCtrl.dispose();
     _poidsCtrl.dispose();
+    _shoppingBudgetCtrl.dispose();
     _depFocus.removeListener(_onDepFocusChange);
     _destFocus.removeListener(_onDestFocusChange);
     _depFocus.dispose();
     _destFocus.dispose();
+    _pickupContactPhoneFocus.dispose();
+    _recipientPhoneFocus.dispose();
     _mapCtrl?.dispose();
     super.dispose();
   }
@@ -1823,81 +3045,111 @@ class _LivraisonScreenState extends State<LivraisonScreen>
 // WIDGETS LOCAUX
 // ═════════════════════════════════════════════════════════════════════════════
 
+class _PickupMapPin extends StatelessWidget {
+  const _PickupMapPin();
+
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: const [
+                BoxShadow(color: Color(0x26000000), blurRadius: 12),
+              ],
+            ),
+            child: Text('Déplacez la carte pour ajuster',
+                style: GoogleFonts.urbanist(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text)),
+          ),
+          const SizedBox(height: 6),
+          const Icon(Icons.location_on_rounded,
+              size: 46, color: AppColors.primary),
+        ],
+      );
+}
+
 class _PlaceTile extends StatelessWidget {
-  final LocalPlace   place;
+  final LocalPlace place;
   final VoidCallback onTap;
   const _PlaceTile({required this.place, required this.onTap});
 
   @override
   Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-      child: Row(children: [
-        Container(
-          width: 40, height: 40,
-          decoration: BoxDecoration(
-            color:        place.color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(place.icon, color: place.color, size: 20),
-        ),
-        const SizedBox(width: 14),
-        Expanded(child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(place.name,
-                style: GoogleFonts.urbanist(
-                    fontSize: 14, fontWeight: FontWeight.w600),
-                maxLines: 1, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 2),
-            Text(
-              place.district.isNotEmpty
-                  ? '${place.district} · ${place.address.split(',').last.trim()}'
-                  : place.address,
-              style: GoogleFonts.urbanist(
-                  fontSize: 12, color: AppColors.textMuted),
-              maxLines: 1, overflow: TextOverflow.ellipsis,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+          child: Row(children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: place.color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(place.icon, color: place.color, size: 20),
             ),
-          ],
-        )),
-        if (place.source != 'firestore')
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-            decoration: BoxDecoration(
-              color: AppColors.bg, borderRadius: BorderRadius.circular(4)),
-            child: Text(place.source.toUpperCase(),
-                style: GoogleFonts.urbanist(
-                    fontSize: 8, color: AppColors.textLight,
-                    fontWeight: FontWeight.w600)),
-          ),
-      ]),
-    ),
-  );
+            const SizedBox(width: 14),
+            Expanded(
+                child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(place.name,
+                    style: GoogleFonts.urbanist(
+                        fontSize: 14, fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(
+                  place.district.isNotEmpty
+                      ? '${place.district} · ${place.address.split(',').last.trim()}'
+                      : place.address,
+                  style: GoogleFonts.urbanist(
+                      fontSize: 12, color: AppColors.textMuted),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            )),
+            if (place.source != 'firestore')
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                    color: AppColors.bg,
+                    borderRadius: BorderRadius.circular(4)),
+                child: Text(place.source.toUpperCase(),
+                    style: GoogleFonts.urbanist(
+                        fontSize: 8,
+                        color: AppColors.textLight,
+                        fontWeight: FontWeight.w600)),
+              ),
+          ]),
+        ),
+      );
 }
 
 class _CircleBtn extends StatelessWidget {
-  final IconData icon; final VoidCallback onTap;
+  final IconData icon;
+  final VoidCallback onTap;
   const _CircleBtn({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: 48, height: 48,
-      decoration: const BoxDecoration(
-        color: Colors.white, shape: BoxShape.circle,
-        boxShadow: AppShadow.md,
-      ),
-      child: Icon(icon, size: 22, color: AppColors.text),
-    ),
-  );
-}
-
-class _QuickBtn {
-  final String   name;
-  final IconData icon;
-  final Color    color;
-  final double   lat, lng;
-  const _QuickBtn(this.name, this.icon, this.color, this.lat, this.lng);
+        onTap: onTap,
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: AppShadow.md,
+          ),
+          child: Icon(icon, size: 22, color: AppColors.text),
+        ),
+      );
 }

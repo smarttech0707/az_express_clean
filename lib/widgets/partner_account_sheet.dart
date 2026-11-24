@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../partner_qr/partner_qr_page.dart';
 
 import 'account_deletion_dialog.dart';
 import 'single_photo_editor.dart';
@@ -19,6 +20,7 @@ Future<void> showPartnerAccountSheet(
   BuildContext context, {
   required String role,
   required String roleLabel,
+  String? establishmentId,
   String? name,
   String? phone,
   required VoidCallback onLogout,
@@ -32,6 +34,7 @@ Future<void> showPartnerAccountSheet(
   String? photoUrl,
   String? photoStoragePath,
   Future<void> Function(String url)? onPhotoUploaded,
+  Future<void> Function()? onPhotoDeleted,
 }) {
   return showModalBottomSheet(
     context: context,
@@ -53,6 +56,7 @@ Future<void> showPartnerAccountSheet(
                       storagePath: photoStoragePath,
                       size: 52,
                       onUploaded: onPhotoUploaded,
+                      onDeleted: onPhotoDeleted,
                     )
                   : const CircleAvatar(
                       radius: 22,
@@ -67,12 +71,16 @@ Future<void> showPartnerAccountSheet(
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w700)),
                     Text(phone?.isNotEmpty == true ? phone! : roleLabel,
-                        style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                        style:
+                            TextStyle(fontSize: 13, color: Colors.grey[600])),
                   ],
                 ),
               ),
             ]),
             const SizedBox(height: 20),
+            if(establishmentId!=null && ['restaurant','seller','pharmacie','boulangerie'].contains(role))
+              ListTile(leading:const Icon(Icons.qr_code),title:const Text('Mon QR code'),
+                onTap:()=>Navigator.of(context).push(MaterialPageRoute(builder:(_)=>const PartnerQrEstablishmentsPage()))),
             const Divider(height: 1),
             const SizedBox(height: 8),
             ListTile(
@@ -84,9 +92,11 @@ Future<void> showPartnerAccountSheet(
               },
             ),
             ListTile(
-              leading: const Icon(Icons.person_remove_outlined, color: Colors.red),
+              leading:
+                  const Icon(Icons.person_remove_outlined, color: Colors.red),
               title: const Text('Supprimer mon compte'),
-              subtitle: const Text('Demande de suppression de compte et de données'),
+              subtitle:
+                  const Text('Demande de suppression de compte et de données'),
               onTap: () {
                 Navigator.pop(ctx);
                 showAccountDeletionRequestDialog(context,

@@ -1,0 +1,115 @@
+--- firestore.rules
++++ firestore.rules.proposed
+@@ -20,6 +20,15 @@
+     function uid() {
+       return request.auth.uid;
+     }
++    // PROPOSITION (étape B) : un partenaire créé par l'administration porte la
++    // revendication `partnerMustChangePassword` (posée par le serveur) tant que
++    // son mot de passe temporaire n'a pas été remplacé. Les ÉCRITURES
++    // professionnelles lui sont refusées ; les lectures (indispensables à
++    // l'écran de première connexion) restent inchangées. Les comptes
++    // historiques n'ont jamais cette revendication : aucun effet pour eux.
++    function partnerActivated() {
++      return request.auth.token.get('partnerMustChangePassword', false) != true;
++    }
+     function adminDoc() {
+       return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+     }
+@@ -266,6 +275,7 @@
+       allow read:   if isOwner(sellerId) || hasAdminPermission('demandes_vendeurs');
+       allow create: if hasAdminPermission('demandes_vendeurs');
+       allow update: if hasAdminPermission('demandes_vendeurs') || (isOwner(sellerId)
++        && partnerActivated()
+         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive','isSuspended','isDeleted','status'])
+         && unchanged('wallet') && unchanged('deletionRequested')
+         && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
+@@ -276,7 +286,7 @@
+       match /wallet_transactions/{txId} {
+         allow read:   if isOwner(sellerId) || isAdmin();
+         allow create: if isAdmin()
+-          || (isOwner(sellerId)
++          || (isOwner(sellerId) && partnerActivated()
+             && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt'])
+             && request.resource.data.amount is int);
+         allow update: if false;
+@@ -302,14 +312,14 @@
+       // par le client (restaurant_owner_dashboard.dart:_toggleOpen) sans
+       // qu'aucune règle owner ne l'autorise jusqu'ici — corrigé au passage,
+       // même portée de risque que l'ajout de logoUrl.
+-      allow update: if isRealUser()
++      allow update: if isRealUser() && partnerActivated()
+         && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+             .data.get('restaurantId', '') == restaurantId
+         && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['logoUrl', 'coverImageUrl', 'isOpen']);
+       // Le propriétaire Firebase Auth ne peut écrire que le token du
+       // restaurant auquel restaurant_owners/{uid} le rattache.
+-      allow update: if isRealUser()
++      allow update: if isRealUser() && partnerActivated()
+         && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+             .data.get('restaurantId', '') == restaurantId
+         && request.resource.data.diff(resource.data).affectedKeys()
+@@ -322,7 +332,7 @@
+       match /menu/{menuId} {
+         allow read: if isAuth();
+         allow write: if isAdmin()
+-          || (isRealUser()
++          || (isRealUser() && partnerActivated()
+             && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+                 .data.get('restaurantId', '') == restaurantId);
+       }
+@@ -351,7 +361,7 @@
+       allow create: if isAdmin();
+       // Le propriétaire peut mettre à jour son profil, mais pas les champs financiers
+       allow update: if isAdmin() ||
+-        (isOwner(boulangerieId)
++        (isOwner(boulangerieId) && partnerActivated()
+           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isActive','isSuspended','isDeleted','status'])
+           && unchanged('wallet') && unchanged('deletionRequested')
+           && unchanged('subscriptionStatus')
+@@ -364,7 +374,7 @@
+       allow delete: if isAdmin();
+       match /menu_items/{itemId} {
+         allow read:  if isAuth();
+-        allow write: if isAdmin() || isOwner(boulangerieId);
++        allow write: if isAdmin() || (isOwner(boulangerieId) && partnerActivated());
+       }
+     }
+ 
+@@ -589,7 +599,7 @@
+         // coordonnées d'une commande déjà créée. Le tableau de bord ne fait
+         // que ces deux transitions sellerStatus (voir
+         // boulangerie_dashboard.dart:_updateSellerStatus).
+-        (isAuth() && resource.data.sellerId == uid()
++        (isAuth() && partnerActivated() && resource.data.sellerId == uid()
+           && resource.data.get('sellerType', '') == 'boulangerie'
+           && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['sellerStatus'])
+@@ -603,7 +613,7 @@
+         // Les autres partenaires conservent leur flux existant ; le
+         // resserrement ci-dessus est volontairement limité au module
+         // Boulangerie audité.
+-        (isAuth() && resource.data.sellerId == uid()
++        (isAuth() && partnerActivated() && resource.data.sellerId == uid()
+           && resource.data.get('sellerType', '') != 'boulangerie'
+           && unchanged('recipientPhone') && unchanged('recipientName')
+           && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
+@@ -805,7 +815,7 @@
+       allow create: if isAdmin();
+       allow update: if isAdmin()
+         // Propriétaire modifie son annonce (sans toucher views/favoritesCount)
+-        || (isRealUser() && resource.data.sellerId == uid()
++        || (isRealUser() && partnerActivated() && resource.data.sellerId == uid()
+           && unchanged('sellerId') && unchanged('views') && unchanged('favoritesCount')
+           && unchanged('expiresAt') && unchanged('sellerVerified')
+           && unchanged('sellerVipStatus') && unchanged('priorityLevel')
+@@ -818,7 +828,7 @@
+         // N'importe quel utilisateur peut modifier favoritesCount uniquement
+         || (isAuth()
+           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['favoritesCount']));
+-      allow delete: if isAdmin() || (isRealUser() && resource.data.sellerId == uid());
++      allow delete: if isAdmin() || (isRealUser() && partnerActivated() && resource.data.sellerId == uid());
+     }
+ 
+     match /marketplace_favorites/{userId} {

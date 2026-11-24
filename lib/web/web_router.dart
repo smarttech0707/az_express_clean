@@ -1,3 +1,5 @@
+import '../delivery_proofs/proof_presentation.dart';
+import '../partner_qr/partner_qr_page.dart';
 import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'admin_auth_service.dart';
@@ -11,11 +13,47 @@ import 'pages/contact_page.dart';
 import 'pages/about_page.dart';
 import 'pages/privacy_page.dart';
 import 'pages/terms_page.dart';
+import 'pages/legal_notice_page.dart';
 import 'pages/delete_account_page.dart';
+import 'pages/faq_page.dart';
+import 'pages/news_page.dart';
+import 'pages/download_page.dart';
 import 'pages/admin/web_admin_login.dart';
 import 'pages/admin/web_admin_dashboard.dart';
 import 'pages/client/web_client_login.dart';
 import 'pages/client/web_client_dashboard.dart';
+
+/// Toutes les routes de l'espace client web.
+///
+/// Deux familles distinctes, volontairement regroupées ici pour qu'aucune
+/// route ne puisse exister sans que le dashboard sache quoi en faire :
+///   - les SECTIONS (`clientSectionTabs`), chacune adossée à une vraie page ;
+///   - les routes de SERVICE, qui n'ont aujourd'hui aucune page web (voir
+///     `WebClientDashboard` : elles affichent un état explicite au lieu de
+///     ramener silencieusement l'utilisateur à l'accueil).
+const clientAppRoutes = <String>[
+  // Sections réelles
+  '/app',
+  '/app/commandes',
+  '/app/wallet',
+  '/app/profil',
+  '/app/support',
+  // Services sans page web dédiée
+  '/app/commander',
+  '/app/restaurants',
+  '/app/boulangeries',
+  '/app/pharmacies',
+  '/app/ekbine',
+  '/app/boutique',
+  '/app/eau',
+  '/app/blanchisserie',
+  '/app/artisans',
+  '/app/residences',
+  '/app/locations',
+  '/app/colis',
+  '/app/recharge',
+  '/app/retrait',
+];
 
 final webRouter = GoRouter(
   initialLocation: '/',
@@ -24,13 +62,13 @@ final webRouter = GoRouter(
     WebClientAuth.instance,
   ]),
   redirect: (context, state) {
-    final loc          = state.matchedLocation;
+    final loc = state.matchedLocation;
     final isAdminRoute = loc.startsWith('/admin');
     final isLoginRoute = loc == '/admin/login';
-    final isClientApp  = loc.startsWith('/app');
+    final isClientApp = loc.startsWith('/app');
     final isClientLogin = loc == '/connexion';
-    final isAdmin      = AdminAuthService.instance.isAdmin;
-    final isClient     = WebClientAuth.instance.isLoggedIn;
+    final isAdmin = AdminAuthService.instance.isAdmin;
+    final isClient = WebClientAuth.instance.isLoggedIn;
 
     // Admin routes
     if (isAdminRoute && !isLoginRoute && !isAdmin) return '/admin/login';
@@ -44,42 +82,68 @@ final webRouter = GoRouter(
   },
   errorBuilder: (_, state) => const WebHomePage(),
   routes: [
+    GoRoute(path:'/partenaire/:token',builder:(_,state)=>PublicPartnerPage(token:state.pathParameters['token']!)),
+    GoRoute(
+        path: '/reception/:grantId',
+        builder: (_, state) =>
+            RecipientProofPage(grantId: state.pathParameters['grantId']!)),
     // ── Pages publiques ───────────────────────────────────────────────────────
-    GoRoute(path: '/',                   builder: (_, __) => const WebHomePage()),
-    GoRoute(path: '/services',           builder: (_, __) => const WebServicesPage()),
-    GoRoute(path: '/comment-ca-marche',  builder: (_, __) => const WebHowItWorksPage()),
-    GoRoute(path: '/commercants',        builder: (_, __) => const WebMerchantsPage()),
-    GoRoute(path: '/livreurs',           builder: (_, __) => const WebDriversPage()),
-    GoRoute(path: '/contact',            builder: (_, __) => const WebContactPage()),
-    GoRoute(path: '/a-propos',           builder: (_, __) => const WebAboutPage()),
-    GoRoute(path: '/confidentialite',    builder: (_, __) => const WebPrivacyPage()),
-    GoRoute(path: '/conditions',         builder: (_, __) => const WebTermsPage()),
-    GoRoute(path: '/delete-account',     builder: (_, __) => const WebDeleteAccountPage()),
+    GoRoute(path: '/', builder: (_, __) => const WebHomePage()),
+    GoRoute(path: '/services', builder: (_, __) => const WebServicesPage()),
+    GoRoute(
+        path: '/comment-ca-marche',
+        builder: (_, __) => const WebHowItWorksPage()),
+    GoRoute(path: '/commercants', builder: (_, __) => const WebMerchantsPage()),
+    GoRoute(path: '/livreurs', builder: (_, __) => const WebDriversPage()),
+    GoRoute(path: '/contact', builder: (_, __) => const WebContactPage()),
+    GoRoute(path: '/a-propos', builder: (_, __) => const WebAboutPage()),
+    GoRoute(
+        path: '/confidentialite', builder: (_, __) => const WebPrivacyPage()),
+    GoRoute(path: '/conditions', builder: (_, __) => const WebTermsPage()),
+    GoRoute(
+        path: '/mentions-legales',
+        builder: (_, __) => const WebLegalNoticePage()),
+    GoRoute(path: '/faq', builder: (_, __) => const WebFaqPage()),
+    GoRoute(path: '/actualites', builder: (_, __) => const WebNewsPage()),
+    GoRoute(
+        path: '/telecharger', builder: (_, __) => const WebDownloadPage()),
+    GoRoute(
+        path: '/delete-account',
+        builder: (_, __) => const WebDeleteAccountPage()),
+    // `/delete-account` est servi par une page HTML statique (firebase.json, lisible sans JavaScript, exigée par
+    // Google Play) : le formulaire de demande reste joignable ici.
+    GoRoute(
+        path: '/suppression-compte',
+        builder: (_, __) => const WebDeleteAccountPage()),
 
     // ── Auth client ───────────────────────────────────────────────────────────
-    GoRoute(path: '/connexion',          builder: (_, __) => const WebClientLoginPage()),
+    GoRoute(path: '/connexion', builder: (_, __) => const WebClientLoginPage()),
 
     // ── App client (protégée) ─────────────────────────────────────────────────
-    GoRoute(path: '/app',                builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/commander',      builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/restaurants',    builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/boulangeries',   builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/pharmacies',     builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/ekbine',         builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/boutique',       builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/eau',            builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/blanchisserie',  builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/artisans',       builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/residences',     builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/locations',      builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/colis',          builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/recharge',       builder: (_, __) => const WebClientDashboard()),
-    GoRoute(path: '/app/retrait',        builder: (_, __) => const WebClientDashboard()),
+    //
+    // BUG CORRIGÉ : ces routes construisaient toutes `const
+    // WebClientDashboard()` SANS lui transmettre la route demandée. Un clic
+    // sur une carte changeait donc l'URL, go_router reconstruisait… le même
+    // widget, dont l'onglet interne (`_tab`) repartait à 0 — l'utilisateur
+    // était ramené à l'accueil. Chaque route passe maintenant sa localisation
+    // au dashboard, qui en dérive ce qu'il affiche.
+    //
+    // `clientAppRoutes` est la liste unique : elle alimente les GoRoute ET la
+    // table de sections du dashboard, qui ne peuvent donc plus diverger.
+    for (final path in clientAppRoutes)
+      GoRoute(
+        path: path,
+        builder: (_, state) =>
+            WebClientDashboard(location: state.matchedLocation),
+      ),
 
     // ── Pages admin (protégées) ───────────────────────────────────────────────
-    GoRoute(path: '/admin',              redirect: (_, __) => '/admin/login'),
-    GoRoute(path: '/admin/login',        builder: (_, __) => const WebAdminLoginPage()),
-    GoRoute(path: '/admin/dashboard',    builder: (_, __) => const WebAdminDashboard()),
+    GoRoute(path: '/admin', redirect: (_, __) => '/admin/login'),
+    GoRoute(
+        path: '/admin/login', builder: (_, __) => const WebAdminLoginPage()),
+    GoRoute(
+        path: '/admin/dashboard',
+        builder: (_, __) => const WebAdminDashboard()),
   ],
 );
 

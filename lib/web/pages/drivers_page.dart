@@ -25,7 +25,9 @@ class WebDriversPage extends StatelessWidget {
             ]),
           ),
           const Positioned(
-            top: 0, left: 0, right: 0,
+            top: 0,
+            left: 0,
+            right: 0,
             child: WebNavBar(currentRoute: '/livreurs'),
           ),
         ],
@@ -49,23 +51,29 @@ class _HeroSection extends StatelessWidget {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text('REJOIGNEZ NOTRE FLOTTE',
-              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700,
-                color: kOrange, letterSpacing: 1.2)),
+                style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: kOrange,
+                    letterSpacing: 1.2)),
           ).animate().fadeIn(duration: 600.ms),
           const SizedBox(height: 20),
-          Text('Devenez Livreur\nAZ Express',
+          Text(
+            'Devenez Livreur\nAZ Express',
             style: kDisplayStyle(context),
             textAlign: TextAlign.center,
           ).animate(delay: 200.ms).fadeIn(duration: 700.ms),
           const SizedBox(height: 16),
           Text(
             'Travaillez à votre rythme. Gagnez plus. Soyez votre propre patron.',
-            style: GoogleFonts.inter(fontSize: 17, color: kTextMuted, height: 1.6),
+            style:
+                GoogleFonts.inter(fontSize: 17, color: kTextMuted, height: 1.6),
             textAlign: TextAlign.center,
           ).animate(delay: 350.ms).fadeIn(duration: 600.ms),
           const SizedBox(height: 32),
           Wrap(
-            spacing: 24, runSpacing: 12,
+            spacing: 24,
+            runSpacing: 12,
             alignment: WrapAlignment.center,
             children: [
               _statBadge('50,000+ FCFA', 'par semaine en moyenne'),
@@ -88,10 +96,14 @@ class _HeroSection extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Text(value, style: GoogleFonts.inter(
-            fontSize: 18, fontWeight: FontWeight.w800, color: kOrange,
-          )),
-          Text(label, style: GoogleFonts.inter(fontSize: 12, color: kTextMuted)),
+          Text(value,
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: kOrange,
+              )),
+          Text(label,
+              style: GoogleFonts.inter(fontSize: 12, color: kTextMuted)),
         ],
       ),
     );
@@ -100,12 +112,36 @@ class _HeroSection extends StatelessWidget {
 
 class _PerksSection extends StatelessWidget {
   static const _perks = [
-    (Icons.schedule_rounded,      'Horaires flexibles',   'Travaillez quand vous voulez, autant que vous voulez.'),
-    (Icons.payments_rounded,      'Paiement hebdomadaire','Recevez vos gains chaque semaine sur votre mobile money.'),
-    (Icons.trending_up_rounded,   'Primes & Bonus',       'Bonus de performance et primes de fidélité.'),
-    (Icons.support_agent_rounded, 'Support dédié',        'Une équipe disponible 7j/7 pour vous accompagner.'),
-    (Icons.shield_rounded,        'Assurance incluse',    'Couverture assurance lors de vos livraisons.'),
-    (Icons.star_rounded,          'Progression rapide',   'Montez en grade et débloquez plus d\'avantages.'),
+    (
+      Icons.schedule_rounded,
+      'Horaires flexibles',
+      'Travaillez quand vous voulez, autant que vous voulez.'
+    ),
+    (
+      Icons.payments_rounded,
+      'Paiement hebdomadaire',
+      'Recevez vos gains chaque semaine sur votre mobile money.'
+    ),
+    (
+      Icons.trending_up_rounded,
+      'Primes & Bonus',
+      'Bonus de performance et primes de fidélité.'
+    ),
+    (
+      Icons.support_agent_rounded,
+      'Support dédié',
+      'Une équipe disponible 7j/7 pour vous accompagner.'
+    ),
+    (
+      Icons.shield_rounded,
+      'Assurance incluse',
+      'Couverture assurance lors de vos livraisons.'
+    ),
+    (
+      Icons.star_rounded,
+      'Progression rapide',
+      'Montez en grade et débloquez plus d\'avantages.'
+    ),
   ];
 
   @override
@@ -117,7 +153,7 @@ class _PerksSection extends StatelessWidget {
       child: Column(
         children: [
           Text('Pourquoi nous rejoindre ?',
-            style: kH1Style(context), textAlign: TextAlign.center),
+              style: kH1Style(context), textAlign: TextAlign.center),
           const SizedBox(height: 48),
           GridView.builder(
             shrinkWrap: true,
@@ -136,7 +172,8 @@ class _PerksSection extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 44, height: 44,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       color: kOrange.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
@@ -144,11 +181,15 @@ class _PerksSection extends StatelessWidget {
                     child: Icon(_perks[i].$1, color: kOrange, size: 22),
                   ),
                   const SizedBox(height: 14),
-                  Text(_perks[i].$2, style: GoogleFonts.inter(
-                    fontSize: 15, fontWeight: FontWeight.w700, color: kWhite)),
+                  Text(_perks[i].$2,
+                      style: GoogleFonts.inter(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: kWhite)),
                   const SizedBox(height: 8),
-                  Text(_perks[i].$3, style: GoogleFonts.inter(
-                    fontSize: 13, color: kTextMuted, height: 1.6)),
+                  Text(_perks[i].$3,
+                      style: GoogleFonts.inter(
+                          fontSize: 13, color: kTextMuted, height: 1.6)),
                 ],
               ),
             ).animate(delay: (i * 80).ms).fadeIn(duration: 600.ms),
@@ -166,20 +207,27 @@ class _FormSection extends StatefulWidget {
 
 class _FormSectionState extends State<_FormSection> {
   final _formKey = GlobalKey<FormState>();
-  final _nameCtrl    = TextEditingController();
-  final _phoneCtrl   = TextEditingController();
-  final _cityCtrl    = TextEditingController();
-  String _vehicle   = 'Moto';
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _cityCtrl = TextEditingController();
+  String _vehicle = 'Moto';
   String _experience = 'Moins de 1 an';
-  bool  _loading    = false;
-  bool  _success    = false;
+  bool _loading = false;
+  bool _success = false;
 
   static const _vehicles = ['Moto', 'Vélo', 'Voiture', 'Tricycle'];
-  static const _experiences = ['Moins de 1 an', '1 à 2 ans', '2 à 5 ans', 'Plus de 5 ans'];
+  static const _experiences = [
+    'Moins de 1 an',
+    '1 à 2 ans',
+    '2 à 5 ans',
+    'Plus de 5 ans'
+  ];
 
   @override
   void dispose() {
-    _nameCtrl.dispose(); _phoneCtrl.dispose(); _cityCtrl.dispose();
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _cityCtrl.dispose();
     super.dispose();
   }
 
@@ -188,16 +236,19 @@ class _FormSectionState extends State<_FormSection> {
     setState(() => _loading = true);
     try {
       await FirebaseFirestore.instance.collection('driver_applications').add({
-        'name':       _nameCtrl.text.trim(),
-        'phone':      _phoneCtrl.text.trim(),
-        'city':       _cityCtrl.text.trim(),
-        'vehicle':    _vehicle,
+        'name': _nameCtrl.text.trim(),
+        'phone': _phoneCtrl.text.trim(),
+        'city': _cityCtrl.text.trim(),
+        'vehicle': _vehicle,
         'experience': _experience,
-        'source':     'website',
-        'status':     'pending',
-        'createdAt':  Timestamp.now(),
+        'source': 'website',
+        'status': 'pending',
+        'createdAt': Timestamp.now(),
       });
-      setState(() { _loading = false; _success = true; });
+      setState(() {
+        _loading = false;
+        _success = true;
+      });
     } catch (e) {
       setState(() => _loading = false);
       if (mounted) {
@@ -218,13 +269,13 @@ class _FormSectionState extends State<_FormSection> {
       child: Column(
         children: [
           Text('Candidature Livreur',
-            style: kH1Style(context), textAlign: TextAlign.center),
+              style: kH1Style(context), textAlign: TextAlign.center),
           const SizedBox(height: 8),
-          Text('Remplissez le formulaire ci-dessous. Notre équipe vous contacte sous 24h.',
-            style: GoogleFonts.inter(fontSize: 15, color: kTextMuted),
-            textAlign: TextAlign.center),
+          Text(
+              'Remplissez le formulaire ci-dessous. Notre équipe vous contacte sous 24h.',
+              style: GoogleFonts.inter(fontSize: 15, color: kTextMuted),
+              textAlign: TextAlign.center),
           const SizedBox(height: 40),
-
           Center(
             child: Container(
               width: formWidth,
@@ -242,21 +293,26 @@ class _FormSectionState extends State<_FormSection> {
     return Column(
       children: [
         Container(
-          width: 80, height: 80,
+          width: 80,
+          height: 80,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: kSuccess.withValues(alpha: 0.1),
           ),
-          child: const Icon(Icons.check_circle_rounded, color: kSuccess, size: 44),
+          child:
+              const Icon(Icons.check_circle_rounded, color: kSuccess, size: 44),
         ).animate().scale(duration: 600.ms, curve: Curves.elasticOut),
         const SizedBox(height: 20),
         Text('Candidature envoyée !',
-          style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w700, color: kWhite),
-          textAlign: TextAlign.center),
+            style: GoogleFonts.inter(
+                fontSize: 22, fontWeight: FontWeight.w700, color: kWhite),
+            textAlign: TextAlign.center),
         const SizedBox(height: 10),
-        Text('Merci ! Notre équipe examinera votre dossier et vous contactera dans les 24 heures.',
-          style: GoogleFonts.inter(fontSize: 14, color: kTextMuted, height: 1.6),
-          textAlign: TextAlign.center),
+        Text(
+            'Merci ! Notre équipe examinera votre dossier et vous contactera dans les 24 heures.',
+            style:
+                GoogleFonts.inter(fontSize: 14, color: kTextMuted, height: 1.6),
+            textAlign: TextAlign.center),
       ],
     );
   }
@@ -267,20 +323,20 @@ class _FormSectionState extends State<_FormSection> {
       child: Column(
         children: [
           _field(_nameCtrl, 'Nom complet', Icons.person_rounded,
-            validator: (v) => (v?.isEmpty ?? true) ? 'Obligatoire' : null),
+              validator: (v) => (v?.isEmpty ?? true) ? 'Obligatoire' : null),
           const SizedBox(height: 16),
           _field(_phoneCtrl, 'Numéro de téléphone', Icons.phone_rounded,
-            keyboardType: TextInputType.phone,
-            validator: (v) => (v?.isEmpty ?? true) ? 'Obligatoire' : null),
+              keyboardType: TextInputType.phone,
+              validator: (v) => (v?.isEmpty ?? true) ? 'Obligatoire' : null),
           const SizedBox(height: 16),
           _field(_cityCtrl, 'Ville', Icons.location_city_rounded,
-            validator: (v) => (v?.isEmpty ?? true) ? 'Obligatoire' : null),
+              validator: (v) => (v?.isEmpty ?? true) ? 'Obligatoire' : null),
           const SizedBox(height: 16),
           _dropdown('Type d\'engin', _vehicles, _vehicle,
-            (v) => setState(() => _vehicle = v!)),
+              (v) => setState(() => _vehicle = v!)),
           const SizedBox(height: 16),
           _dropdown('Expérience de livraison', _experiences, _experience,
-            (v) => setState(() => _experience = v!)),
+              (v) => setState(() => _experience = v!)),
           const SizedBox(height: 28),
           SizedBox(
             width: double.infinity,
@@ -290,13 +346,18 @@ class _FormSectionState extends State<_FormSection> {
                 backgroundColor: kOrange,
                 foregroundColor: kWhite,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
               child: _loading
-                  ? const SizedBox(width: 20, height: 20,
-                      child: CircularProgressIndicator(color: kWhite, strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          color: kWhite, strokeWidth: 2))
                   : Text('Envoyer ma candidature',
-                      style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700)),
+                      style: GoogleFonts.inter(
+                          fontSize: 15, fontWeight: FontWeight.w700)),
             ),
           ),
         ],
@@ -327,12 +388,15 @@ class _FormSectionState extends State<_FormSection> {
       style: GoogleFonts.inter(color: kWhite, fontSize: 15),
       decoration: InputDecoration(
         labelText: label,
-        prefixIcon: const Icon(Icons.arrow_drop_down_rounded, color: kTextMuted),
+        prefixIcon:
+            const Icon(Icons.arrow_drop_down_rounded, color: kTextMuted),
       ),
-      items: items.map((i) => DropdownMenuItem(
-        value: i,
-        child: Text(i),
-      )).toList(),
+      items: items
+          .map((i) => DropdownMenuItem(
+                value: i,
+                child: Text(i),
+              ))
+          .toList(),
     );
   }
 }

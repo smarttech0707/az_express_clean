@@ -122,7 +122,9 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('AndroidTtsProvider — sélection de moteur (compatibilité Samsung)', () {
-    test('préfère "Speech Services by Google" quand Samsung TTS est aussi présent', () async {
+    test(
+        'préfère "Speech Services by Google" quand Samsung TTS est aussi présent',
+        () async {
       final fake = _FakeFlutterTts()
         ..engines = ['com.samsung.SMT', 'com.google.android.tts'];
       final provider = AndroidTtsProvider(tts: fake);
@@ -133,7 +135,9 @@ void main() {
       expect(provider.debugSelectedEngine, 'com.google.android.tts');
     });
 
-    test('ne force aucun moteur si "Speech Services by Google" est absent (repli moteur système)', () async {
+    test(
+        'ne force aucun moteur si "Speech Services by Google" est absent (repli moteur système)',
+        () async {
       final fake = _FakeFlutterTts()..engines = ['com.samsung.SMT'];
       final provider = AndroidTtsProvider(tts: fake);
 
@@ -165,7 +169,8 @@ void main() {
       expect(provider.debugSelectedVoiceName, 'voice-fr');
     });
 
-    test('accepte une variante française si aucun fr-FR exact n\'existe', () async {
+    test('accepte une variante française si aucun fr-FR exact n\'existe',
+        () async {
       final fake = _FakeFlutterTts()
         ..voices = [
           {'name': 'voice-ca', 'locale': 'fr-CA'},
@@ -177,7 +182,9 @@ void main() {
       expect(fake.setVoiceCalledWith?['name'], 'voice-ca');
     });
 
-    test('retombe sur setLanguage(fr-FR) si aucune voix française n\'est listée', () async {
+    test(
+        'retombe sur setLanguage(fr-FR) si aucune voix française n\'est listée',
+        () async {
       final fake = _FakeFlutterTts()..voices = [];
       final provider = AndroidTtsProvider(tts: fake);
 
@@ -188,19 +195,25 @@ void main() {
     });
   });
 
-  group('AndroidTtsProvider — réglages de débit/hauteur/volume (voix naturelle)', () {
-    test('applyVoiceSettings transmet exactement les valeurs demandées', () async {
+  group(
+      'AndroidTtsProvider — réglages de débit/hauteur/volume (voix naturelle)',
+      () {
+    test('applyVoiceSettings transmet exactement les valeurs demandées',
+        () async {
       final fake = _FakeFlutterTts();
       final provider = AndroidTtsProvider(tts: fake);
 
-      await provider.applyVoiceSettings(speechRate: 0.48, pitch: 1.0, volume: 1.0);
+      await provider.applyVoiceSettings(
+          speechRate: 0.48, pitch: 1.0, volume: 1.0);
 
       expect(fake.speechRate, 0.48);
       expect(fake.pitch, 1.0);
       expect(fake.volume, 1.0);
     });
 
-    test('initialize() choisit un débit inférieur à 1.0 (moins robotique que le débit par défaut)', () async {
+    test(
+        'initialize() choisit un débit inférieur à 1.0 (moins robotique que le débit par défaut)',
+        () async {
       final fake = _FakeFlutterTts();
       final provider = AndroidTtsProvider(tts: fake);
 
@@ -212,11 +225,13 @@ void main() {
   });
 
   group('VoiceManager — nettoyage du texte avant lecture', () {
-    test('supprime markdown (**/***/#/```) et underscores avant de parler', () async {
+    test('supprime markdown (**/***/#/```) et underscores avant de parler',
+        () async {
       final recorder = _RecordingVoiceProvider();
       final manager = VoiceManager(provider: recorder);
 
-      await manager.speak('**Titre important** : voici `du code` et _emphase_.');
+      await manager
+          .speak('**Titre important** : voici `du code` et _emphase_.');
 
       final spokenText = recorder.spoken.join(' ');
       expect(spokenText, isNot(contains('**')));
@@ -224,7 +239,9 @@ void main() {
       expect(spokenText, isNot(contains('_')));
     });
 
-    test('supprime les emoji avant de parler (évite "émoji pouce levé" façon Samsung TTS)', () async {
+    test(
+        'supprime les emoji avant de parler (évite "émoji pouce levé" façon Samsung TTS)',
+        () async {
       final recorder = _RecordingVoiceProvider();
       final manager = VoiceManager(provider: recorder);
 
@@ -247,14 +264,17 @@ void main() {
   });
 
   group('VoiceManager — naturalité du débit (segmentation en phrases)', () {
-    test('découpe un texte multi-phrases en plusieurs appels speak() séquentiels', () async {
+    test(
+        'découpe un texte multi-phrases en plusieurs appels speak() séquentiels',
+        () async {
       final recorder = _RecordingVoiceProvider();
       final manager = VoiceManager(
         provider: recorder,
         sentencePause: const Duration(milliseconds: 1),
       );
 
-      await manager.speak('Votre commande est confirmée. Le livreur arrive dans 10 minutes ! Merci de votre confiance.');
+      await manager.speak(
+          'Votre commande est confirmée. Le livreur arrive dans 10 minutes ! Merci de votre confiance.');
 
       expect(recorder.spoken.length, 3);
       expect(recorder.spoken[0], contains('confirmée'));
@@ -272,8 +292,10 @@ void main() {
     });
   });
 
-  group('VoiceManager — changement de fournisseur sans impacter l\'appelant', () {
-    test('setProvider() arrête l\'ancien fournisseur et initialise le nouveau', () async {
+  group('VoiceManager — changement de fournisseur sans impacter l\'appelant',
+      () {
+    test('setProvider() arrête l\'ancien fournisseur et initialise le nouveau',
+        () async {
       final first = _RecordingVoiceProvider();
       final manager = VoiceManager(provider: first);
       await manager.initialize();
@@ -286,7 +308,9 @@ void main() {
       expect(manager.activeProvider, second);
     });
 
-    test('un fournisseur de niveau 2 indisponible retombe automatiquement sur AndroidTtsProvider', () async {
+    test(
+        'un fournisseur de niveau 2 indisponible retombe automatiquement sur AndroidTtsProvider',
+        () async {
       final unavailable = _UnavailableVoiceProvider();
       final manager = VoiceManager(provider: unavailable);
 

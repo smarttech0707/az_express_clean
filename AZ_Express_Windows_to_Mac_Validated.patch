@@ -1,0 +1,3050 @@
+diff --git a/lib/screens/admin/admin_login.dart b/lib/screens/admin/admin_login.dart
+index 6207f8f..529a60a 100644
+--- a/lib/screens/admin/admin_login.dart
++++ b/lib/screens/admin/admin_login.dart
+@@ -34,7 +34,7 @@ bool adminDevelopmentBypassAllowed({
+ 
+ @visibleForTesting
+ bool adminDevelopmentRoleAllowed(Map<String, dynamic> adminData) {
+-  final role = adminData['role'] as String?;
++  final role = adminData['role'];
+   return adminData['isActive'] == true &&
+       (role == 'super' || (role == 'sub' && adminData['permissions'] is List));
+ }
+@@ -51,6 +51,7 @@ class _AdminLoginState extends State<AdminLogin> {
+   final _passCtrl = TextEditingController();
+   bool _showPass = false;
+   bool _loading = false;
++  bool _loginInFlight = false;
+   bool _emailVerificationRequired = false;
+   bool _resendingVerificationEmail = false;
+   String? _verificationEmail;
+@@ -87,6 +88,7 @@ class _AdminLoginState extends State<AdminLogin> {
+   }
+ 
+   Future<void> _login() async {
++    if (_loginInFlight || _autoResuming || _resendingVerificationEmail) return;
+     FocusScope.of(context).unfocus();
+ 
+     final id = _idCtrl.text.trim();
+@@ -97,6 +99,7 @@ class _AdminLoginState extends State<AdminLogin> {
+       return;
+     }
+ 
++    _loginInFlight = true;
+     setState(() => _loading = true);
+     setState(() => _emailVerificationRequired = false);
+ 
+@@ -122,12 +125,11 @@ class _AdminLoginState extends State<AdminLogin> {
+       }
+ 
+       if (!mounted) return;
+-      setState(() => _loading = false);
+ 
+-      // Build adminData — all Firestore fields + uid. Backward compat: missing role = 'super'
++      // Le rôle doit être explicitement valide ; l’UID vient de Firebase Auth.
+       final adminData = <String, dynamic>{
+-        'uid': cred.user!.uid,
+         ...adminDoc.data()!,
++        'uid': cred.user!.uid,
+       };
+       final access = validateAdminRecord(adminData);
+       if (!access.allowed) {
+@@ -158,12 +160,11 @@ class _AdminLoginState extends State<AdminLogin> {
+ 
+       final adminPhone = adminData['phone'] as String?;
+       final hasPhone = adminPhone != null && adminPhone.isNotEmpty;
+-      if (!hasPhone) {
+-        await FirebaseAuth.instance.signOut();
+-        if (!mounted) return;
+-        _error('2FA obligatoire : aucun téléphone Admin n’est configuré.');
+-        return;
+-      }
++      // La 2FA reste OBLIGATOIRE : l'enrôlement ci-dessous est le seul chemin
++      // vers le tableau de bord. Mais elle n'exige plus un numéro, puisque
++      // l'application d'authentification (TOTP) est désormais le facteur
++      // proposé en premier et ne dépend d'aucun réseau SMS. Un numéro
++      // enregistré reste utilisé pour proposer le repli SMS.
+       final skipTwoFactor = adminDevelopmentBypassAllowed(
+         isDebug: kDebugMode,
+         buildFlagEnabled: _adminSkipTwoFactorBuildFlag,
+@@ -188,8 +189,8 @@ class _AdminLoginState extends State<AdminLogin> {
+         );
+         return;
+       }
+-      debugPrint(
+-          '[ADMIN_MFA] enrôlement requis uid=${_maskedUid(cred.user!.uid)}');
++      debugPrint('[ADMIN_MFA] enrôlement requis '
++          'uid=${_maskedUid(cred.user!.uid)} smsDisponible=$hasPhone');
+       final enrollmentSecret = AdminEnrollmentSecret(pass);
+       _passCtrl.clear();
+       Navigator.pushReplacement(
+@@ -213,22 +214,21 @@ class _AdminLoginState extends State<AdminLogin> {
+         ),
+       );
+     } on FirebaseAuthException catch (e) {
++      debugPrint('[ADMIN_AUTH] login refusé code=${e.code}');
+       if (!mounted) return;
+       setState(() => _loading = false);
+-      switch (e.code) {
+-        case 'user-not-found':
+-        case 'wrong-password':
+-        case 'invalid-credential':
+-          _error("Identifiant ou mot de passe incorrect");
+-        case 'too-many-requests':
+-          _error("Trop de tentatives. Réessayez plus tard.");
+-        default:
+-          _error("Erreur Firebase : ${e.code}");
+-      }
++      _error(adminMfaErrorMessage(e.code));
++    } on FirebaseException catch (e) {
++      debugPrint('[ADMIN_AUTH] vérification rôle refusée code=${e.code}');
++      if (mounted) _error(adminMfaErrorMessage(e.code));
+     } catch (e) {
++      debugPrint('[ADMIN_AUTH] login échoué type=${e.runtimeType}');
+       if (!mounted) return;
+       setState(() => _loading = false);
+-      _error("Erreur : ${e.toString()}");
++      _error('Impossible de terminer la connexion Admin. Réessayez.');
++    } finally {
++      _loginInFlight = false;
++      if (mounted) setState(() => _loading = false);
+     }
+   }
+ 
+@@ -237,6 +237,7 @@ class _AdminLoginState extends State<AdminLogin> {
+       : '${uid.substring(0, 3)}…${uid.substring(uid.length - 3)}';
+ 
+   Future<void> _resendVerificationEmail() async {
++    if (_loginInFlight || _resendingVerificationEmail || _autoResuming) return;
+     if (!_verificationGuard.canSend()) {
+       final seconds =
+           (_verificationGuard.remaining().inMilliseconds / 1000).ceil();
+diff --git a/lib/screens/admin/admin_mfa_security.dart b/lib/screens/admin/admin_mfa_security.dart
+index a289f3b..df13af7 100644
+--- a/lib/screens/admin/admin_mfa_security.dart
++++ b/lib/screens/admin/admin_mfa_security.dart
+@@ -57,7 +57,7 @@ AdminAccessDecision validateAdminRecord(Map<String, dynamic>? data) {
+   if (data['isActive'] != true) {
+     return const AdminAccessDecision.rejected('admin-role-rejected');
+   }
+-  final role = data['role'] as String?;
++  final role = data['role'];
+   if (role != 'super' && role != 'sub') {
+     return const AdminAccessDecision.rejected('admin-role-rejected');
+   }
+@@ -74,6 +74,20 @@ AdminAccessDecision validateAdminRecord(Map<String, dynamic>? data) {
+ }
+ 
+ String adminMfaErrorMessage(String code) => switch (code) {
++      'user-not-found' ||
++      'wrong-password' ||
++      'invalid-credential' =>
++        'Identifiant ou mot de passe incorrect.',
++      'network-request-failed' ||
++      'unavailable' =>
++        'Connexion réseau indisponible. Vérifiez votre connexion et réessayez.',
++      'permission-denied' =>
++        'Accès Firestore refusé lors de la vérification Admin. Contactez l’administrateur.',
++      'user-token-expired' ||
++      'invalid-user-token' ||
++      'user-mismatch' =>
++        'Session expirée. Recommencez la connexion Admin.',
++      'missing-verification-id' => 'Aucun challenge actif. Renvoyez le code.',
+       'invalid-verification-code' => 'Code incorrect. Vérifiez et réessayez.',
+       'session-expired' => 'Code expiré. Renvoyez un nouveau code.',
+       'too-many-requests' => 'Trop de tentatives. Réessayez plus tard.',
+@@ -82,13 +96,117 @@ String adminMfaErrorMessage(String code) => switch (code) {
+         'Le numéro Admin est invalide. Utilisez un numéro ivoirien valide.',
+       'admin-role-rejected' =>
+         'Accès refusé : rôle Admin invalide ou désactivé.',
+-      'unsupported-second-factor' => 'Aucun facteur SMS Admin n’est enrôlé.',
++      'unsupported-second-factor' =>
++        'Aucun second facteur Admin n’est enrôlé (ni application '
++            'd’authentification, ni SMS).',
++      'totp-challenge-timeout' =>
++        'Le code a expiré. Ouvrez votre application d’authentification et '
++            'saisissez le code affiché actuellement.',
++      'requires-recent-login' =>
++        'Votre session n’est plus assez récente. Reconnectez-vous avec votre '
++            'mot de passe pour continuer.',
++      'maximum-second-factor-count-exceeded' =>
++        'Nombre maximal de seconds facteurs atteint. Supprimez un facteur '
++            'existant avant d’en ajouter un autre.',
++      'second-factor-already-enrolled' =>
++        'Ce second facteur est déjà enrôlé sur ce compte Admin.',
+       'app-not-authorized' ||
+       'missing-client-identifier' =>
+         'Cette version Android n’est pas autorisée pour la vérification SMS.',
+       _ => 'Échec de la double authentification ($code).',
+     };
+ 
++/// Seconds facteurs MFA Admin réellement pris en charge par Identity Platform.
++///
++/// `totp` est volontairement déclaré en premier : c'est l'ordre de préférence
++/// appliqué par [resolveAdminSecondFactor], une application d'authentification
++/// ne dépendant d'aucun réseau SMS (voir l'incident Error 39).
++enum AdminSecondFactor { totp, sms }
++
++/// Facteur déjà enrôlé, décrit SANS type Firebase pour que la sélection reste
++/// vérifiable sans Firebase Auth ni appareil réel.
++class AdminEnrolledFactor {
++  final AdminSecondFactor kind;
++
++  /// `MultiFactorInfo.uid` — requis par `getAssertionForSignIn`.
++  final String enrollmentId;
++
++  /// Libellé d'affichage (numéro masqué par Firebase pour le SMS, nom donné à
++  /// l'enrôlement pour TOTP). Jamais un secret.
++  final String? label;
++
++  const AdminEnrolledFactor({
++    required this.kind,
++    required this.enrollmentId,
++    this.label,
++  });
++}
++
++/// Décision de second facteur : un facteur unique à utiliser, un choix à
++/// présenter, ou un refus explicite.
++class AdminFactorResolution {
++  final List<AdminEnrolledFactor> available;
++  final AdminEnrolledFactor? single;
++  final bool requiresChoice;
++  final String? errorCode;
++
++  const AdminFactorResolution._({
++    required this.available,
++    this.single,
++    this.requiresChoice = false,
++    this.errorCode,
++  });
++
++  bool get allowed => errorCode == null;
++}
++
++/// Choisit le second facteur à utiliser parmi ceux réellement enrôlés.
++///
++/// Aucun facteur exploitable renvoie `unsupported-second-factor` — le même code
++/// que le flux SMS historique, donc le même message et le même refus d'accès :
++/// cette fonction ne crée jamais de chemin vers le tableau de bord.
++AdminFactorResolution resolveAdminSecondFactor(
++    List<AdminEnrolledFactor> factors) {
++  final usable = factors
++      .where((factor) => factor.enrollmentId.trim().isNotEmpty)
++      .toList()
++    // TOTP d'abord : indépendant du réseau SMS.
++    ..sort((a, b) => a.kind.index.compareTo(b.kind.index));
++
++  if (usable.isEmpty) {
++    return const AdminFactorResolution._(
++      available: <AdminEnrolledFactor>[],
++      errorCode: 'unsupported-second-factor',
++    );
++  }
++  if (usable.length == 1) {
++    return AdminFactorResolution._(available: usable, single: usable.first);
++  }
++  return AdminFactorResolution._(available: usable, requiresChoice: true);
++}
++
++/// Longueur imposée par Identity Platform pour un code TOTP.
++const int kAdminTotpCodeLength = 6;
++
++/// Valide le code AVANT tout appel réseau. Retourne `null` si le code est
++/// acceptable, sinon un message français affichable tel quel.
++///
++/// Ne journalise jamais la valeur reçue.
++String? validateAdminTotpCode(String raw) {
++  final code = raw.trim();
++  if (code.isEmpty) {
++    return 'Entrez le code à $kAdminTotpCodeLength chiffres affiché par votre '
++        'application d’authentification.';
++  }
++  if (!RegExp(r'^[0-9]+$').hasMatch(code)) {
++    return 'Le code ne doit contenir que des chiffres.';
++  }
++  if (code.length != kAdminTotpCodeLength) {
++    return 'Le code doit contenir exactement $kAdminTotpCodeLength chiffres.';
++  }
++  return null;
++}
++
+ class SingleNavigationGuard {
+   bool _used = false;
+ 
+diff --git a/lib/screens/admin/admin_otp_page.dart b/lib/screens/admin/admin_otp_page.dart
+index bf5f995..cfb3b1d 100644
+--- a/lib/screens/admin/admin_otp_page.dart
++++ b/lib/screens/admin/admin_otp_page.dart
+@@ -57,6 +57,29 @@ String adminOtpErrorMessage(String code) => switch (code) {
+ @visibleForTesting
+ String normalizeAdminMfaPhone(String phone) => AuthService.toE164(phone.trim());
+ 
++/// Traduit les facteurs Firebase en descripteurs neutres pour
++/// [resolveAdminSecondFactor]. Ne transporte aucun secret : seulement le type,
++/// l'identifiant d'enrôlement et un libellé d'affichage.
++List<AdminEnrolledFactor> adminFactorsFromHints(List<MultiFactorInfo> hints) {
++  final factors = <AdminEnrolledFactor>[];
++  for (final hint in hints) {
++    if (hint is PhoneMultiFactorInfo) {
++      factors.add(AdminEnrolledFactor(
++        kind: AdminSecondFactor.sms,
++        enrollmentId: hint.uid,
++        label: hint.phoneNumber,
++      ));
++    } else if (hint is TotpMultiFactorInfo) {
++      factors.add(AdminEnrolledFactor(
++        kind: AdminSecondFactor.totp,
++        enrollmentId: hint.uid,
++        label: hint.displayName,
++      ));
++    }
++  }
++  return factors;
++}
++
+ /// Résout exclusivement un vrai challenge Firebase MFA. En mode enrollment,
+ /// le compte Admin existant est enrôlé avant tout accès au tableau de bord.
+ class AdminOtpPage extends StatefulWidget {
+@@ -72,6 +95,8 @@ class AdminOtpPage extends StatefulWidget {
+         adminPhone = null,
+         enrollmentSecret = null;
+ 
++  /// `adminPhone` peut être nul : l'enrôlement TOTP n'exige aucun numéro. Le
++  /// repli SMS n'est proposé que si un numéro est réellement enregistré.
+   const AdminOtpPage.enrollment({
+     super.key,
+     required this.adminUid,
+@@ -91,6 +116,12 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+   int? _resendToken;
+   PhoneMultiFactorInfo? _phoneHint;
+   MultiFactorSession? _enrollmentSession;
++  // Le secret TOTP ne vit qu'ici, en mémoire, et seulement le temps de
++  // l'enrôlement : jamais en Firestore, jamais en préférences, jamais loggé.
++  TotpSecret? _totpSecret;
++  AdminFactorResolution? _resolution;
++  AdminEnrolledFactor? _selectedFactor;
++  AdminSecondFactor _factor = AdminSecondFactor.totp;
+   Timer? _countdownTimer;
+   Timer? _sendTimeout;
+   int _countdown = 60;
+@@ -103,7 +134,15 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+   String get _phoneLabel =>
+       _phoneHint?.phoneNumber ?? widget.adminPhone ?? 'numéro enregistré';
+   String get _code => _controllers.map((controller) => controller.text).join();
+-  bool get _canResend => _countdown <= 0 && !_sending && !_verifying;
++  bool get _canResend =>
++      _isSms && _countdown <= 0 && !_sending && !_verifying;
++  bool get _isSms => _factor == AdminSecondFactor.sms;
++  bool get _awaitingChoice => _resolution?.requiresChoice == true &&
++      _selectedFactor == null;
++  bool get _smsFallbackAvailable =>
++      widget.mode == AdminMfaMode.enrollment &&
++      !_isSms &&
++      (widget.adminPhone?.isNotEmpty == true);
+ 
+   @override
+   void initState() {
+@@ -124,14 +163,33 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+       String? phoneNumber;
+       if (widget.mode == AdminMfaMode.signIn) {
+         final resolver = widget.resolver!;
++        final resolution =
++            _resolution ??= resolveAdminSecondFactor(
++                adminFactorsFromHints(resolver.hints));
++        if (!resolution.allowed) {
++          throw FirebaseAuthException(code: resolution.errorCode!);
++        }
++        // Deux facteurs enrôlés : l'Admin choisit, rien n'est envoyé avant.
++        final selected = _selectedFactor ?? resolution.single;
++        if (selected == null) {
++          if (mounted) setState(() => _sending = false);
++          return;
++        }
++        _selectedFactor = selected;
++        _factor = selected.kind;
++        if (!_isSms) {
++          // TOTP : aucun challenge réseau, le code vient de l'application.
++          if (mounted) setState(() => _sending = false);
++          return;
++        }
+         final phoneHints = resolver.hints.whereType<PhoneMultiFactorInfo>();
+         if (phoneHints.isEmpty) {
+-          throw FirebaseAuthException(
+-            code: 'unsupported-second-factor',
+-            message: 'Aucun second facteur SMS n’est enrôlé.',
+-          );
++          throw FirebaseAuthException(code: 'unsupported-second-factor');
+         }
+-        hint = phoneHints.first;
++        hint = phoneHints.firstWhere(
++          (candidate) => candidate.uid == selected.enrollmentId,
++          orElse: () => phoneHints.first,
++        );
+         _phoneHint = hint;
+         session = resolver.session;
+       } else {
+@@ -153,10 +211,22 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+           getSession: user.multiFactor.getSession,
+         );
+         session = _enrollmentSession!;
++        if (!_isSms) {
++          // TOTP prioritaire : Identity Platform génère un secret, l'Admin le
++          // saisit dans son application d'authentification. Aucun SMS, donc
++          // aucune dépendance au réseau opérateur.
++          _totpSecret ??= await TotpMultiFactorGenerator.generateSecret(session);
++          if (mounted) setState(() => _sending = false);
++          return;
++        }
++        final phone = widget.adminPhone;
++        if (phone == null || phone.isEmpty) {
++          throw FirebaseAuthException(code: 'invalid-phone-number');
++        }
+         // Les documents Admin conservent historiquement le numéro tel qu'il a
+         // été saisi (par exemple 07 01 02 03 04). Firebase Phone Auth exige
+         // cependant le format international E.164 pour créer le challenge MFA.
+-        phoneNumber = normalizeAdminMfaPhone(widget.adminPhone!);
++        phoneNumber = normalizeAdminMfaPhone(phone);
+       }
+ 
+       _sendTimeout?.cancel();
+@@ -195,9 +265,9 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+       );
+     } on FirebaseAuthException catch (e) {
+       _onVerificationFailed(e);
+-    } catch (e, stackTrace) {
++    } catch (e) {
+       debugPrint('[ADMIN_MFA] création challenge échouée '
+-          'type=${e.runtimeType} exception=$e\n$stackTrace');
++          'type=${e.runtimeType}');
+       if (mounted) {
+         setState(() {
+           _sending = false;
+@@ -210,9 +280,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+ 
+   void _onVerificationFailed(FirebaseAuthException error) {
+     _sendTimeout?.cancel();
+-    final stackTrace = StackTrace.current;
+-    debugPrint('[ADMIN_MFA] challenge refusé code=${error.code} '
+-        'message=${error.message} exception=$error\n$stackTrace');
++    debugPrint('[ADMIN_MFA] challenge refusé code=${error.code}');
+     if (!mounted) return;
+     setState(() {
+       _sending = false;
+@@ -232,6 +300,10 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+   }
+ 
+   Future<void> _verify() async {
++    if (!_isSms) {
++      await _verifyTotp();
++      return;
++    }
+     if (_code.length != 6) {
+       _snack('Entrez les 6 chiffres du code.', Colors.orange);
+       return;
+@@ -248,25 +320,66 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+     await _completeWith(credential);
+   }
+ 
+-  Future<void> _completeWith(PhoneAuthCredential credential) async {
+-    if (_verifying || _completed) return;
++  /// Vérifie un code d'application d'authentification. Le code est validé
++  /// localement AVANT tout appel réseau, et n'est jamais journalisé.
++  Future<void> _verifyTotp() async {
++    final error = validateAdminTotpCode(_code);
++    if (error != null) {
++      _snack(error, Colors.orange);
++      return;
++    }
++    if (widget.mode == AdminMfaMode.enrollment) {
++      final secret = _totpSecret;
++      if (secret == null) {
++        _snack('Aucun enrôlement actif. Recommencez la connexion Admin.',
++            Colors.red);
++        return;
++      }
++      await _completeWithAssertion(
++        () => TotpMultiFactorGenerator.getAssertionForEnrollment(
++            secret, _code.trim()),
++        displayName: 'Authenticator Admin AZ Express',
++      );
++      return;
++    }
++    final selected = _selectedFactor;
++    if (selected == null) {
++      _snack('Aucun facteur sélectionné.', Colors.red);
++      return;
++    }
++    await _completeWithAssertion(
++      () => TotpMultiFactorGenerator.getAssertionForSignIn(
++          selected.enrollmentId, _code.trim()),
++    );
++  }
++
++  Future<void> _completeWith(PhoneAuthCredential credential) =>
++      _completeWithAssertion(
++        () async => PhoneMultiFactorGenerator.getAssertion(credential),
++        displayName: 'Téléphone Admin AZ Express',
++      );
++
++  /// Chemin unique de validation du second facteur, partagé SMS et TOTP :
++  /// aucune branche ne mène au tableau de bord sans assertion acceptée par
++  /// Identity Platform, puis revalidation du rôle Admin.
++  Future<void> _completeWithAssertion(
++    Future<MultiFactorAssertion> Function() buildAssertion, {
++    String? displayName,
++  }) async {
++    if (!mounted || _verifying || _completed) return;
+     setState(() => _verifying = true);
+     try {
++      final assertion = await buildAssertion();
+       User user;
+       if (widget.mode == AdminMfaMode.signIn) {
+-        final result = await widget.resolver!.resolveSignIn(
+-          PhoneMultiFactorGenerator.getAssertion(credential),
+-        );
++        final result = await widget.resolver!.resolveSignIn(assertion);
+         user = result.user!;
+       } else {
+         final current = FirebaseAuth.instance.currentUser;
+         if (current == null || current.uid != widget.adminUid) {
+           throw FirebaseAuthException(code: 'user-mismatch');
+         }
+-        await current.multiFactor.enroll(
+-          PhoneMultiFactorGenerator.getAssertion(credential),
+-          displayName: 'Téléphone Admin AZ Express',
+-        );
++        await current.multiFactor.enroll(assertion, displayName: displayName);
+         user = current;
+       }
+ 
+@@ -292,15 +405,21 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+         context,
+         MaterialPageRoute(
+           builder: (_) => AdminDashboard(
+-            adminData: <String, dynamic>{'uid': user.uid, ...data!},
++            adminData: <String, dynamic>{...data!, 'uid': user.uid},
+           ),
+         ),
+       );
+-    } on FirebaseAuthException catch (e, stackTrace) {
+-      debugPrint('[ADMIN_MFA] echec code=${e.code} message=${e.message} '
+-          'exception=$e\n$stackTrace');
++    } on FirebaseAuthException catch (e) {
++      debugPrint('[ADMIN_MFA] validation échouée code=${e.code}');
+       _clearCode();
+       _snack(_messageFor(e), Colors.red);
++    } on FirebaseException catch (e) {
++      debugPrint('[ADMIN_MFA] vérification rôle échouée code=${e.code}');
++      _snack(adminMfaErrorMessage(e.code), Colors.red);
++    } catch (e) {
++      debugPrint('[ADMIN_MFA] validation échouée type=${e.runtimeType}');
++      _snack('Impossible de terminer la validation Admin. Reconnectez-vous.',
++          Colors.red);
+     } finally {
+       if (mounted && !_completed) setState(() => _verifying = false);
+     }
+@@ -310,6 +429,30 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+     return adminOtpErrorMessage(error.code);
+   }
+ 
++  void _selectFactor(AdminEnrolledFactor factor) {
++    if (_sending || _verifying || _completed) return;
++    setState(() {
++      _selectedFactor = factor;
++      _factor = factor.kind;
++      _sendFailed = false;
++    });
++    _clearCode();
++    _prepareChallenge();
++  }
++
++  /// Repli SMS explicite pendant l'enrôlement — le SMS reste pleinement
++  /// supporté, il n'est simplement plus le seul chemin possible.
++  void _useSmsInstead() {
++    if (_sending || _verifying || _completed) return;
++    setState(() {
++      _factor = AdminSecondFactor.sms;
++      _totpSecret = null;
++      _sendFailed = false;
++    });
++    _clearCode();
++    _prepareChallenge();
++  }
++
+   void _clearCode() {
+     for (final controller in _controllers) {
+       controller.clear();
+@@ -351,6 +494,8 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+       widget.enrollmentSecret?.clear();
+       unawaited(FirebaseAuth.instance.signOut());
+     }
++    // Le secret TOTP ne doit pas survivre à l'écran.
++    _totpSecret = null;
+     for (final controller in _controllers) {
+       controller.dispose();
+     }
+@@ -360,6 +505,84 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+     super.dispose();
+   }
+ 
++  String get _instructions {
++    if (_awaitingChoice) {
++      return 'Choisissez votre second facteur.';
++    }
++    if (_isSms) return 'Code SMS envoyé au\n$_phoneLabel';
++    if (widget.mode == AdminMfaMode.enrollment) {
++      return 'Ajoutez ce compte dans Google Authenticator, Microsoft '
++          'Authenticator ou Authy, puis saisissez le code affiché.';
++    }
++    return 'Saisissez le code affiché par votre application '
++        'd’authentification.';
++  }
++
++  List<Widget> _buildFactorChoice() {
++    final factors = _resolution?.available ?? const <AdminEnrolledFactor>[];
++    return [
++      for (final factor in factors)
++        Padding(
++          padding: const EdgeInsets.only(bottom: 12),
++          child: SizedBox(
++            width: double.infinity,
++            child: ElevatedButton.icon(
++              onPressed: () => _selectFactor(factor),
++              icon: Icon(factor.kind == AdminSecondFactor.totp
++                  ? Icons.phonelink_lock
++                  : Icons.sms_outlined),
++              label: Text(factor.kind == AdminSecondFactor.totp
++                  ? 'Application d’authentification'
++                  : 'Code SMS${factor.label == null ? '' : ' · ${factor.label}'}'),
++            ),
++          ),
++        ),
++    ];
++  }
++
++  /// Clé de configuration à saisir manuellement dans l'application
++  /// d'authentification (phase 1 : pas de QR code).
++  ///
++  /// Affichée uniquement pendant l'enrôlement, jamais après, jamais stockée,
++  /// jamais journalisée.
++  Widget _buildSecretCard() {
++    final secret = _totpSecret!;
++    return Container(
++      margin: const EdgeInsets.only(bottom: 24),
++      padding: const EdgeInsets.all(16),
++      decoration: BoxDecoration(
++        color: AppColors.primary.withValues(alpha: 0.06),
++        borderRadius: BorderRadius.circular(12),
++        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
++      ),
++      child: Column(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          const Text('Compte', style: TextStyle(fontWeight: FontWeight.w600)),
++          Text(FirebaseAuth.instance.currentUser?.email ?? 'Admin AZ Express'),
++          const SizedBox(height: 12),
++          const Text('Émetteur', style: TextStyle(fontWeight: FontWeight.w600)),
++          const Text('AZ Express'),
++          const SizedBox(height: 12),
++          const Text('Clé de configuration',
++              style: TextStyle(fontWeight: FontWeight.w600)),
++          const SizedBox(height: 4),
++          SelectableText(
++            secret.secretKey,
++            style: const TextStyle(
++                fontFamily: 'monospace', fontSize: 15, letterSpacing: 1.2),
++          ),
++          const SizedBox(height: 12),
++          const Text(
++            'Saisissez cette clé une seule fois dans votre application, puis '
++            'ne la conservez nulle part : elle ne sera plus affichée.',
++            style: TextStyle(fontSize: 12),
++          ),
++        ],
++      ),
++    );
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     return Scaffold(
+@@ -386,10 +609,11 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+                 textAlign: TextAlign.center,
+               ),
+               const SizedBox(height: 8),
+-              Text('Code SMS envoyé au\n$_phoneLabel',
+-                  textAlign: TextAlign.center),
++              Text(_instructions, textAlign: TextAlign.center),
+               const SizedBox(height: 28),
+-              if (_sending)
++              if (_awaitingChoice)
++                ..._buildFactorChoice()
++              else if (_sending)
+                 const CircularProgressIndicator(color: AppColors.primary)
+               else if (_sendFailed)
+                 ElevatedButton.icon(
+@@ -398,6 +622,7 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+                   label: const Text('Réessayer'),
+                 )
+               else ...[
++                if (!_isSms && _totpSecret != null) _buildSecretCard(),
+                 Row(
+                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                   children: List.generate(
+@@ -427,13 +652,20 @@ class _AdminOtpPageState extends State<AdminOtpPage> {
+                   ),
+                 ),
+                 const SizedBox(height: 12),
+-                TextButton(
+-                  onPressed:
+-                      _canResend ? () => _prepareChallenge(resend: true) : null,
+-                  child: Text(_canResend
+-                      ? 'Renvoyer le code'
+-                      : 'Renvoyer dans $_countdown secondes'),
+-                ),
++                if (_isSms)
++                  TextButton(
++                    onPressed: _canResend
++                        ? () => _prepareChallenge(resend: true)
++                        : null,
++                    child: Text(_canResend
++                        ? 'Renvoyer le code'
++                        : 'Renvoyer dans $_countdown secondes'),
++                  ),
++                if (_smsFallbackAvailable)
++                  TextButton(
++                    onPressed: _verifying ? null : _useSmsInstead,
++                    child: const Text('Utiliser un code SMS à la place'),
++                  ),
+               ],
+             ],
+           ),
+diff --git a/lib/screens/admin/admin_restaurants_page.dart b/lib/screens/admin/admin_restaurants_page.dart
+index 5c0cb3d..f0c6dd6 100644
+--- a/lib/screens/admin/admin_restaurants_page.dart
++++ b/lib/screens/admin/admin_restaurants_page.dart
+@@ -1,5 +1,6 @@
+ import 'dart:io';
+ import '../../widgets/scale_button.dart';
++import '../../widgets/admin_restaurant_cards.dart';
+ import 'package:flutter/material.dart';
+ import 'package:cloud_firestore/cloud_firestore.dart';
+ import 'package:firebase_storage/firebase_storage.dart';
+@@ -277,62 +278,26 @@ class AdminRestaurantsPage extends StatelessWidget {
+                       ),
+                     ),
+                     const Divider(height: 1, indent: 16, endIndent: 16),
+-                    // Boutons actions
+-                    Row(
+-                      children: [
+-                        // Gérer le menu
+-                        Expanded(
+-                          child: TextButton.icon(
+-                            onPressed: () => Navigator.push(
+-                              context,
+-                              MaterialPageRoute(
+-                                builder: (_) => _MenuManagePage(
+-                                  restaurantId: doc.id,
+-                                  restaurantName: data["name"] ?? "",
+-                                ),
+-                              ),
+-                            ),
+-                            icon: const Icon(Icons.menu_book,
+-                                size: 18, color: Color(0xFF1565C0)),
+-                            label: const Text(
+-                              "Menu",
+-                              style: TextStyle(color: Color(0xFF1565C0)),
+-                            ),
+-                          ),
+-                        ),
+-                        // Abonnement
+-                        Expanded(
+-                          child: TextButton.icon(
+-                            onPressed: () => Navigator.push(
+-                              context,
+-                              MaterialPageRoute(
+-                                builder: (_) => _RestaurantSubPage(
+-                                  docId: doc.id,
+-                                  data: data,
+-                                ),
+-                              ),
+-                            ),
+-                            icon: const Icon(Icons.workspace_premium_rounded,
+-                                size: 18, color: Colors.amber),
+-                            label: const Text(
+-                              "Abo",
+-                              style: TextStyle(color: Colors.amber),
+-                            ),
++                    AdminRestaurantActions(
++                      onMenu: () => Navigator.push(
++                        context,
++                        MaterialPageRoute(
++                          builder: (_) => _MenuManagePage(
++                            restaurantId: doc.id,
++                            restaurantName: data["name"] ?? "",
+                           ),
+                         ),
+-                        // Supprimer
+-                        Expanded(
+-                          child: TextButton.icon(
+-                            onPressed: () => _deleteRestaurant(context, doc),
+-                            icon: const Icon(Icons.delete_outline,
+-                                size: 18, color: Colors.red),
+-                            label: const Text(
+-                              "Supprimer",
+-                              style: TextStyle(color: Colors.red),
+-                            ),
++                      ),
++                      onSubscription: () => Navigator.push(
++                        context,
++                        MaterialPageRoute(
++                          builder: (_) => _RestaurantSubPage(
++                            docId: doc.id,
++                            data: data,
+                           ),
+                         ),
+-                      ],
++                      ),
++                      onDelete: () => _deleteRestaurant(context, doc),
+                     ),
+                   ],
+                 ),
+@@ -424,71 +389,16 @@ class _MenuManagePage extends StatelessWidget {
+               final data = doc.data() as Map<String, dynamic>;
+               final imageUrl = (data["imageUrl"] as String?) ?? "";
+ 
+-              return Container(
+-                margin: const EdgeInsets.only(bottom: 12),
+-                decoration: BoxDecoration(
+-                  color: Colors.white,
+-                  borderRadius: BorderRadius.circular(16),
+-                  boxShadow: [
+-                    BoxShadow(
+-                      color: Colors.black.withValues(alpha: 0.06),
+-                      blurRadius: 8,
+-                      offset: const Offset(0, 3),
+-                    ),
+-                  ],
+-                ),
+-                child: ListTile(
+-                  contentPadding:
+-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+-                  leading: ClipRRect(
+-                    borderRadius: BorderRadius.circular(12),
+-                    child: imageUrl.isNotEmpty
+-                        ? Image.network(
+-                            imageUrl,
+-                            width: 54,
+-                            height: 54,
+-                            fit: BoxFit.cover,
+-                            errorBuilder: (_, __, ___) => _menuIcon(),
+-                          )
+-                        : _menuIcon(),
+-                  ),
+-                  title: Text(
+-                    data["name"] ?? "—",
+-                    style: const TextStyle(fontWeight: FontWeight.bold),
+-                  ),
+-                  subtitle: data["description"] != null &&
+-                          (data["description"] as String).isNotEmpty
+-                      ? Text(data["description"],
+-                          style: const TextStyle(fontSize: 12))
+-                      : null,
+-                  trailing: Row(
+-                    mainAxisSize: MainAxisSize.min,
+-                    children: [
+-                      Text(
+-                        "${data['price'] ?? 0} FCFA",
+-                        style: const TextStyle(
+-                          color: Color(0xFF1565C0),
+-                          fontWeight: FontWeight.bold,
+-                          fontSize: 14,
+-                        ),
+-                      ),
+-                      const SizedBox(width: 4),
+-                      IconButton(
+-                        icon: const Icon(Icons.edit_outlined,
+-                            color: Colors.grey, size: 20),
+-                        onPressed: () => _goToAddItem(context, doc),
+-                      ),
+-                      IconButton(
+-                        icon: const Icon(Icons.delete_outline,
+-                            color: Colors.red, size: 20),
+-                        onPressed: () async {
+-                          await doc.reference.delete();
+-                          await deleteStorageUrls([imageUrl]);
+-                        },
+-                      ),
+-                    ],
+-                  ),
+-                ),
++              return AdminRestaurantDishCard(
++                name: data["name"] ?? "—",
++                description: data["description"] as String? ?? "",
++                price: "${data['price'] ?? 0} FCFA",
++                imageUrl: imageUrl,
++                onEdit: () => _goToAddItem(context, doc),
++                onDelete: () async {
++                  await doc.reference.delete();
++                  await deleteStorageUrls([imageUrl]);
++                },
+               );
+             },
+           );
+@@ -1044,14 +954,6 @@ class _RestaurantSubPageState extends State<_RestaurantSubPage> {
+   }
+ }
+ 
+-Widget _menuIcon() => Container(
+-      width: 54,
+-      height: 54,
+-      color: const Color(0xFF1565C0).withValues(alpha: 0.1),
+-      child: const Icon(Icons.fastfood_rounded,
+-          color: Color(0xFF1565C0), size: 26),
+-    );
+-
+ Widget _dialogField(
+   TextEditingController ctrl,
+   String label,
+diff --git a/lib/screens/admin/admin_security_dashboard.dart b/lib/screens/admin/admin_security_dashboard.dart
+index 74f41ee..69053e2 100644
+--- a/lib/screens/admin/admin_security_dashboard.dart
++++ b/lib/screens/admin/admin_security_dashboard.dart
+@@ -1,9 +1,21 @@
+ import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
+ import 'package:cloud_firestore/cloud_firestore.dart';
+ import 'package:intl/intl.dart';
+ 
+ import '../../theme/app_theme.dart';
+ 
++String _securityErrorMessage(Object? error) {
++  if ((error is FirebaseException && error.code == 'permission-denied') ||
++      (error is PlatformException &&
++          (error.code == 'permission-denied' ||
++              (error.code == 'firebase_firestore' &&
++                  (error.message ?? '').contains('PERMISSION_DENIED'))))) {
++    return 'Accès sécurité non autorisé ou règles non configurées.';
++  }
++  return 'Impossible de charger les données de sécurité. Réessayez.';
++}
++
+ class AdminSecurityDashboard extends StatefulWidget {
+   const AdminSecurityDashboard({super.key});
+ 
+@@ -71,9 +83,12 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
+           .where('createdAt', isGreaterThan: _since24h)
+           .count()
+           .get(),
++      // rate_limits is server-only internal state, not a log of blocked calls.
++      // Count the existing order-limit events without exposing that collection.
+       _db
+-          .collection('rate_limits')
+-          .where('updatedAt', isGreaterThan: _since1h)
++          .collection('security_events')
++          .where('eventType', isEqualTo: 'order_rate_limit_exceeded')
++          .where('createdAt', isGreaterThan: _since1h)
+           .count()
+           .get(),
+       // Dispatching — commandes annulées faute de livreur
+@@ -152,8 +167,14 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
+               child: Column(mainAxisSize: MainAxisSize.min, children: [
+                 const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                 const SizedBox(height: 12),
+-                Text('Erreur : ${snap.error}',
+-                    style: const TextStyle(color: Colors.red)),
++                Padding(
++                  padding: const EdgeInsets.symmetric(horizontal: 24),
++                  child: Text(
++                    _securityErrorMessage(snap.error),
++                    textAlign: TextAlign.center,
++                    style: const TextStyle(color: Colors.red),
++                  ),
++                ),
+               ]),
+             );
+           }
+@@ -244,7 +265,7 @@ class _AdminSecurityDashboardState extends State<AdminSecurityDashboard> {
+                 Expanded(
+                     child: _StatCard(
+                   icon: Icons.block_rounded,
+-                  label: 'Rate limits\n(1h)',
++                  label: 'Commandes limitées\n(1h)',
+                   value: '${s['rate_limited_1h']}',
+                   color: (s['rate_limited_1h'] ?? 0) > 5
+                       ? Colors.orange
+@@ -437,6 +458,16 @@ class _RecentSecurityEvents extends StatelessWidget {
+           .limit(10)
+           .snapshots(),
+       builder: (ctx, snap) {
++        if (snap.hasError) {
++          return _EmptyCard(
++            icon: Icons.error_outline,
++            message: _securityErrorMessage(snap.error),
++            color: Colors.red,
++          );
++        }
++        if (snap.connectionState == ConnectionState.waiting) {
++          return const Center(child: CircularProgressIndicator());
++        }
+         if (!snap.hasData || snap.data!.docs.isEmpty) {
+           return const _EmptyCard(
+             icon: Icons.verified_user_rounded,
+@@ -587,6 +618,16 @@ class _RecentAuditLogs extends StatelessWidget {
+           .limit(15)
+           .snapshots(),
+       builder: (ctx, snap) {
++        if (snap.hasError) {
++          return _EmptyCard(
++            icon: Icons.error_outline,
++            message: _securityErrorMessage(snap.error),
++            color: Colors.red,
++          );
++        }
++        if (snap.connectionState == ConnectionState.waiting) {
++          return const Center(child: CircularProgressIndicator());
++        }
+         if (!snap.hasData || snap.data!.docs.isEmpty) {
+           return const _EmptyCard(
+             icon: Icons.history_rounded,
+@@ -683,6 +724,16 @@ class _TopZonesSection extends StatelessWidget {
+           .limit(5)
+           .snapshots(),
+       builder: (ctx, snap) {
++        if (snap.hasError) {
++          return _EmptyCard(
++            icon: Icons.error_outline,
++            message: _securityErrorMessage(snap.error),
++            color: Colors.red,
++          );
++        }
++        if (snap.connectionState == ConnectionState.waiting) {
++          return const Center(child: CircularProgressIndicator());
++        }
+         if (!snap.hasData || snap.data!.docs.isEmpty) {
+           return const _EmptyCard(
+             icon: Icons.location_on_rounded,
+@@ -771,8 +822,11 @@ class _EmptyCard extends StatelessWidget {
+       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+         Icon(icon, color: color, size: 20),
+         const SizedBox(width: 10),
+-        Text(message,
+-            style: TextStyle(color: color, fontWeight: FontWeight.w600)),
++        Flexible(
++          child: Text(message,
++              textAlign: TextAlign.center,
++              style: TextStyle(color: color, fontWeight: FontWeight.w600)),
++        ),
+       ]),
+     );
+   }
+diff --git a/lib/screens/admin/admin_vehicle_moderation_page.dart b/lib/screens/admin/admin_vehicle_moderation_page.dart
+index 996f9af..6d5880d 100644
+--- a/lib/screens/admin/admin_vehicle_moderation_page.dart
++++ b/lib/screens/admin/admin_vehicle_moderation_page.dart
+@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
+ import 'package:cloud_functions/cloud_functions.dart';
+ import 'package:flutter/material.dart';
+ 
++import '../../theme/app_theme.dart';
++
+ class AdminVehicleModerationPage extends StatefulWidget {
+   const AdminVehicleModerationPage({super.key});
+ 
+@@ -10,17 +12,23 @@ class AdminVehicleModerationPage extends StatefulWidget {
+       _AdminVehicleModerationPageState();
+ }
+ 
+-class _AdminVehicleModerationPageState
+-    extends State<AdminVehicleModerationPage> {
++class _AdminVehicleModerationPageState extends State<AdminVehicleModerationPage>
++    with SingleTickerProviderStateMixin {
+   static const _pageSize = 20;
+-  final _items = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+-  DocumentSnapshot<Map<String, dynamic>>? _cursor;
+-  int _tab = 0;
+-  bool _loading = false;
+-  bool _hasMore = true;
+-  Object? _error;
++  static const _tabCount = 4;
++  late final TabController _tabController;
++  final _itemsByTab = List.generate(
++    _tabCount,
++    (_) => <QueryDocumentSnapshot<Map<String, dynamic>>>[],
++  );
++  final _cursors =
++      List<DocumentSnapshot<Map<String, dynamic>>?>.filled(_tabCount, null);
++  final _loadingByTab = List<bool>.filled(_tabCount, false);
++  final _hasMoreByTab = List<bool>.filled(_tabCount, true);
++  final _errorsByTab = List<Object?>.filled(_tabCount, null);
++  final _loadGenerationByTab = List<int>.filled(_tabCount, 0);
+ 
+-  String get _collection => switch (_tab) {
++  String _collectionForTab(int tab) => switch (tab) {
+         0 => 'vehicle_listings',
+         1 || 2 => 'vehicle_seller_profiles',
+         _ => 'vehicle_reports',
+@@ -29,115 +37,192 @@ class _AdminVehicleModerationPageState
+   @override
+   void initState() {
+     super.initState();
+-    _reload();
++    _tabController = TabController(length: _tabCount, vsync: this)
++      ..addListener(_handleTabChange);
++    _loadMore(0);
++  }
++
++  @override
++  void dispose() {
++    _tabController
++      ..removeListener(_handleTabChange)
++      ..dispose();
++    super.dispose();
++  }
++
++  void _handleTabChange() {
++    final tab = _tabController.index;
++    if (_itemsByTab[tab].isEmpty && !_loadingByTab[tab] && _hasMoreByTab[tab]) {
++      _loadMore(tab);
++    }
+   }
+ 
+-  Future<void> _reload() async {
+-    _items.clear();
+-    _cursor = null;
+-    _hasMore = true;
+-    await _loadMore();
++  Future<void> _reload(int tab) async {
++    setState(() {
++      _loadGenerationByTab[tab]++;
++      _itemsByTab[tab].clear();
++      _cursors[tab] = null;
++      _hasMoreByTab[tab] = true;
++      _loadingByTab[tab] = false;
++      _errorsByTab[tab] = null;
++    });
++    await _loadMore(tab);
+   }
+ 
+-  Future<void> _loadMore() async {
+-    if (_loading || !_hasMore) return;
++  Future<void> _loadMore(int tab) async {
++    if (_loadingByTab[tab] || !_hasMoreByTab[tab]) return;
++    final generation = _loadGenerationByTab[tab];
+     setState(() {
+-      _loading = true;
+-      _error = null;
++      _loadingByTab[tab] = true;
++      _errorsByTab[tab] = null;
+     });
+     try {
++      final collection = _collectionForTab(tab);
+       Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+-          .collection(_collection)
+-          .orderBy(_collection == 'vehicle_reports' ? 'createdAt' : 'updatedAt',
++          .collection(collection)
++          .orderBy(collection == 'vehicle_reports' ? 'createdAt' : 'updatedAt',
+               descending: true)
+           .limit(_pageSize + 1);
+-      if (_tab == 2) {
++      if (tab == 2) {
+         query = query.where('sellerType', isEqualTo: 'professional');
+       }
+-      if (_cursor != null) query = query.startAfterDocument(_cursor!);
++      final cursor = _cursors[tab];
++      if (cursor != null) query = query.startAfterDocument(cursor);
+       final snapshot = await query.get();
+       final page = snapshot.docs.take(_pageSize).toList();
+       if (!mounted) return;
++      if (generation != _loadGenerationByTab[tab]) return;
+       setState(() {
+-        _items.addAll(page);
+-        _cursor = page.isEmpty ? null : page.last;
+-        _hasMore = snapshot.docs.length > _pageSize;
++        _itemsByTab[tab].addAll(page);
++        _cursors[tab] = page.isEmpty ? null : page.last;
++        _hasMoreByTab[tab] = snapshot.docs.length > _pageSize;
+       });
+     } catch (error) {
+-      if (mounted) setState(() => _error = error);
++      if (mounted && generation == _loadGenerationByTab[tab]) {
++        setState(() => _errorsByTab[tab] = error);
++      }
+     } finally {
+-      if (mounted) setState(() => _loading = false);
++      if (mounted && generation == _loadGenerationByTab[tab]) {
++        setState(() => _loadingByTab[tab] = false);
++      }
+     }
+   }
+ 
+   @override
+-  Widget build(BuildContext context) => DefaultTabController(
+-        length: 4,
+-        child: Scaffold(
+-          appBar: AppBar(
+-            title: const Text('Modération Auto & Moto'),
+-            bottom: TabBar(
+-              isScrollable: true,
+-              onTap: (value) {
+-                _tab = value;
+-                _reload();
+-              },
+-              tabs: const [
+-                Tab(text: 'Annonces'),
+-                Tab(text: 'Vendeurs'),
+-                Tab(text: 'Pros/Magasins'),
+-                Tab(text: 'Signalements'),
+-              ],
++  Widget build(BuildContext context) {
++    final compact = MediaQuery.sizeOf(context).width < 400;
++    final textScaler = MediaQuery.textScalerOf(context);
++    final titleSize = compact ? 16.0 : AppTypography.titleLarge(context);
++    final tabHeight =
++        (textScaler.scale(AppTypography.labelLarge(context)) * 1.4 + 20)
++            .clamp(48.0, double.infinity);
++    return Scaffold(
++      appBar: AppBar(
++        titleSpacing: compact ? 8 : 16,
++        toolbarHeight: (textScaler.scale(titleSize) * 1.4 + 16)
++            .clamp(56.0, double.infinity),
++        title: Tooltip(
++          message: 'Modération Auto & Moto',
++          child: Text(
++            'Modération Auto & Moto',
++            maxLines: 1,
++            overflow: TextOverflow.ellipsis,
++            style: AppTypography.titleLargeStyle(context).copyWith(
++              fontSize: titleSize,
+             ),
+           ),
+-          body: SafeArea(top: false, child: _body()),
+         ),
+-      );
++        bottom: TabBar(
++          controller: _tabController,
++          isScrollable: true,
++          tabAlignment: TabAlignment.start,
++          labelPadding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
++          labelStyle: AppTypography.labelLargeStyle(context),
++          unselectedLabelStyle: AppTypography.labelLargeStyle(context),
++          tabs: [
++            for (final label in const [
++              'Annonces',
++              'Vendeurs',
++              'Pros/Magasins',
++              'Signalements',
++            ])
++              Tab(
++                height: tabHeight,
++                child: Text(label, maxLines: 1, softWrap: false),
++              ),
++          ],
++        ),
++      ),
++      body: SafeArea(
++        top: false,
++        child: TabBarView(
++          controller: _tabController,
++          children: List.generate(_tabCount, _tabBody),
++        ),
++      ),
++    );
++  }
+ 
+-  Widget _body() {
+-    if (_loading && _items.isEmpty) {
++  Widget _tabBody(int tab) {
++    final items = _itemsByTab[tab];
++    final loading = _loadingByTab[tab];
++    final error = _errorsByTab[tab];
++    if (loading && items.isEmpty) {
+       return const Center(child: CircularProgressIndicator());
+     }
+-    if (_error != null && _items.isEmpty) {
++    if (error != null && items.isEmpty) {
+       return Center(
+         child: FilledButton.tonal(
+-          onPressed: _reload,
++          onPressed: () => _reload(tab),
+           child: const Text('Réessayer'),
+         ),
+       );
+     }
+-    if (_items.isEmpty) return const Center(child: Text('Aucun élément.'));
++    if (items.isEmpty) {
++      return const Center(
++        child: Padding(
++          padding: EdgeInsets.all(24),
++          child: Text(
++            'Aucun élément.',
++            textAlign: TextAlign.center,
++          ),
++        ),
++      );
++    }
+     return RefreshIndicator(
+-      onRefresh: _reload,
++      onRefresh: () => _reload(tab),
+       child: ListView.builder(
+         padding: const EdgeInsets.all(12),
+-        itemCount: _items.length + (_hasMore ? 1 : 0),
++        itemCount: items.length + (_hasMoreByTab[tab] ? 1 : 0),
+         itemBuilder: (context, index) {
+-          if (index == _items.length) {
++          if (index == items.length) {
+             return Padding(
+               padding: const EdgeInsets.all(12),
+               child: OutlinedButton(
+-                onPressed: _loading ? null : _loadMore,
+-                child: Text(_loading ? 'Chargement…' : 'Charger la suite'),
++                onPressed: loading ? null : () => _loadMore(tab),
++                child: Text(loading ? 'Chargement…' : 'Charger la suite'),
+               ),
+             );
+           }
+-          return _card(_items[index]);
++          return _card(items[index], tab);
+         },
+       ),
+     );
+   }
+ 
+-  Widget _card(QueryDocumentSnapshot<Map<String, dynamic>> document) {
++  Widget _card(
++    QueryDocumentSnapshot<Map<String, dynamic>> document,
++    int tab,
++  ) {
+     final data = document.data();
+-    final title = _tab == 0
++    final title = tab == 0
+         ? data['title']
+-        : _tab == 3
++        : tab == 3
+             ? '${data['targetType']} • ${data['reason']}'
+             : data['shopName'] ?? data['displayName'];
+-    final status = _tab == 2
++    final status = tab == 2
+         ? data['verificationStatus']
+-        : _tab == 1
++        : tab == 1
+             ? (data['suspended'] == true ? 'suspended' : 'active')
+             : data['status'];
+     return Card(
+@@ -157,7 +242,11 @@ class _AdminVehicleModerationPageState
+               Text(details, maxLines: 3, overflow: TextOverflow.ellipsis),
+             ],
+             const SizedBox(height: 8),
+-            Wrap(spacing: 8, runSpacing: 6, children: _actions(document, data)),
++            Wrap(
++              spacing: 8,
++              runSpacing: 6,
++              children: _actions(document, data, tab),
++            ),
+           ],
+         ),
+       ),
+@@ -167,40 +256,41 @@ class _AdminVehicleModerationPageState
+   List<Widget> _actions(
+     QueryDocumentSnapshot<Map<String, dynamic>> document,
+     Map<String, dynamic> data,
++    int tab,
+   ) {
+-    if (_tab == 0) {
++    if (tab == 0) {
+       return [
+         _action(document.id, 'listing', 'suspend', 'Suspendre',
+-            needsReason: true),
+-        _action(document.id, 'listing', 'restore', 'Restaurer'),
+-        _action(document.id, 'listing', 'archive', 'Archiver'),
++            tab: tab, needsReason: true),
++        _action(document.id, 'listing', 'restore', 'Restaurer', tab: tab),
++        _action(document.id, 'listing', 'archive', 'Archiver', tab: tab),
+       ];
+     }
+-    if (_tab == 1) {
++    if (tab == 1) {
+       final suspended = data['suspended'] == true;
+       return [
+         _action(document.id, 'seller', suspended ? 'restore' : 'suspend',
+             suspended ? 'Restaurer' : 'Suspendre',
+-            needsReason: !suspended),
++            tab: tab, needsReason: !suspended),
+       ];
+     }
+-    if (_tab == 2) {
++    if (tab == 2) {
+       return [
+-        _action(document.id, 'verification', 'verify', 'Vérifier'),
++        _action(document.id, 'verification', 'verify', 'Vérifier', tab: tab),
+         _action(document.id, 'verification', 'reject', 'Refuser',
+-            needsReason: true),
++            tab: tab, needsReason: true),
+       ];
+     }
+     return [
+-      _action(document.id, 'report', 'resolve', 'Résoudre'),
+-      _action(document.id, 'report', 'dismiss', 'Classer'),
++      _action(document.id, 'report', 'resolve', 'Résoudre', tab: tab),
++      _action(document.id, 'report', 'dismiss', 'Classer', tab: tab),
+     ];
+   }
+ 
+   Widget _action(String id, String type, String action, String label,
+-          {bool needsReason = false}) =>
++          {required int tab, bool needsReason = false}) =>
+       FilledButton.tonal(
+-        onPressed: () => _moderate(id, type, action, label, needsReason),
++        onPressed: () => _moderate(id, type, action, label, tab, needsReason),
+         child: Text(label),
+       );
+ 
+@@ -209,6 +299,7 @@ class _AdminVehicleModerationPageState
+     String type,
+     String action,
+     String label,
++    int tab,
+     bool needsReason,
+   ) async {
+     final controller = TextEditingController();
+@@ -247,7 +338,7 @@ class _AdminVehicleModerationPageState
+         'action': action,
+         'reason': reason
+       });
+-      await _reload();
++      await _reload(tab);
+     } catch (_) {
+       if (mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(
+diff --git a/lib/screens/auth/forgot_password_page.dart b/lib/screens/auth/forgot_password_page.dart
+index aaeab22..ea34d5d 100644
+--- a/lib/screens/auth/forgot_password_page.dart
++++ b/lib/screens/auth/forgot_password_page.dart
+@@ -3,10 +3,44 @@ import 'package:firebase_auth/firebase_auth.dart';
+ import '../../services/auth_service.dart';
+ import 'otp_verify_page.dart';
+ import '../../theme/app_theme.dart';
++import '../../widgets/password_reset_email_guidance.dart';
++
++/// Rôles qui passent par cet écran. Tous les deux disposent d'une adresse
++/// e-mail RÉELLE, validée à l'inscription — contrairement aux partenaires
++/// (vendeur/restaurant/boulangerie/flotte), dont l'e-mail Firebase Auth est
++/// technique (`07…@az-seller.ci`) et donc non délivrable.
++enum AccountRecoveryRole { client, driver }
++
++/// Le canal SMS est-il proposé pour ce rôle ?
++///
++/// Il est masqué pour le livreur : le chemin SMS aboutit à
++/// `ResetPasswordPage`, qui appelle `resetAccountPassword` avec
++/// `userType: 'client'` CODÉ EN DUR (reset_password_page.dart). La
++/// réinitialisation viserait donc la collection `clients`, jamais `livreurs` —
++/// et `resetAccountPassword` n'a de toute façon aucune entrée `livreur` dans sa
++/// table de collections côté Cloud Function. Corriger cela proprement exige de
++/// modifier `functions/passwordReset.js`, hors du périmètre de ce correctif
++/// Flutter : on évite donc d'engager le livreur dans un flux trompeur plutôt
++/// que de le laisser réinitialiser le mauvais compte.
++@visibleForTesting
++bool smsRecoveryAvailable(AccountRecoveryRole role) =>
++    role == AccountRecoveryRole.client;
++
++/// Avertissement affiché quand le canal SMS reste proposé : Firebase Phone Auth
++/// est actuellement en échec côté projet (`INTERNAL (13) / Error code: 39`),
++/// alors que le lien e-mail passe par un autre service et fonctionne.
++const String kSmsRecoveryWarning =
++    'Le SMS peut être indisponible actuellement. Utilisez le lien par e-mail '
++    'si possible.';
+ 
+ class ForgotPasswordPage extends StatefulWidget {
+   final String? prefillPhone;
+-  const ForgotPasswordPage({super.key, this.prefillPhone});
++  final AccountRecoveryRole role;
++  const ForgotPasswordPage({
++    super.key,
++    this.prefillPhone,
++    this.role = AccountRecoveryRole.client,
++  });
+ 
+   @override
+   State<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
+@@ -15,9 +49,13 @@ class ForgotPasswordPage extends StatefulWidget {
+ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+   final _phoneCtrl = TextEditingController();
+   final _emailCtrl = TextEditingController();
+-  bool _bySms = true;
++  // E-mail par défaut : c'est le seul canal de récupération réellement
++  // fonctionnel aujourd'hui pour ces deux rôles (voir kSmsRecoveryWarning).
++  bool _bySms = false;
+   bool _loading = false;
+ 
++  bool get _smsAvailable => smsRecoveryAvailable(widget.role);
++
+   @override
+   void initState() {
+     super.initState();
+@@ -51,9 +89,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+     }
+     setState(() => _loading = true);
+     try {
+-      await AuthService().sendEmailPasswordReset(email);
++      await sendResetEmailAndShowGuidance(
++        context: context,
++        sendEmail: () => AuthService().sendEmailPasswordReset(email),
++      );
+       if (!mounted) return;
+-      _snack('Lien de réinitialisation envoyé à $email', Colors.green);
+       Navigator.pop(context);
+     } on FirebaseAuthException catch (e) {
+       _snack(
+@@ -69,6 +109,17 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+   }
+ 
+   Future<void> _submitSms() async {
++    // Défense en profondeur : même si la carte SMS réapparaissait un jour dans
++    // l'interface, un livreur ne doit jamais atteindre un reset qui viserait
++    // la collection `clients`.
++    if (!_smsAvailable) {
++      _snack(
++        'La réinitialisation par SMS n’est pas disponible pour ce compte. '
++        'Utilisez le lien par e-mail.',
++        Colors.orange,
++      );
++      return;
++    }
+     final phone = _phoneCtrl.text.trim();
+     if (!AuthService.isValidPhone(phone)) {
+       _snack('Numéro de téléphone invalide', Colors.orange);
+@@ -158,7 +209,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+                                 fontWeight: FontWeight.bold)),
+                         SizedBox(height: 4),
+                         Text(
+-                            'Choisissez comment recevoir\nvotre code de récupération',
++                            'Recevez un lien de réinitialisation\npar e-mail',
+                             style:
+                                 TextStyle(color: Colors.white70, fontSize: 12)),
+                       ],
+@@ -173,29 +224,61 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+             const SizedBox(height: 12),
+ 
+-            // Sélecteur SMS / Email
++            // Sélecteur SMS / Email — l'e-mail est présenté en premier, et le
++            // SMS n'apparaît que pour les rôles où ce canal est exploitable.
+             Row(
+               children: [
+-                Expanded(
+-                    child: _MethodCard(
+-                  icon: Icons.sms_outlined,
+-                  label: 'Recevoir un code\npar SMS',
+-                  selected: _bySms,
+-                  color: AppColors.primary,
+-                  onTap: () => setState(() => _bySms = true),
+-                )),
+-                const SizedBox(width: 12),
+                 Expanded(
+                     child: _MethodCard(
+                   icon: Icons.email_outlined,
+-                  label: 'Recevoir un lien\npar Email',
++                  label: 'Recevoir un lien\npar e-mail',
+                   selected: !_bySms,
+                   color: const Color(0xFF1E88E5),
+                   onTap: () => setState(() => _bySms = false),
+                 )),
++                if (_smsAvailable) ...[
++                  const SizedBox(width: 12),
++                  Expanded(
++                      child: _MethodCard(
++                    icon: Icons.sms_outlined,
++                    label: 'Recevoir un code\npar SMS',
++                    selected: _bySms,
++                    color: AppColors.primary,
++                    onTap: () => setState(() => _bySms = true),
++                  )),
++                ],
+               ],
+             ),
+ 
++            if (_smsAvailable) ...[
++              const SizedBox(height: 12),
++              Container(
++                padding: const EdgeInsets.all(12),
++                decoration: BoxDecoration(
++                  color: const Color(0xFFFFF8E1),
++                  borderRadius: BorderRadius.circular(12),
++                  border: Border.all(color: const Color(0xFFFFE082)),
++                ),
++                child: const Row(
++                  children: [
++                    Icon(Icons.info_outline,
++                        size: 18, color: Color(0xFFF57F17)),
++                    SizedBox(width: 8),
++                    Expanded(
++                      child: Text(kSmsRecoveryWarning,
++                          style: TextStyle(fontSize: 12)),
++                    ),
++                  ],
++                ),
++              ),
++            ] else ...[
++              const SizedBox(height: 12),
++              Text(
++                'La réinitialisation se fait par e-mail pour ce compte.',
++                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
++              ),
++            ],
++
+             const SizedBox(height: 28),
+ 
+             if (_bySms) ...[
+diff --git a/lib/screens/auth/generic_forgot_password_page.dart b/lib/screens/auth/generic_forgot_password_page.dart
+index 048639e..d5fe203 100644
+--- a/lib/screens/auth/generic_forgot_password_page.dart
++++ b/lib/screens/auth/generic_forgot_password_page.dart
+@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
+ import 'package:firebase_auth/firebase_auth.dart';
+ import 'package:cloud_functions/cloud_functions.dart';
+ import '../../services/auth_service.dart';
++import '../../widgets/password_reset_email_guidance.dart';
+ 
+ /// Réinitialisation mot de passe / PIN pour tous les types d'utilisateurs
+ /// professionnels (non-client).
+@@ -99,10 +100,12 @@ class _GenericForgotPasswordPageState extends State<GenericForgotPasswordPage> {
+     if (_isAdmin) {
+       setState(() => _loading = true);
+       try {
+-        await FirebaseAuth.instance.sendPasswordResetEmail(email: ident);
++        await sendResetEmailAndShowGuidance(
++          context: context,
++          sendEmail: () =>
++              FirebaseAuth.instance.sendPasswordResetEmail(email: ident),
++        );
+         if (!mounted) return;
+-        _snack(
+-            'Lien envoyé à $ident. Vérifiez votre boîte mail.', Colors.green);
+         Navigator.pop(context);
+       } on FirebaseAuthException catch (e) {
+         _snack(
+diff --git a/lib/screens/driver/driver_login.dart b/lib/screens/driver/driver_login.dart
+index 86e46e6..2fda12d 100644
+--- a/lib/screens/driver/driver_login.dart
++++ b/lib/screens/driver/driver_login.dart
+@@ -273,7 +273,9 @@ class _DriverLoginState extends State<DriverLogin> {
+                 onTap: () => Navigator.push(
+                     context,
+                     MaterialPageRoute(
+-                        builder: (_) => const ForgotPasswordPage())),
++                        builder: (_) => const ForgotPasswordPage(
++                              role: AccountRecoveryRole.driver,
++                            ))),
+                 child: const Text('Mot de passe oublié ?',
+                     style: TextStyle(
+                         color: Color(0xFF167DB7),
+diff --git a/lib/web/pages/admin/web_admin_login.dart b/lib/web/pages/admin/web_admin_login.dart
+index dc68043..fad1759 100644
+--- a/lib/web/pages/admin/web_admin_login.dart
++++ b/lib/web/pages/admin/web_admin_login.dart
+@@ -6,6 +6,7 @@ import '../../web_theme.dart';
+ import '../../admin_auth_service.dart';
+ import '../../widgets/az_logo.dart';
+ import '../../../widgets/admin_email_verification_prompt.dart';
++import '../../../widgets/password_reset_email_guidance.dart';
+ 
+ class WebAdminLoginPage extends StatefulWidget {
+   const WebAdminLoginPage({super.key});
+@@ -106,19 +107,13 @@ class _WebAdminLoginPageState extends State<WebAdminLoginPage> {
+       _error = null;
+     });
+     try {
+-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
++      await sendResetEmailAndShowGuidance(
++        context: context,
++        sendEmail: () =>
++            FirebaseAuth.instance.sendPasswordResetEmail(email: email),
++      );
+       if (!mounted) return;
+       setState(() => _loading = false);
+-      ScaffoldMessenger.of(context).showSnackBar(
+-        SnackBar(
+-          content: Text('Email de réinitialisation envoyé à $email',
+-              style: GoogleFonts.inter(color: Colors.white)),
+-          backgroundColor: kSuccess,
+-          behavior: SnackBarBehavior.floating,
+-          shape:
+-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+-        ),
+-      );
+     } on FirebaseAuthException catch (e) {
+       if (!mounted) return;
+       setState(() {
+diff --git a/test/screens/admin/admin_mfa_security_test.dart b/test/screens/admin/admin_mfa_security_test.dart
+index 72cf51c..cd8f96f 100644
+--- a/test/screens/admin/admin_mfa_security_test.dart
++++ b/test/screens/admin/admin_mfa_security_test.dart
+@@ -2,6 +2,51 @@ import 'package:az_express/screens/admin/admin_mfa_security.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ 
+ void main() {
++  group('diagnostics Admin sans exception brute', () {
++    for (final code in [
++      'wrong-password',
++      'invalid-credential',
++      'user-not-found'
++    ]) {
++      test(code, () {
++        expect(adminMfaErrorMessage(code), contains('mot de passe incorrect'));
++      });
++    }
++    test('permission Firestore distincte du code SMS', () {
++      expect(adminMfaErrorMessage('permission-denied'), contains('Firestore'));
++    });
++    test('réseau indisponible', () {
++      expect(
++          adminMfaErrorMessage('network-request-failed'), contains('réseau'));
++    });
++    test('session expirée', () {
++      expect(adminMfaErrorMessage('user-token-expired'),
++          contains('Session expirée'));
++    });
++    test('challenge absent', () {
++      expect(adminMfaErrorMessage('missing-verification-id'),
++          contains('Aucun challenge'));
++    });
++    test('rôle mal typé refusé sans exception', () {
++      expect(
++          validateAdminRecord({'role': 42, 'isActive': true}).allowed, isFalse);
++    });
++    for (final role in [
++      'client',
++      'livreur',
++      'vendeur',
++      'restaurant',
++      'pharmacie',
++      'boulangerie',
++      'flotte',
++      'artisan'
++    ]) {
++      test('$role ne donne jamais accès Admin', () {
++        expect(validateAdminRecord({'role': role, 'isActive': true}).allowed,
++            isFalse);
++      });
++    }
++  });
+   group('contrôle du rôle après MFA', () {
+     test('accepte un super Admin valide', () {
+       expect(
+diff --git a/lib/widgets/admin_restaurant_cards.dart b/lib/widgets/admin_restaurant_cards.dart
+new file mode 100644
+index 0000000..fb66380
+--- /dev/null
++++ b/lib/widgets/admin_restaurant_cards.dart
+@@ -0,0 +1,196 @@
++import 'package:flutter/material.dart';
++
++/// Keeps dish text independent of the space needed by price and actions.
++class AdminRestaurantDishCard extends StatelessWidget {
++  const AdminRestaurantDishCard({
++    super.key,
++    required this.name,
++    required this.description,
++    required this.price,
++    required this.imageUrl,
++    required this.onEdit,
++    required this.onDelete,
++  });
++
++  final String name;
++  final String description;
++  final String price;
++  final String imageUrl;
++  final VoidCallback onEdit;
++  final VoidCallback onDelete;
++
++  @override
++  Widget build(BuildContext context) {
++    final fallback = Container(
++      width: 54,
++      height: 54,
++      color: const Color(0xFF1565C0).withValues(alpha: 0.1),
++      child: const Icon(Icons.fastfood_rounded,
++          color: Color(0xFF1565C0), size: 26),
++    );
++    final image = ClipRRect(
++      borderRadius: BorderRadius.circular(12),
++      child: imageUrl.isEmpty
++          ? fallback
++          : Image.network(
++              imageUrl,
++              width: 54,
++              height: 54,
++              fit: BoxFit.cover,
++              errorBuilder: (_, __, ___) => fallback,
++            ),
++    );
++    final text = Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Tooltip(
++          message: name,
++          child: Text(
++            name,
++            maxLines: 2,
++            overflow: TextOverflow.ellipsis,
++            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
++          ),
++        ),
++        if (description.isNotEmpty) ...[
++          const SizedBox(height: 4),
++          Tooltip(
++            message: description,
++            child: Text(
++              description,
++              maxLines: 2,
++              overflow: TextOverflow.ellipsis,
++              style: const TextStyle(fontSize: 12),
++            ),
++          ),
++        ],
++      ],
++    );
++
++    return Container(
++      margin: const EdgeInsets.only(bottom: 12),
++      padding: const EdgeInsets.all(16),
++      decoration: BoxDecoration(
++        color: Colors.white,
++        borderRadius: BorderRadius.circular(16),
++        boxShadow: [
++          BoxShadow(
++            color: Colors.black.withValues(alpha: 0.06),
++            blurRadius: 8,
++            offset: const Offset(0, 3),
++          ),
++        ],
++      ),
++      child: LayoutBuilder(builder: (context, constraints) {
++        // Stack the thumbnail when a phone or large text needs the full width.
++        final stacked = constraints.maxWidth <
++            360 * MediaQuery.textScalerOf(context).scale(16) / 16;
++        return Column(
++          crossAxisAlignment: CrossAxisAlignment.stretch,
++          children: [
++            if (stacked) ...[
++              Align(alignment: Alignment.centerLeft, child: image),
++              const SizedBox(height: 12),
++              text,
++            ] else
++              Row(
++                crossAxisAlignment: CrossAxisAlignment.start,
++                children: [
++                  image,
++                  const SizedBox(width: 12),
++                  Expanded(child: text),
++                ],
++              ),
++            const SizedBox(height: 8),
++            Wrap(
++              alignment: WrapAlignment.spaceBetween,
++              crossAxisAlignment: WrapCrossAlignment.center,
++              spacing: 12,
++              runSpacing: 4,
++              children: [
++                Text(
++                  price,
++                  style: const TextStyle(
++                    color: Color(0xFF1565C0),
++                    fontWeight: FontWeight.bold,
++                    fontSize: 14,
++                  ),
++                ),
++                Row(
++                  mainAxisSize: MainAxisSize.min,
++                  children: [
++                    IconButton(
++                      tooltip: 'Modifier',
++                      icon: const Icon(Icons.edit_outlined,
++                          color: Colors.grey, size: 20),
++                      onPressed: onEdit,
++                    ),
++                    IconButton(
++                      tooltip: 'Supprimer',
++                      icon: const Icon(Icons.delete_outline,
++                          color: Colors.red, size: 20),
++                      onPressed: onDelete,
++                    ),
++                  ],
++                ),
++              ],
++            ),
++          ],
++        );
++      }),
++    );
++  }
++}
++
++class AdminRestaurantActions extends StatelessWidget {
++  const AdminRestaurantActions({
++    super.key,
++    required this.onMenu,
++    required this.onSubscription,
++    required this.onDelete,
++  });
++
++  final VoidCallback onMenu;
++  final VoidCallback onSubscription;
++  final VoidCallback onDelete;
++
++  @override
++  Widget build(BuildContext context) => Padding(
++        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
++        child: Wrap(
++          alignment: WrapAlignment.spaceEvenly,
++          spacing: 8,
++          runSpacing: 4,
++          children: [
++            TextButton.icon(
++              onPressed: onMenu,
++              icon: const Icon(Icons.menu_book,
++                  size: 18, color: Color(0xFF1565C0)),
++              label: const Text('Menu',
++                  style: TextStyle(color: Color(0xFF1565C0))),
++            ),
++            TextButton.icon(
++              onPressed: onSubscription,
++              icon: const Icon(Icons.workspace_premium_rounded,
++                  size: 18, color: Colors.amber),
++              label: const Text('Abo', style: TextStyle(color: Colors.amber)),
++            ),
++            TextButton(
++              onPressed: onDelete,
++              style: TextButton.styleFrom(
++                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
++              ),
++              child: const Wrap(
++                alignment: WrapAlignment.center,
++                crossAxisAlignment: WrapCrossAlignment.center,
++                spacing: 8,
++                children: [
++                  Icon(Icons.delete_outline, size: 18, color: Colors.red),
++                  Text('Supprimer', style: TextStyle(color: Colors.red)),
++                ],
++              ),
++            ),
++          ],
++        ),
++      );
++}
+diff --git a/lib/widgets/password_reset_email_guidance.dart b/lib/widgets/password_reset_email_guidance.dart
+new file mode 100644
+index 0000000..be041f3
+--- /dev/null
++++ b/lib/widgets/password_reset_email_guidance.dart
+@@ -0,0 +1,30 @@
++import 'package:flutter/material.dart';
++
++const String kPasswordResetEmailGuidance =
++    'Un lien de réinitialisation a été envoyé à votre adresse e-mail.\n'
++    'Vérifiez votre boîte de réception ainsi que le dossier Spam/Indésirables.\n'
++    'Si le lien n’est pas cliquable, copiez-le puis ouvrez-le dans Chrome ou un navigateur.\n'
++    'Ne partagez jamais ce lien avec quelqu’un.';
++
++Future<void> sendResetEmailAndShowGuidance({
++  required BuildContext context,
++  required Future<void> Function() sendEmail,
++}) async {
++  await sendEmail();
++  if (!context.mounted) return;
++
++  await showDialog<void>(
++    context: context,
++    builder: (dialogContext) => AlertDialog(
++      scrollable: true,
++      title: const Text('Vérifiez votre e-mail'),
++      content: const SelectableText(kPasswordResetEmailGuidance),
++      actions: [
++        TextButton(
++          onPressed: () => Navigator.pop(dialogContext),
++          child: const Text('Compris'),
++        ),
++      ],
++    ),
++  );
++}
+diff --git a/rules-tests/admin-security.rules.test.js b/rules-tests/admin-security.rules.test.js
+new file mode 100644
+index 0000000..821376e
+--- /dev/null
++++ b/rules-tests/admin-security.rules.test.js
+@@ -0,0 +1,81 @@
++'use strict';
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
++const { collection, query, where, orderBy, limit, getDocs, getCountFromServer, doc, setDoc, updateDoc, deleteDoc } = require('firebase/firestore');
++let env;
++const since = new Date('2026-01-01');
++const dbFor = (uid, provider = 'password') => env.authenticatedContext(uid, {
++  firebase: { sign_in_provider: provider },
++}).firestore();
++function counts(db) {
++  return [
++    ...['payment_initiated', 'wallet_credited', 'withdrawal_initiated', 'order_auto_cancelled_no_driver'].map(action =>
++      query(collection(db, 'audit_logs'), where('action', '==', action), where('createdAt', '>', since))),
++    query(collection(db, 'security_events'), where('resolved', '==', false)),
++    query(collection(db, 'security_events'), where('severity', '==', 'critical'), where('resolved', '==', false)),
++    ...['webhook_invalid_secret', 'webhook_replay_attempt', 'order_rate_limit_exceeded'].map(event =>
++      query(collection(db, 'security_events'), where('eventType', '==', event), where('createdAt', '>', since))),
++  ];
++}
++function lists(db) {
++  return [
++    query(collection(db, 'audit_logs'), orderBy('createdAt', 'desc'), limit(15)),
++    query(collection(db, 'security_events'), orderBy('createdAt', 'desc'), limit(10)),
++    query(collection(db, 'dispatch_metrics'), orderBy('noDriverFoundCount', 'desc'), limit(5)),
++  ];
++}
++test.before(async () => {
++  env = await initializeTestEnvironment({
++    projectId: 'demo-az-security',
++    firestore: { rules: fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8') },
++  });
++  await env.withSecurityRulesDisabled(async ctx => {
++    const db = ctx.firestore();
++    for (const [uid, data] of Object.entries({
++      super: { role: 'super', isActive: true },
++      sub: { role: 'sub', isActive: true, permissions: [] },
++      inactive: { role: 'super', isActive: false },
++      anonymous: { role: 'super', isActive: true },
++    })) await setDoc(doc(db, 'admins', uid), data);
++    for (const name of ['audit_logs', 'security_events', 'dispatch_metrics', 'rate_limits']) {
++      await setDoc(doc(db, name, 'sample'), { createdAt: new Date(), updatedAt: new Date(),
++        eventType: 'order_rate_limit_exceeded', action: 'payment_initiated',
++        resolved: false, severity: 'critical', noDriverFoundCount: 3 });
++    }
++    for (const [name, uid] of [['clients', 'client'], ['livreurs', 'driver'], ['sellers', 'seller'], ['restaurants', 'partner']]) {
++      await setDoc(doc(db, name, uid), { uid, isActive: true });
++    }
++  });
++});
++test.after(async () => { if (env) await env.cleanup(); });
++
++test('super-admin: all Flutter aggregates and list queries are allowed', async () => {
++  const db = dbFor('super');
++  for (const q of counts(db)) await assertSucceeds(getCountFromServer(q));
++  for (const q of lists(db)) await assertSucceeds(getDocs(q));
++  const result = await getCountFromServer(counts(db).at(-1));
++  assert.equal(result.data().count, 1);
++});
++for (const uid of ['sub', 'inactive', 'client', 'driver', 'seller', 'partner', 'anonymous', 'unauthenticated']) {
++  test(`${uid}: security dashboard reads denied`, async () => {
++    const db = uid === 'unauthenticated' ? env.unauthenticatedContext().firestore() : dbFor(uid, uid === 'anonymous' ? 'anonymous' : 'password');
++    for (const q of counts(db)) await assertFails(getCountFromServer(q));
++    for (const q of lists(db)) await assertFails(getDocs(q));
++  });
++}
++test('original rate_limits aggregate remains denied even to super-admin', async () => {
++  await assertFails(getCountFromServer(query(collection(dbFor('super'), 'rate_limits'), where('updatedAt', '>', since))));
++});
++test('client-side create/update/delete forbidden including super-admin', async () => {
++  for (const uid of ['super', 'sub', 'client', 'driver', 'seller', 'partner']) {
++    for (const name of ['audit_logs', 'security_events', 'rate_limits', 'dispatch_metrics']) {
++      const db = dbFor(uid);
++      await assertFails(setDoc(doc(db, name, 'new'), { action: 'forged' }));
++      await assertFails(updateDoc(doc(db, name, 'sample'), { resolved: true }));
++      await assertFails(deleteDoc(doc(db, name, 'sample')));
++    }
++  }
++});
+diff --git a/test/screens/admin/admin_2fa_debug_bypass_test.dart b/test/screens/admin/admin_2fa_debug_bypass_test.dart
+new file mode 100644
+index 0000000..bc42116
+--- /dev/null
++++ b/test/screens/admin/admin_2fa_debug_bypass_test.dart
+@@ -0,0 +1,75 @@
++import 'package:az_express/screens/admin/admin_dashboard.dart';
++import 'package:az_express/screens/admin/admin_login.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++bool bypass({
++  bool isDebug = true,
++  bool flag = true,
++  bool credentials = true,
++  bool document = true,
++  bool role = true,
++  bool email = true,
++  bool phone = true,
++}) =>
++    adminDevelopmentBypassAllowed(
++      isDebug: isDebug,
++      buildFlagEnabled: flag,
++      credentialsAccepted: credentials,
++      adminDocumentExists: document,
++      roleActive: role,
++      emailVerified: email,
++      phoneConfigured: phone,
++    );
++
++void main() {
++  test('2FA reste obligatoire sans le flag explicite', () {
++    expect(bypass(flag: false), isFalse);
++  });
++
++  test('2FA reste obligatoire en release même avec le flag', () {
++    expect(bypass(isDebug: false, flag: true), isFalse);
++  });
++
++  test('le contournement exige toutes les cinq autres conditions', () {
++    expect(bypass(), isTrue);
++    expect(bypass(credentials: false), isFalse);
++    expect(bypass(document: false), isFalse);
++    expect(bypass(role: false), isFalse);
++    expect(bypass(email: false), isFalse);
++    expect(bypass(phone: false), isFalse);
++  });
++
++  test('le flag accepte uniquement super ou sub explicitement actif', () {
++    expect(
++      adminDevelopmentRoleAllowed({'role': 'super', 'isActive': true}),
++      isTrue,
++    );
++    expect(
++      adminDevelopmentRoleAllowed({
++        'role': 'sub',
++        'isActive': true,
++        'permissions': <String>[],
++      }),
++      isTrue,
++    );
++    expect(
++      adminDevelopmentRoleAllowed({'role': 'sub', 'isActive': false}),
++      isFalse,
++    );
++    expect(adminDevelopmentRoleAllowed({'role': 'sub'}), isFalse);
++    expect(adminDevelopmentRoleAllowed({'role': 'client'}), isFalse);
++    expect(adminDevelopmentRoleAllowed({}), isFalse);
++  });
++
++  testWidgets('le bandeau de contournement est visible et explicite',
++      (tester) async {
++    await tester.pumpWidget(
++      const MaterialApp(
++        home: Scaffold(body: AdminTwoFactorBypassBanner()),
++      ),
++    );
++    expect(find.byKey(const Key('admin-2fa-debug-bypass-banner')), findsOne);
++    expect(find.text('2FA DÉSACTIVÉE — MODE DEV'), findsOne);
++  });
++}
+diff --git a/test/screens/admin/admin_security_dashboard_test.dart b/test/screens/admin/admin_security_dashboard_test.dart
+new file mode 100644
+index 0000000..c669979
+--- /dev/null
++++ b/test/screens/admin/admin_security_dashboard_test.dart
+@@ -0,0 +1,158 @@
++import 'package:az_express/screens/admin/admin_security_dashboard.dart';
++// ignore: depend_on_referenced_packages
++import 'package:cloud_firestore_platform_interface/cloud_firestore_platform_interface.dart'
++    as platform;
++import 'package:firebase_core/firebase_core.dart';
++// ignore: depend_on_referenced_packages
++import 'package:firebase_core_platform_interface/test.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++  late platform.FirebaseFirestorePlatform original;
++  final store = _Store();
++  setUpAll(() async {
++    setupFirebaseCoreMocks();
++    await Firebase.initializeApp();
++    original = platform.FirebaseFirestorePlatform.instance;
++    platform.FirebaseFirestorePlatform.instance = store;
++  });
++  tearDownAll(() => platform.FirebaseFirestorePlatform.instance = original);
++  setUp(() {
++    store.aggregateError = null;
++    store.streamError = null;
++    store.paths.clear();
++    store.filters.clear();
++  });
++  Future<void> show(WidgetTester tester) async {
++    tester.view.devicePixelRatio = 1;
++    tester.view.physicalSize = const Size(800, 2400);
++    addTearDown(tester.view.resetDevicePixelRatio);
++    addTearDown(tester.view.resetPhysicalSize);
++    await tester.pumpWidget(const MaterialApp(home: AdminSecurityDashboard()));
++    await tester.pumpAndSettle();
++  }
++
++  testWidgets('loads real order-limit events without reading private counters',
++      (tester) async {
++    await show(tester);
++    expect(store.paths, isNot(contains('rate_limits')));
++    expect(store.filters, contains(contains('order_rate_limit_exceeded')));
++    expect(find.text('Commandes limitées\n(1h)'), findsOneWidget);
++    expect(find.text('7'), findsOneWidget);
++    expect(tester.takeException(), isNull);
++  });
++  final errors = <Object>[
++    FirebaseException(
++        plugin: 'cloud_firestore',
++        code: 'permission-denied',
++        message: 'PRIVATE_DIAGNOSTIC'),
++    PlatformException(
++        code: 'firebase_firestore',
++        message: 'PERMISSION_DENIED PRIVATE_DIAGNOSTIC'),
++    FirebaseException(
++        plugin: 'cloud_firestore',
++        code: 'failed-precondition',
++        message: 'PRIVATE_DIAGNOSTIC'),
++  ];
++  for (var i = 0; i < errors.length; i++) {
++    testWidgets('aggregate error $i is safe and refresh recovers',
++        (tester) async {
++      store.aggregateError = errors[i];
++      await show(tester);
++      expect(find.textContaining('PRIVATE_DIAGNOSTIC'), findsNothing);
++      expect(
++          find.text(i < 2
++              ? 'Accès sécurité non autorisé ou règles non configurées.'
++              : 'Impossible de charger les données de sécurité. Réessayez.'),
++          findsOneWidget);
++      store.aggregateError = null;
++      await tester.tap(find.byTooltip('Actualiser'));
++      await tester.pumpAndSettle();
++      expect(find.text('Commandes limitées\n(1h)'), findsOneWidget);
++      expect(tester.takeException(), isNull);
++    });
++  }
++  testWidgets(
++      'stream permission errors are not displayed as empty healthy logs',
++      (tester) async {
++    store.streamError = errors.first;
++    await show(tester);
++    expect(find.text('Accès sécurité non autorisé ou règles non configurées.'),
++        findsNWidgets(3));
++    expect(find.text('Aucun événement suspect'), findsNothing);
++    expect(find.textContaining('PRIVATE_DIAGNOSTIC'), findsNothing);
++    expect(tester.takeException(), isNull);
++  });
++}
++
++class _Store extends platform.FirebaseFirestorePlatform {
++  Object? aggregateError;
++  Object? streamError;
++  final paths = <String>[];
++  final filters = <String>[];
++  @override
++  platform.FirebaseFirestorePlatform delegateFor(
++          {required FirebaseApp app, required String databaseId}) =>
++      this;
++  @override
++  platform.CollectionReferencePlatform collection(String path) {
++    paths.add(path);
++    if (path == 'rate_limits') throw StateError('Server-only collection');
++    return _Collection(this, path);
++  }
++}
++
++class _Collection extends platform.CollectionReferencePlatform {
++  _Collection(this.store, String path) : super(store, path) {
++    parameters.addAll({
++      'where': <List<dynamic>>[],
++      'orderBy': <List<dynamic>>[],
++      'limit': null,
++      'limitToLast': null,
++      'startAt': null,
++      'startAfter': null,
++      'endAt': null,
++      'endBefore': null
++    });
++  }
++  final _Store store;
++  final queryFilters = <List<dynamic>>[];
++  bool get orderLimit =>
++      queryFilters.toString().contains('order_rate_limit_exceeded');
++  @override
++  platform.QueryPlatform where(List<List<dynamic>> conditions) {
++    store.filters.add(conditions.toString());
++    queryFilters.addAll(conditions);
++    return this;
++  }
++
++  @override
++  platform.QueryPlatform orderBy(Iterable<List<dynamic>> orders) => this;
++  @override
++  platform.QueryPlatform limit(int limit) => this;
++  @override
++  platform.AggregateQueryPlatform count() => _Count(this);
++  @override
++  Stream<platform.QuerySnapshotPlatform> snapshots(
++          {bool includeMetadataChanges = false,
++          required platform.ListenSource listenSource}) =>
++      store.streamError != null
++          ? Stream.error(store.streamError!)
++          : Stream.value(platform.QuerySnapshotPlatform(
++              [], [], platform.SnapshotMetadataPlatform(false, false)));
++}
++
++class _Count extends platform.AggregateQueryPlatform {
++  _Count(this.collection) : super(collection);
++  final _Collection collection;
++  @override
++  Future<platform.AggregateQuerySnapshotPlatform> get(
++      {required platform.AggregateSource source}) async {
++    if (collection.store.aggregateError case final error?) throw error;
++    return platform.AggregateQuerySnapshotPlatform(
++        count: collection.orderLimit ? 7 : 0, sum: [], average: []);
++  }
++}
+diff --git a/test/screens/admin/admin_totp_enrollment_test.dart b/test/screens/admin/admin_totp_enrollment_test.dart
+new file mode 100644
+index 0000000..8c8b0ee
+--- /dev/null
++++ b/test/screens/admin/admin_totp_enrollment_test.dart
+@@ -0,0 +1,237 @@
++import 'package:az_express/screens/admin/admin_mfa_security.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++/// TOTP Admin — phase 1 (saisie manuelle de la clé, pas de QR code).
++///
++/// Le SMS reste pleinement supporté ; TOTP devient un second facteur
++/// alternatif, prioritaire parce qu'il ne dépend d'aucun réseau opérateur
++/// (incident Firebase Phone Auth `INTERNAL (13) / Error code: 39`).
++///
++/// Ces tests sont purs : aucune dépendance à Firebase Auth, aucun appareil,
++/// aucun réseau. Ils exercent les décisions qui précèdent tout appel réseau —
++/// validation du code, sélection du facteur, messages d'erreur.
++void main() {
++  const sms = AdminEnrolledFactor(
++    kind: AdminSecondFactor.sms,
++    enrollmentId: 'sms-enrollment-1',
++    label: '+225 07 ** ** 97',
++  );
++  const totp = AdminEnrolledFactor(
++    kind: AdminSecondFactor.totp,
++    enrollmentId: 'totp-enrollment-1',
++    label: 'Authenticator Admin AZ Express',
++  );
++
++  group('Validation locale du code TOTP (avant tout appel réseau)', () {
++    test('code vide refusé', () {
++      final error = validateAdminTotpCode('');
++      expect(error, isNotNull);
++      expect(error, contains('6 chiffres'));
++    });
++
++    test('code uniquement composé d\'espaces refusé', () {
++      expect(validateAdminTotpCode('      '), isNotNull);
++    });
++
++    test('code non numérique refusé', () {
++      for (final code in ['12a456', 'abcdef', '12 456', '12-456', '１２３４５６']) {
++        final error = validateAdminTotpCode(code);
++        expect(error, isNotNull, reason: 'code refusé attendu : $code');
++        expect(error, contains('chiffres'));
++      }
++    });
++
++    test('moins de 6 chiffres refusé', () {
++      for (final code in ['1', '12345']) {
++        expect(validateAdminTotpCode(code), isNotNull, reason: code);
++      }
++    });
++
++    test('plus de 6 chiffres refusé', () {
++      for (final code in ['1234567', '123456789012']) {
++        expect(validateAdminTotpCode(code), isNotNull, reason: code);
++      }
++    });
++
++    test('exactement 6 chiffres accepté', () {
++      expect(validateAdminTotpCode('123456'), isNull);
++      expect(validateAdminTotpCode('000000'), isNull,
++          reason: 'un code TOTP peut légitimement valoir 000000');
++      expect(validateAdminTotpCode(' 654321 '), isNull,
++          reason: 'les espaces autour du code sont tolérés');
++    });
++
++    test('la longueur exigée reste celle d\'Identity Platform', () {
++      expect(kAdminTotpCodeLength, 6);
++    });
++
++    test('les messages de refus sont en français et sans détail technique', () {
++      for (final code in ['', 'abcdef', '123']) {
++        final error = validateAdminTotpCode(code)!;
++        expect(error, isNot(contains('Exception')));
++        expect(error, isNot(contains('firebase')));
++        expect(error, isNot(contains('TOTP')));
++        expect(error.endsWith('.'), isTrue, reason: 'phrase complète : $error');
++      }
++    });
++  });
++
++  group('Sélection du second facteur', () {
++    test('TOTP seul : utilisé directement, aucun choix demandé', () {
++      final resolution = resolveAdminSecondFactor([totp]);
++      expect(resolution.allowed, isTrue);
++      expect(resolution.requiresChoice, isFalse);
++      expect(resolution.single?.kind, AdminSecondFactor.totp);
++      expect(resolution.single?.enrollmentId, 'totp-enrollment-1');
++    });
++
++    test('SMS seul : flux SMS historique préservé, aucun choix demandé', () {
++      final resolution = resolveAdminSecondFactor([sms]);
++      expect(resolution.allowed, isTrue);
++      expect(resolution.requiresChoice, isFalse);
++      expect(resolution.single?.kind, AdminSecondFactor.sms);
++      expect(resolution.single?.enrollmentId, 'sms-enrollment-1');
++    });
++
++    test('SMS + TOTP : un choix est demandé, TOTP présenté en premier', () {
++      for (final factors in [
++        [sms, totp],
++        [totp, sms],
++      ]) {
++        final resolution = resolveAdminSecondFactor(factors);
++        expect(resolution.allowed, isTrue);
++        expect(resolution.requiresChoice, isTrue);
++        expect(resolution.single, isNull,
++            reason: 'aucun facteur ne doit être choisi à la place de l\'Admin');
++        expect(resolution.available.length, 2);
++        expect(resolution.available.first.kind, AdminSecondFactor.totp,
++            reason: 'TOTP d\'abord : indépendant du réseau SMS');
++      }
++    });
++
++    test('aucun facteur : refus explicite unsupported-second-factor', () {
++      final resolution = resolveAdminSecondFactor(const []);
++      expect(resolution.allowed, isFalse);
++      expect(resolution.errorCode, 'unsupported-second-factor');
++      expect(resolution.single, isNull);
++      expect(resolution.available, isEmpty);
++    });
++
++    test('facteur sans identifiant d\'enrôlement ignoré', () {
++      // Un hint sans `uid` exploitable ne permettrait pas
++      // `getAssertionForSignIn` : il ne doit jamais être proposé.
++      const broken = AdminEnrolledFactor(
++        kind: AdminSecondFactor.totp,
++        enrollmentId: '   ',
++      );
++      final resolution = resolveAdminSecondFactor([broken, sms]);
++      expect(resolution.requiresChoice, isFalse);
++      expect(resolution.single?.kind, AdminSecondFactor.sms);
++
++      final onlyBroken = resolveAdminSecondFactor([broken]);
++      expect(onlyBroken.allowed, isFalse);
++      expect(onlyBroken.errorCode, 'unsupported-second-factor');
++    });
++
++    test(
++        'une panne SMS (Error 39) ne bloque pas l\'Admin dès qu\'un facteur TOTP existe',
++        () {
++      // Le SMS peut être injoignable côté opérateur : la sélection reste
++      // possible et TOTP est proposé en tête, donc un chemin de connexion
++      // subsiste sans aucun envoi de SMS.
++      final resolution = resolveAdminSecondFactor([sms, totp]);
++      expect(resolution.allowed, isTrue);
++      expect(resolution.available.first.kind, AdminSecondFactor.totp);
++
++      // Et si seul TOTP est enrôlé, aucun challenge SMS n'est même envisagé.
++      final totpOnly = resolveAdminSecondFactor([totp]);
++      expect(totpOnly.single?.kind, AdminSecondFactor.totp);
++    });
++  });
++
++  group('Messages d\'erreur TOTP', () {
++    const expectations = <String, String>{
++      'invalid-verification-code': 'Code incorrect',
++      'totp-challenge-timeout': 'expiré',
++      'requires-recent-login': 'Reconnectez-vous',
++      'maximum-second-factor-count-exceeded': 'Nombre maximal',
++      'unsupported-second-factor': 'Aucun second facteur',
++    };
++
++    expectations.forEach((code, fragment) {
++      test('$code est traduit en français', () {
++        final message = adminMfaErrorMessage(code);
++        expect(message, contains(fragment));
++        expect(message, isNot(contains(code)),
++            reason: 'le code technique ne doit jamais être montré');
++      });
++    });
++
++    test('aucun message ne divulgue de détail technique Firebase', () {
++      for (final code in expectations.keys) {
++        final message = adminMfaErrorMessage(code);
++        for (final leak in ['Firebase', 'Exception', 'INTERNAL', 'null']) {
++          expect(message, isNot(contains(leak)), reason: '$code → $message');
++        }
++      }
++    });
++
++    test('un code inconnu reste générique sans exposer de pile', () {
++      final message = adminMfaErrorMessage('totp-unknown-failure-xyz');
++      expect(message, contains('double authentification'));
++      expect(message, isNot(contains('Exception')));
++    });
++  });
++
++  group('Aucune fuite de secret', () {
++    test('un secret TOTP n\'apparaît jamais dans un message utilisateur', () {
++      // Forme réaliste d'une clé Identity Platform (base32).
++      const secretKey = 'JBSWY3DPEHPK3PXP';
++      final messages = <String>[
++        ...['', 'abc', '123', '1234567'].map((c) => validateAdminTotpCode(c)!),
++        validateAdminTotpCode(secretKey) ?? '',
++        adminMfaErrorMessage('totp-challenge-timeout'),
++        adminMfaErrorMessage('invalid-verification-code'),
++        adminMfaErrorMessage('maximum-second-factor-count-exceeded'),
++      ];
++      for (final message in messages) {
++        expect(message, isNot(contains(secretKey)));
++        expect(message, isNot(contains('otpauth')));
++      }
++    });
++
++    test('aucun code saisi n\'est réinjecté dans le message de refus', () {
++      const code = '987654';
++      final error = validateAdminTotpCode('$code$code');
++      expect(error, isNotNull);
++      expect(error, isNot(contains(code)),
++          reason: 'le code ne doit jamais être réaffiché ni journalisé');
++    });
++
++    test('la clé n\'est pas acceptée comme code (longueur et alphabet)', () {
++      expect(validateAdminTotpCode('JBSWY3DPEHPK3PXP'), isNotNull);
++    });
++  });
++
++  group('Non-régression du flux SMS', () {
++    test('les messages SMS historiques sont inchangés', () {
++      expect(adminMfaErrorMessage('invalid-phone-number'),
++          contains('numéro Admin'));
++      expect(adminMfaErrorMessage('session-expired'), contains('expiré'));
++      expect(adminMfaErrorMessage('quota-exceeded'), contains('Quota SMS'));
++      expect(adminMfaErrorMessage('missing-verification-id'),
++          contains('Aucun challenge'));
++    });
++
++    test('le contrôle du rôle Admin reste la dernière barrière', () {
++      // Inchangé par TOTP : même après une assertion acceptée, un rôle
++      // invalide refuse l'accès.
++      expect(validateAdminRecord({'role': 'client', 'isActive': true}).allowed,
++          isFalse);
++      expect(validateAdminRecord({'role': 'super', 'isActive': false}).allowed,
++          isFalse);
++      expect(validateAdminRecord({'role': 'super', 'isActive': true}).allowed,
++          isTrue);
++    });
++  });
++}
+diff --git a/test/screens/admin/admin_vehicle_moderation_layout_test.dart b/test/screens/admin/admin_vehicle_moderation_layout_test.dart
+new file mode 100644
+index 0000000..9552326
+--- /dev/null
++++ b/test/screens/admin/admin_vehicle_moderation_layout_test.dart
+@@ -0,0 +1,143 @@
++import 'package:az_express/screens/admin/admin_vehicle_moderation_page.dart';
++// ignore: depend_on_referenced_packages
++import 'package:cloud_firestore_platform_interface/cloud_firestore_platform_interface.dart'
++    as platform;
++import 'package:firebase_core/firebase_core.dart';
++// ignore: depend_on_referenced_packages
++import 'package:firebase_core_platform_interface/test.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:google_fonts/google_fonts.dart';
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++  late platform.FirebaseFirestorePlatform original;
++  setUpAll(() async {
++    setupFirebaseCoreMocks();
++    await Firebase.initializeApp();
++    original = platform.FirebaseFirestorePlatform.instance;
++    platform.FirebaseFirestorePlatform.instance = _EmptyStore();
++    GoogleFonts.config.allowRuntimeFetching = false;
++  });
++  tearDownAll(() {
++    platform.FirebaseFirestorePlatform.instance = original;
++    GoogleFonts.config.allowRuntimeFetching = true;
++  });
++
++  for (final width in [320.0, 360.0, 412.0]) {
++    for (final scale in [1.0, 2.0]) {
++      testWidgets('Android $width px, texte x$scale: titre, onglets et vide',
++          (tester) async {
++        tester.view.devicePixelRatio = 1;
++        tester.view.physicalSize = Size(width, 640);
++        tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
++        addTearDown(tester.view.resetDevicePixelRatio);
++        addTearDown(tester.view.resetPhysicalSize);
++        addTearDown(tester.view.resetPadding);
++        final navigator = GlobalKey<NavigatorState>();
++        await tester.pumpWidget(MaterialApp(
++          navigatorKey: navigator,
++          theme: ThemeData(platform: TargetPlatform.android),
++          builder: (context, child) => MediaQuery(
++            data: MediaQuery.of(context)
++                .copyWith(textScaler: TextScaler.linear(scale)),
++            child: child!,
++          ),
++          home: const Scaffold(),
++        ));
++        navigator.currentState!.push(MaterialPageRoute<void>(
++          builder: (_) => const AdminVehicleModerationPage(),
++        ));
++        await tester.pumpAndSettle();
++        expect(find.byType(BackButton), findsOneWidget);
++        final title = find.text('Modération Auto & Moto');
++        final titleRect = tester.getRect(title);
++        expect(
++            titleRect.left,
++            greaterThanOrEqualTo(
++                tester.getRect(find.byType(BackButton)).right));
++        expect(titleRect.right, lessThanOrEqualTo(width));
++        final titleParagraph = tester.renderObject<RenderParagraph>(title);
++        expect(titleParagraph.maxLines, 1);
++        expect(titleParagraph.overflow, TextOverflow.ellipsis);
++
++        final tabs = tester.widget<TabBar>(find.byType(TabBar));
++        for (final entry in [
++          'Annonces',
++          'Vendeurs',
++          'Pros/Magasins',
++          'Signalements',
++        ].asMap().entries) {
++          final label = find.text(entry.value);
++          await tester.ensureVisible(label);
++          await tester.pumpAndSettle();
++          await tester.tap(label);
++          await tester.pumpAndSettle();
++          expect(tabs.controller!.index, entry.key);
++          final paragraph = tester.renderObject<RenderParagraph>(label);
++          expect(paragraph.didExceedMaxLines, isFalse);
++          final labelRect = tester.getRect(label);
++          final barRect = tester.getRect(find.byType(TabBar));
++          expect(labelRect.left, greaterThanOrEqualTo(-0.1));
++          expect(labelRect.right, lessThanOrEqualTo(width + 0.1));
++          expect(labelRect.top, greaterThanOrEqualTo(barRect.top));
++          expect(labelRect.bottom, lessThanOrEqualTo(barRect.bottom));
++          final empty = find.text('Aucun élément.').hitTestable();
++          expect(empty, findsOneWidget);
++          final viewport = tester.getRect(find.byType(TabBarView));
++          final emptyCenter = tester.getCenter(empty);
++          expect(emptyCenter.dx, closeTo(viewport.center.dx, 1));
++          expect(emptyCenter.dy, closeTo(viewport.center.dy, 1));
++          expect(viewport.bottom, lessThanOrEqualTo(616));
++          expect(viewport.height, greaterThan(400));
++          expect(tester.takeException(), isNull);
++        }
++        await tester.drag(find.byType(TabBarView), Offset(width * 0.8, 0));
++        await tester.pumpAndSettle();
++        expect(tabs.controller!.index, 2);
++        expect(tester.takeException(), isNull);
++      });
++    }
++  }
++}
++
++class _EmptyStore extends platform.FirebaseFirestorePlatform {
++  @override
++  platform.FirebaseFirestorePlatform delegateFor({
++    required FirebaseApp app,
++    required String databaseId,
++  }) =>
++      this;
++
++  @override
++  platform.CollectionReferencePlatform collection(String collectionPath) =>
++      _EmptyCollection(this, collectionPath);
++}
++
++class _EmptyCollection extends platform.CollectionReferencePlatform {
++  _EmptyCollection(super.firestore, super.path) {
++    parameters.addAll({
++      'where': <List<dynamic>>[],
++      'orderBy': <List<dynamic>>[],
++      'limit': null,
++      'limitToLast': null,
++      'startAt': null,
++      'startAfter': null,
++      'endAt': null,
++      'endBefore': null,
++    });
++  }
++
++  @override
++  platform.QueryPlatform orderBy(Iterable<List<dynamic>> orders) => this;
++  @override
++  platform.QueryPlatform limit(int limit) => this;
++  @override
++  platform.QueryPlatform where(List<List<dynamic>> conditions) => this;
++  @override
++  Future<platform.QuerySnapshotPlatform> get(
++          [platform.GetOptions options = const platform.GetOptions()]) async =>
++      platform.QuerySnapshotPlatform(
++          [], [], platform.SnapshotMetadataPlatform(false, false));
++}
+diff --git a/test/screens/auth/forgot_password_recovery_test.dart b/test/screens/auth/forgot_password_recovery_test.dart
+new file mode 100644
+index 0000000..4981716
+--- /dev/null
++++ b/test/screens/auth/forgot_password_recovery_test.dart
+@@ -0,0 +1,143 @@
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++import 'package:az_express/screens/auth/forgot_password_page.dart';
++
++/// Récupération de mot de passe Client / Livreur — correctif du 2026-10-06.
++///
++/// Firebase Phone Auth est en échec sur le projet (`INTERNAL (13) /
++/// Error code: 39`), ce qui casse le canal SMS. `sendPasswordResetEmail` passe
++/// par un autre service Identity Toolkit et n'est pas affecté : pour Client et
++/// Livreur, qui disposent tous deux d'une adresse e-mail RÉELLE validée à
++/// l'inscription, le lien e-mail est donc le seul canal fonctionnel.
++///
++/// L'écran proposait déjà les deux canaux, mais `_bySms = true` faisait
++/// atterrir l'utilisateur sur le canal cassé. Le défaut est désormais
++/// l'e-mail, et le canal SMS est masqué pour le livreur (voir
++/// [smsRecoveryAvailable] pour la raison exacte).
++///
++/// Ces tests ne touchent ni Firebase, ni réseau : l'écran n'instancie
++/// `FirebaseAuth` qu'au moment d'une soumission, jamais au `build`.
++void main() {
++  Future<void> pumpPage(WidgetTester tester, AccountRecoveryRole role) async {
++    await tester.pumpWidget(MaterialApp(
++      home: ForgotPasswordPage(role: role),
++    ));
++    await tester.pump();
++  }
++
++  group('Disponibilité du canal SMS par rôle', () {
++    test('le client conserve le canal SMS', () {
++      expect(smsRecoveryAvailable(AccountRecoveryRole.client), isTrue);
++    });
++
++    test('le livreur n\'a pas de canal SMS', () {
++      // Le chemin SMS du livreur aboutirait à `resetAccountPassword` avec
++      // `userType: 'client'` codé en dur — il viserait la collection
++      // `clients`, jamais `livreurs`.
++      expect(smsRecoveryAvailable(AccountRecoveryRole.driver), isFalse);
++    });
++
++    test('le rôle par défaut est client', () {
++      const page = ForgotPasswordPage();
++      expect(page.role, AccountRecoveryRole.client);
++    });
++  });
++
++  group('Client — e-mail par défaut, SMS conservé', () {
++    testWidgets('arrive sur le mode e-mail', (tester) async {
++      await pumpPage(tester, AccountRecoveryRole.client);
++      expect(find.text('Votre adresse email'), findsOneWidget);
++      expect(find.text('Votre numéro de téléphone'), findsNothing);
++      expect(find.text('Envoyer le lien email'), findsOneWidget);
++      expect(find.text('Envoyer le code SMS'), findsNothing);
++    });
++
++    testWidgets('le canal SMS reste visible et sélectionnable',
++        (tester) async {
++      await pumpPage(tester, AccountRecoveryRole.client);
++      final smsCard = find.text('Recevoir un code\npar SMS');
++      expect(smsCard, findsOneWidget);
++
++      await tester.tap(smsCard);
++      await tester.pump();
++      expect(find.text('Votre numéro de téléphone'), findsOneWidget);
++      expect(find.text('Envoyer le code SMS'), findsOneWidget);
++      expect(find.text('Votre adresse email'), findsNothing);
++    });
++
++    testWidgets('l\'avertissement SMS indisponible est affiché',
++        (tester) async {
++      await pumpPage(tester, AccountRecoveryRole.client);
++      expect(find.text(kSmsRecoveryWarning), findsOneWidget);
++      expect(kSmsRecoveryWarning, contains('e-mail'));
++      expect(kSmsRecoveryWarning, contains('indisponible'));
++    });
++
++    testWidgets('le numéro prérempli ne force pas le mode SMS',
++        (tester) async {
++      await tester.pumpWidget(const MaterialApp(
++        home: ForgotPasswordPage(prefillPhone: '0700000000'),
++      ));
++      await tester.pump();
++      expect(find.text('Votre adresse email'), findsOneWidget,
++          reason: 'le préremplissage ne doit pas ramener sur le canal cassé');
++    });
++  });
++
++  group('Livreur — e-mail uniquement', () {
++    testWidgets('arrive sur le mode e-mail', (tester) async {
++      await pumpPage(tester, AccountRecoveryRole.driver);
++      expect(find.text('Votre adresse email'), findsOneWidget);
++      expect(find.text('Envoyer le lien email'), findsOneWidget);
++    });
++
++    testWidgets('aucune carte SMS proposée', (tester) async {
++      await pumpPage(tester, AccountRecoveryRole.driver);
++      expect(find.text('Recevoir un code\npar SMS'), findsNothing);
++      expect(find.text('Votre numéro de téléphone'), findsNothing);
++      expect(find.text('Envoyer le code SMS'), findsNothing);
++    });
++
++    testWidgets('pas d\'avertissement SMS, mais une explication dédiée',
++        (tester) async {
++      await pumpPage(tester, AccountRecoveryRole.driver);
++      expect(find.text(kSmsRecoveryWarning), findsNothing);
++      expect(
++        find.text('La réinitialisation se fait par e-mail pour ce compte.'),
++        findsOneWidget,
++      );
++    });
++
++    testWidgets('le livreur ne peut jamais atteindre l\'écran de code SMS',
++        (tester) async {
++      // Aucun chemin d'interface ne mène au reset SMS : ni carte, ni bouton.
++      // La garde de `_submitSms` ferme en plus le cas où la carte
++      // réapparaîtrait par régression.
++      await pumpPage(tester, AccountRecoveryRole.driver);
++      expect(find.byType(TextField), findsOneWidget,
++          reason: 'un seul champ : l\'adresse e-mail');
++      expect(find.textContaining('6 chiffres'), findsNothing);
++    });
++  });
++
++  group('Le canal e-mail est bien celui présenté', () {
++    testWidgets('le libellé annonce un lien, pas un code', (tester) async {
++      for (final role in AccountRecoveryRole.values) {
++        await pumpPage(tester, role);
++        expect(find.text('Recevoir un lien\npar e-mail'), findsOneWidget);
++        expect(
++          find.text('Un lien de réinitialisation sera envoyé à cet email'),
++          findsOneWidget,
++        );
++      }
++    });
++
++    testWidgets('l\'en-tête ne parle plus de code de récupération',
++        (tester) async {
++      await pumpPage(tester, AccountRecoveryRole.client);
++      expect(find.textContaining('votre code de récupération'), findsNothing);
++      expect(find.textContaining('lien de réinitialisation'), findsWidgets);
++    });
++  });
++}
+diff --git a/test/widgets/admin_restaurant_cards_test.dart b/test/widgets/admin_restaurant_cards_test.dart
+new file mode 100644
+index 0000000..f23e97e
+--- /dev/null
++++ b/test/widgets/admin_restaurant_cards_test.dart
+@@ -0,0 +1,114 @@
++import 'package:az_express/widgets/admin_restaurant_cards.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++const names = [
++  'foutou sauce gouagouassou viande de brousse',
++  'spaghetti viande',
++  'riz sauce graine poisson fumé',
++  'attiéké poisson thon braisé',
++];
++const description =
++    'Plat préparé avec des légumes frais, une sauce maison et un accompagnement au choix.';
++
++Future<void> showCard(
++  WidgetTester tester,
++  Widget child,
++  double width,
++  double scale,
++) async {
++  tester.view.devicePixelRatio = 1;
++  tester.view.physicalSize = Size(width, 900);
++  addTearDown(tester.view.resetDevicePixelRatio);
++  addTearDown(tester.view.resetPhysicalSize);
++  await tester.pumpWidget(MaterialApp(
++    theme: ThemeData(platform: TargetPlatform.android),
++    home: MediaQuery(
++      data: MediaQueryData(textScaler: TextScaler.linear(scale)),
++      child: Scaffold(
++        body: ListView(
++          padding: const EdgeInsets.all(16),
++          children: [child],
++        ),
++      ),
++    ),
++  ));
++  await tester.pumpAndSettle();
++}
++
++void main() {
++  for (final width in [320.0, 360.0, 412.0, 800.0]) {
++    for (final scale in [1.0, 2.0]) {
++      for (final name in names) {
++        testWidgets('dish $name at $width px, text x$scale', (tester) async {
++          var edits = 0;
++          var deletes = 0;
++          await showCard(
++            tester,
++            AdminRestaurantDishCard(
++              name: name,
++              description: description,
++              price: '12500 FCFA',
++              imageUrl: '',
++              onEdit: () => edits++,
++              onDelete: () => deletes++,
++            ),
++            width,
++            scale,
++          );
++          expect(tester.takeException(), isNull);
++          // A regression to a narrow ListTile title fails this geometry check.
++          for (final value in [name, description]) {
++            final paragraph =
++                tester.renderObject<RenderParagraph>(find.text(value));
++            expect(paragraph.size.width, greaterThanOrEqualTo(256));
++            final lines = paragraph.getBoxesForSelection(
++                TextSelection(baseOffset: 0, extentOffset: value.length));
++            expect(lines.map((box) => box.top).toSet().length,
++                lessThanOrEqualTo(2));
++          }
++          final price =
++              tester.renderObject<RenderParagraph>(find.text('12500 FCFA'));
++          expect(price.didExceedMaxLines, isFalse);
++          expect(tester.getRect(find.text('12500 FCFA')).right,
++              lessThanOrEqualTo(width - 16));
++          expect(tester.getTopLeft(find.byTooltip('Modifier')).dy,
++              greaterThan(tester.getBottomLeft(find.text(description)).dy));
++          await tester.tap(find.byTooltip('Modifier'));
++          await tester.tap(find.byTooltip('Supprimer'));
++          expect(edits, 1);
++          expect(deletes, 1);
++          expect(tester.takeException(), isNull);
++        });
++      }
++      testWidgets('restaurant actions at $width px, text x$scale',
++          (tester) async {
++        final taps = <String>[];
++        await showCard(
++          tester,
++          AdminRestaurantActions(
++            onMenu: () => taps.add('Menu'),
++            onSubscription: () => taps.add('Abo'),
++            onDelete: () => taps.add('Supprimer'),
++          ),
++          width,
++          scale,
++        );
++        for (final label in ['Menu', 'Abo', 'Supprimer']) {
++          final paragraph =
++              tester.renderObject<RenderParagraph>(find.text(label));
++          final boxes = paragraph.getBoxesForSelection(
++              TextSelection(baseOffset: 0, extentOffset: label.length));
++          expect(boxes.map((box) => box.top).toSet(), hasLength(1),
++              reason: '$label must remain on a single line');
++          expect(tester.getRect(find.text(label)).right,
++              lessThanOrEqualTo(width - 16));
++          await tester.tap(find.text(label));
++        }
++        expect(taps, ['Menu', 'Abo', 'Supprimer']);
++        expect(tester.takeException(), isNull);
++      });
++    }
++  }
++}
+diff --git a/test/widgets/password_reset_email_guidance_test.dart b/test/widgets/password_reset_email_guidance_test.dart
+new file mode 100644
+index 0000000..0833d97
+--- /dev/null
++++ b/test/widgets/password_reset_email_guidance_test.dart
+@@ -0,0 +1,69 @@
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++import 'package:az_express/widgets/password_reset_email_guidance.dart';
++
++void main() {
++  testWidgets('sends the reset email then shows complete safety guidance',
++      (tester) async {
++    var sendCount = 0;
++
++    await tester.pumpWidget(MaterialApp(
++      home: Builder(
++        builder: (context) => Scaffold(
++          body: TextButton(
++            onPressed: () => sendResetEmailAndShowGuidance(
++              context: context,
++              sendEmail: () async {
++                sendCount++;
++              },
++            ),
++            child: const Text('Réinitialiser'),
++          ),
++        ),
++      ),
++    ));
++
++    await tester.tap(find.text('Réinitialiser'));
++    await tester.pumpAndSettle();
++
++    expect(sendCount, 1);
++    expect(find.text('Vérifiez votre e-mail'), findsOneWidget);
++    expect(kPasswordResetEmailGuidance, contains('boîte de réception'));
++    expect(kPasswordResetEmailGuidance, contains('Spam/Indésirables'));
++    expect(kPasswordResetEmailGuidance, contains('copiez-le'));
++    expect(kPasswordResetEmailGuidance, contains('Chrome ou un navigateur'));
++    expect(kPasswordResetEmailGuidance, contains('Ne partagez jamais ce lien'));
++    expect(find.text(kPasswordResetEmailGuidance), findsOneWidget);
++    expect(find.textContaining('https://'), findsNothing);
++  });
++
++  testWidgets('does not show success guidance when email sending fails',
++      (tester) async {
++    await tester.pumpWidget(MaterialApp(
++      home: Builder(
++        builder: (context) => Scaffold(
++          body: TextButton(
++            onPressed: () async {
++              try {
++                await sendResetEmailAndShowGuidance(
++                  context: context,
++                  sendEmail: () async => throw StateError('send failed'),
++                );
++              } on StateError {
++                // The screen reports the send failure; this test only verifies
++                // that success guidance is not shown.
++              }
++            },
++            child: const Text('Réinitialiser'),
++          ),
++        ),
++      ),
++    ));
++
++    await tester.tap(find.text('Réinitialiser'));
++    await tester.pump();
++
++    expect(find.text('Vérifiez votre e-mail'), findsNothing);
++  });
++}
+diff --git a/firestore.rules b/firestore.rules
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -1265,5 +1265,4 @@
+     match /security_events/{eventId} {
+       allow read:   if isAdmin();
+-      allow update: if isAdmin();
+       allow write:  if false;
+     }

@@ -1,43 +1,53 @@
-﻿import 'dart:math';
+import 'dart:math';
 import '../../widgets/scale_button.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:geolocator/geolocator.dart';
+import 'admin_pharmacy_guards_page.dart';
+import '../../models/delivery_zone.dart';
+import '../../utils/partner_location_validator.dart';
+import '../../widgets/partner_location_input.dart';
 
 class AdminPharmaciesPage extends StatelessWidget {
   const AdminPharmaciesPage({super.key});
 
   void _showAddPharmacy(BuildContext context, {DocumentSnapshot? existing}) {
-    final data       = existing?.data() as Map<String, dynamic>?;
-    final nameCtrl   = TextEditingController(text: data?['name']    ?? '');
-    final addressCtrl= TextEditingController(text: data?['address'] ?? '');
-    final phoneCtrl  = TextEditingController(text: data?['phone']   ?? '');
-    final hoursCtrl  = TextEditingController(text: data?['hours']   ?? '08h–22h');
-    final latCtrl    = TextEditingController(text: data?['lat']?.toString() ?? '');
-    final lngCtrl    = TextEditingController(text: data?['lng']?.toString() ?? '');
+    final data = existing?.data() as Map<String, dynamic>?;
+    final nameCtrl = TextEditingController(text: data?['name'] ?? '');
+    final addressCtrl = TextEditingController(text: data?['address'] ?? '');
+    final phoneCtrl = TextEditingController(text: data?['phone'] ?? '');
+    final hoursCtrl = TextEditingController(text: data?['hours'] ?? '08h–22h');
+    final latCtrl = TextEditingController(text: data?['lat']?.toString() ?? '');
+    final lngCtrl = TextEditingController(text: data?['lng']?.toString() ?? '');
     // For creation: pre-fill generated password. For edit: blank (leave unchanged).
-    final passCtrl   = TextEditingController(
+    final passCtrl = TextEditingController(
         text: existing == null ? _generatePassword() : '');
-    bool isOnDuty   = data?['isOnDuty'] ?? false;
-    bool gpsLoading = false;
-    bool showPass   = existing == null; // visible by default for new pharmacies
+    bool isOnDuty = data?['isOnDuty'] ?? false;
+    bool showPass = existing == null; // visible by default for new pharmacies
+    String? selectedCityId = data?['cityId'] as String?;
+    String? selectedCityName = data?['cityName'] as String?;
+    List<DeliveryZone> availableCities = const [];
+    final citiesFuture = _loadReferenceCities();
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text(existing == null ? 'Ajouter une pharmacie' : 'Modifier la pharmacie'),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(existing == null
+              ? 'Ajouter une pharmacie'
+              : 'Modifier la pharmacie'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 _field(nameCtrl, 'Nom de la pharmacie', Icons.local_pharmacy),
                 const SizedBox(height: 10),
-                _field(addressCtrl, 'Adresse (quartier / rue)', Icons.location_on),
+                _field(
+                    addressCtrl, 'Adresse (quartier / rue)', Icons.location_on),
                 const SizedBox(height: 10),
                 _field(phoneCtrl, 'Téléphone', Icons.phone,
                     type: TextInputType.phone),
@@ -45,85 +55,69 @@ class AdminPharmaciesPage extends StatelessWidget {
                 _field(hoursCtrl, 'Horaires (ex: 08h–22h)', Icons.access_time),
                 const SizedBox(height: 10),
 
-                // GPS fields
-                Row(
-                  children: [
-                    Expanded(
-                      child: _field(latCtrl, 'Latitude', Icons.gps_fixed,
-                          type: const TextInputType.numberWithOptions(
-                              decimal: true, signed: true)),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _field(lngCtrl, 'Longitude', Icons.gps_not_fixed,
-                          type: const TextInputType.numberWithOptions(
-                              decimal: true, signed: true)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: gpsLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.my_location, size: 18),
-                    label: Text(gpsLoading ? 'Localisation...' : 'Ma position GPS'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red.shade700,
-                      side: BorderSide(color: Colors.red.shade200),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: gpsLoading
-                        ? null
-                        : () async {
-                            setS(() => gpsLoading = true);
-                            try {
-                              bool svc =
-                                  await Geolocator.isLocationServiceEnabled();
-                              if (!svc) {
-                                setS(() => gpsLoading = false);
-                                if (!ctx.mounted) return;
-                                ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(
-                                      content: Text('GPS désactivé sur cet appareil')));
-                                return;
-                              }
-                              LocationPermission perm =
-                                  await Geolocator.checkPermission();
-                              if (perm == LocationPermission.denied) {
-                                perm = await Geolocator.requestPermission();
-                              }
-                              if (perm == LocationPermission.denied ||
-                                  perm == LocationPermission.deniedForever) {
-                                setS(() => gpsLoading = false);
-                                if (!ctx.mounted) return;
-                                ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          'Permission GPS refusée. Activez-la dans les paramètres.')));
-                                return;
-                              }
-                              final pos = await Geolocator.getCurrentPosition();
-                              setS(() {
-                                latCtrl.text = pos.latitude.toStringAsFixed(6);
-                                lngCtrl.text = pos.longitude.toStringAsFixed(6);
-                                gpsLoading = false;
-                              });
-                            } catch (_) {
-                              setS(() => gpsLoading = false);
-                              if (!ctx.mounted) return;
-                              ScaffoldMessenger.of(ctx).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Impossible d\'obtenir la position GPS')));
-                            }
+                FutureBuilder<List<DeliveryZone>>(
+                  future: citiesFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: LinearProgressIndicator(),
+                      );
+                    }
+                    availableCities = snapshot.data ?? const [];
+                    final validSelection = availableCities.any(
+                      (city) => city.cityId == selectedCityId,
+                    );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: validSelection ? selectedCityId : null,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Ville *',
+                            prefixIcon: Icon(Icons.location_city_outlined),
+                          ),
+                          items: availableCities
+                              .where((city) => city.cityId != null)
+                              .map(
+                                (city) => DropdownMenuItem(
+                                  value: city.cityId,
+                                  child: Text(
+                                    city.name ?? city.cityId!,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (cityId) {
+                            final city = availableCities.firstWhere(
+                              (candidate) => candidate.cityId == cityId,
+                            );
+                            setS(() {
+                              selectedCityId = city.cityId;
+                              selectedCityName = city.name ?? city.cityId;
+                            });
                           },
-                  ),
+                        ),
+                        if (!validSelection && existing != null) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Ville à renseigner',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                      ],
+                    );
+                  },
+                ),
+                PartnerLocationInput(
+                  latitudeController: latCtrl,
+                  longitudeController: lngCtrl,
                 ),
 
                 const SizedBox(height: 14),
@@ -147,8 +141,7 @@ class AdminPharmaciesPage extends StatelessWidget {
                         controller: passCtrl,
                         obscureText: !showPass,
                         style: const TextStyle(
-                            letterSpacing: 1.5,
-                            fontWeight: FontWeight.w600),
+                            letterSpacing: 1.5, fontWeight: FontWeight.w600),
                         decoration: InputDecoration(
                           hintText: existing == null
                               ? 'Mot de passe temporaire'
@@ -172,8 +165,8 @@ class AdminPharmaciesPage extends StatelessWidget {
                     Tooltip(
                       message: 'Copier',
                       child: IconButton(
-                        icon: const Icon(Icons.copy_rounded,
-                            color: Colors.grey),
+                        icon:
+                            const Icon(Icons.copy_rounded, color: Colors.grey),
                         onPressed: () {
                           final p = passCtrl.text.trim();
                           if (p.isEmpty) return;
@@ -253,22 +246,41 @@ class AdminPharmaciesPage extends StatelessWidget {
                 child: const Text('Annuler')),
             ScaleButton(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white),
+                  backgroundColor: Colors.red, foregroundColor: Colors.white),
               onPressed: () async {
                 if (nameCtrl.text.trim().isEmpty) return;
+                final selectedCities = availableCities
+                    .where((city) => city.cityId == selectedCityId)
+                    .toList(growable: false);
+                if (selectedCities.length != 1 ||
+                    selectedCityName == null ||
+                    selectedCityName!.trim().isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                    content: Text('Sélectionnez une ville valide.'),
+                  ));
+                  return;
+                }
                 final newPass = passCtrl.text.trim();
                 // Le mot de passe ne transite plus jamais par une écriture
                 // Firestore directe — uniquement via setPharmaciePassword()
                 // (Cloud Function, hachage côté serveur).
+                final locationError = PartnerLocationValidator.validateText(
+                    latCtrl.text, lngCtrl.text);
+                if (locationError != null) {
+                  ScaffoldMessenger.of(ctx)
+                      .showSnackBar(SnackBar(content: Text(locationError)));
+                  return;
+                }
                 final payload = <String, dynamic>{
-                  'name':     nameCtrl.text.trim(),
-                  'address':  addressCtrl.text.trim(),
-                  'phone':    phoneCtrl.text.trim(),
-                  'hours':    hoursCtrl.text.trim(),
+                  'name': nameCtrl.text.trim(),
+                  'address': addressCtrl.text.trim(),
+                  'phone': phoneCtrl.text.trim(),
+                  'hours': hoursCtrl.text.trim(),
                   'isOnDuty': isOnDuty,
-                  'lat': double.tryParse(latCtrl.text.trim()) ?? 0.0,
-                  'lng': double.tryParse(lngCtrl.text.trim()) ?? 0.0,
+                  'cityId': selectedCityId,
+                  'cityName': selectedCityName,
+                  'lat': double.parse(latCtrl.text.trim()),
+                  'lng': double.parse(lngCtrl.text.trim()),
                 };
 
                 String pharmacieId;
@@ -289,7 +301,8 @@ class AdminPharmaciesPage extends StatelessWidget {
                     ? (newPass.isNotEmpty ? newPass : _generatePassword())
                     : (newPass.isNotEmpty ? newPass : null);
                 if (passwordToSet != null) {
-                  final fn = FirebaseFunctions.instanceFor(region: 'europe-west1');
+                  final fn =
+                      FirebaseFunctions.instanceFor(region: 'europe-west1');
                   await fn.httpsCallable('setPharmaciePassword').call({
                     'pharmacieId': pharmacieId,
                     'newPassword': passwordToSet,
@@ -306,6 +319,22 @@ class AdminPharmaciesPage extends StatelessWidget {
     );
   }
 
+  Future<List<DeliveryZone>> _loadReferenceCities() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('zones_livraison')
+        .where('type', isEqualTo: 'ville')
+        .where('isActive', isEqualTo: true)
+        .where('isServiceable', isEqualTo: true)
+        .limit(100)
+        .get();
+    final cities = snapshot.docs
+        .map((document) => DeliveryZone.fromMap(document.id, document.data()))
+        .where((city) => city.cityId != null && city.name?.trim().isNotEmpty == true)
+        .toList()
+      ..sort((left, right) => left.name!.compareTo(right.name!));
+    return cities;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -315,6 +344,17 @@ class AdminPharmaciesPage extends StatelessWidget {
         backgroundColor: Colors.red.shade700,
         foregroundColor: Colors.white,
         centerTitle: true,
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const AdminPharmacyGuardsPage()),
+            ),
+            icon: const Icon(Icons.calendar_month_rounded, color: Colors.white),
+            label: const Text('Gardes', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: Colors.red.shade700,
@@ -358,16 +398,17 @@ class AdminPharmaciesPage extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             itemCount: docs.length,
             itemBuilder: (context, i) {
-              final doc    = docs[i];
-              final data   = doc.data() as Map<String, dynamic>;
+              final doc = docs[i];
+              final data = doc.data() as Map<String, dynamic>;
               final onDuty = data['isOnDuty'] ?? false;
               // Le mot de passe (haché) vit désormais dans pharmacie_credentials,
               // illisible depuis le client par design — la création exige toujours
               // d'en définir un, donc ce badge reste informatif (vrai par défaut)
               // plutôt que de dépendre d'un champ qui n'existe plus ici.
-              final hasPass = ((data['password'] as String?) ?? '').isNotEmpty ||
-                  ((data['accessCode'] as String?) ?? '').isNotEmpty ||
-                  !data.containsKey('password');
+              final hasPass =
+                  ((data['password'] as String?) ?? '').isNotEmpty ||
+                      ((data['accessCode'] as String?) ?? '').isNotEmpty ||
+                      !data.containsKey('password');
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -384,89 +425,103 @@ class AdminPharmaciesPage extends StatelessWidget {
                   ],
                 ),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    ListTile(
-                      contentPadding:
-                          const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                      leading: Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: (onDuty ? Colors.red : Colors.grey)
-                              .withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Icon(Icons.local_pharmacy,
-                            color: onDuty
-                                ? Colors.red.shade700
-                                : Colors.grey,
-                            size: 26),
-                      ),
-                      title: Text(data['name'] ?? '—',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15)),
-                      subtitle: Column(
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 10, 4),
+                      child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(data['address'] ?? '',
-                              style: const TextStyle(fontSize: 12)),
-                          Text(data['phone'] ?? '',
-                              style: TextStyle(
-                                  color: Colors.blue.shade700,
-                                  fontSize: 12)),
-                          if ((data['hours'] ?? '').isNotEmpty)
-                            Text('🕐 ${data['hours']}',
-                                style: const TextStyle(fontSize: 11)),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Icon(
-                                hasPass
-                                    ? Icons.lock_rounded
-                                    : Icons.lock_open_rounded,
-                                size: 12,
+                          Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: (onDuty ? Colors.red : Colors.grey)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(Icons.local_pharmacy,
                                 color:
-                                    hasPass ? Colors.green : Colors.orange,
+                                    onDuty ? Colors.red.shade700 : Colors.grey,
+                                size: 26),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(data['name'] ?? '—',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15)),
+                                Text(data['address'] ?? '',
+                                    style: const TextStyle(fontSize: 12)),
+                                Text(data['phone'] ?? '',
+                                    style: TextStyle(
+                                        color: Colors.blue.shade700,
+                                        fontSize: 12)),
+                                if ((data['hours'] ?? '').isNotEmpty)
+                                  Text('🕐 ${data['hours']}',
+                                      style: const TextStyle(fontSize: 11)),
+                                const SizedBox(height: 2),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      hasPass
+                                          ? Icons.lock_rounded
+                                          : Icons.lock_open_rounded,
+                                      size: 12,
+                                      color: hasPass
+                                          ? Colors.green
+                                          : Colors.orange,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        hasPass
+                                            ? 'Accès configuré'
+                                            : 'Aucun mot de passe',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: hasPass
+                                                ? Colors.green
+                                                : Colors.orange),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Switch(
+                                value: onDuty,
+                                activeThumbColor: Colors.red,
+                                onChanged: (_) =>
+                                    doc.reference.update({'isOnDuty': !onDuty}),
                               ),
-                              const SizedBox(width: 4),
                               Text(
-                                hasPass
-                                    ? 'Accès configuré'
-                                    : 'Aucun mot de passe',
+                                onDuty ? 'De garde' : 'Fermée',
                                 style: TextStyle(
-                                    fontSize: 11,
-                                    color: hasPass
-                                        ? Colors.green
-                                        : Colors.orange),
+                                  fontSize: 10,
+                                  color: onDuty ? Colors.red : Colors.grey,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ],
-                          ),
-                        ],
-                      ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Switch(
-                            value: onDuty,
-                            activeThumbColor: Colors.red,
-                            onChanged: (_) => doc.reference
-                                .update({'isOnDuty': !onDuty}),
-                          ),
-                          Text(
-                            onDuty ? 'De garde' : 'Fermée',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: onDuty ? Colors.red : Colors.grey,
-                              fontWeight: FontWeight.bold,
-                            ),
                           ),
                         ],
                       ),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 4,
+                        runSpacing: 4,
                         children: [
                           TextButton.icon(
                             onPressed: () =>
@@ -482,8 +537,8 @@ class AdminPharmaciesPage extends StatelessWidget {
                             icon: const Icon(Icons.delete_outline,
                                 size: 16, color: Colors.red),
                             label: const Text('Supprimer',
-                                style: TextStyle(
-                                    color: Colors.red, fontSize: 12)),
+                                style:
+                                    TextStyle(color: Colors.red, fontSize: 12)),
                           ),
                         ],
                       ),
@@ -499,7 +554,8 @@ class AdminPharmaciesPage extends StatelessWidget {
   }
 
   void _confirmDelete(BuildContext context, DocumentSnapshot doc) {
-    final name = (doc.data() as Map<String, dynamic>)['name'] ?? 'cette pharmacie';
+    final name =
+        (doc.data() as Map<String, dynamic>)['name'] ?? 'cette pharmacie';
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -527,8 +583,7 @@ class AdminPharmaciesPage extends StatelessWidget {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 String _generatePassword() {
-  const chars =
-      'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   final rand = Random.secure();
   return List.generate(8, (_) => chars[rand.nextInt(chars.length)]).join();
 }
@@ -542,8 +597,7 @@ Widget _field(TextEditingController ctrl, String label, IconData icon,
       labelText: label,
       prefixIcon: Icon(icon),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     ),
   );
 }

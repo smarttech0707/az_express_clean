@@ -1,16 +1,22 @@
-﻿import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import '../services/firestore_service.dart';
 import '../theme/app_theme.dart';
+import 'app_snack.dart';
 
 class RatingDialog extends StatefulWidget {
   final String orderId;
   final String driverName;
 
+  /// Injection de test uniquement ; en production : `FirestoreService.rateOrder`.
+  final Future<void> Function(String orderId, int rating)? submit;
+
   const RatingDialog({
     super.key,
     required this.orderId,
     required this.driverName,
+    this.submit,
   });
 
   @override
@@ -20,23 +26,56 @@ class RatingDialog extends StatefulWidget {
 class _RatingDialogState extends State<RatingDialog> {
   int _selected = 0;
   bool _sending = false;
+  String? _error;
 
   static const _labels = [
-    "", "Très mauvais", "Mauvais", "Correct", "Bien", "Excellent !"
+    "",
+    "Très mauvais",
+    "Mauvais",
+    "Correct",
+    "Bien",
+    "Excellent !"
   ];
 
+  static String _messageFor(Object error) {
+    if (error is FirebaseException && error.code == 'permission-denied') {
+      return "Cette commande ne peut pas être notée (livraison non terminée "
+          "ou déjà notée).";
+    }
+    return "Impossible d'enregistrer votre note. Vérifiez votre connexion "
+        "et réessayez.";
+  }
+
   Future<void> _submit() async {
-    if (_selected == 0) return;
-    setState(() => _sending = true);
-    await FirestoreService().rateOrder(widget.orderId, _selected);
-    if (mounted) Navigator.of(context).pop();
+    if (_selected == 0 || _sending) return;
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+    try {
+      final send = widget.submit ?? FirestoreService().rateOrder;
+      await send(widget.orderId, _selected);
+    } catch (e) {
+      // Sans ce garde, une écriture refusée laissait le bouton en chargement
+      // indéfiniment, sans aucun message.
+      if (mounted) {
+        setState(() {
+          _sending = false;
+          _error = _messageFor(e);
+        });
+      }
+      return;
+    }
+    if (!mounted) return;
+    AppSnack.show(context, 'Merci pour votre note !',
+        type: AppSnackType.success);
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -46,14 +85,12 @@ class _RatingDialogState extends State<RatingDialog> {
             const SizedBox(height: 12),
             const Text(
               "Livraison effectuée !",
-              style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             Text(
               "Comment était ${widget.driverName} ?",
-              style:
-                  const TextStyle(color: Colors.grey, fontSize: 14),
+              style: const TextStyle(color: Colors.grey, fontSize: 14),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
@@ -66,12 +103,9 @@ class _RatingDialogState extends State<RatingDialog> {
                 return GestureDetector(
                   onTap: () => setState(() => _selected = star),
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: Icon(
-                      star <= _selected
-                          ? Icons.star
-                          : Icons.star_border,
+                      star <= _selected ? Icons.star : Icons.star_border,
                       color: Colors.amber,
                       size: 40,
                     ),
@@ -89,6 +123,21 @@ class _RatingDialogState extends State<RatingDialog> {
               ),
             ],
 
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.errorText(Theme.of(context).brightness),
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+
             const SizedBox(height: 20),
 
             Row(
@@ -102,9 +151,7 @@ class _RatingDialogState extends State<RatingDialog> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: ScaleButton(
-                    onPressed: (_selected == 0 || _sending)
-                        ? null
-                        : _submit,
+                    onPressed: (_selected == 0 || _sending) ? null : _submit,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,

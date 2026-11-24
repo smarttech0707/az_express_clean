@@ -1,7 +1,7 @@
 name: az_express
 description: AZ Express - Livraison express et services de proximité à Abengourou
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.10+11
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -11,6 +11,12 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
+
+  # QR/PIN delivery proof UI (disabled by default)
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.2.0
 
   # UI
   cupertino_icons: ^1.0.2
@@ -45,6 +51,9 @@ dependencies:
   # Navigation GPS externe
   url_launcher: ^6.3.0
 
+  # Partage natif (fiche Immobilier — Mission 9 "Activation UI carte/itinéraire")
+  share_plus: ^10.1.4
+
   # Cryptographie
   crypto: ^3.0.3
 
@@ -78,6 +87,11 @@ dependencies:
   flutter_native_splash: ^2.4.0
   firebase_app_check: ^0.4.5
 
+# M2.7.2 : copie locale de flutter_foreground_task 8.17.0 sans plateforme iOS (voir third_party/flutter_foreground_task/AZ_PROVENANCE.md).
+dependency_overrides:
+  flutter_foreground_task:
+    path: third_party/flutter_foreground_task
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -90,6 +104,9 @@ flutter:
     - assets/logo.png
     - assets/motorbike.png
     - assets/payment/
+    # Urbanist embarquée (SIL OFL 1.1, voir OFL.txt) : textes corrects hors
+    # ligne. google_fonts les trouve par leur nom avant tout téléchargement.
+    - assets/google_fonts/
 
 
 # ------------------------------

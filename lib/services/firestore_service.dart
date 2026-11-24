@@ -1,11 +1,12 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:math';
+import '../models/decline_order_result.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import '../models/order_model.dart';
 import '../models/driver_earnings_summary.dart';
 
 class FirestoreService {
-
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
   // ==============================
@@ -13,9 +14,9 @@ class FirestoreService {
   // ==============================
 
   // Commission tiered : 100 FCFA pour 500-1000 FCFA, 200 FCFA au-delà
-  static int _commissionBasic    = 100; // courses 500–1000 FCFA
+  static int _commissionBasic = 100; // courses 500–1000 FCFA
   static int _commissionStandard = 200; // courses > 1000 FCFA
-  static int _threshold          = 1000;
+  static int _threshold = 1000;
 
   /// Charge la config commission depuis Firestore (appelé au démarrage).
   Future<void> loadCommissionConfig() async {
@@ -23,12 +24,12 @@ class FirestoreService {
       final doc = await db.collection('config').doc('commission').get();
       if (doc.exists) {
         final data = doc.data()!;
-        final basic    = data['commissionBasic'];
+        final basic = data['commissionBasic'];
         final standard = data['commissionStandard'];
-        final thresh   = data['threshold'];
-        if (basic    != null) _commissionBasic    = (basic    as num).toInt();
+        final thresh = data['threshold'];
+        if (basic != null) _commissionBasic = (basic as num).toInt();
         if (standard != null) _commissionStandard = (standard as num).toInt();
-        if (thresh   != null) _threshold          = (thresh   as num).toInt();
+        if (thresh != null) _threshold = (thresh as num).toInt();
       }
     } catch (_) {}
   }
@@ -45,9 +46,12 @@ class FirestoreService {
   // CRÉER COMMANDE
   // ==============================
 
-  Future<void> createOrder(OrderModel order) async {
+  Future<void> createOrder(OrderModel order,
+      {bool alreadyCreated = false}) async {
     final orderRef = db.collection("orders").doc(order.id);
-    await orderRef.set(order.toMap());
+    if (!alreadyCreated) {
+      await orderRef.set(order.toMap());
+    }
     // Tente l'assignation auto du livreur le plus proche.
     // Volontairement non bloquant pour la création de commande (déjà réussie
     // à ce stade) — mais l'échec est désormais loggé plutôt qu'avalé en
@@ -55,8 +59,8 @@ class FirestoreService {
     // laissait jusqu'ici la commande "pending" sans aucune trace exploitable
     // avant l'expiration automatique 10 min plus tard (autoExpireOrders).
     try {
-      await findNearestDriver(
-          order.latitude, order.longitude, order.id, budget: order.budget);
+      await findNearestDriver(order.latitude, order.longitude, order.id,
+          budget: order.budget);
     } catch (e) {
       debugPrint('[FirestoreService.createOrder] dispatch initial échoué pour '
           '${order.id} : $e — la commande reste pending, '
@@ -128,9 +132,9 @@ class FirestoreService {
         .limit(1)
         .snapshots()
         .map((snap) {
-      if (snap.docs.isEmpty) return null;
-      return OrderModel.fromMap(snap.docs.first.id, snap.docs.first.data());
-    });
+          if (snap.docs.isEmpty) return null;
+          return OrderModel.fromMap(snap.docs.first.id, snap.docs.first.data());
+        });
   }
 
   /// Nombre de livraisons complétées par ce livreur (count aggregation — no doc reads)
@@ -160,13 +164,13 @@ class FirestoreService {
   Future<bool> findNearestDriver(
       double clientLat, double clientLng, String orderId,
       {int budget = 0, double radiusKm = 2.0}) async {
-    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
-        .httpsCallable(
-          'dispatchOrderToDriver',
-          options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
-        );
+    final callable =
+        FirebaseFunctions.instanceFor(region: 'europe-west1').httpsCallable(
+      'dispatchOrderToDriver',
+      options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+    );
     final result = await callable.call(<String, dynamic>{
-      'orderId':  orderId,
+      'orderId': orderId,
       'radiusKm': radiusKm,
     });
     final data = Map<String, dynamic>.from(result.data as Map);
@@ -177,113 +181,31 @@ class FirestoreService {
   // ACCEPTER COMMANDE
   // ==============================
 
+  /// Accepte une course via la Cloud Function `acceptOrderCF`.
+  ///
+  /// La commission (100 FCFA sous 1 000 FCFA, 200 FCFA au-delà), le contrôle du
+  /// portefeuille et le débit sont faits par le SERVEUR, dans une seule
+  /// transaction : aucun montant de portefeuille ne vient du client. Un rejeu
+  /// (double tap) ne débite pas deux fois. Les erreurs gardent leur message
+  /// (ex. `CREDIT_INSUFFISANT:<solde>:<commission>`) pour l'interface livreur.
   Future<void> acceptOrder(
     String orderId,
     String driverId, {
     String? acceptanceSelfieUrl,
     String? driverPhotoUrl,
   }) async {
-    final orderRef  = db.collection("orders").doc(orderId);
-    final driverRef = db.collection("livreurs").doc(driverId);
-
-    String? commissionDescription;
-    int     commissionAmount = 0;
-    List<String> otherDriverIds = [];
-
-    await db.runTransaction((transaction) async {
-      final orderSnapshot  = await transaction.get(orderRef);
-      final driverSnapshot = await transaction.get(driverRef);
-
-      if (!orderSnapshot.exists || !driverSnapshot.exists) return;
-
-      final orderData = orderSnapshot.data() as Map<String, dynamic>;
-      final status    = orderData["status"] as String? ?? '';
-
-      // Accepte à la fois les assignations directes et les broadcasts
-      if (status != "assigned" && status != "broadcast") return;
-
-      // Ré-vérification à l'acceptation : dispatchOrder() (functions/dispatch.js)
-      // exclut déjà les livreurs suspendus/hors-ligne/déjà en course au moment
-      // de l'OFFRE, mais rien ne re-vérifiait ces mêmes conditions au moment de
-      // l'ACCEPTATION — un livreur notifié avant d'être suspendu (ou passé
-      // hors-ligne, ou déjà occupé par une autre course acceptée entre-temps)
-      // pouvait donc encore accepter. Fenêtre étroite mais réelle.
-      //
-      // Correctif 2026-07-19 : `driverSnapshot["champ"]` (operator [] de
-      // DocumentSnapshot) appelle .get("champ") en interne, qui lève un
-      // StateError ("field ... does not exist within the
-      // DocumentSnapshotPlatform") si le champ est absent — le `as bool? ??
-      // false` qui suit ne protège jamais contre ça, l'exception part avant
-      // que le `??` ne puisse s'appliquer. Confirmé en production : les
-      // livreurs approuvés via le flux standard (driver_requests_page.dart)
-      // n'ont jamais `isSuspended`/`isAvailable` à la création (déjà
-      // documenté CLAUDE.md), donc CHAQUE première acceptation d'un nouveau
-      // livreur faisait planter cette transaction. Corrigé en passant par
-      // `.data()` (un Map, dont l'opérateur [] retourne bien `null` sur une
-      // clé absente, sans exception) avant de lire les champs individuels.
-      final driverData = driverSnapshot.data() ?? {};
-      final bool driverSuspended  = driverData["isSuspended"]  as bool? ?? false;
-      final bool driverOnline     = driverData["isOnline"]     as bool? ?? false;
-      final bool driverOnDelivery = driverData["isOnDelivery"] as bool? ?? false;
-      if (driverSuspended) {
-        throw Exception("Votre compte a été suspendu, vous ne pouvez plus accepter de commandes.");
-      }
-      if (!driverOnline) {
-        throw Exception("Vous devez être en ligne pour accepter une commande.");
-      }
-      if (driverOnDelivery) {
-        throw Exception("Vous avez déjà une livraison en cours.");
-      }
-
-      final int price      = (orderData["budget"] as num? ?? 0).toInt();
-      commissionAmount     = calculateCommission(price);
-
-      final int wallet = (driverSnapshot["wallet"] as num? ?? 0).toInt();
-      if (wallet < commissionAmount) {
-        throw Exception("CREDIT_INSUFFISANT:$wallet:$commissionAmount");
-      }
-
-      // Livreurs à notifier de l'annulation (pour broadcast)
-      final notified  = List<String>.from(orderData["notifiedDriverIds"] as List? ?? []);
-      otherDriverIds  = notified.where((id) => id != driverId).toList();
-
-      // Commission déduite + flag isOnDelivery
-      transaction.update(driverRef, {
-        "wallet":       wallet - commissionAmount,
-        "isOnDelivery": true,
+    // driverId est conservé pour les appelants existants : le serveur utilise
+    // l'identité authentifiée.
+    try {
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('acceptOrderCF')
+          .call(<String, dynamic>{
+        'orderId': orderId,
+        if (acceptanceSelfieUrl != null) 'acceptanceSelfieUrl': acceptanceSelfieUrl,
+        if (driverPhotoUrl != null) 'driverPhotoUrl': driverPhotoUrl,
       });
-
-      transaction.update(orderRef, {
-        "status":   "accepted",
-        "driverId": driverId,
-        "notifiedDriverIds": FieldValue.delete(),
-        if (acceptanceSelfieUrl != null) "driverAcceptanceSelfie": acceptanceSelfieUrl,
-        if (driverPhotoUrl      != null) "driverPhotoUrl":         driverPhotoUrl,
-      });
-
-      commissionDescription =
-          "Commission AZ Express — course ${orderData['description']?.toString().split('\n').first ?? ''} ($price FCFA)";
-    });
-
-    // Effacer pendingOrderId chez les autres livreurs notifiés
-    if (otherDriverIds.isNotEmpty) {
-      final batch = db.batch();
-      for (final id in otherDriverIds) {
-        batch.update(db.collection("livreurs").doc(id), {
-          "pendingOrderId": FieldValue.delete(),
-        });
-      }
-      await batch.commit();
-    }
-
-    if (commissionAmount > 0 && commissionDescription != null) {
-      await _logTransaction(
-        driverId,
-        "commission",
-        commissionAmount,
-        commissionDescription!,
-        orderId: orderId,
-      );
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(e.message ?? 'Acceptation impossible');
     }
   }
 
@@ -291,62 +213,31 @@ class FirestoreService {
   // REFUSER COMMANDE (Yango-style)
   // ==============================
 
-  /// Refus d'une course par [driverId].
-  /// — Broadcast : retire ce livreur de notifiedDriverIds + efface pendingOrderId.
-  ///   Si dernier livreur → reset pending + re-cherche à rayon élargi.
-  /// — Assignation directe : reset pending + re-cherche.
-  Future<void> declineOrder(String orderId, String driverId) async {
-    final orderRef  = db.collection("orders").doc(orderId);
-    final driverRef = db.collection("livreurs").doc(driverId);
-
-    // Effacer pendingOrderId chez ce livreur immédiatement
-    await driverRef.update({"pendingOrderId": FieldValue.delete()});
-
-    List<String> remaining = [];
-    String currentStatus   = '';
-
-    await db.runTransaction((tx) async {
-      final snap = await tx.get(orderRef);
-      if (!snap.exists) return;
-      final data    = snap.data()!;
-      currentStatus = data["status"] as String? ?? '';
-
-      if (currentStatus == "broadcast") {
-        final notified = List<String>.from(data["notifiedDriverIds"] as List? ?? []);
-        remaining = notified.where((id) => id != driverId).toList();
-
-        if (remaining.isEmpty) {
-          // Tous ont refusé → reset
-          tx.update(orderRef, {
-            "status":            "pending",
-            "notifiedDriverIds": FieldValue.delete(),
-          });
-        } else {
-          // D'autres attendent encore
-          tx.update(orderRef, {"notifiedDriverIds": remaining});
-        }
-      } else if (currentStatus == "assigned") {
-        // Assignation directe refusée
-        tx.update(orderRef, {
-          "status":   "pending",
-          "driverId": FieldValue.delete(),
-        });
-      }
-    });
-
-    // Si plus aucun livreur disponible → re-chercher à rayon plus large
-    if (remaining.isEmpty &&
-        (currentStatus == "broadcast" || currentStatus == "assigned")) {
-      final snap = await orderRef.get();
-      if (!snap.exists) return;
-      final d = snap.data()!;
-      await findNearestDriver(
-        (d["latitude"]  ?? 0).toDouble(),
-        (d["longitude"] ?? 0).toDouble(),
-        orderId,
-        budget:   (d["budget"] as num? ?? 0).toInt(),
-        radiusKm: 5.0,
-      );
+  /// Refuse une mission assignée via la Cloud Function sécurisée.
+  /// Le serveur vérifie le livreur connecté et gère la récupération du dispatch.
+  Future<DeclineOrderResult> declineOrder(String orderId, String driverId) async {
+    // driverId est conservé pour les appelants existants.
+    final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('declineLegacyOrderCF');
+    final response = await callable.call(<String, dynamic>{'orderId': orderId});
+    return DeclineOrderResult.fromData(response.data);
+  }
+  /// Libère une course acceptée mais PAS encore récupérée (transfert, cas 1).
+  ///
+  /// Le serveur rembourse une seule fois la commission du livreur, remet la
+  /// commande en file avec le même identifiant et le même prix, puis relance
+  /// l'attribution sans ce livreur. [reason] : `vehicle_problem`, `emergency`,
+  /// `too_far`, `customer_unreachable` ou `other`. Une course avec avance
+  /// d'achat n'est pas libérable automatiquement (message `SHOPPING_BUDGET_REVIEW`).
+  Future<bool> releaseOrderBeforePickup(String orderId, String reason) async {
+    try {
+      final response = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('releaseOrderBeforePickupCF')
+          .call(<String, dynamic>{'orderId': orderId, 'reason': reason});
+      final data = response.data;
+      return data is Map && data['success'] == true;
+    } on FirebaseFunctionsException catch (e) {
+      throw Exception(e.message ?? 'Libération impossible');
     }
   }
 
@@ -415,17 +306,17 @@ class FirestoreService {
   /// vérifie que l'appelant est bien le livreur assigné ; [driverId]/[price]
   /// restent dans la signature pour ne pas casser l'appelant
   /// (driver_dashboard.dart) mais sont ignorés côté serveur.
-  Future<void> deliverOrder(
-      String orderId, String driverId, int price,
-      {bool markCashPaid = false,
-       double? deliveredLat,
-       double? deliveredLng,
-       String? deliveryPhotoUrl}) async {
+  Future<void> deliverOrder(String orderId, String driverId, int price,
+      {bool? markCashPaid = false,
+      double? deliveredLat,
+      double? deliveredLng,
+      String? deliveryPhotoUrl}) async {
     final callable = FirebaseFunctions.instanceFor(region: 'europe-west1')
         .httpsCallable('deliverOrderCF');
     await callable.call(<String, dynamic>{
       'orderId': orderId,
-      'markCashPaid': markCashPaid,
+      // null = aucune déclaration de paiement (commande v2 : le non-paiement se signale ensuite avec un motif).
+      if (markCashPaid != null) 'markCashPaid': markCashPaid,
       if (deliveredLat != null) 'deliveredLat': deliveredLat,
       if (deliveredLng != null) 'deliveredLng': deliveredLng,
       if (deliveryPhotoUrl != null) 'deliveryPhotoUrl': deliveryPhotoUrl,
@@ -440,22 +331,6 @@ class FirestoreService {
   // TRANSACTIONS WALLET
   // ==============================
 
-  Future<void> _logTransaction(
-      String driverId, String type, int amount, String description,
-      {String? orderId}) async {
-    await db
-        .collection("livreurs")
-        .doc(driverId)
-        .collection("wallet_transactions")
-        .add({
-      "type": type,
-      "amount": amount,
-      "description": description,
-      "orderId": orderId,
-      "createdAt": Timestamp.now(),
-    });
-  }
-
   Stream<QuerySnapshot> walletTransactions(String driverId) {
     return db
         .collection("livreurs")
@@ -466,51 +341,44 @@ class FirestoreService {
         .snapshots();
   }
 
-  Future<void> rechargeDriverWallet(String driverId, int amount,
-      {String adminNote = "Rechargé par l'admin"}) async {
-    final driverRef = db.collection("livreurs").doc(driverId);
-    await db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(driverRef);
-      if (!snapshot.exists) return;
-      final wallet = (snapshot["wallet"] as num? ?? 0).toInt();
-      transaction.update(driverRef, {"wallet": wallet + amount});
+  /// Clé de confirmation d'une recharge manuelle : à générer UNE fois quand l'admin confirme le montant, puis à
+  /// réutiliser telle quelle si l'appel est rejoué (double appui, reprise réseau) — le serveur ne crédite qu'une fois.
+  static String newRechargeKey() {
+    final random = Random.secure();
+    return List.generate(24, (_) => random.nextInt(16).toRadixString(16)).join();
+  }
+
+  /// Recharge manuelle du portefeuille d'un livreur après remise d'espèces au bureau. Passe par la Cloud Function
+  /// `adminDriverRechargeCF` (autorisation admin, plafond configurable, idempotence, audit) : aucune écriture
+  /// directe du solde depuis l'application. Retourne le nouveau solde.
+  Future<int> rechargeDriverWallet(String driverId, int amount,
+      {String adminNote = '', required String idempotencyKey}) async {
+    if (amount <= 0) throw ArgumentError('Montant de recharge invalide');
+    final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable('adminDriverRechargeCF')
+        .call({
+      'driverId': driverId,
+      'amount': amount,
+      'idempotencyKey': idempotencyKey,
+      if (adminNote.trim().isNotEmpty) 'note': adminNote.trim(),
     });
-    await _logTransaction(driverId, "recharge", amount, adminNote);
+    final data = (result.data as Map?)?['data'] as Map?;
+    return (data?['newBalance'] as num?)?.toInt() ?? 0;
   }
 
   Future<void> assignDriverToFleet(
       String driverId, String ownerId, String ownerName) async {
     await db.collection('livreurs').doc(driverId).update({
-      'ownerId':   ownerId,
+      'ownerId': ownerId,
       'ownerName': ownerName,
     });
   }
 
   Future<void> makeDriverIndependent(String driverId) async {
     await db.collection('livreurs').doc(driverId).update({
-      'ownerId':   FieldValue.delete(),
+      'ownerId': FieldValue.delete(),
       'ownerName': FieldValue.delete(),
     });
-  }
-
-  Future<void> deductCommission(String driverId, int price,
-      {String? orderId}) async {
-    int commission = calculateCommission(price);
-    final driverRef = db.collection("livreurs").doc(driverId);
-    await db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(driverRef);
-      if (!snapshot.exists) return;
-      int wallet = (snapshot["wallet"] as num? ?? 0).toInt();
-      int newWallet = (wallet - commission).clamp(0, double.maxFinite.toInt());
-      transaction.update(driverRef, {"wallet": newWallet});
-    });
-    await _logTransaction(
-      driverId,
-      "commission",
-      commission,
-      "Commission AZ Express — course à $price FCFA",
-      orderId: orderId,
-    );
   }
 
   // ==============================
@@ -560,23 +428,18 @@ class FirestoreService {
   // NOTATION
   // ==============================
 
+  /// Enregistre la note du client sur sa commande livrée.
+  ///
+  /// Le client ne peut écrire que `rating` sur sa propre commande (règles
+  /// Firestore). La moyenne du livreur (`avgRating`/`ratingCount`) est mise à
+  /// jour côté serveur par `applyDriverRatingOnOrderUpdate` : l'ancienne
+  /// transaction écrivait aussi `livreurs/{id}`, refusé par les règles, ce qui
+  /// faisait échouer toute la notation.
   Future<void> rateOrder(String orderId, int rating) async {
-    final orderRef = db.collection("orders").doc(orderId);
-    await db.runTransaction((tx) async {
-      final orderSnap = await tx.get(orderRef);
-      if (!orderSnap.exists) return;
-      final driverId = orderSnap.data()?['driverId'] as String?;
-      tx.update(orderRef, {'rating': rating});
-      if (driverId != null) {
-        final driverRef = db.collection("livreurs").doc(driverId);
-        final driverSnap = await tx.get(driverRef);
-        final currentAvg   = (driverSnap.data()?['avgRating']   as num? ?? 0).toDouble();
-        final currentCount = (driverSnap.data()?['ratingCount'] as num? ?? 0).toInt();
-        final newCount = currentCount + 1;
-        final newAvg   = double.parse(((currentAvg * currentCount + rating) / newCount).toStringAsFixed(1));
-        tx.update(driverRef, {'avgRating': newAvg, 'ratingCount': newCount});
-      }
-    });
+    if (rating < 1 || rating > 5) {
+      throw ArgumentError.value(rating, 'rating', 'doit être entre 1 et 5');
+    }
+    await db.collection("orders").doc(orderId).update({'rating': rating});
   }
 
   // ==============================
@@ -594,12 +457,10 @@ class FirestoreService {
   // STATS LIVREUR (patron de flotte)
   // ==============================
 
-  Future<DriverEarningsSummary> driverEarningsSummary(
-      String driverId) async {
+  Future<DriverEarningsSummary> driverEarningsSummary(String driverId) async {
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
-    final weekStart =
-        todayStart.subtract(Duration(days: now.weekday - 1));
+    final weekStart = todayStart.subtract(Duration(days: now.weekday - 1));
     final monthStart = DateTime(now.year, now.month, 1);
 
     final snap = await db
@@ -701,9 +562,12 @@ class FirestoreService {
 
   String _col(String userType) {
     switch (userType) {
-      case 'driver': return 'livreurs';
-      case 'seller': return 'sellers';
-      default: return 'clients';
+      case 'driver':
+        return 'livreurs';
+      case 'seller':
+        return 'sellers';
+      default:
+        return 'clients';
     }
   }
 
@@ -749,25 +613,13 @@ class FirestoreService {
     });
   }
 
-  Future<void> approveRecharge(
-      String requestId, String userId, String userType, int amount, String method) async {
-    final colName = _col(userType);
-    final batch = db.batch();
-    batch.update(db.collection('recharge_requests').doc(requestId), {
-      'status': 'approved',
-      'approvedAt': FieldValue.serverTimestamp(),
-    });
-    batch.update(db.collection(colName).doc(userId), {
-      'wallet': FieldValue.increment(amount),
-    });
-    final txRef = db.collection(colName).doc(userId).collection('wallet_transactions').doc();
-    batch.set(txRef, {
-      'type': 'recharge',
-      'amount': amount,
-      'description': 'Recharge ${method == "wave" ? "Wave" : "Orange Money"} — $amount FCFA',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-    await batch.commit();
+  /// Approuve une demande de recharge via `adminApproveRechargeCF` : le serveur relit le statut, le montant
+  /// et le compte dans la demande elle-même (les paramètres ci-dessous ne sont conservés que pour ne pas
+  /// casser l'appelant et ne sont PAS envoyés), ne crédite qu'une fois et journalise. Aucune écriture directe
+  /// du solde d'un autre utilisateur depuis l'application.
+  Future<void> approveRecharge(String requestId, String userId, String userType,
+      int amount, String method) async {
+    await _callWalletRequestCF('adminApproveRechargeCF', requestId);
   }
 
   Future<void> rejectRecharge(String requestId) async {
@@ -777,60 +629,74 @@ class FirestoreService {
     });
   }
 
-  /// Admin confirme un retrait → débite le wallet et marque comme traité.
+  /// Admin confirme le règlement manuel d'un retrait (pending_manual → processed) via
+  /// adminApproveWithdrawalCF. Le wallet a DÉJÀ été débité à la création de la demande
+  /// (initiateWithdrawal) : l'ancienne version débitait une seconde fois. Le serveur ne touche à aucun solde.
   Future<void> approveWithdrawal(
       String requestId, String userId, String userType, int amount) async {
-    final colName = _col(userType);
-    final userRef  = db.collection(colName).doc(userId);
+    await _callWalletRequestCF('adminApproveWithdrawalCF', requestId);
+  }
 
-    final batch = db.batch();
-    batch.update(db.collection('withdrawal_requests').doc(requestId), {
-      'status':      'processed',
-      'processedAt': FieldValue.serverTimestamp(),
-    });
-    // Débiter le wallet de l'utilisateur
-    batch.update(userRef, {'wallet': FieldValue.increment(-amount)});
-    // Logger la transaction
-    final txRef = userRef.collection('wallet_transactions').doc();
-    batch.set(txRef, {
-      'type':        'withdrawal',
-      'amount':      amount,
-      'description': 'Retrait approuvé — $amount FCFA',
-      'createdAt':   FieldValue.serverTimestamp(),
-    });
-    await batch.commit();
+  /// Appel commun des approbations admin ; l'enveloppe {success, code, message} est convertie en erreur lisible.
+  Future<void> _callWalletRequestCF(String name, String requestId) async {
+    final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+        .httpsCallable(name)
+        .call(<String, dynamic>{'requestId': requestId});
+    final body = result.data;
+    if (body is Map && body['success'] == false) {
+      throw StateError(body['message']?.toString() ?? 'Opération refusée');
+    }
   }
 
   /// Admin rejette un retrait pending_manual → rembourse le wallet (déjà débité).
+  ///
+  /// Idempotent : le remboursement n'a lieu que si la demande est encore en
+  /// attente de traitement manuel et n'a pas déjà été remboursée. Sans ce
+  /// garde-fou, un second appel (double tap, reprise réseau) recréditait une
+  /// nouvelle fois le wallet — un double remboursement bien réel.
+  /// Une transaction remplace le batch : la lecture du statut et l'écriture
+  /// doivent être atomiques pour que deux appels simultanés se sérialisent.
   Future<void> rejectWithdrawal(String requestId) async {
-    final wdSnap = await db.collection('withdrawal_requests').doc(requestId).get();
-    if (!wdSnap.exists) return;
-    final data = wdSnap.data()!;
-    final userId   = data['userId']   as String?;
-    final userType = data['userType'] as String? ?? 'client';
-    final amount   = (data['amount']  as num?)?.toInt() ?? 0;
-    final colName  = _col(userType);
+    final wdRef = db.collection('withdrawal_requests').doc(requestId);
+    await db.runTransaction((tx) async {
+      final wdSnap = await tx.get(wdRef);
+      if (!wdSnap.exists) return;
+      final data = wdSnap.data()!;
 
-    final batch = db.batch();
-    batch.update(db.collection('withdrawal_requests').doc(requestId), {
-      'status': 'rejected',
-      'rejectedAt': FieldValue.serverTimestamp(),
+      final status = data['status'] as String?;
+      final alreadyRefunded = data['refunded'] == true;
+      // Seule une demande encore en traitement manuel peut être remboursée :
+      // un retrait déjà envoyé, rejeté ou compensé ne doit jamais l'être.
+      if (alreadyRefunded || status != 'pending_manual') return;
+
+      final userId = data['userId'] as String?;
+      final userType = data['userType'] as String? ?? 'client';
+      final amount = (data['amount'] as num?)?.toInt() ?? 0;
+      final colName = _col(userType);
+
+      tx.update(wdRef, {
+        'status': 'rejected',
+        'refunded': userId != null && amount > 0,
+        'rejectedAt': FieldValue.serverTimestamp(),
+      });
+      if (userId != null && amount > 0) {
+        tx.update(db.collection(colName).doc(userId), {
+          'wallet': FieldValue.increment(amount),
+        });
+        final txRef = db
+            .collection(colName)
+            .doc(userId)
+            .collection('wallet_transactions')
+            .doc();
+        tx.set(txRef, {
+          'type': 'refund',
+          'amount': amount,
+          'description': 'Remboursement retrait rejeté — $amount FCFA',
+          'withdrawId': requestId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
     });
-    if (userId != null && amount > 0) {
-      batch.update(db.collection(colName).doc(userId), {
-        'wallet': FieldValue.increment(amount),
-      });
-      final txRef = db.collection(colName).doc(userId)
-          .collection('wallet_transactions').doc();
-      batch.set(txRef, {
-        'type': 'refund',
-        'amount': amount,
-        'description': 'Remboursement retrait rejeté — $amount FCFA',
-        'withdrawId': requestId,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-    }
-    await batch.commit();
   }
 
   Stream<QuerySnapshot> pendingRecharges() => db
@@ -853,4 +719,3 @@ class FirestoreService {
       .where('status', isEqualTo: status)
       .snapshots();
 }
-

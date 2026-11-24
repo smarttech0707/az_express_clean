@@ -1,7 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import '../../services/partner_approval_service.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../utils/partner_location_validator.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminRestaurantRequestsPage extends StatefulWidget {
   const AdminRestaurantRequestsPage({super.key});
@@ -29,45 +32,42 @@ class _AdminRestaurantRequestsPageState
   }
 
   Future<void> _approve(String uid, Map<String, dynamic> data) async {
+    final latitude = (data['lat'] as num?)?.toDouble();
+    final longitude = (data['lng'] as num?)?.toDouble();
+    final locationError =
+        PartnerLocationValidator.validate(latitude, longitude);
+    if (locationError != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(locationError), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
     final db = FirebaseFirestore.instance;
 
-    // Create restaurant document
-    final restoRef = db.collection('restaurants').doc();
-    final restoId  = restoRef.id;
-
-    final batch = db.batch();
-
-    batch.set(restoRef, {
-      'id':             restoId,
-      'name':           data['restaurantName'] ?? '',
-      'ownerName':      data['ownerName'] ?? '',
-      'phone':          data['phone'] ?? '',
-      'address':        data['address'] ?? '',
-      'category':       data['category'] ?? '',
-      'lat':            data['lat'] ?? 0.0,
-      'lng':            data['lng'] ?? 0.0,
-      'isOpen':         false,
-      'isActive':       true,
-      'createdAt':      FieldValue.serverTimestamp(),
-    });
-
-    // Create owner record
-    batch.set(db.collection('restaurant_owners').doc(uid), {
-      'uid':          uid,
-      'restaurantId': restoId,
-      'phone':        data['phone'] ?? '',
-      'ownerName':    data['ownerName'] ?? '',
-      'createdAt':    FieldValue.serverTimestamp(),
-    });
-
-    // Update request status
-    batch.update(db.collection('restaurant_requests').doc(uid), {
-      'status':     'approved',
-      'approvedAt': FieldValue.serverTimestamp(),
-      'restaurantId': restoId,
-    });
-
-    await batch.commit();
+    try {
+      await approvePartnerOnce(db:db,requestCollection:'restaurant_requests',requestId:uid,collection:'restaurants',idField:'restaurantId',profile:{
+      'name': data['restaurantName'] ?? '',
+      'ownerName': data['ownerName'] ?? '',
+      'phone': data['phone'] ?? '',
+      'address': data['address'] ?? '',
+      'category': data['category'] ?? '',
+      'lat': latitude,
+      'lng': longitude,
+      'isOpen': false,
+      'isActive': true,
+      'createdAt': FieldValue.serverTimestamp(),
+      },ownerProfile:{
+      'uid': uid,
+      'phone': data['phone'] ?? '',
+      'ownerName': data['ownerName'] ?? '',
+      'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Approbation non confirmee. Verifiez la liaison existante.')));
+      return;
+    }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -93,8 +93,7 @@ class _AdminRestaurantRequestsPageState
               child: const Text('Annuler')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Refuser',
-                style: TextStyle(color: Colors.red)),
+            child: const Text('Refuser', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -104,7 +103,8 @@ class _AdminRestaurantRequestsPageState
     await FirebaseFirestore.instance
         .collection('restaurant_requests')
         .doc(uid)
-        .update({'status': 'rejected', 'rejectedAt': FieldValue.serverTimestamp()});
+        .update(
+            {'status': 'rejected', 'rejectedAt': FieldValue.serverTimestamp()});
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -126,15 +126,10 @@ class _AdminRestaurantRequestsPageState
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
         centerTitle: true,
-        bottom: TabBar(
+        bottom: AzTabBar(
+          labels: const ['En attente', 'Traitées'],
           controller: _tabCtrl,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          tabs: const [
-            Tab(text: 'En attente'),
-            Tab(text: 'Traitées'),
-          ],
+          backgroundColor: const Color(0xFF1565C0),
         ),
       ),
       body: TabBarView(
@@ -181,8 +176,9 @@ class _RequestsList extends StatelessWidget {
       // "Traitées" tab: approved + rejected
       query = FirebaseFirestore.instance
           .collection('restaurant_requests')
-          .where('status', whereIn: ['approved', 'rejected'])
-          .orderBy('createdAt', descending: true);
+          .where('status', whereIn: ['approved', 'rejected']).orderBy(
+              'createdAt',
+              descending: true);
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -210,14 +206,14 @@ class _RequestsList extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           itemCount: docs.length,
           itemBuilder: (context, i) {
-            final doc  = docs[i];
+            final doc = docs[i];
             final data = doc.data() as Map<String, dynamic>;
             return _RequestCard(
               uid: doc.id,
               data: data,
               onApprove: () => onApprove(doc.id, data),
-              onReject:  () => onReject(doc.id,
-                  data['restaurantName'] ?? 'ce restaurant'),
+              onReject: () =>
+                  onReject(doc.id, data['restaurantName'] ?? 'ce restaurant'),
             );
           },
         );
@@ -243,17 +239,23 @@ class _RequestCard extends StatelessWidget {
 
   Color get _statusColor {
     switch (data['status']) {
-      case 'approved': return const Color(0xFF2E7D32);
-      case 'rejected': return const Color(0xFFC62828);
-      default:         return const Color(0xFFFF8F00);
+      case 'approved':
+        return const Color(0xFF2E7D32);
+      case 'rejected':
+        return const Color(0xFFC62828);
+      default:
+        return const Color(0xFFFF8F00);
     }
   }
 
   String get _statusLabel {
     switch (data['status']) {
-      case 'approved': return 'Approuvé';
-      case 'rejected': return 'Refusé';
-      default:         return 'En attente';
+      case 'approved':
+        return 'Approuvé';
+      case 'rejected':
+        return 'Refusé';
+      default:
+        return 'En attente';
     }
   }
 
@@ -272,7 +274,8 @@ class _RequestCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: isPending
             ? Border.all(
-                color: const Color(0xFFFF8F00).withValues(alpha: 0.5), width: 1.5)
+                color: const Color(0xFFFF8F00).withValues(alpha: 0.5),
+                width: 1.5)
             : null,
         boxShadow: [
           BoxShadow(
@@ -319,8 +322,8 @@ class _RequestCard extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: _statusColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
@@ -364,8 +367,7 @@ class _RequestCard extends StatelessWidget {
                       ),
                       child: Text('Refuser',
                           style: GoogleFonts.urbanist(
-                              color: Colors.red,
-                              fontWeight: FontWeight.w600)),
+                              color: Colors.red, fontWeight: FontWeight.w600)),
                     ),
                   ),
                   const SizedBox(width: 12),

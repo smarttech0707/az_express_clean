@@ -225,7 +225,7 @@ test('approveRealEstateAgentRequest: rejects a non-admin caller', async () => {
 
 test('approveRealEstateAgentRequest: approving creates the agent and marks the request approved', async () => {
   const { fns, store } = buildFns({
-    'admins/admin1': { isActive: true },
+    'admins/admin1': { role: 'super', isActive: true },
     'real_estate_agent_requests/req1': { uid: 'agentUid1', name: 'Agence X', phone: '070000000', status: 'pending' },
   });
   const result = await fns.approveRealEstateAgentRequest.run({
@@ -240,10 +240,26 @@ test('approveRealEstateAgentRequest: approving creates the agent and marks the r
 
 test('approveRealEstateAgentRequest: rejecting does not create an agent', async () => {
   const { fns, store } = buildFns({
-    'admins/admin1': { isActive: true },
+    'admins/admin1': { role: 'super', isActive: true },
     'real_estate_agent_requests/req1': { uid: 'agentUid1', name: 'Agence X', phone: '070000000', status: 'pending' },
   });
   await fns.approveRealEstateAgentRequest.run({ auth: { uid: 'admin1' }, data: { requestId: 'req1', decision: 'reject' } });
   assert.equal(store.get('real_estate_agent_requests/req1').status, 'rejected');
   assert.equal(store.get('real_estate_agents/agentUid1'), undefined);
+});
+
+test('approveRealEstateAgentRequest: rejects a sub-admin and a disabled super-admin', async () => {
+  for (const admin of [
+    { role: 'sub', isActive: true, permissions: ['ekbine'] },
+    { role: 'super', isActive: false },
+  ]) {
+    const { fns } = buildFns({
+      'admins/admin1': admin,
+      'real_estate_agent_requests/req1': { uid: 'u1', name: 'Agence X', phone: '070000000', status: 'pending' },
+    });
+    await assert.rejects(
+      () => fns.approveRealEstateAgentRequest.run({ auth: { uid: 'admin1' }, data: { requestId: 'req1', decision: 'approve' } }),
+      (err) => err.code === 'permission-denied',
+    );
+  }
 });

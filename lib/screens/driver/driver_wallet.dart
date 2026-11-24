@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../services/firestore_service.dart';
@@ -91,8 +91,7 @@ class DriverWallet extends StatelessWidget {
                         const SizedBox(height: 12),
                         const Text(
                           "Crédit disponible",
-                          style:
-                              TextStyle(color: Colors.white70, fontSize: 13),
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                         const SizedBox(height: 4),
                         Row(
@@ -120,12 +119,13 @@ class DriverWallet extends StatelessWidget {
                         const SizedBox(height: 16),
                         Row(
                           children: [
-                            _miniStat(Icons.arrow_downward,
-                                "Rechargé", "$totalRecharge FCFA",
-                                Colors.greenAccent),
+                            _miniStat(Icons.arrow_downward, "Rechargé",
+                                "$totalRecharge FCFA", Colors.greenAccent),
                             const SizedBox(width: 24),
-                            _miniStat(Icons.arrow_upward,
-                                "Commissions", "$totalCommission FCFA",
+                            _miniStat(
+                                Icons.arrow_upward,
+                                "Commissions",
+                                "$totalCommission FCFA",
                                 Colors.redAccent.shade100),
                           ],
                         ),
@@ -152,10 +152,9 @@ class DriverWallet extends StatelessWidget {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(20)),
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 10),
+                                      borderRadius: BorderRadius.circular(20)),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 10),
                                 ),
                               ),
                             ),
@@ -180,10 +179,9 @@ class DriverWallet extends StatelessWidget {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(20)),
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 10),
+                                      borderRadius: BorderRadius.circular(20)),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 10),
                                 ),
                               ),
                             ),
@@ -195,8 +193,7 @@ class DriverWallet extends StatelessWidget {
 
                   // ── TITRE HISTORIQUE ────────────────────────
                   const Padding(
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -218,7 +215,7 @@ class DriverWallet extends StatelessWidget {
                           )
                         : ListView.builder(
                             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(
+                            padding: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 4),
                             itemCount: transactions.length,
                             itemBuilder: (context, i) {
@@ -237,8 +234,7 @@ class DriverWallet extends StatelessWidget {
     );
   }
 
-  Widget _miniStat(
-      IconData icon, String label, String value, Color color) {
+  Widget _miniStat(IconData icon, String label, String value, Color color) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -247,8 +243,7 @@ class DriverWallet extends StatelessWidget {
             Icon(icon, color: color, size: 13),
             const SizedBox(width: 4),
             Text(label,
-                style:
-                    const TextStyle(color: Colors.white70, fontSize: 11)),
+                style: const TextStyle(color: Colors.white70, fontSize: 11)),
           ],
         ),
         Text(value,
@@ -282,9 +277,7 @@ class _TransactionTile extends StatelessWidget {
     final amount = (data["amount"] as num? ?? 0).toInt();
     final description = data["description"] ?? "";
     final ts = data["createdAt"];
-    final date = ts != null
-        ? (ts as Timestamp).toDate()
-        : DateTime.now();
+    final date = ts != null ? (ts as Timestamp).toDate() : DateTime.now();
 
     final isRecharge = type == "recharge";
 
@@ -294,9 +287,7 @@ class _TransactionTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 4)
-        ],
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
       ),
       child: Row(
         children: [
@@ -305,9 +296,7 @@ class _TransactionTile extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: isRecharge
-                  ? Colors.green.shade50
-                  : Colors.red.shade50,
+              color: isRecharge ? Colors.green.shade50 : Colors.red.shade50,
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -331,8 +320,7 @@ class _TransactionTile extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   _formatDate(date),
-                  style: const TextStyle(
-                      color: Colors.grey, fontSize: 11),
+                  style: const TextStyle(color: Colors.grey, fontSize: 11),
                 ),
               ],
             ),

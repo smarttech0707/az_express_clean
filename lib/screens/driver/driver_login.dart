@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -57,7 +58,8 @@ class _DriverLoginState extends State<DriverLogin> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => DriverDashboard(driverId: user.uid, driverName: driverName),
+            builder: (_) =>
+                DriverDashboard(driverId: user.uid, driverName: driverName),
           ),
         );
         return;
@@ -89,14 +91,14 @@ class _DriverLoginState extends State<DriverLogin> {
       // 1. Déterminer l'email Firebase Auth
       final authEmail = await AuthService().getDriverAuthEmail(id);
       if (authEmail == null) {
-        _snack("Identifiant introuvable. Vérifiez vos informations.", Colors.red);
+        _snack(
+            "Identifiant introuvable. Vérifiez vos informations.", Colors.red);
         setState(() => _loading = false);
         return;
       }
 
       // 2. Connexion Firebase Auth
-      final credential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: authEmail,
         password: pass,
       );
@@ -119,7 +121,9 @@ class _DriverLoginState extends State<DriverLogin> {
             .get();
 
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
 
         if (!mounted) return;
         setState(() => _loading = false);
@@ -186,7 +190,10 @@ class _DriverLoginState extends State<DriverLogin> {
     if (_autoResuming) {
       return const Scaffold(
         backgroundColor: Color(0xFFF5F5F5),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF167DB7))),
+        body: BackOverlay(
+            color: Color(0xFF167DB7),
+            child: Center(
+                child: CircularProgressIndicator(color: Color(0xFF167DB7)))),
       );
     }
     return Scaffold(
@@ -241,7 +248,7 @@ class _DriverLoginState extends State<DriverLogin> {
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 16),
@@ -252,25 +259,31 @@ class _DriverLoginState extends State<DriverLogin> {
                 labelText: "Mot de passe",
                 prefixIcon: const Icon(Icons.lock),
                 suffixIcon: IconButton(
-                  icon: Icon(
-                      _showPass ? Icons.visibility_off : Icons.visibility),
+                  icon:
+                      Icon(_showPass ? Icons.visibility_off : Icons.visibility),
                   onPressed: () => setState(() => _showPass = !_showPass),
                 ),
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 4),
             Align(
               alignment: Alignment.centerRight,
               child: GestureDetector(
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const ForgotPasswordPage())),
+                onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const ForgotPasswordPage(
+                              role: AccountRecoveryRole.driver,
+                            ))),
                 child: const Text('Mot de passe oublié ?',
-                    style: TextStyle(color: Color(0xFF167DB7),
-                        fontSize: 13, fontWeight: FontWeight.w600)),
+                    style: TextStyle(
+                        color: Color(0xFF167DB7),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
               ),
             ),
             const SizedBox(height: 24),

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -37,8 +37,8 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('clients').doc(uid).get();
+      final doc =
+          await FirebaseFirestore.instance.collection('clients').doc(uid).get();
       final bal = (doc.data()?['wallet'] as num? ?? 0).toInt();
       if (mounted) setState(() => _clientWalletDisplay = _fmt(bal));
     } catch (_) {}
@@ -100,11 +100,11 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
             onPressed: () => Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const EkAgentDashboard())),
             icon: Container(
-              width: 8, height: 8,
+              width: 8,
+              height: 8,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: ek.myAgent?.isOnline == true
-                    ? kEkGreen : Colors.grey,
+                color: ek.myAgent?.isOnline == true ? kEkGreen : Colors.grey,
               ),
             ),
             label: Text('Agent',
@@ -151,13 +151,11 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
             decoration: BoxDecoration(
               color: kEkGreen.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                  color: kEkGreen.withValues(alpha: 0.4)),
+              border: Border.all(color: kEkGreen.withValues(alpha: 0.4)),
             ),
             child: Column(children: [
               Text('Wallet',
-                  style: GoogleFonts.urbanist(
-                      fontSize: 10, color: kEkGreen)),
+                  style: GoogleFonts.urbanist(fontSize: 10, color: kEkGreen)),
               Text(_clientWalletDisplay!,
                   style: GoogleFonts.urbanist(
                     fontSize: 14,
@@ -179,9 +177,7 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
           child: Text('Choisir un opérateur',
               style: GoogleFonts.urbanist(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: kEkText)),
+                  fontSize: 15, fontWeight: FontWeight.w700, color: kEkText)),
         ),
         SizedBox(
           height: 90,
@@ -190,7 +186,7 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             children: ekOperators.map((op) {
               final color = Color(op['color'] as int);
-              final bg    = Color(op['bg'] as int);
+              final bg = Color(op['bg'] as int);
               return GestureDetector(
                 onTap: () => _goToOrderForm(op['id'] as String),
                 child: Container(
@@ -199,12 +195,12 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
                   decoration: BoxDecoration(
                     color: bg,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: color.withValues(alpha: 0.3)),
+                    border: Border.all(color: color.withValues(alpha: 0.3)),
                     boxShadow: [
                       BoxShadow(
                         color: color.withValues(alpha: 0.1),
-                        blurRadius: 8, offset: const Offset(0, 3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
                       )
                     ],
                   ),
@@ -215,7 +211,9 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
                         borderRadius: BorderRadius.circular(8),
                         child: Image.asset(
                           op['logo'] as String,
-                          width: 42, height: 42, fit: BoxFit.contain,
+                          width: 42,
+                          height: 42,
+                          fit: BoxFit.contain,
                           errorBuilder: (_, __, ___) => Text(
                             op['emoji'] as String,
                             style: const TextStyle(fontSize: 28),
@@ -243,10 +241,18 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
   // ── Quick action buttons ──────────────────────────────────────────────────
   Widget _buildQuickActions() {
     final actions = [
-      {'label': 'Crédit',    'icon': Icons.phone_rounded,           'color': 0xFFFF6600},
-      {'label': 'Internet',  'icon': Icons.wifi_rounded,             'color': 0xFF005EB8},
-      {'label': 'Mobile\nMoney', 'icon': Icons.account_balance_wallet_rounded, 'color': 0xFF00C853},
-      {'label': 'Transfert', 'icon': Icons.swap_horiz_rounded,       'color': 0xFFFFBB00},
+      {'label': 'Crédit', 'icon': Icons.phone_rounded, 'color': 0xFFFF6600},
+      {'label': 'Internet', 'icon': Icons.wifi_rounded, 'color': 0xFF005EB8},
+      {
+        'label': 'Mobile\nMoney',
+        'icon': Icons.account_balance_wallet_rounded,
+        'color': 0xFF00C853
+      },
+      {
+        'label': 'Transfert',
+        'icon': Icons.swap_horiz_rounded,
+        'color': 0xFFFFBB00
+      },
     ];
 
     return Padding(
@@ -256,7 +262,8 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
           final color = Color(a['color'] as int);
           return Expanded(
             child: GestureDetector(
-              onTap: () => _goToOrderForm(null, serviceHint: a['label'] as String),
+              onTap: () =>
+                  _goToOrderForm(null, serviceHint: a['label'] as String),
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -280,8 +287,8 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
                         color: color.withValues(alpha: 0.12),
                         shape: BoxShape.circle,
                       ),
-                      child: Icon(a['icon'] as IconData,
-                          color: color, size: 20),
+                      child:
+                          Icon(a['icon'] as IconData, color: color, size: 20),
                     ),
                     const SizedBox(height: 6),
                     Text(a['label'] as String,
@@ -313,7 +320,8 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
             padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
             child: Row(children: [
               Container(
-                width: 8, height: 8,
+                width: 8,
+                height: 8,
                 decoration: const BoxDecoration(
                     color: kEkGreen, shape: BoxShape.circle),
               ),
@@ -340,8 +348,8 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
         child: GestureDetector(
           onTap: () {
             if (!isLoggedIn) {
-              Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => const ClientAuthPage()));
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const ClientAuthPage()));
               return;
             }
             Navigator.push(context,
@@ -404,8 +412,8 @@ class _EkHomeScreenState extends State<EkHomeScreen> {
   void _goToOrderForm(String? operatorId, {String? serviceHint}) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.isAnonymous) {
-      Navigator.push(context,
-          MaterialPageRoute(builder: (_) => const ClientAuthPage()));
+      Navigator.push(
+          context, MaterialPageRoute(builder: (_) => const ClientAuthPage()));
       return;
     }
     Navigator.push(
@@ -428,7 +436,7 @@ class _ActiveOrderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final statusColor = ekStatusColor(order.status);
-    final opColor     = EkService.operatorColor(order.operator);
+    final opColor = EkService.operatorColor(order.operator);
 
     return GestureDetector(
       onTap: () => Navigator.push(context,
@@ -441,13 +449,14 @@ class _ActiveOrderCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: statusColor.withValues(alpha: 0.3)),
           boxShadow: const [
-            BoxShadow(color: Color(0x08000000), blurRadius: 6,
-                offset: Offset(0, 2))
+            BoxShadow(
+                color: Color(0x08000000), blurRadius: 6, offset: Offset(0, 2))
           ],
         ),
         child: Row(children: [
           Container(
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: opColor.withValues(alpha: 0.12),
               shape: BoxShape.circle,
@@ -456,9 +465,7 @@ class _ActiveOrderCard extends StatelessWidget {
               child: Text(
                 order.operator[0].toUpperCase(),
                 style: GoogleFonts.urbanist(
-                    color: opColor,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800),
+                    color: opColor, fontSize: 18, fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -473,8 +480,7 @@ class _ActiveOrderCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: kEkText)),
                 Text(order.beneficiaryNumber,
-                    style: GoogleFonts.urbanist(
-                        fontSize: 12, color: kEkMuted)),
+                    style: GoogleFonts.urbanist(fontSize: 12, color: kEkMuted)),
               ],
             ),
           ),
@@ -486,8 +492,7 @@ class _ActiveOrderCard extends StatelessWidget {
                     color: kEkGreen)),
             const SizedBox(height: 4),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: statusColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
@@ -516,4 +521,3 @@ String _fmt(int price) {
   }
   return '${buf.toString()} F';
 }
-

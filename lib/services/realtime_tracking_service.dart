@@ -16,66 +16,77 @@ import 'google_routes_service.dart';
 /// - Expose [animatedDriverPos] pour affichage fluide.
 /// - Notifie les widgets via [ChangeNotifier].
 class RealtimeTrackingService extends ChangeNotifier {
-
   // ── Paramètres ─────────────────────────────────────────────────────────────
-  final String  _driverId;
-  final LatLng  _clientPosition;  // point de récupération (référence originale)
+  final String _driverId;
+  final LatLng _clientPosition; // point de récupération (référence originale)
   final LatLng? _destination;
 
   // ── Cible active (peut changer après picked_up) ────────────────────────────
-  LatLng? _overrideTarget; // non-null → remplace _clientPosition pour le routage
+  LatLng?
+      _overrideTarget; // non-null → remplace _clientPosition pour le routage
 
   LatLng get _effectiveTarget => _overrideTarget ?? _clientPosition;
 
   // ── État courant ────────────────────────────────────────────────────────────
   DriverLocationModel? _driverLocation;
-  LatLng?              _animatedPos;
-  double               _animatedHeading = 0;
-  RouteModel           _routeToClient   = RouteModel.empty();
-  RouteModel           _routeToDest     = RouteModel.empty();
-  bool                 _routeLoading    = false;
-  bool                 _followDriver    = true;
-  DateTime             _lastUpdateTime  = DateTime(2000);
+  LatLng? _animatedPos;
+  double _animatedHeading = 0;
+  RouteModel _routeToClient = RouteModel.empty();
+  RouteModel _routeToDest = RouteModel.empty();
+  int _routeRevision = 0;
+  bool _routeLoading = false;
+  bool _followDriver = true;
+  bool _isAnimating = false;
+  DateTime _lastUpdateTime = DateTime(2000);
 
   // ── Internes ───────────────────────────────────────────────────────────────
-  bool     _disposed   = false;
+  bool _disposed = false;
   StreamSubscription<DocumentSnapshot>? _firestoreSub;
-  Timer?   _animTimer;
-  LatLng?  _animFrom;
-  LatLng?  _animTo;
-  double   _headingFrom = 0;
-  double   _headingTo   = 0;
+  Timer? _animTimer;
+  LatLng? _animFrom;
+  LatLng? _animTo;
+  double _headingFrom = 0;
+  double _headingTo = 0;
   DateTime _animStart = DateTime.now();
-  static const _animDurationMs   = 1600;
+  static const _animDurationMs = 1600;
   // Seuil déviation itinéraire relevé de 80m→200m pour limiter les appels Directions API
   static const _recalcThresholdM = 200.0;
-  static const _minMoveMeters    = 5.0;
+  static const _minMoveMeters = 5.0;
   DateTime _lastRouteCalc = DateTime(2000);
 
   // ── Getters publics ────────────────────────────────────────────────────────
-  DriverLocationModel? get driverLocation   => _driverLocation;
-  LatLng               get clientPosition   => _clientPosition;
-  LatLng?              get destination      => _destination;
-  RouteModel           get routeToClient    => _routeToClient;
-  RouteModel           get routeToDest      => _routeToDest;
-  bool                 get routeLoading     => _routeLoading;
-  bool                 get followDriver     => _followDriver;
-  LatLng?              get animatedDriverPos => _animatedPos;
-  double               get animatedHeading  => _animatedHeading;
-  DateTime             get lastUpdateTime   => _lastUpdateTime;
+  DriverLocationModel? get driverLocation => _driverLocation;
+  LatLng get clientPosition => _clientPosition;
+  LatLng? get destination => _destination;
+  RouteModel get routeToClient => _routeToClient;
+  RouteModel get routeToDest => _routeToDest;
+  int get routeRevision => _routeRevision;
+  bool get routeLoading => _routeLoading;
+  bool get followDriver => _followDriver;
+  bool get isAnimating => _isAnimating;
+  LatLng? get animatedDriverPos => _animatedPos;
+  double get animatedHeading => _animatedHeading;
+  DateTime get lastUpdateTime => _lastUpdateTime;
 
-  bool get hasDriver     => _driverLocation != null;
-  bool get hasDest       => _destination    != null;
-  int  get totalEta      => _routeToClient.etaMinutes + _routeToDest.etaMinutes;
+  bool get hasDriver => _driverLocation != null;
+  bool get hasDest => _destination != null;
+  int get totalEta => _routeToClient.etaMinutes + _routeToDest.etaMinutes;
   double get totalDistKm => _routeToClient.distanceKm + _routeToDest.distanceKm;
-  int  get totalPrice    => _routeToClient.estimatedPrice;
+  int get totalPrice => _routeToClient.estimatedPrice;
+
+  /// `true` quand un tronçon affiché n'est pas un itinéraire routier réel
+  /// (ligne droite de repli) : l'écran doit le signaler près de la durée.
+  bool get routeIsEstimate =>
+      (_routeToClient.isNotEmpty && _routeToClient.isEstimate) ||
+      (_routeToDest.isNotEmpty && _routeToDest.isEstimate);
 
   /// Bascule la cible de routage vers la destination de livraison.
   /// Appelé quand le statut commande passe à `picked_up`.
   void switchToDelivery(LatLng deliveryDest) {
     _overrideTarget = deliveryDest;
-    _routeToDest    = RouteModel.empty();
-    _lastRouteCalc  = DateTime(2000); // force recalc immédiat
+    _routeToDest = RouteModel.empty();
+    _routeRevision++;
+    _lastRouteCalc = DateTime(2000); // force recalc immédiat
     notifyListeners();
     if (_driverLocation != null) {
       _calculateRoutes(_driverLocation!.latLng);
@@ -84,12 +95,12 @@ class RealtimeTrackingService extends ChangeNotifier {
 
   // ── Constructeur ───────────────────────────────────────────────────────────
   RealtimeTrackingService({
-    required String  driverId,
-    required LatLng  clientPosition,
-    LatLng?          destination,
-  })  : _driverId       = driverId,
+    required String driverId,
+    required LatLng clientPosition,
+    LatLng? destination,
+  })  : _driverId = driverId,
         _clientPosition = clientPosition,
-        _destination    = destination {
+        _destination = destination {
     _startFirestoreListener();
   }
 
@@ -102,8 +113,12 @@ class RealtimeTrackingService extends ChangeNotifier {
   void _startFirestoreListener() {
     // Ne rien écouter si pas encore de livreur assigné (évite doc path vide)
     if (_driverId.isEmpty) return;
+    // SEC-01 / S6.2 : tous les champs consommés par `DriverLocationModel.fromMap`
+    // (lat/lng/heading/speed/updatedAt/isOnline/name/photoUrl) sont dans la
+    // projection publique `driver_public` → plus besoin de la collection
+    // privée `livreurs` pour ce suivi.
     _firestoreSub = FirebaseFirestore.instance
-        .collection('livreurs')
+        .collection('driver_public')
         .doc(_driverId)
         .snapshots()
         .listen(_onFirestoreUpdate, onError: (_) {});
@@ -125,16 +140,18 @@ class RealtimeTrackingService extends ChangeNotifier {
     if (prev != null && _animatedPos != null) {
       // Ne pas re-animer si le livreur n'a pas vraiment bougé
       final moved = Geolocator.distanceBetween(
-        prev.latitude, prev.longitude,
-        newLoc.latitude, newLoc.longitude,
+        prev.latitude,
+        prev.longitude,
+        newLoc.latitude,
+        newLoc.longitude,
       );
       if (moved >= _minMoveMeters) {
-        _startAnimation(_animatedPos!, newLoc.latLng, _animatedHeading, newLoc.heading);
+        _startAnimation(
+            _animatedPos!, newLoc.latLng, _animatedHeading, newLoc.heading);
       }
     } else {
-      _animatedPos     = newLoc.latLng;
+      _animatedPos = newLoc.latLng;
       _animatedHeading = newLoc.heading;
-      _startAnimation(newLoc.latLng, newLoc.latLng, newLoc.heading, newLoc.heading);
     }
 
     notifyListeners();
@@ -144,8 +161,8 @@ class RealtimeTrackingService extends ChangeNotifier {
     final secsSinceCalc = now.difference(_lastRouteCalc).inSeconds;
 
     // Recalcule si 1ère fois, ou toutes les 120s, ou déviation importante (>200m)
-    final shouldRecalc = !hasDriver || secsSinceCalc >= 120 ||
-        _isOffRoute(newLoc.latLng);
+    final shouldRecalc =
+        !hasDriver || secsSinceCalc >= 120 || _isOffRoute(newLoc.latLng);
 
     if (shouldRecalc && !_routeLoading) {
       _lastRouteCalc = now;
@@ -159,8 +176,10 @@ class RealtimeTrackingService extends ChangeNotifier {
     double minDist = double.infinity;
     for (final point in _routeToClient.points) {
       final d = Geolocator.distanceBetween(
-        driverPos.latitude, driverPos.longitude,
-        point.latitude,     point.longitude,
+        driverPos.latitude,
+        driverPos.longitude,
+        point.latitude,
+        point.longitude,
       );
       if (d < minDist) minDist = d;
     }
@@ -169,17 +188,21 @@ class RealtimeTrackingService extends ChangeNotifier {
 
   // ── Animation du marqueur (16ms = ~60fps) ──────────────────────────────────
   void _startAnimation(LatLng from, LatLng to, double fromH, double toH) {
-    _animFrom     = from;
-    _animTo       = to;
-    _headingFrom  = fromH;
-    _headingTo    = toH;
-    _animStart    = DateTime.now();
+    _animFrom = from;
+    _animTo = to;
+    _headingFrom = fromH;
+    _headingTo = toH;
+    _animStart = DateTime.now();
+    _isAnimating = true;
     _animTimer?.cancel();
     _animTimer = Timer.periodic(const Duration(milliseconds: 16), _onAnimTick);
   }
 
   void _onAnimTick(Timer timer) {
-    if (_disposed) { timer.cancel(); return; }
+    if (_disposed) {
+      timer.cancel();
+      return;
+    }
     if (_animFrom == null || _animTo == null) {
       timer.cancel();
       return;
@@ -189,15 +212,17 @@ class RealtimeTrackingService extends ChangeNotifier {
     // Ease-out cubic pour mouvement naturel
     t = 1 - (1 - t) * (1 - t) * (1 - t);
 
+    final isFinalTick = elapsed >= _animDurationMs;
     _animatedPos = LatLng(
-      _animFrom!.latitude  + (_animTo!.latitude  - _animFrom!.latitude)  * t,
+      _animFrom!.latitude + (_animTo!.latitude - _animFrom!.latitude) * t,
       _animFrom!.longitude + (_animTo!.longitude - _animFrom!.longitude) * t,
     );
     _animatedHeading = _lerpAngle(_headingFrom, _headingTo, t);
+    _isAnimating = !isFinalTick;
     notifyListeners();
 
-    if (elapsed >= _animDurationMs) {
-      _animatedPos     = _animTo;
+    if (isFinalTick) {
+      _animatedPos = _animTo;
       _animatedHeading = _headingTo;
       timer.cancel();
     }
@@ -206,7 +231,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   // Interpolation d'angle gérant le passage 359° → 0°
   double _lerpAngle(double from, double to, double t) {
     double diff = to - from;
-    if (diff >  180) diff -= 360;
+    if (diff > 180) diff -= 360;
     if (diff < -180) diff += 360;
     return (from + diff * t) % 360;
   }
@@ -219,18 +244,19 @@ class RealtimeTrackingService extends ChangeNotifier {
 
     // Route 1 : livreur → cible active (récupération ou livraison)
     _routeToClient = await GoogleRoutesService.getRouteModel(
-      origin:      driverPos,
+      origin: driverPos,
       destination: _effectiveTarget,
     );
 
     // Route 2 : point de récupération → destination finale (avant picked_up)
     if (_overrideTarget == null && _destination != null) {
       _routeToDest = await GoogleRoutesService.getRouteModel(
-        origin:      _clientPosition,
+        origin: _clientPosition,
         destination: _destination!,
       );
     }
 
+    _routeRevision++;
     _routeLoading = false;
     notifyListeners();
   }
@@ -241,10 +267,31 @@ class RealtimeTrackingService extends ChangeNotifier {
     await _calculateRoutes(_driverLocation!.latLng);
   }
 
+  @visibleForTesting
+  void debugStartVisualTransition({
+    required LatLng from,
+    required LatLng to,
+    double fromHeading = 0,
+    double toHeading = 0,
+  }) {
+    if (_disposed) return;
+    _driverLocation = DriverLocationModel(
+      driverId: _driverId,
+      latitude: from.latitude,
+      longitude: from.longitude,
+      heading: fromHeading,
+      timestamp: DateTime.now(),
+    );
+    _animatedPos = from;
+    _animatedHeading = fromHeading;
+    _startAnimation(from, to, fromHeading, toHeading);
+  }
+
   // ── Dispose ────────────────────────────────────────────────────────────────
   @override
   void dispose() {
     _disposed = true;
+    _isAnimating = false;
     _animTimer?.cancel();
     _firestoreSub?.cancel();
     super.dispose();

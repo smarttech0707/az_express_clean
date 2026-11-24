@@ -1,0 +1,53 @@
+{
+  "_comment": "Donnees FICTIVES du scenario S1 (preprod uniquement). Aucun identifiant reel. Les UID sont attribues par Firebase Auth a la creation des comptes; les champs <...> sont remplis a ce moment-la. NE PAS ECRIRE avant autorisation du proprietaire.",
+  "project": "az-express-preprod",
+  "accounts": [
+    { "key": "client1", "role": "client", "email": "preprod-client-s1@example.invalid", "displayName": "Client Test S1", "password": "<genere localement a la creation, jamais dans le depot>" },
+    { "key": "driver1", "role": "livreur", "email": "preprod-driver-s1@example.invalid", "displayName": "Livreur Test S1", "password": "<genere localement a la creation, jamais dans le depot>" }
+  ],
+  "firestore": {
+    "zones_livraison/abengourou-test": {
+      "name": "Abengourou (TEST)", "type": "ville", "cityId": "abengourou",
+      "lat": 6.7273, "lng": -3.4961, "radiusKm": 8,
+      "isActive": true, "isServiceable": true, "coordinateSource": "own", "order": 1
+    },
+    "clients/<client1.uid>": {
+      "name": "Client Test S1", "phone": "+2250000000001", "wallet": 20000, "deletionRequested": false
+    },
+    "livreurs/<driver1.uid>": {
+      "name": "Livreur Test S1", "phone": "+2250000000002", "wallet": 5000,
+      "isOnline": true, "isAvailable": true, "isSuspended": false, "isOnDelivery": false,
+      "currentCityId": "abengourou", "registeredCityId": "abengourou",
+      "lat": 6.7285, "lng": -3.4955, "updatedAt": "<Timestamp.now() ecrit JUSTE avant le dispatch (obsolete apres 3 min)>",
+      "deliveries": 0
+    }
+  },
+  "order": {
+    "_note": "Creee PAR LE CLIENT avec son jeton (regles Firestore appliquees), dans UNE transaction avec le debit de son wallet.",
+    "id": "<uuid v4>",
+    "fields": {
+      "description": "COMMANDE TEST S1 - aucune valeur reelle",
+      "budget": 500, "shoppingBudget": 0, "status": "pending", "type": "livraison",
+      "clientId": "<client1.uid>", "clientName": "Client Test S1", "clientPhone": "+2250000000001",
+      "paymentMethod": "wallet", "isPaid": true, "forSelf": true, "deliveryMode": "standard",
+      "latitude": 6.7290, "longitude": -3.4950, "deliveryLatitude": 6.7290, "deliveryLongitude": -3.4950,
+      "destLat": 6.7310, "destLng": -3.4925,
+      "pickupCityId": "abengourou", "deliveryCityId": "abengourou", "cityResolutionStatus": "resolved",
+      "pickupCoordinateSource": "own", "deliveryCoordinateSource": "own",
+      "createdAt": "<Timestamp.now()>"
+    },
+    "clientWalletTransaction": { "wallet": "20000 -> 19500", "lastPaidOrderId": "<order id>" }
+  },
+  "selfie": {
+    "_note": "JPEG synthetique genere localement (aplat de couleur + texte TEST), < 100 Ko. Televerse par le livreur avec son jeton.",
+    "path": "acceptance_selfies/<order id>/<driver1.uid>.jpg",
+    "contentType": "image/jpeg"
+  },
+  "expected": {
+    "afterCreation": { "client.wallet": 19500, "order.status": "pending" },
+    "afterDispatch": { "order.status": "assigned", "order.driverId": "<driver1.uid>", "note": "un seul livreur eligible => assigned (pas broadcast)" },
+    "afterAccept": { "driver.wallet": 4900, "driver.isOnDelivery": true, "order.status": "accepted", "order.commissionAmount": 100, "order.commissionStatus": "charged", "order.commissionTxId": "commission_<order id>_<driver1.uid>", "walletTransactions(driver)": ["commission 100"] },
+    "afterDelivery": { "driver.wallet": 5400, "driver.isOnDelivery": false, "driver.deliveries": 1, "order.status": "delivered", "walletTransactions(driver)": ["commission 100", "earning 500"], "commissions": [{ "amount": 100, "commissionSource": "traced", "driverGain": 400 }], "config/az_wallet": { "totalCommissions": 100, "totalDeliveries": 1 } },
+    "conservation": { "avant": 25000, "apres": { "client": 19500, "driver": 5400, "AZ": 100, "total": 25000 } }
+  }
+}

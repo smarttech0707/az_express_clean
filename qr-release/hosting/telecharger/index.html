@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1730">
+  <meta name="description" content="Téléchargez AZ Express, vos livraisons et services du quotidien à Abengourou.">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://az-express-b0469.web.app/telecharger">
+  <title>Téléchargez AZ Express — Abengourou</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --navy: #0b1730;
+      --navy-soft: #142544;
+      --orange: #ff6b00;
+      --orange-dark: #c2410c;
+      --ink: #182338;
+      --muted: #5d687b;
+      --line: #e5e9f0;
+      --paper: #fff;
+      --wash: #f7f8fb;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--wash); line-height: 1.55; }
+    a { color: inherit; }
+    .top {
+      position: relative;
+      overflow: hidden;
+      color: white;
+      background: radial-gradient(circle at 87% 13%, rgba(255,107,0,.22), transparent 25rem),
+        linear-gradient(135deg, var(--navy), var(--navy-soft));
+    }
+    .top::after {
+      position: absolute; right: -8rem; bottom: -14rem; width: 30rem; height: 30rem;
+      border: 1px solid rgba(255,255,255,.09); border-radius: 50%; content: "";
+      box-shadow: 0 0 0 3rem rgba(255,255,255,.025), 0 0 0 6rem rgba(255,255,255,.02);
+      pointer-events: none;
+    }
+    .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    header {
+      position: relative; z-index: 1; display: flex; align-items: center;
+      justify-content: space-between; padding: 22px 0;
+    }
+    .brand { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; }
+    .brand img { width: 46px; height: 46px; border-radius: 14px; }
+    .brand strong { font-size: 1.08rem; letter-spacing: .01em; }
+    .area { color: #d4dbea; font-size: .9rem; font-weight: 600; }
+    .hero {
+      position: relative; z-index: 1; display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(260px, .85fr);
+      align-items: center; gap: 52px; padding: 56px 0 76px;
+    }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px;
+      border: 1px solid rgba(255,255,255,.16); border-radius: 99px;
+      color: #ffe1cf; background: rgba(255,255,255,.07);
+      font-size: .79rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); }
+    h1 {
+      max-width: 680px; margin: 20px 0 14px; font-size: clamp(2.5rem, 6vw, 4.6rem);
+      line-height: 1.04; letter-spacing: -.045em;
+    }
+    h1 span { color: #ff8a36; }
+    .lead { max-width: 590px; margin: 0; color: #d7deeb; font-size: clamp(1.03rem, 2vw, 1.2rem); }
+    .facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+    .fact {
+      padding: 8px 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 12px;
+      color: #f1f4f9; background: rgba(255,255,255,.06); font-size: .9rem; font-weight: 600;
+    }
+    .download-card {
+      padding: 26px; border: 1px solid rgba(255,255,255,.13); border-radius: 24px;
+      background: rgba(255,255,255,.08); box-shadow: 0 24px 70px rgba(0,0,0,.2);
+      backdrop-filter: blur(12px);
+    }
+    .download-card h2 { margin: 0 0 5px; font-size: 1.25rem; }
+    .download-card p { margin: 0; color: #d5ddeb; font-size: .94rem; }
+    .button {
+      display: flex; min-height: 56px; align-items: center; justify-content: center; gap: 10px;
+      margin-top: 20px; border: 0; border-radius: 15px; color: white; background: var(--orange);
+      font: inherit; font-weight: 800; text-decoration: none; transition: transform .16s ease, background .16s ease;
+    }
+    .button:not([aria-disabled="true"]):hover { transform: translateY(-2px); background: #f05f00; }
+    .button[aria-disabled="true"] { cursor: not-allowed; color: #f2f4f8; background: #687387; }
+    .state { min-height: 24px; margin-top: 11px !important; color: #ffe1cf !important; font-size: .87rem !important; font-weight: 700; }
+    main { padding: 54px 0 68px; }
+    .section-title { margin: 0 0 8px; color: var(--navy); font-size: clamp(1.7rem, 4vw, 2.25rem); letter-spacing: -.025em; }
+    .section-lead { margin: 0; color: var(--muted); }
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 26px; }
+    .feature {
+      min-height: 112px; padding: 18px; border: 1px solid var(--line); border-radius: 18px;
+      background: var(--paper); box-shadow: 0 8px 25px rgba(20,37,68,.035);
+    }
+    .feature b { display: block; margin-bottom: 5px; color: var(--navy); }
+    .feature span { color: var(--muted); font-size: .92rem; }
+    .install { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 48px; }
+    .panel { padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); }
+    .panel h2 { margin: 0 0 13px; color: var(--navy); font-size: 1.25rem; }
+    ol { margin: 0; padding-left: 21px; color: var(--muted); }
+    li + li { margin-top: 8px; }
+    .security { border-color: #f2d3bf; background: #fffaf6; }
+    .security p { margin: 0; color: #4e5663; }
+    .legal { margin-top: 18px !important; color: var(--muted) !important; font-size: .92rem !important; }
+    .legal a { color: var(--orange-dark); font-weight: 700; }
+    footer { padding: 22px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: .86rem; }
+    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+    .small { margin-top: 12px !important; color: #818a99 !important; font-size: .82rem !important; }
+    #checksum { overflow-wrap: anywhere; }
+    @media (max-width: 760px) {
+      .wrap { width: min(100% - 30px, 620px); }
+      .area { max-width: 120px; text-align: right; font-size: .78rem; }
+      .hero { grid-template-columns: 1fr; gap: 28px; padding: 40px 0 50px; }
+      .download-card { padding: 21px; }
+      .features { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .feature { min-height: 106px; padding: 15px; }
+      .install { grid-template-columns: 1fr; margin-top: 36px; }
+      main { padding: 40px 0 52px; }
+    }
+    @media (max-width: 390px) { .features { grid-template-columns: 1fr; } h1 { font-size: 2.42rem; } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="wrap">
+      <header>
+        <a class="brand" href="/" aria-label="AZ Express, accueil">
+          <img src="/assets/assets/logo.png" alt="Logo AZ Express">
+          <strong>AZ Express</strong>
+        </a>
+        <span class="area">Abengourou · Côte d’Ivoire</span>
+      </header>
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <span class="eyebrow"><span class="dot" aria-hidden="true"></span> Services du quotidien</span>
+          <h1 id="page-title">Téléchargez <span>AZ Express</span></h1>
+          <p class="lead">Vos livraisons et services du quotidien à portée de main.</p>
+          <div class="facts" aria-label="Informations sur l’application">
+            <span class="fact">Version <span id="version">1.0.9</span></span>
+            <span class="fact">Environ 78,5 Mo</span>
+            <span class="fact">Android 7.0 minimum</span>
+          </div>
+        </div>
+        <aside class="download-card" aria-labelledby="download-title">
+          <h2 id="download-title">Application Android</h2>
+          <p id="download-intro">Installation directe pour les nouveaux utilisateurs Android.</p>
+          <a id="download-button" class="button" href="#" aria-disabled="true" tabindex="-1">
+            <span aria-hidden="true">↓</span>
+            <span id="button-label">Vérification du téléchargement…</span>
+          </a>
+          <p id="download-state" class="state" role="status" aria-live="polite">Vérification de la disponibilité du fichier APK…</p>
+          <noscript><p>Activez JavaScript pour vérifier le fichier et afficher le bouton de téléchargement.</p></noscript>
+          <p class="small">Ne téléchargez et n’installez l’application que depuis cette adresse officielle.</p>
+        </aside>
+      </section>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <section aria-labelledby="services-title">
+      <h2 class="section-title" id="services-title">Tout AZ Express, dans une seule application</h2>
+      <p class="section-lead">Des services locaux pensés pour Abengourou.</p>
+      <div class="features">
+        <div class="feature"><b>Livraison de colis</b><span>Faites acheminer vos colis avec suivi de commande.</span></div>
+        <div class="feature"><b>Courses et achats</b><span>Confiez vos courses et achats du quotidien.</span></div>
+        <div class="feature"><b>Restaurants</b><span>Consultez les menus disponibles et commandez.</span></div>
+        <div class="feature"><b>Pharmacies</b><span>Transmettez vos besoins à une pharmacie partenaire.</span></div>
+        <div class="feature"><b>Boutiques</b><span>Découvrez les produits proposés sur AZ Express.</span></div>
+        <div class="feature"><b>AZ IA</b><span>Un assistant intelligent pour vous accompagner dans l’application.</span></div>
+      </div>
+    </section>
+
+    <section class="install" aria-label="Installation et sécurité">
+      <div class="panel">
+        <h2>Installation sur Android</h2>
+        <ol>
+          <li>Téléchargez l’APK avec le bouton « Télécharger pour Android » de cette page officielle.</li>
+          <li>Ouvrez le fichier depuis les notifications ou le dossier Téléchargements.</li>
+          <li>Si Android le demande, autorisez temporairement votre navigateur à installer cette application, puis revenez à l’installation.</li>
+          <li>Gardez Google Play Protect actif. Après installation, désactivez l’autorisation d’installation accordée au navigateur si vous n’en avez plus besoin.</li>
+        </ol>
+        <p class="small">Android peut afficher un avertissement pour une installation hors Play Store. Ne désactivez pas Play Protect et n’ignorez pas une alerte de sécurité.</p>
+      </div>
+      <div class="panel security">
+        <h2>Vérifiez avant d’installer</h2>
+        <p>Utilisez uniquement l’APK publié depuis <strong>az-express-b0469.web.app</strong>. Vérifiez le nom de l’application et sa version. N’installez pas un fichier reçu par une source inconnue.</p>
+        <p><strong>Vous avez déjà installé AZ Express depuis Google Play ?</strong> Effectuez vos mises à jour dans Google Play. Cet APK utilise une signature différente et ne peut pas mettre à jour votre installation Play. Ne désinstallez pas votre application pour le remplacer : vous pourriez perdre des données locales.</p>
+        <p id="checksum" class="small" hidden></p>
+        <p class="legal">En savoir plus : <a href="/#/confidentialite">Politique de confidentialité</a> · <a href="/#/delete-account">Suppression de compte</a>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="wrap"><span>© AZ Express · Abengourou, Côte d’Ivoire</span><span>Distribution Android directe · HTTPS</span></div></footer>
+
+  <script>
+    (() => {
+      const button = document.getElementById('download-button');
+      const label = document.getElementById('button-label');
+      const state = document.getElementById('download-state');
+      const intro = document.getElementById('download-intro');
+      const checksum = document.getElementById('checksum');
+
+      const unavailable = (message) => {
+        button.href = '#';
+        button.setAttribute('aria-disabled', 'true');
+        button.setAttribute('tabindex', '-1');
+        label.textContent = 'Téléchargement indisponible';
+        state.textContent = message;
+      };
+
+      fetch('/distribution/latest.json', { cache: 'no-store' })
+        .then((response) => {
+          if (!response.ok) throw new Error('manifest');
+          return response.json();
+        })
+        .then(async (release) => {
+          if (release.published !== true || typeof release.downloadUrl !== 'string') {
+            unavailable('Le téléchargement n’est pas encore activé.');
+            return;
+          }
+          const target = new URL(release.downloadUrl, window.location.origin);
+          if (target.protocol !== 'https:' ||
+              target.origin !== window.location.origin ||
+              !target.pathname.toLowerCase().endsWith('.apk') ||
+              !/^[a-f0-9]{64}$/i.test(release.fileSha256 || '') ||
+              !Number.isSafeInteger(release.fileSizeBytes) ||
+              release.fileSizeBytes <= 0) {
+            unavailable('Les informations du téléchargement ne sont pas valides.');
+            return;
+          }
+
+          let head;
+          try {
+            head = await fetch(target.href, { method: 'HEAD', cache: 'no-store' });
+          } catch (_) {
+            unavailable('Impossible de vérifier le fichier. Réessayez dans quelques instants.');
+            return;
+          }
+          const contentType = (head.headers.get('content-type') || '').toLowerCase();
+          let contentLength = Number(head.headers.get('content-length'));
+          // Hosting may compress the response: Content-Length then describes
+          // transferred bytes, not the APK. A one-byte range exposes its real size.
+          if (head.ok && head.headers.get('content-encoding')) {
+            const probe = await fetch(target.href, {
+              headers: { Range: 'bytes=0-0' }, cache: 'no-store'
+            });
+            const range = /^bytes 0-0\/(\d+)$/.exec(probe.headers.get('content-range') || '');
+            const validProbe = probe.status === 206 && range &&
+              !probe.headers.get('content-encoding') &&
+              (probe.headers.get('content-type') || '').includes('application/vnd.android.package-archive');
+            contentLength = validProbe ? Number(range[1]) : NaN;
+            if (probe.body) await probe.body.cancel();
+          }
+          if (!head.ok ||
+              !contentType.includes('application/vnd.android.package-archive') ||
+              contentLength !== release.fileSizeBytes) {
+            unavailable('Le fichier APK n’est pas encore disponible ou vérifié.');
+            return;
+          }
+
+          document.getElementById('version').textContent = release.versionName;
+          button.href = target.href;
+          button.removeAttribute('aria-disabled');
+          button.removeAttribute('tabindex');
+          button.setAttribute('download', '');
+          label.textContent = 'Télécharger pour Android';
+          intro.textContent = 'APK officiel pour une nouvelle installation Android.';
+          state.textContent = `${release.fileSizeLabel || 'APK vérifié'} · ${release.versionName} · HTTPS`;
+          checksum.textContent = `SHA-256 du fichier : ${release.fileSha256.toUpperCase()}`;
+          checksum.hidden = false;
+        })
+        .catch(() => unavailable('Le téléchargement sera disponible après publication du fichier officiel.'));
+    })();
+  </script>
+</body>
+</html>

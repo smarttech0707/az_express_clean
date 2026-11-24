@@ -1,12 +1,15 @@
-﻿import 'package:flutter/material.dart';
+import '../../delivery_proofs/proof_presentation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/notification_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/wallet_action_sheet.dart';
+import '../../widgets/min_version_dialog.dart';
 import '../../widgets/partner_account_sheet.dart';
 import '../../widgets/logout_confirm_dialog.dart';
 
@@ -35,13 +38,17 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
   @override
   void initState() {
     super.initState();
+    // Version minimale du rôle boulangerie (config/app_versions.boulangerie) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleBoulangerie,
+        blockedMessage: 'Installez la dernière version pour continuer à gérer vos commandes.'));
     _tabCtrl = TabController(length: 4, vsync: this);
-    _isOpen  = widget.boulangerieData['isOpen'] == true;
+    _isOpen = widget.boulangerieData['isOpen'] == true;
     _photoUrl = widget.boulangerieData['logoUrl'] as String?;
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
       if (type == 'new_boulangerie_order') _tabCtrl.animateTo(0);
-    });
+    }, acceptedTypes: const {'new_boulangerie_order'});
   }
 
   @override
@@ -83,7 +90,9 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
   Future<void> _doLogout() async {
     AuthService().logAuthEvent('logout', 'boulangerie');
     await FirebaseAuth.instance.signOut();
-    try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (_) {}
     if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
@@ -106,8 +115,7 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
           SizedBox(width: 10),
           Text('Nouvelle commande !'),
         ]),
-        content:
-            const Text('Une nouvelle commande vient d\'arriver.'),
+        content: const Text('Une nouvelle commande vient d\'arriver.'),
         actions: [
           TextButton(
             onPressed: () {
@@ -116,8 +124,7 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
             },
             child: const Text('Voir maintenant',
                 style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF5D4037))),
+                    fontWeight: FontWeight.bold, color: Color(0xFF5D4037))),
           ),
         ],
       ),
@@ -177,20 +184,18 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
                 ),
                 child: Container(
                   margin: const EdgeInsets.only(right: 6),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(children: [
-                    const Icon(Icons.account_balance_wallet_rounded,
-                        size: 16),
+                    const Icon(Icons.account_balance_wallet_rounded, size: 16),
                     const SizedBox(width: 4),
                     Text('$wallet F',
                         style: GoogleFonts.urbanist(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold)),
+                            fontSize: 12, fontWeight: FontWeight.bold)),
                   ]),
                 ),
               );
@@ -202,18 +207,27 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
             onPressed: () => showPartnerAccountSheet(
               context,
               role: 'boulangerie',
+              establishmentId: widget.boulangerieId,
               roleLabel: 'Boulangerie',
               name: name as String?,
               phone: widget.boulangerieData['phone'] as String?,
               onLogout: _logout,
               photoUrl: _photoUrl,
-              photoStoragePath: 'boulangerie_logos/${widget.boulangerieId}/logo.jpg',
+              photoStoragePath:
+                  'boulangerie_logos/${widget.boulangerieId}/logo.jpg',
               onPhotoUploaded: (url) async {
                 await FirebaseFirestore.instance
                     .collection('boulangeries')
                     .doc(widget.boulangerieId)
                     .update({'logoUrl': url});
                 if (mounted) setState(() => _photoUrl = url);
+              },
+              onPhotoDeleted: () async {
+                await FirebaseFirestore.instance
+                    .collection('boulangeries')
+                    .doc(widget.boulangerieId)
+                    .update({'logoUrl': FieldValue.delete()});
+                if (mounted) setState(() => _photoUrl = null);
               },
             ),
           ),
@@ -230,12 +244,18 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
           unselectedLabelColor: Colors.white60,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          labelStyle: GoogleFonts.urbanist(
-              fontWeight: FontWeight.w600, fontSize: 12),
+          labelStyle:
+              GoogleFonts.urbanist(fontWeight: FontWeight.w600, fontSize: 12),
           tabs: const [
-            Tab(icon: Icon(Icons.fiber_new_rounded, size: 18), text: 'Nouvelles'),
-            Tab(icon: Icon(Icons.local_fire_department_rounded, size: 18), text: 'Préparation'),
-            Tab(icon: Icon(Icons.check_circle_outline_rounded, size: 18), text: 'Prêtes'),
+            Tab(
+                icon: Icon(Icons.fiber_new_rounded, size: 18),
+                text: 'Nouvelles'),
+            Tab(
+                icon: Icon(Icons.local_fire_department_rounded, size: 18),
+                text: 'Préparation'),
+            Tab(
+                icon: Icon(Icons.check_circle_outline_rounded, size: 18),
+                text: 'Prêtes'),
             Tab(icon: Icon(Icons.history_rounded, size: 18), text: 'Livrées'),
           ],
         ),
@@ -243,13 +263,13 @@ class _BoulangerieDashboardState extends State<BoulangerieDashboard>
       body: Column(
         children: [
           // ── Subscription/VIP status banners ──────────────────────
-          _BoulangerieSubscriptionBanner(boulangerieData: widget.boulangerieData),
+          _BoulangerieSubscriptionBanner(
+              boulangerieData: widget.boulangerieData),
 
           // ── Toggle ouvert / fermé ──────────────────────────────────
           Container(
             color: Colors.white,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(children: [
               Icon(
                 _isOpen
@@ -408,8 +428,7 @@ class _OrderList extends StatelessWidget {
                 Icon(emptyIcon, size: 56, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text(emptyLabel,
-                    style: const TextStyle(
-                        color: Colors.grey, fontSize: 15)),
+                    style: const TextStyle(color: Colors.grey, fontSize: 15)),
               ],
             ),
           );
@@ -420,7 +439,7 @@ class _OrderList extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
           itemCount: docs.length,
           itemBuilder: (context, i) {
-            final doc  = docs[i];
+            final doc = docs[i];
             final data = doc.data() as Map<String, dynamic>;
             return _OrderCard(
               orderId: doc.id,
@@ -455,21 +474,21 @@ class _OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final clientName    = data['clientName']    ?? 'Client';
-    final clientPhone   = data['clientPhone']   ?? '';
-    final address       = data['description']   ?? data['deliveryAddress'] ?? '—';
-    final items         = (data['items'] as List?)?.cast<Map>() ?? [];
-    final itemsAmount   = (data['itemsAmount']  as num?)?.toInt() ?? 0;
-    final deliveryFee   = (data['budget']       as num?)?.toInt() ?? 0;
-    final totalAmount   = (data['totalAmount']  as num?)?.toInt() ?? 0;
-    final payMethod     = data['paymentMethod'] ?? 'cash';
+    final clientName = data['clientName'] ?? 'Client';
+    final clientPhone = data['clientPhone'] ?? '';
+    final address = data['description'] ?? data['deliveryAddress'] ?? '—';
+    final items = (data['items'] as List?)?.cast<Map>() ?? [];
+    final itemsAmount = (data['itemsAmount'] as num?)?.toInt() ?? 0;
+    final deliveryFee = (data['budget'] as num?)?.toInt() ?? 0;
+    final totalAmount = (data['totalAmount'] as num?)?.toInt() ?? 0;
+    final payMethod = data['paymentMethod'] ?? 'cash';
     final requestedTime = data['requestedTime'] as String?;
-    final status        = data['status']        ?? 'pending';
-    final sellerStatus  = data['sellerStatus']  as String?;
-    final driverId      = data['driverId']      as String?;
-    final orderSubType    = data['orderSubType']    as String?;
+    final status = data['status'] ?? 'pending';
+    final sellerStatus = data['sellerStatus'] as String?;
+    final driverId = data['driverId'] as String?;
+    final orderSubType = data['orderSubType'] as String?;
     final cakeDescription = data['cakeDescription'] as String?;
-    final cakeDeadline    = (data['cakeDeadline'] as Timestamp?)?.toDate();
+    final cakeDeadline = (data['cakeDeadline'] as Timestamp?)?.toDate();
 
     Color statusColor;
     String statusLabel;
@@ -511,10 +530,10 @@ class _OrderCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          ProofActions(orderId: orderId, partner: true),
           // ── En-tête statut ───────────────────────────────────────
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: statusColor.withValues(alpha: 0.08),
               borderRadius:
@@ -524,8 +543,8 @@ class _OrderCard extends StatelessWidget {
               Container(
                 width: 8,
                 height: 8,
-                decoration: BoxDecoration(
-                    color: statusColor, shape: BoxShape.circle),
+                decoration:
+                    BoxDecoration(color: statusColor, shape: BoxShape.circle),
               ),
               const SizedBox(width: 8),
               Text(statusLabel,
@@ -536,8 +555,8 @@ class _OrderCard extends StatelessWidget {
               const Spacer(),
               if (requestedTime != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: Colors.amber.shade50,
                     borderRadius: BorderRadius.circular(8),
@@ -565,8 +584,8 @@ class _OrderCard extends StatelessWidget {
                 // ── Badge gâteau personnalisé ──────────────────────
                 if (orderSubType == 'custom_cake') ...[
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         colors: [Color(0xFF6D1B7B), Color(0xFFAD1457)],
@@ -574,8 +593,7 @@ class _OrderCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Row(children: [
-                      Text('🎂',
-                          style: TextStyle(fontSize: 16)),
+                      Text('🎂', style: TextStyle(fontSize: 16)),
                       SizedBox(width: 6),
                       Text('Gâteau personnalisé',
                           style: TextStyle(
@@ -593,7 +611,8 @@ class _OrderCard extends StatelessWidget {
                         color: const Color(0xFF6D1B7B).withValues(alpha: 0.07),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                            color: const Color(0xFF6D1B7B).withValues(alpha: 0.25)),
+                            color: const Color(0xFF6D1B7B)
+                                .withValues(alpha: 0.25)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -626,14 +645,13 @@ class _OrderCard extends StatelessWidget {
                   ],
                   const Divider(height: 14),
                 ] else if (items.isNotEmpty) ...[
-                // ── Articles (commande normale) ────────────────────
+                  // ── Articles (commande normale) ────────────────────
                   const Text('Articles',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 12)),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   const SizedBox(height: 6),
                   ...items.map((item) => Padding(
-                        padding:
-                            const EdgeInsets.only(bottom: 3),
+                        padding: const EdgeInsets.only(bottom: 3),
                         child: Row(children: [
                           const Icon(Icons.circle,
                               size: 6, color: Colors.brown),
@@ -647,8 +665,7 @@ class _OrderCard extends StatelessWidget {
                           Text(
                             '${(item['price'] as num?)?.toInt() ?? 0} F',
                             style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600),
+                                fontSize: 13, fontWeight: FontWeight.w600),
                           ),
                         ]),
                       )),
@@ -662,8 +679,8 @@ class _OrderCard extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(address,
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.grey)),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
                 ]),
                 const SizedBox(height: 8),
@@ -677,100 +694,34 @@ class _OrderCard extends StatelessWidget {
                           fontWeight: FontWeight.w600, fontSize: 13)),
                   const SizedBox(width: 8),
                   GestureDetector(
-                    onTap: () => launchUrl(
-                        Uri.parse('tel:$clientPhone')),
+                    onTap: () => launchUrl(Uri.parse('tel:$clientPhone')),
                     child: Text(clientPhone,
                         style: TextStyle(
-                            color: Colors.blue.shade700,
-                            fontSize: 12)),
+                            color: Colors.blue.shade700, fontSize: 12)),
                   ),
                 ]),
                 const SizedBox(height: 8),
 
                 // ── Livreur (si assigné) ───────────────────────────
                 if (driverId != null)
-                  StreamBuilder<DocumentSnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('livreurs')
-                        .doc(driverId)
-                        .snapshots(),
-                    builder: (context, dSnap) {
-                      final dd = dSnap.data?.data()
-                          as Map<String, dynamic>?;
-                      if (dd == null) return const SizedBox.shrink();
-                      final dName  = dd['name']  ?? 'Livreur';
-                      final dPhone = dd['phone'] ?? '';
-                      final online = dd['isOnline'] == true;
-                      return Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(children: [
-                          Icon(Icons.delivery_dining_rounded,
-                              color: Colors.blue.shade700, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                                Text(dName,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13)),
-                                Row(children: [
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: BoxDecoration(
-                                      color: online
-                                          ? Colors.green
-                                          : Colors.grey,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    online ? 'En ligne' : 'Hors ligne',
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey),
-                                  ),
-                                ]),
-                              ],
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: () => launchUrl(
-                                Uri.parse('tel:$dPhone')),
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade700,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(Icons.phone_rounded,
-                                  color: Colors.white, size: 16),
-                            ),
-                          ),
-                        ]),
-                      );
-                    },
-                  ),
+                  // SEC-01 / S6.14 : `phone` n'est plus lu depuis `livreurs`
+                  // (lecture large à fermer) — accès contextualisé via la
+                  // Cloud Function `getDriverPhoneForOrderCF`, Future mémorisé
+                  // dans un State dédié (même patron que S6.10/S6.12/S6.13)
+                  // pour ne jamais la rappeler aux reconstructions GPS du
+                  // StreamBuilder `driver_public`.
+                  _DriverDeliveryCard(orderId: orderId, driverId: driverId),
 
                 const SizedBox(height: 10),
 
                 // ── Montants ───────────────────────────────────────
                 Row(children: [
-                  _amountChip(
-                      'Articles', '$itemsAmount FCFA', Colors.brown),
+                  _amountChip('Articles', '$itemsAmount FCFA', Colors.brown),
+                  const SizedBox(width: 8),
+                  _amountChip('Livraison', '$deliveryFee FCFA', Colors.blue),
                   const SizedBox(width: 8),
                   _amountChip(
-                      'Livraison', '$deliveryFee FCFA', Colors.blue),
-                  const SizedBox(width: 8),
-                  _amountChip('Total',
+                      'Total',
                       '${totalAmount > 0 ? totalAmount : itemsAmount + deliveryFee} FCFA',
                       Colors.green),
                 ]),
@@ -812,8 +763,7 @@ class _OrderCard extends StatelessWidget {
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 12),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                       onPressed: () => onAction!(orderId),
                     ),
@@ -830,8 +780,7 @@ class _OrderCard extends StatelessWidget {
   Widget _amountChip(String label, String value, Color color) {
     return Expanded(
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(8),
@@ -839,16 +788,130 @@ class _OrderCard extends StatelessWidget {
         child: Column(children: [
           Text(label,
               style: TextStyle(
-                  fontSize: 9,
-                  color: color,
-                  fontWeight: FontWeight.w600)),
+                  fontSize: 9, color: color, fontWeight: FontWeight.w600)),
           Text(value,
               style: TextStyle(
-                  fontSize: 11,
-                  color: color,
-                  fontWeight: FontWeight.bold)),
+                  fontSize: 11, color: color, fontWeight: FontWeight.bold)),
         ]),
       ),
+    );
+  }
+}
+
+// SEC-01 / S6.14 : carte livreur de `_OrderCard` — `name`/`isOnline` restent
+// sur `driver_public` (StreamBuilder, inchangé) ; `phone` vient de
+// `getDriverPhoneForOrderCF`, mémorisée dans l'État et relancée uniquement si
+// `orderId`/`driverId` changent réellement (jamais à chaque reconstruction
+// GPS). Patron identique à S6.10/S6.12/S6.13.
+class _DriverDeliveryCard extends StatefulWidget {
+  final String orderId;
+  final String driverId;
+  const _DriverDeliveryCard({required this.orderId, required this.driverId});
+
+  @override
+  State<_DriverDeliveryCard> createState() => _DriverDeliveryCardState();
+}
+
+class _DriverDeliveryCardState extends State<_DriverDeliveryCard> {
+  late Future<String?> _phoneFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneFuture = _fetchPhone();
+  }
+
+  @override
+  void didUpdateWidget(_DriverDeliveryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.orderId != widget.orderId ||
+        oldWidget.driverId != widget.driverId) {
+      setState(() {
+        _phoneFuture = _fetchPhone();
+      });
+    }
+  }
+
+  Future<String?> _fetchPhone() async {
+    try {
+      final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('getDriverPhoneForOrderCF')
+          .call({'orderId': widget.orderId});
+      return ((result.data as Map?)?['data'] as Map?)?['phone'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('driver_public')
+          .doc(widget.driverId)
+          .snapshots(),
+      builder: (context, dSnap) {
+        final dd = dSnap.data?.data() as Map<String, dynamic>?;
+        if (dd == null) return const SizedBox.shrink();
+        final dName = dd['name'] ?? 'Livreur';
+        final online = dd['isOnline'] == true;
+        return FutureBuilder<String?>(
+          future: _phoneFuture,
+          builder: (context, phoneSnap) {
+            final dPhone = phoneSnap.data ?? '';
+            return Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(children: [
+                Icon(Icons.delivery_dining_rounded,
+                    color: Colors.blue.shade700, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(dName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 13)),
+                      Row(children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: online ? Colors.green : Colors.grey,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          online ? 'En ligne' : 'Hors ligne',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.grey),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => launchUrl(Uri.parse('tel:$dPhone')),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade700,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.phone_rounded,
+                        color: Colors.white, size: 16),
+                  ),
+                ),
+              ]),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -861,7 +924,8 @@ class _BoulangerieSubscriptionBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final subStatus = boulangerieData['subscriptionStatus'] as String? ?? 'active';
+    final subStatus =
+        boulangerieData['subscriptionStatus'] as String? ?? 'active';
     final vipStatus = boulangerieData['vipStatus'] as String? ?? 'none';
     final vipExpiry = boulangerieData['vipExpiresAt'];
 
@@ -882,7 +946,10 @@ class _BoulangerieSubscriptionBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Abonnement suspendu — Rechargez votre wallet pour réactiver votre compte.',
-                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ]),
@@ -907,7 +974,9 @@ class _BoulangerieSubscriptionBanner extends StatelessWidget {
                       ? 'Compte VIP actif — Votre boulangerie apparaît en premier. Expire le ${_fmtDate(vipExpiry)}.'
                       : 'Compte VIP actif — Votre boulangerie apparaît en premier.',
                   style: const TextStyle(
-                      color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w600),
+                      color: Colors.black87,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ]),

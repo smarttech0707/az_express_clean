@@ -5,6 +5,8 @@ const {
   ClaudeProvider, OpenAIProvider, GeminiProvider,
   DeepSeekProvider, MistralProvider, GroqProvider,
 } = require('./providers');
+const { buildRoute, normalizeConfig, ROUTER_DEFAULTS, isAziaProviderAllowed } = require('./aiRouter');
+const { classifyProviderFailure } = require('./providers/fallbackPolicy');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AIProviderService (Master Prompt 108) — orchestrateur multi-fournisseurs IA.
@@ -22,24 +24,22 @@ const {
 //   ├── MistralProvider   (réel — attend MISTRAL_API_KEY)
 //   └── GroqProvider      (réel — attend GROQ_API_KEY)
 //
-// Portée volontairement limitée à generateText/generateChat/generateVision
-// (texte/chat/vision simples, sans appel d'outils) — la boucle d'appel
-// d'outils d'AZ IA (functions/azia/index.js) reste spécifique à Claude et
-// n'est PAS routée à travers ce service : aucun des 5 autres fournisseurs
-// n'implémente le registre d'outils AZ IA (commandes, wallet, etc.), un
-// fallback qui tenterait de continuer une conversation avec outils sur un
-// autre fournisseur perdrait le contexte des appels déjà effectués — un vrai
-// risque fonctionnel, pas juste un détail technique. Ce service sert les
-// futurs besoins de génération simple (résumé, reformulation, description
-// d'image...) et fournit dès maintenant le suivi d'usage/coût réutilisé par
-// azIaChat pour son propre appel Claude (voir functions/azia/index.js).
-// ═══════════════════════════════════════════════════════════════════════════
+// Text, vision and canonical tool turns share routing and usage tracking.
+// Providers own native protocols; azIaChat owns sequential execution and its
+// invocation-local replay ledger. Native continuation state stays in adapters.
+
 
 // Tarifs approximatifs en USD par million de tokens — donnés à titre
 // indicatif pour l'ESTIMATION de coût uniquement (jamais une facturation
 // exacte), à ajuster si les grilles tarifaires publiques des fournisseurs
 // changent. Aucune valeur inventée : ce sont les tarifs publics connus au
 // moment de l'écriture pour le modèle par défaut de chaque provider.
+//
+// Repli PAR PROVIDER, utilisé seulement si aucun tarif PAR MODÈLE plus précis
+// n'est configuré (voir AI_MODEL_PRICING / getModelPricing ci-dessous) — un
+// même provider peut servir des modèles à coûts très différents (ex. OpenAI
+// gpt-4o vs gpt-4o-mini), donc ce tableau n'est jamais la seule source de
+// vérité une fois qu'un tarif par modèle existe.
 const PRICING = {
   claude:   { input: 3.00,  output: 15.00 }, // claude-sonnet-5
   openai:   { input: 0.15,  output: 0.60  }, // gpt-4o-mini
@@ -48,6 +48,24 @@ const PRICING = {
   mistral:  { input: 2.00,  output: 6.00  }, // mistral-large-latest
   groq:     { input: 0.05,  output: 0.08  }, // llama-3.3-70b (groq)
 };
+
+// Grille tarifaire PAR MODÈLE, configurable sans redéploiement de code —
+// Mission 10 : "le coût ne doit jamais être une valeur codée en dur comme
+// une vérité éternelle". Source : variable d'environnement AI_MODEL_PRICING
+// (JSON, ex. {"gpt-4o":{"input":2.50,"output":10.00}}), avec repli sur le
+// tableau PRICING par provider ci-dessus si le modèle exact n'y figure pas.
+// Jamais d'exception sur un JSON malformé — un tarif indisponible retombe
+// silencieusement sur le repli par provider, jamais un coût inventé.
+let _modelPricingCache = null;
+function getModelPricingTable() {
+  if (_modelPricingCache) return _modelPricingCache;
+  try {
+    _modelPricingCache = JSON.parse(process.env.AI_MODEL_PRICING || '{}');
+  } catch (_) {
+    _modelPricingCache = {};
+  }
+  return _modelPricingCache;
+}
 
 // Ordre de bascule automatique — reprend l'exemple donné dans la demande
 // (Claude → Gemini → OpenAI → DeepSeek), complété par Mistral/Groq en fin
@@ -58,7 +76,13 @@ const FALLBACK_ORDER = ['claude', 'gemini', 'openai', 'deepseek', 'mistral', 'gr
 
 const DEFAULT_CONFIG = {
   provider: 'claude',
-  fallbackEnabled: false,
+  // L'ancien champ `fallbackEnabled` n'est volontairement PAS repris ici :
+  // l'inscrire dans les valeurs par défaut le ferait apparaître comme une
+  // valeur « explicite » dans la configuration fusionnée et prendrait le pas
+  // sur le champ officiel. Le défaut vient donc de
+  // ROUTER_DEFAULTS.enableFallback, et `fallbackEnabled` ne garde qu'un rôle
+  // de compatibilité pour un document `settings/ai` existant.
+  ...ROUTER_DEFAULTS,
   preferredModel: null,
   temperature: 0.7,
   maxTokens: 1024,
@@ -95,17 +119,29 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
     if (cachedConfig && now - cachedConfigAt < CONFIG_CACHE_MS) return cachedConfig;
     try {
       const snap = await db.collection('settings').doc('ai').get();
-      cachedConfig = { ...DEFAULT_CONFIG, ...(snap.exists ? snap.data() : {}) };
+      cachedConfig = { ...DEFAULT_CONFIG, ...normalizeConfig(snap.exists ? snap.data() : {}) };
     } catch (_) {
-      cachedConfig = { ...DEFAULT_CONFIG };
+      cachedConfig = { ...DEFAULT_CONFIG, ...normalizeConfig({}) };
     }
     cachedConfigAt = now;
     return cachedConfig;
   }
 
-  function estimateCost(providerName, inputTokens, outputTokens) {
+  // `model` est optionnel (4ᵉ argument, purement additif — les appelants
+  // existants à 3 arguments gardent exactement leur comportement d'origine).
+  // Quand un modèle précis est fourni et qu'aucun tarif n'est connu pour lui
+  // NI pour son provider, la fonction renvoie `null` plutôt que d'inventer un
+  // chiffre (Mission 10) — mais un appel legacy sans `model` sur un provider
+  // inconnu continue de renvoyer 0, comportement déjà couvert par un test.
+  function estimateCost(providerName, inputTokens, outputTokens, model) {
+    if (model) {
+      const modelRate = getModelPricingTable()[model];
+      if (modelRate) {
+        return (inputTokens / 1e6) * modelRate.input + (outputTokens / 1e6) * modelRate.output;
+      }
+    }
     const rate = PRICING[providerName];
-    if (!rate) return 0;
+    if (!rate) return model ? null : 0;
     return (inputTokens / 1e6) * rate.input + (outputTokens / 1e6) * rate.output;
   }
 
@@ -183,22 +219,45 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
 
   // ── Usage / coût / logs / statistiques quotidiennes ───────────────────────
   // Non-bloquant : jamais attendu avant de renvoyer la réponse à l'appelant.
-  function recordUsage({ uid, role, provider, model, inputTokens, outputTokens, responseTimeMs, success, fallbackFrom, errorMessage }) {
-    const cost = estimateCost(provider, inputTokens || 0, outputTokens || 0);
+  //
+  // Champs additifs (Mission 9) — jamais requis, toujours par défaut à
+  // null/false pour ne rien casser des appelants existants (azia/index.js
+  // continue de fonctionner sans les fournir) :
+  //   cachedInputTokens, finishReason, errorCode, requestId, toolRequested,
+  //   toolExecuted, riskLevel. `fallbackUsed` est dérivé de `fallbackFrom`.
+  // Ne journalise JAMAIS : clé API, contenu utilisateur complet, mot de
+  // passe/secret/jeton — seuls des métadonnées (compteurs, identifiants,
+  // messages d'erreur déjà expurgés de tout secret par le provider) sont
+  // écrites ici.
+  function recordUsage({
+    uid, role, provider, model, inputTokens, outputTokens, responseTimeMs, success,
+    fallbackFrom, errorMessage, conversationId, toolUsed,
+    cachedInputTokens, finishReason, errorCode, requestId, toolRequested, toolExecuted, riskLevel,
+  }) {
+    const cost = estimateCost(provider, inputTokens || 0, outputTokens || 0, model);
     const date = new Date().toISOString().slice(0, 10);
+    const fallbackUsed = !!fallbackFrom;
 
     db.collection('ai_usage').add({
       uid: uid || null, role: role || null, provider, model: model || null,
       inputTokens: inputTokens || 0, outputTokens: outputTokens || 0,
+      cachedInputTokens: cachedInputTokens || 0,
       estimatedCost: cost, responseTimeMs: responseTimeMs || 0, success,
-      fallbackFrom: fallbackFrom || null,
+      fallbackFrom: fallbackFrom || null, fallbackUsed,
+      conversationId: conversationId || null, toolUsed: toolUsed || null,
+      finishReason: finishReason || null, requestId: requestId || null,
+      toolRequested: toolRequested || null, toolExecuted: toolExecuted || null,
+      riskLevel: riskLevel || null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     }).catch((e) => console.error('ai_usage write failed:', e.message));
 
     db.collection('ai_logs').add({
       uid: uid || null, provider, model: model || null, success,
-      errorMessage: errorMessage || null, fallbackFrom: fallbackFrom || null,
+      errorMessage: errorMessage || null, errorCode: errorCode || null,
+      fallbackFrom: fallbackFrom || null, fallbackUsed,
       responseTimeMs: responseTimeMs || 0,
+      conversationId: conversationId || null, toolUsed: toolUsed || null,
+      requestId: requestId || null, riskLevel: riskLevel || null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     }).catch((e) => console.error('ai_logs write failed:', e.message));
 
@@ -218,15 +277,58 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
 
   // ── Cœur : appelle un provider, avec bascule automatique si activée ──────
   async function callWithFallback(method, args, opts, config) {
-    const startProvider = opts.provider || config.provider || 'claude';
-    const order = [startProvider, ...FALLBACK_ORDER.filter(p => p !== startProvider)];
-    const attemptOrder = config.fallbackEnabled ? order : [startProvider];
+    const turn = method === 'generateTurn' ? args[0] : null;
+    const route = turn
+      ? buildRoute({
+        config,
+        hasTools: (turn.tools || []).length > 0 || (turn.messages || []).some(m =>
+          Array.isArray(m.content) && m.content.some(b => b.type === 'tool_call' || b.type === 'tool_result')),
+        hasImage: !!turn.images || (turn.messages || []).some(m =>
+          Array.isArray(m.content) && m.content.some(b => b.type === 'image')),
+        complexity: turn.complexity,
+        forceProvider: opts.forceProvider || opts.provider,
+      })
+      : null;
+    const startProvider = route?.provider || opts.provider || config.provider || 'claude';
+    // Liste blanche appliquée à TOUS les chemins (generateTurn via buildRoute, mais aussi generateText/generateVision qui
+    // n'en passent pas) : plafond du code ∩ liste effective de la configuration. Un fournisseur hors liste n'est jamais
+    // appelé, ni en départ ni en repli.
+    const isAllowed = (name) => isAziaProviderAllowed(name) && (config.allowedProviders || []).includes(name);
+    if (!isAllowed(startProvider)) {
+      throw new Error(`Fournisseur IA non autorise par la politique: ${startProvider}`);
+    }
+    const order = route
+      ? [startProvider, ...route.fallbacks]
+      : [startProvider, ...FALLBACK_ORDER.filter(p => p !== startProvider)];
+    // A stateful tool turn cannot safely fall back to a provider without the
+    // same native protocol. The router therefore selects only tool-capable
+    // providers for it, while ordinary text turns retain configured fallback.
+    //
+    // Source unique de vérité : `config.enableFallback` (déjà calculé par
+    // aiRouter.js:normalizeConfig() à partir de AI_ENABLE_FALLBACK, avec
+    // repli de compatibilité sur l'ancien champ Firestore `fallbackEnabled`
+    // si un document existant l'utilise encore — jamais l'ancien champ lu
+    // directement ici, pour ne plus jamais diverger de ce que buildRoute()
+    // a déjà utilisé pour construire `route.fallbacks` juste au-dessus).
+    const attemptOrder = (route
+      ? [...new Set(order)].filter((name) =>
+        (!(turn.tools || []).length || providers[name]?.supportsTools?.())
+        && (!turn.canonicalHistory || providers[name]?.supportsCanonicalHistory?.()))
+      : (config.enableFallback ? order : [startProvider])).filter(isAllowed);
 
     let lastError = null;
     for (let i = 0; i < attemptOrder.length; i++) {
       const providerName = attemptOrder[i];
       const provider = providers[providerName];
       if (!provider) continue;
+      // Consentement : seuls les fournisseurs couverts par le consentement de l'utilisateur peuvent recevoir ses
+      // données, repli compris. Contrôlé avant toute tentative réseau (le fournisseur est simplement sauté).
+      if (Array.isArray(opts.consentedProviders) && !opts.consentedProviders.includes(providerName)) {
+        const refused = new Error(`Fournisseur IA non couvert par le consentement: ${providerName}`);
+        refused.code = 'CONSENT_PROVIDER_NOT_GRANTED';
+        lastError = lastError || refused;
+        continue;
+      }
       if (!provider.isConfigured()) {
         // Jamais tenté sur le réseau — ne compte pas comme une panne, juste
         // un fournisseur pas encore activé, on passe au suivant silencieusement.
@@ -235,13 +337,34 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
       }
       const t0 = Date.now();
       try {
-        const result = await provider[method](...args, {
-          model: opts.model || config.preferredModel || undefined,
+        // `preferredModel` est une préférence GLOBALE : l'appliquer à un
+        // fournisseur qui n'est pas celui pour lequel elle a été choisie
+        // enverrait par exemple un identifiant de modèle Claude à Gemini.
+        // Elle n'est donc retenue que pour le fournisseur initialement
+        // sélectionné ; tout autre fournisseur (repli) résout son propre
+        // modèle via sa configuration dédiée (GEMINI_MODEL, OPENAI_MODEL…).
+        const modelForThisProvider = config.models?.[providerName] ||
+          (providerName === startProvider
+            ? (opts.model || turn?.model || (config.provider === providerName ? config.preferredModel : undefined))
+            : undefined);
+        const providerOptions = {
+          model: modelForThisProvider,
           temperature: opts.temperature ?? config.temperature,
           maxTokens: opts.maxTokens ?? config.maxTokens,
           system: opts.system,
           mediaType: opts.mediaType,
-        });
+          timeoutMs: opts.timeoutMs ?? config.timeout,
+        };
+        const turnOptions = {
+          ...turn,
+          model: modelForThisProvider,
+          timeoutMs: opts.timeoutMs ?? config.timeout,
+          temperature: opts.preserveProviderDefaults ? turn?.temperature : (turn?.temperature ?? config.temperature),
+          maxTokens: turn?.maxTokens ?? opts.maxTokens ?? config.maxTokens,
+        };
+        const result = method === 'generateTurn'
+          ? await provider.generateTurn(turnOptions)
+          : await provider[method](...args, providerOptions);
         return {
           ...result,
           provider: providerName,
@@ -250,9 +373,20 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
         };
       } catch (err) {
         lastError = err;
-        console.error(`AIProviderService: ${providerName}.${method} a échoué — ${err.message}`);
-        if (!config.fallbackEnabled) break;
-        // fallbackEnabled : on continue vers le fournisseur suivant
+        // Éligibilité évaluée AVANT toute bascule : une erreur imputable à
+        // notre requête, à une clé invalide ou un refus de sécurité ne doit
+        // jamais être rejouée sur un autre fournisseur (voir fallbackPolicy).
+        const verdict = classifyProviderFailure(err);
+        console.error(`AIProviderService: ${providerName}.${method} a échoué — `
+          + `${err.message} [fallback=${verdict.eligible} ${verdict.reason}]`);
+        if (!verdict.eligible) break;
+        // Même champ normalisé que ci-dessus (config.enableFallback) — avant
+        // ce correctif, cette ligne vérifiait encore l'ancien `fallbackEnabled`
+        // brut, ce qui pouvait interrompre la boucle après un seul échec même
+        // quand `attemptOrder` contenait déjà un second fournisseur légitime
+        // (calculé, lui, à partir du bon champ). Voir functions/OPENAI_PROVIDER.md.
+        if (!config.enableFallback) break;
+        // enableFallback : on continue vers le fournisseur suivant
       }
     }
     throw lastError || new Error('Aucun fournisseur IA disponible');
@@ -262,12 +396,20 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
     const config = await getConfig();
     const uid = opts.uid || null;
     const role = opts.role || null;
+    // Identifiant de corrélation stable par appel (Mission 7/9) — repris de
+    // l'appelant s'il en fournit un (ex. un futur appelant orchestrant un
+    // tour d'outils), sinon généré ici pour que chaque écriture ai_usage/
+    // ai_logs reste traçable même sans appelant instrumenté.
+    const requestId = opts.requestId || crypto.randomUUID();
+    const requestedTools = method === 'generateTurn' && Array.isArray(args[0]?.tools)
+      ? args[0].tools.map((t) => t.name).join(',') || null
+      : null;
 
-    if (uid) await checkAndIncrementQuota(uid, role || 'default');
+    if (uid && !opts.skipQuota) await checkAndIncrementQuota(uid, role || 'default');
 
     // La vision n'est jamais mise en cache (image différente à chaque appel,
     // une clé de cache basée sur le texte seul serait trompeuse).
-    const cacheable = opts.cache !== false && method !== 'generateVision';
+    const cacheable = opts.cache !== false && method !== 'generateVision' && method !== 'generateTurn' && config.enableCache !== false;
     const cacheKey = cacheable ? hashKey(opts.provider || config.provider, method, args) : null;
     if (cacheKey) {
       const cached = await getFromCache(cacheKey);
@@ -288,36 +430,47 @@ function createAIProviderService({ db, admin, providers: providersOverride }) {
 
     try {
       const result = await callWithFallback(method, args, opts, config);
-      recordUsage({
-        uid, role, provider: result.provider, model: result.model,
-        inputTokens: result.inputTokens, outputTokens: result.outputTokens,
-        responseTimeMs: result.responseTimeMs, success: true,
-        fallbackFrom: result.fallbackFrom,
-      });
+      if (opts.recordUsage !== false && config.enableMetrics !== false) {
+        recordUsage({
+          uid, role, provider: result.provider, model: result.model,
+          inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+          responseTimeMs: result.responseTimeMs, success: true,
+          fallbackFrom: result.fallbackFrom, conversationId: opts.conversationId,
+          toolUsed: opts.toolUsed,
+          cachedInputTokens: result.cachedInputTokens, finishReason: result.finishReason,
+          requestId, toolRequested: requestedTools,
+          toolExecuted: opts.toolExecuted ?? null, riskLevel: opts.riskLevel ?? null,
+        });
+      }
       if (cacheKey) await saveToCache(cacheKey, result);
-      return result;
+      return { ...result, requestId };
     } catch (err) {
-      recordUsage({
-        uid, role, provider: opts.provider || config.provider,
-        model: opts.model || 'n/a', inputTokens: 0, outputTokens: 0,
-        responseTimeMs: 0, success: false, errorMessage: err.message,
-      });
+      if (opts.recordUsage !== false && config.enableMetrics !== false) {
+        recordUsage({
+          uid, role, provider: opts.provider || config.provider,
+          model: opts.model || 'n/a', inputTokens: 0, outputTokens: 0,
+          responseTimeMs: 0, success: false, errorMessage: err.message,
+          conversationId: opts.conversationId, toolUsed: opts.toolUsed,
+          errorCode: err.code || null, requestId, toolRequested: requestedTools,
+          toolExecuted: opts.toolExecuted ?? null, riskLevel: opts.riskLevel ?? null,
+        });
+      }
       throw err;
     }
   }
 
+  // generateText / generateChat / generateVision : aucun appelant en production (vérifié M2.14 : seul `azIaChat` appelle un
+  // modèle, via aiGateway.generateTurn). Conservées pour les tests et d'éventuels usages futurs, mais soumises à la MÊME
+  // liste blanche (claude/gemini) que generateTurn dans callWithFallback — jamais d'appel hors liste, ni en départ ni en
+  // repli. Toute donnée d'utilisateur envoyée par ces méthodes devra en plus passer `consentedProviders`.
   return {
     providers,
     getConfig,
     generateText:   (prompt, opts)        => generate('generateText',   [prompt], opts || {}),
     generateChat:   (messages, opts)      => generate('generateChat',   [messages], opts || {}),
     generateVision: (prompt, image, opts) => generate('generateVision', [prompt, image], opts || {}),
-    // Exposé pour intégration additive dans azIaChat (boucle d'outils Claude
-    // existante, volontairement non réécrite — voir en-tête de ce fichier) :
-    // permet à azIaChat de continuer à journaliser son propre usage/coût
-    // dans les mêmes collections ai_usage/ai_logs/ai_daily_stats que ce
-    // service, sans passer par callWithFallback (qui perdrait le contexte
-    // d'outils déjà en cours).
+    generateTurn:   (turn, opts)          => generate('generateTurn',   [turn], opts || {}),
+    // Aggregate usage for the bounded azIaChat sequence.
     recordUsage,
     estimateCost,
   };

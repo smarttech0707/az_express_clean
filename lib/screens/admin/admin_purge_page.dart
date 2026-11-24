@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../theme/app_theme.dart';
@@ -11,7 +11,7 @@ class AdminPurgePage extends StatefulWidget {
 }
 
 class _AdminPurgePageState extends State<AdminPurgePage> {
-  bool _purgeOrders = true;
+  final bool _purgeOrders = false;
   bool _purgeChats = true;
   bool _purgeRecharges = false;
 
@@ -20,6 +20,10 @@ class _AdminPurgePageState extends State<AdminPurgePage> {
   int _totalDeleted = 0;
 
   Future<int> _deleteCollection(String collection) async {
+    // Preserve order history and financial references, including terminal orders.
+    if (collection == 'orders') {
+      throw StateError('La suppression des commandes est désactivée.');
+    }
     int deleted = 0;
     QuerySnapshot snap;
     do {
@@ -32,9 +36,9 @@ class _AdminPurgePageState extends State<AdminPurgePage> {
       final batch = FirebaseFirestore.instance.batch();
       for (final doc in snap.docs) {
         batch.delete(doc.reference);
-        deleted++;
       }
       await batch.commit();
+      deleted += snap.docs.length;
 
       if (mounted) {
         setState(() {
@@ -92,8 +96,7 @@ class _AdminPurgePageState extends State<AdminPurgePage> {
           ScaleButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text("Purger",
-                style: TextStyle(color: Colors.white)),
+            child: const Text("Purger", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -209,12 +212,10 @@ class _AdminPurgePageState extends State<AdminPurgePage> {
             _CollectionTile(
               icon: Icons.receipt_long_rounded,
               title: "Commandes",
-              subtitle: "Toutes les commandes clients (orders)",
+              subtitle: "Suppression désactivée : historique et traçabilité préservés",
               color: AppColors.primary,
               value: _purgeOrders,
-              onChanged: _loading
-                  ? null
-                  : (v) => setState(() => _purgeOrders = v ?? false),
+              onChanged: null,
             ),
             const SizedBox(height: 10),
             _CollectionTile(
@@ -329,67 +330,67 @@ class _CollectionTile extends StatelessWidget {
     // dire de quelle collection il s'agit).
     return MergeSemantics(
       child: GestureDetector(
-      onTap: onChanged == null ? null : () => onChanged!(!value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: value ? color : Colors.grey.shade200,
-            width: value ? 2 : 1,
+        onTap: onChanged == null ? null : () => onChanged!(!value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: value ? color : Colors.grey.shade200,
+              width: value ? 2 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 22),
               ),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                        color: Colors.grey.shade600, fontSize: 12),
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style:
+                          TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Checkbox(
-              value: value,
-              onChanged: onChanged,
-              activeColor: color,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(4)),
-            ),
-          ],
+              Checkbox(
+                value: value,
+                onChanged: onChanged,
+                activeColor: color,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4)),
+              ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }

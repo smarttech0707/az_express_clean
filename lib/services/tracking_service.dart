@@ -4,57 +4,66 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import '../models/route_model.dart';
 import 'google_routes_service.dart';
 
 /// État de suivi partagé entre la vue client et la vue livreur.
 class TrackingState {
-  final LatLng?       driverPosition;
-  final LatLng        clientPosition;
-  final LatLng?       destination;
-  final List<LatLng>  routeToClient;      // livreur → client
-  final List<LatLng>  routeToDestination; // client → destination
-  final double        distanceToClient;   // km
-  final double        distanceToDest;     // km
-  final int           etaToClient;        // minutes
-  final int           etaToDest;          // minutes
-  final bool          routeLoading;
+  final LatLng? driverPosition;
+  final LatLng clientPosition;
+  final LatLng? destination;
+  final List<LatLng> routeToClient; // livreur → client
+  final List<LatLng> routeToDestination; // client → destination
+  final double distanceToClient; // km
+  final double distanceToDest; // km
+  final int etaToClient; // minutes
+  final int etaToDest; // minutes
+  final bool routeLoading;
+
+  /// `true` quand distance et durée ne viennent pas d'un itinéraire routier
+  /// réel (vol d'oiseau, vitesse fixe) : l'écran doit l'indiquer.
+  final bool routeIsEstimate;
 
   const TrackingState({
     this.driverPosition,
     required this.clientPosition,
     this.destination,
-    this.routeToClient      = const [],
+    this.routeToClient = const [],
     this.routeToDestination = const [],
-    this.distanceToClient   = 0,
-    this.distanceToDest     = 0,
-    this.etaToClient        = 0,
-    this.etaToDest          = 0,
-    this.routeLoading       = false,
+    this.distanceToClient = 0,
+    this.distanceToDest = 0,
+    this.etaToClient = 0,
+    this.etaToDest = 0,
+    this.routeLoading = false,
+    this.routeIsEstimate = false,
   });
 
   TrackingState copyWith({
-    LatLng?      driverPosition,
-    LatLng?      clientPosition,
-    LatLng?      destination,
+    LatLng? driverPosition,
+    LatLng? clientPosition,
+    LatLng? destination,
     List<LatLng>? routeToClient,
     List<LatLng>? routeToDestination,
-    double?      distanceToClient,
-    double?      distanceToDest,
-    int?         etaToClient,
-    int?         etaToDest,
-    bool?        routeLoading,
-  }) => TrackingState(
-    driverPosition:      driverPosition      ?? this.driverPosition,
-    clientPosition:      clientPosition      ?? this.clientPosition,
-    destination:         destination         ?? this.destination,
-    routeToClient:       routeToClient       ?? this.routeToClient,
-    routeToDestination:  routeToDestination  ?? this.routeToDestination,
-    distanceToClient:    distanceToClient    ?? this.distanceToClient,
-    distanceToDest:      distanceToDest      ?? this.distanceToDest,
-    etaToClient:         etaToClient         ?? this.etaToClient,
-    etaToDest:           etaToDest           ?? this.etaToDest,
-    routeLoading:        routeLoading        ?? this.routeLoading,
-  );
+    double? distanceToClient,
+    double? distanceToDest,
+    int? etaToClient,
+    int? etaToDest,
+    bool? routeLoading,
+    bool? routeIsEstimate,
+  }) =>
+      TrackingState(
+        driverPosition: driverPosition ?? this.driverPosition,
+        clientPosition: clientPosition ?? this.clientPosition,
+        destination: destination ?? this.destination,
+        routeToClient: routeToClient ?? this.routeToClient,
+        routeToDestination: routeToDestination ?? this.routeToDestination,
+        distanceToClient: distanceToClient ?? this.distanceToClient,
+        distanceToDest: distanceToDest ?? this.distanceToDest,
+        etaToClient: etaToClient ?? this.etaToClient,
+        etaToDest: etaToDest ?? this.etaToDest,
+        routeLoading: routeLoading ?? this.routeLoading,
+        routeIsEstimate: routeIsEstimate ?? this.routeIsEstimate,
+      );
 
   int get etaTotal => etaToClient + etaToDest;
   double get distanceTotal => distanceToClient + distanceToDest;
@@ -69,18 +78,18 @@ class TrackingService extends ChangeNotifier {
     required String driverId,
     required LatLng clientPosition,
     LatLng? destination,
-  })  : _driverId       = driverId,
+  })  : _driverId = driverId,
         _clientPosition = clientPosition,
-        _destination    = destination {
+        _destination = destination {
     _state = TrackingState(
       clientPosition: clientPosition,
-      destination:    destination,
+      destination: destination,
     );
     _start();
   }
 
-  final String  _driverId;
-  final LatLng  _clientPosition;
+  final String _driverId;
+  final LatLng _clientPosition;
   final LatLng? _destination;
 
   late TrackingState _state;
@@ -88,7 +97,12 @@ class TrackingService extends ChangeNotifier {
 
   StreamSubscription<DocumentSnapshot>? _driverSub;
   LatLng? _lastRouteCalcPos;
-  Timer?  _animTimer;
+  Timer? _animTimer;
+  int _routeRevision = 0;
+  bool _isAnimating = false;
+
+  int get routeRevision => _routeRevision;
+  bool get isAnimating => _isAnimating;
 
   // Recalcule la route si le livreur a bougé de plus de 200m — aligné avec RealtimeTrackingService
   static const double _routeRefreshMeters = 200;
@@ -98,8 +112,11 @@ class TrackingService extends ChangeNotifier {
   static const int _animStepMs = 16;
 
   void _start() {
+    if (_driverId.isEmpty) return;
+    // SEC-01 / S6.2 : seuls `lat`/`lng` sont consommés (`_onDriverSnapshot`),
+    // tous deux dans la projection publique `driver_public`.
     _driverSub = FirebaseFirestore.instance
-        .collection('livreurs')
+        .collection('driver_public')
         .doc(_driverId)
         .snapshots()
         .listen(_onDriverSnapshot, onError: (_) {});
@@ -130,6 +147,7 @@ class TrackingService extends ChangeNotifier {
 
   void _animateMarkerTo(LatLng target) {
     _animTimer?.cancel();
+    _isAnimating = true;
     final start = _state.driverPosition!;
     final steps = (_animDurationMs / _animStepMs).round();
     var step = 0;
@@ -140,13 +158,15 @@ class TrackingService extends ChangeNotifier {
         step++;
         final progress = _easeInOut(step / steps);
         final interpolated = LatLng(
-          _lerp(start.latitude,  target.latitude,  progress),
+          _lerp(start.latitude, target.latitude, progress),
           _lerp(start.longitude, target.longitude, progress),
         );
+        final isFinalTick = step >= steps;
         _state = _state.copyWith(driverPosition: interpolated);
+        _isAnimating = !isFinalTick;
         notifyListeners();
 
-        if (step >= steps) {
+        if (isFinalTick) {
           t.cancel();
           _refreshRouteIfNeeded(target);
         }
@@ -157,9 +177,12 @@ class TrackingService extends ChangeNotifier {
   void _refreshRouteIfNeeded(LatLng pos) {
     final shouldRefresh = _lastRouteCalcPos == null ||
         Geolocator.distanceBetween(
-          _lastRouteCalcPos!.latitude, _lastRouteCalcPos!.longitude,
-          pos.latitude, pos.longitude,
-        ) >= _routeRefreshMeters;
+              _lastRouteCalcPos!.latitude,
+              _lastRouteCalcPos!.longitude,
+              pos.latitude,
+              pos.longitude,
+            ) >=
+            _routeRefreshMeters;
 
     if (shouldRefresh) {
       _lastRouteCalcPos = pos;
@@ -173,9 +196,7 @@ class TrackingService extends ChangeNotifier {
   // Courbe ease-in-out pour un mouvement naturel (pas de départ/arrivée brusque)
   static double _easeInOut(double t) {
     final c = t.clamp(0.0, 1.0);
-    return c < 0.5
-        ? 2 * c * c
-        : 1 - math.pow(-2 * c + 2, 2) / 2;
+    return c < 0.5 ? 2 * c * c : 1 - math.pow(-2 * c + 2, 2) / 2;
   }
 
   Future<void> _calculateRoutes(LatLng driverPos) async {
@@ -183,19 +204,29 @@ class TrackingService extends ChangeNotifier {
     notifyListeners();
 
     // Distance livreur → client
-    final distToClient = Geolocator.distanceBetween(
-      driverPos.latitude, driverPos.longitude,
-      _clientPosition.latitude, _clientPosition.longitude,
-    ) / 1000;
+    var distToClient = Geolocator.distanceBetween(
+          driverPos.latitude,
+          driverPos.longitude,
+          _clientPosition.latitude,
+          _clientPosition.longitude,
+        ) /
+        1000;
 
-    final etaToClient = _eta(distToClient);
+    var etaToClient = _eta(distToClient);
 
     // Route livreur → client — via GoogleRoutesService (avec cache 5 min)
     final routeModel1 = await GoogleRoutesService.getRouteModel(
-      origin:      driverPos,
+      origin: driverPos,
       destination: _clientPosition,
     );
     final routeToClient = routeModel1.points;
+    // Itinéraire routier réel : sa distance et sa durée remplacent le vol
+    // d'oiseau. Minimum 1 min : 0 signifie « phase de livraison » pour l'écran.
+    var isEstimate = !_isRealRoute(routeModel1);
+    if (!isEstimate) {
+      distToClient = routeModel1.distanceKm;
+      etaToClient = routeModel1.etaMinutes.clamp(1, 180);
+    }
 
     // Route client → destination (si destination disponible)
     List<LatLng> routeToDest = [];
@@ -204,29 +235,45 @@ class TrackingService extends ChangeNotifier {
 
     if (_destination != null) {
       distToDest = Geolocator.distanceBetween(
-        _clientPosition.latitude, _clientPosition.longitude,
-        _destination!.latitude, _destination!.longitude,
-      ) / 1000;
+            _clientPosition.latitude,
+            _clientPosition.longitude,
+            _destination!.latitude,
+            _destination!.longitude,
+          ) /
+          1000;
       etaToDest = _eta(distToDest);
 
       final routeModel2 = await GoogleRoutesService.getRouteModel(
-        origin:      _clientPosition,
+        origin: _clientPosition,
         destination: _destination!,
       );
       routeToDest = routeModel2.points;
+      if (_isRealRoute(routeModel2)) {
+        distToDest = routeModel2.distanceKm;
+        etaToDest = routeModel2.etaMinutes.clamp(1, 180);
+      } else {
+        isEstimate = true;
+      }
     }
 
     _state = _state.copyWith(
-      routeToClient:      routeToClient.isNotEmpty ? routeToClient : [driverPos, _clientPosition],
+      routeToClient: routeToClient.isNotEmpty
+          ? routeToClient
+          : [driverPos, _clientPosition],
       routeToDestination: routeToDest,
-      distanceToClient:   distToClient,
-      distanceToDest:     distToDest,
-      etaToClient:        etaToClient,
-      etaToDest:          etaToDest,
-      routeLoading:       false,
+      distanceToClient: distToClient,
+      distanceToDest: distToDest,
+      etaToClient: etaToClient,
+      etaToDest: etaToDest,
+      routeLoading: false,
+      routeIsEstimate: isEstimate,
     );
+    _routeRevision++;
     notifyListeners();
   }
+
+  static bool _isRealRoute(RouteModel route) =>
+      route.isNotEmpty && !route.isEstimate;
 
   /// Vitesse moto en ville : 25 km/h (inclut arrêts feux, ralentissements)
   static int _eta(double distKm) {
@@ -234,8 +281,21 @@ class TrackingService extends ChangeNotifier {
     return ((distKm / 25) * 60).round().clamp(1, 180);
   }
 
+  @visibleForTesting
+  void debugStartVisualTransition({
+    required LatLng from,
+    required LatLng to,
+  }) {
+    // Le test couvre uniquement l'interpolation visuelle : marquer la route
+    // comme fraîche évite un appel Directions réel à la dernière frame.
+    _lastRouteCalcPos = to;
+    _state = _state.copyWith(driverPosition: from);
+    _animateMarkerTo(to);
+  }
+
   @override
   void dispose() {
+    _isAnimating = false;
     _animTimer?.cancel();
     _driverSub?.cancel();
     super.dispose();

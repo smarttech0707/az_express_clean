@@ -7,10 +7,12 @@ class OrderStatusStepper extends StatelessWidget {
   const OrderStatusStepper({super.key, required this.status});
 
   static const _steps = [
-    _StepDef('Confirmée',  Icons.check_circle_outline_rounded,   Icons.check_circle_rounded),
-    _StepDef('Préparée',   Icons.inventory_2_outlined,           Icons.inventory_2_rounded),
-    _StepDef('En route',   Icons.electric_bike_outlined,         Icons.electric_bike_rounded),
-    _StepDef('Livrée',     Icons.flag_outlined,                  Icons.flag_rounded),
+    _StepDef('Confirmée', Icons.check_circle_outline_rounded,
+        Icons.check_circle_rounded),
+    _StepDef('Préparée', Icons.inventory_2_outlined, Icons.inventory_2_rounded),
+    _StepDef(
+        'En route', Icons.electric_bike_outlined, Icons.electric_bike_rounded),
+    _StepDef('Livrée', Icons.flag_outlined, Icons.flag_rounded),
   ];
 
   // Mapping status → index actif (0-based, -1 = annulé)
@@ -77,14 +79,14 @@ class OrderStatusStepper extends StatelessWidget {
           }
 
           final stepIdx = i ~/ 2;
-          final done    = stepIdx < active;
+          final done = stepIdx < active;
           final current = stepIdx == active;
-          final step    = _steps[stepIdx];
+          final step = _steps[stepIdx];
 
           return Column(mainAxisSize: MainAxisSize.min, children: [
             AnimatedContainer(
               duration: const Duration(milliseconds: 300),
-              width:  done || current ? 38 : 32,
+              width: done || current ? 38 : 32,
               height: done || current ? 38 : 32,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
@@ -97,13 +99,18 @@ class OrderStatusStepper extends StatelessWidget {
                     ? Border.all(color: AppColors.primary, width: 3)
                     : null,
                 boxShadow: current
-                    ? [BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.35),
-                        blurRadius: 8, spreadRadius: 1)]
+                    ? [
+                        BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.35),
+                            blurRadius: 8,
+                            spreadRadius: 1)
+                      ]
                     : null,
               ),
               child: Icon(
-                done ? step.iconFilled : (current ? step.iconFilled : step.icon),
+                done
+                    ? step.iconFilled
+                    : (current ? step.iconFilled : step.icon),
                 size: done || current ? 18 : 15,
                 color: done || current ? Colors.white : Colors.grey.shade400,
               ),

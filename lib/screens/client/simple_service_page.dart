@@ -1,8 +1,11 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/app_text.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/premium_background.dart';
+import '../../widgets/premium_empty_state.dart';
 
 class SimpleServicePage extends StatelessWidget {
   final String serviceType; // "tricycle" | "taxi_nuit"
@@ -36,24 +39,30 @@ class SimpleServicePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final textColor = AppColors.premiumTextPrimary(brightness);
+    final mutedColor = AppColors.premiumTextSecondary(brightness);
+    final directoryMessage = serviceType == 'taxi_nuit'
+        ? 'Annuaire de chauffeurs. Appelez directement le chauffeur pour convenir du trajet.'
+        : 'Annuaire de prestataires. Appelez directement le prestataire pour convenir du service.';
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      body: CustomScrollView(
+      backgroundColor: Colors.transparent,
+      body: PremiumBackground(
+          child: CustomScrollView(
         slivers: [
           // Header
           SliverAppBar(
             expandedHeight:
                 (MediaQuery.of(context).size.height * 0.20).clamp(140.0, 200.0),
             pinned: true,
-            backgroundColor: color,
-            foregroundColor: Colors.white,
+            backgroundColor: AppColors.premiumSurface(brightness),
+            foregroundColor: textColor,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: gradient,
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  color: AppColors.premiumSurface(brightness),
+                  border: Border(
+                    bottom: BorderSide(color: color.withValues(alpha: 0.25)),
                   ),
                 ),
                 child: SafeArea(
@@ -65,15 +74,22 @@ class SimpleServicePage extends StatelessWidget {
                         const SizedBox(height: 44),
                         Row(
                           children: [
-                            Icon(icon, color: Colors.white70, size: 30),
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.12),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(icon, color: color, size: 24),
+                            ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
                                 title,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
+                                style: AppTypography.headlineStyle(
+                                  context,
+                                  color: textColor,
                                 ),
                               ),
                             ),
@@ -82,8 +98,10 @@ class SimpleServicePage extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           subtitle,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 13),
+                          style: AppTypography.bodySmallStyle(
+                            context,
+                            color: mutedColor,
+                          ),
                         ),
                       ],
                     ),
@@ -92,11 +110,21 @@ class SimpleServicePage extends StatelessWidget {
               ),
             ),
             title: Text(title,
-                style: const TextStyle(color: Colors.white, fontSize: 18)),
-            centerTitle: true,
+                style:
+                    AppTypography.titleLargeStyle(context, color: textColor)),
+            centerTitle: false,
           ),
 
           // Liste
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Text(
+                directoryMessage,
+                style: AppTypography.bodySmallStyle(context, color: mutedColor),
+              ),
+            ),
+          ),
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection("simple_services")
@@ -114,24 +142,11 @@ class SimpleServicePage extends StatelessWidget {
 
               if (docs.isEmpty) {
                 return SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(icon, size: 72, color: Colors.grey.shade300),
-                        const SizedBox(height: 16),
-                        Text(
-                          context.tr('no_provider'),
-                          style: const TextStyle(fontSize: 16, color: Colors.grey),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          context.tr('come_back'),
-                          style: TextStyle(
-                              fontSize: 13, color: Colors.grey.shade400),
-                        ),
-                      ],
-                    ),
+                  child: PremiumEmptyState(
+                    icon: icon,
+                    title: context.tr('no_provider'),
+                    message: context.tr('come_back'),
+                    accent: color,
                   ),
                 );
               }
@@ -141,8 +156,7 @@ class SimpleServicePage extends StatelessWidget {
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, i) {
-                      final data =
-                          docs[i].data() as Map<String, dynamic>;
+                      final data = docs[i].data() as Map<String, dynamic>;
                       final name = data["name"] ?? "Sans nom";
                       final phone = data["phone"] ?? "";
 
@@ -152,15 +166,12 @@ class SimpleServicePage extends StatelessWidget {
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.06),
-                              blurRadius: 10,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
+                          color: AppColors.premiumSurfaceElevated(brightness),
+                          borderRadius: AppRadius.xlR,
+                          border: Border.all(
+                            color: AppColors.premiumBorder(brightness),
+                          ),
+                          boxShadow: AppShadow.xs,
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,7 +201,8 @@ class SimpleServicePage extends StatelessWidget {
                                   width: double.infinity,
                                   child: Container(
                                     decoration: BoxDecoration(
-                                      gradient: LinearGradient(colors: gradient),
+                                      gradient:
+                                          LinearGradient(colors: gradient),
                                     ),
                                     child: Center(
                                         child: Icon(icon,
@@ -205,7 +217,8 @@ class SimpleServicePage extends StatelessWidget {
                                 children: [
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           name,
@@ -286,7 +299,7 @@ class SimpleServicePage extends StatelessWidget {
             },
           ),
         ],
-      ),
+      )),
     );
   }
 }

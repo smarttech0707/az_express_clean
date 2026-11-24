@@ -1,4 +1,4 @@
-﻿import 'dart:typed_data';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../widgets/scale_button.dart';
 import '../../services/auth_service.dart';
+import '../../services/permission_primer.dart';
 
 class DriverRegister extends StatefulWidget {
   const DriverRegister({super.key});
@@ -15,11 +16,11 @@ class DriverRegister extends StatefulWidget {
 }
 
 class _DriverRegisterState extends State<DriverRegister> {
-  final _nameCtrl    = TextEditingController();
-  final _phoneCtrl   = TextEditingController();
-  final _emailCtrl   = TextEditingController();
-  final _idCtrl      = TextEditingController();
-  final _passCtrl    = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _idCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   final _idNumberCtrl = TextEditingController();
 
@@ -32,6 +33,7 @@ class _DriverRegisterState extends State<DriverRegister> {
 
   Future<void> _takeSelfie() async {
     try {
+      if (!await PermissionPrimer.prepareImage(ImageSource.camera, context: context)) return;
       final img = await ImagePicker().pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
@@ -43,12 +45,15 @@ class _DriverRegisterState extends State<DriverRegister> {
         setState(() => _selfieBytes = bytes);
       }
     } catch (e) {
-      if (mounted) _snack("Impossible d'accéder à la caméra. Vérifiez les permissions.", Colors.red);
+      if (mounted)
+        _snack("Impossible d'accéder à la caméra. Vérifiez les permissions.",
+            Colors.red);
     }
   }
 
   Future<void> _pickIdPhoto(ImageSource source) async {
     try {
+      if (!await PermissionPrimer.prepareImage(source, context: context)) return;
       final picked = await ImagePicker().pickImage(
         source: source,
         imageQuality: 60,
@@ -59,7 +64,10 @@ class _DriverRegisterState extends State<DriverRegister> {
         setState(() => _idPhotoBytes = bytes);
       }
     } catch (e) {
-      if (mounted) _snack("Impossible d'accéder à la caméra/galerie. Vérifiez les permissions.", Colors.red);
+      if (mounted)
+        _snack(
+            "Impossible d'accéder à la caméra/galerie. Vérifiez les permissions.",
+            Colors.red);
     }
   }
 
@@ -82,7 +90,8 @@ class _DriverRegisterState extends State<DriverRegister> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF167DB7)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF167DB7)),
               title: const Text("Importer depuis la galerie"),
               onTap: () {
                 Navigator.pop(context);
@@ -105,7 +114,11 @@ class _DriverRegisterState extends State<DriverRegister> {
 
     final email = _emailCtrl.text.trim();
 
-    if (name.isEmpty || phone.isEmpty || email.isEmpty || id.isEmpty || pass.isEmpty) {
+    if (name.isEmpty ||
+        phone.isEmpty ||
+        email.isEmpty ||
+        id.isEmpty ||
+        pass.isEmpty) {
       _snack("Remplissez tous les champs", Colors.red);
       return;
     }
@@ -143,8 +156,8 @@ class _DriverRegisterState extends State<DriverRegister> {
 
     try {
       // Utiliser le vrai email comme identifiant Firebase Auth
-      final credential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
+      final credential =
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: pass,
       );
@@ -179,16 +192,16 @@ class _DriverRegisterState extends State<DriverRegister> {
           .collection("driver_requests")
           .doc(uid)
           .set({
-        "uid":        uid,
-        "name":       name,
-        "phone":      phone,
-        "email":      email,
+        "uid": uid,
+        "name": name,
+        "phone": phone,
+        "email": email,
         "identifiant": id,
-        "status":     "pending",
-        "photoUrl":   photoUrl,
+        "status": "pending",
+        "photoUrl": photoUrl,
         "idPhotoUrl": idPhotoUrl,
-        "idNumber":   _idNumberCtrl.text.trim(),
-        "createdAt":  FieldValue.serverTimestamp(),
+        "idNumber": _idNumberCtrl.text.trim(),
+        "createdAt": FieldValue.serverTimestamp(),
       });
 
       if (!mounted) return;
@@ -238,9 +251,12 @@ class _DriverRegisterState extends State<DriverRegister> {
         case 'email-already-in-use':
           _snack("Cet identifiant est déjà utilisé", Colors.red);
         case 'network-request-failed':
-          _snack("Pas de connexion internet. Vérifiez votre réseau et réessayez.", Colors.orange);
+          _snack(
+              "Pas de connexion internet. Vérifiez votre réseau et réessayez.",
+              Colors.orange);
         case 'too-many-requests':
-          _snack("Trop de tentatives. Réessayez dans quelques minutes.", Colors.orange);
+          _snack("Trop de tentatives. Réessayez dans quelques minutes.",
+              Colors.orange);
         case 'weak-password':
           _snack("Mot de passe trop faible (6 caractères minimum)", Colors.red);
         default:
@@ -250,7 +266,9 @@ class _DriverRegisterState extends State<DriverRegister> {
       if (!mounted) return;
       setState(() => _loading = false);
       final msg = e.toString();
-      if (msg.contains('network') || msg.contains('timeout') || msg.contains('SocketException')) {
+      if (msg.contains('network') ||
+          msg.contains('timeout') ||
+          msg.contains('SocketException')) {
         _snack("Connexion internet instable. Réessayez.", Colors.orange);
       } else {
         _snack("Erreur : $msg", Colors.red);
@@ -271,8 +289,7 @@ class _DriverRegisterState extends State<DriverRegister> {
       MaterialPageRoute(
         builder: (_) => Scaffold(
           appBar: AppBar(
-            title: Text(title,
-                style: const TextStyle(fontSize: 15)),
+            title: Text(title, style: const TextStyle(fontSize: 15)),
             backgroundColor: const Color(0xFF167DB7),
             foregroundColor: Colors.white,
           ),
@@ -336,8 +353,7 @@ AZ Express peut suspendre un livreur en cas de :
 
 Le livreur est responsable de ses actions pendant les livraisons.""";
 
-  static const String _remuneration =
-      """RÉMUNÉRATION DES LIVREURS — AZ Express
+  static const String _remuneration = """RÉMUNÉRATION DES LIVREURS — AZ Express
 
 PRINCIPE
 
@@ -436,7 +452,8 @@ Email : znm0905@gmail.com""";
                   ),
                   boxShadow: [
                     BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.06), blurRadius: 8)
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 8)
                   ],
                 ),
                 child: _selfieBytes == null
@@ -446,8 +463,8 @@ Email : znm0905@gmail.com""";
                             width: 72,
                             height: 72,
                             decoration: BoxDecoration(
-                              color:
-                                  const Color(0xFF167DB7).withValues(alpha: 0.1),
+                              color: const Color(0xFF167DB7)
+                                  .withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(Icons.camera_alt,
@@ -623,8 +640,7 @@ Email : znm0905@gmail.com""";
                 children: [
                   CheckboxListTile(
                     value: _acceptTerms,
-                    onChanged: (v) =>
-                        setState(() => _acceptTerms = v ?? false),
+                    onChanged: (v) => setState(() => _acceptTerms = v ?? false),
                     activeColor: const Color(0xFF167DB7),
                     controlAffinity: ListTileControlAffinity.leading,
                     title: RichText(
@@ -636,9 +652,7 @@ Email : znm0905@gmail.com""";
                           WidgetSpan(
                             child: GestureDetector(
                               onTap: () => _showLegal(
-                                  context,
-                                  "Conditions livreurs",
-                                  _termsDriver),
+                                  context, "Conditions livreurs", _termsDriver),
                               child: const Text(
                                 "Conditions d'utilisation livreur",
                                 style: TextStyle(
@@ -669,10 +683,8 @@ Email : znm0905@gmail.com""";
                           const TextSpan(text: "J'accepte la "),
                           WidgetSpan(
                             child: GestureDetector(
-                              onTap: () => _showLegal(
-                                  context,
-                                  "Rémunération des livreurs",
-                                  _remuneration),
+                              onTap: () => _showLegal(context,
+                                  "Rémunération des livreurs", _remuneration),
                               child: const Text(
                                 "Politique de rémunération",
                                 style: TextStyle(
@@ -725,10 +737,9 @@ Email : znm0905@gmail.com""";
         labelText: label,
         hintText: hint,
         prefixIcon: Icon(icon),
-        border:
-            OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }
@@ -744,10 +755,9 @@ Email : znm0905@gmail.com""";
           icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility),
           onPressed: () => setState(() => _showPass = !_showPass),
         ),
-        border:
-            OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surface,
       ),
     );
   }

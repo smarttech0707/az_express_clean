@@ -1,0 +1,14 @@
+--- functions/adminPartnerAccounts.js	2026-10-27 03:39:39.667632900 +0000
++++ C:/Users/User/AppData/Local/Temp/claude/d--az-express-clean/78634419-1e56-4e46-9f16-17d14c8e3b49/scratchpad/b5work/functions/adminPartnerAccounts.js	2026-10-27 05:25:23.241661500 +0000
+@@ -259,6 +259,11 @@
+     data: {
+       uid, phone: rootFlags.ownerPhone, ownerName: rootFlags.ownerName,
+       createdAt: timestamp, restaurantId,
++      // PROJECTION en lecture seule de l'autorité partner_provisioning/{uid} :
++      // les règles Cloud Storage (limite de 2 documents) lisent ce document
++      // qui prouve déjà la propriété. Écrite dans le MÊME lot atomique que le
++      // journal, jamais lue par le serveur pour décider.
++      mustChangePassword: true,
+     },
+   });
+   documents.push({

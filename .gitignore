@@ -56,6 +56,9 @@ lib/firebase_options.dart
 .env.*
 functions/.env
 functions/.env.*
+# Fichier modèle documentant les variables d'env attendues (aucune vraie
+# valeur/secret dedans) — doit rester versionné, contrairement aux .env réels.
+!functions/.env.example
 
 # Release keystore — never commit private signing keys
 *.keystore
@@ -67,3 +70,29 @@ functions/.env.*
 
 # Debug symbols from obfuscated builds
 /build/app/outputs/symbols/
+
+# Local Firebase configuration snapshots and security-cleanup reports.
+.scratch_shots/
+*.pre-mfa-backup
+functions/scripts/reports/cleanup_production_test_data_*.json
+
+.dart_appdata/
+
+# Projet Firebase de test (test-env/)
+test-env/dart-defines.test.json
+test-env/runtime/
+test-env/.emulator-data/
+functions/.secret.local
+
+test-env/.snapshots/
+
+# Binaires volumineux retirés du suivi Git (nettoyage pré-push) — fichiers ciblés
+# individuellement, conservés physiquement sur disque, jamais supprimés.
+/AZ_Express_1.0.6_7_Play_Internal.aab
+/AZ_Express_1.0.7_8_Play_Internal.aab
+/AZ_Express_1.0.8_9_Play_Internal.aab
+/AZ_Express_1.0.9_10_Play_Alpha.aab
+/web/downloads/az-express-latest.apk
+/qr-release/android-test/AZExpress-1.0.10-qrtest-11.apk
+/qr-release/hosting/downloads/az-express-latest.apk
+/qr-release/hosting-audit/baseline/downloads/az-express-latest.apk

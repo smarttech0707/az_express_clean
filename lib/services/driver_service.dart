@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/driver_model.dart';
 
 class DriverService {
-
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
   Future<void> registerDriver(DriverModel driver) async {

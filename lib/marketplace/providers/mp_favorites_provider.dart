@@ -3,12 +3,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/mp_service.dart';
 
 class MpFavoritesProvider extends ChangeNotifier {
-  Set<String> _ids   = {};
-  bool        _loaded = false;
+  Set<String> _ids = {};
+  bool _loaded = false;
 
-  Set<String> get ids    => _ids;
-  bool get loaded        => _loaded;
-  bool isFav(String id)  => _ids.contains(id);
+  Set<String> get ids => _ids;
+  bool get loaded => _loaded;
+  bool isFav(String id) => _ids.contains(id);
 
   Future<void> load() async {
     if (_loaded) return;
@@ -33,7 +33,7 @@ class MpFavoritesProvider extends ChangeNotifier {
   }
 
   void reset() {
-    _ids    = {};
+    _ids = {};
     _loaded = false;
     notifyListeners();
   }

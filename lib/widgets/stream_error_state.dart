@@ -18,7 +18,8 @@ class StreamErrorState extends StatelessWidget {
 
   const StreamErrorState({
     super.key,
-    this.message = 'Impossible de charger les données. Vérifiez votre connexion.',
+    this.message =
+        'Impossible de charger les données. Vérifiez votre connexion.',
     this.icon = Icons.wifi_off_rounded,
     this.onRetry,
     this.retryLabel = 'Réessayer',

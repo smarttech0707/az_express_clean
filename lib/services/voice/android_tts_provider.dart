@@ -47,7 +47,8 @@ class AndroidTtsProvider implements VoiceProvider {
       // Un échec d'initialisation (plateforme non supportée, TTS absent...)
       // ne doit jamais faire planter AZ IA — juste indiquer que ce
       // fournisseur n'est pas utilisable, VoiceManager gère le repli.
-      debugPrint('[VoiceManager] AndroidTtsProvider.initialize() a échoué : $e');
+      debugPrint(
+          '[VoiceManager] AndroidTtsProvider.initialize() a échoué : $e');
       _available = false;
     }
   }
@@ -59,7 +60,8 @@ class AndroidTtsProvider implements VoiceProvider {
   Future<void> _selectBestEngine() async {
     try {
       final dynamic raw = await _tts.getEngines;
-      final engines = (raw is List) ? raw.map((e) => e.toString()).toList() : <String>[];
+      final engines =
+          (raw is List) ? raw.map((e) => e.toString()).toList() : <String>[];
       debugPrint('[VoiceManager] Moteurs TTS disponibles : $engines');
       for (final preferred in _preferredEngines) {
         if (engines.contains(preferred)) {
@@ -69,7 +71,8 @@ class AndroidTtsProvider implements VoiceProvider {
           return;
         }
       }
-      debugPrint('[VoiceManager] Aucun moteur préféré trouvé — conserve le moteur système par défaut.');
+      debugPrint(
+          '[VoiceManager] Aucun moteur préféré trouvé — conserve le moteur système par défaut.');
     } catch (e) {
       debugPrint('[VoiceManager] getEngines()/setEngine() indisponible : $e');
     }
@@ -84,16 +87,21 @@ class AndroidTtsProvider implements VoiceProvider {
       final dynamic raw = await _tts.getVoices;
       final voices = (raw is List) ? raw.cast<dynamic>() : <dynamic>[];
       final frVoices = voices.where((v) {
-        final locale = (v is Map ? v['locale'] : null)?.toString().toLowerCase() ?? '';
+        final locale =
+            (v is Map ? v['locale'] : null)?.toString().toLowerCase() ?? '';
         return locale.startsWith('fr');
       }).toList();
 
-      debugPrint('[VoiceManager] ${frVoices.length} voix françaises disponibles.');
+      debugPrint(
+          '[VoiceManager] ${frVoices.length} voix françaises disponibles.');
 
       Map<dynamic, dynamic>? best;
       for (final v in frVoices) {
         final locale = (v['locale'] ?? '').toString().toLowerCase();
-        if (locale == 'fr-fr') { best = v; break; }
+        if (locale == 'fr-fr') {
+          best = v;
+          break;
+        }
         best ??= v;
       }
 
@@ -104,13 +112,16 @@ class AndroidTtsProvider implements VoiceProvider {
         };
         await _tts.setVoice(voiceMap);
         _selectedVoiceName = voiceMap['name'];
-        debugPrint('[VoiceManager] Voix sélectionnée : $_selectedVoiceName (${voiceMap['locale']})');
+        debugPrint(
+            '[VoiceManager] Voix sélectionnée : $_selectedVoiceName (${voiceMap['locale']})');
       } else {
-        debugPrint('[VoiceManager] Aucune voix française nommée trouvée — repli sur setLanguage(fr-FR).');
+        debugPrint(
+            '[VoiceManager] Aucune voix française nommée trouvée — repli sur setLanguage(fr-FR).');
         await _tts.setLanguage('fr-FR');
       }
     } catch (e) {
-      debugPrint('[VoiceManager] getVoices()/setVoice() indisponible, repli sur setLanguage : $e');
+      debugPrint(
+          '[VoiceManager] getVoices()/setVoice() indisponible, repli sur setLanguage : $e');
       await _tts.setLanguage('fr-FR');
     }
   }

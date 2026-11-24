@@ -1,4 +1,5 @@
 'use strict';
+const { query: lifecycleQuery } = require('./lifecycleFake');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -11,12 +12,32 @@ const {
   buildPayBoutiqueOrder,
   buildPayBoutiqueOrderCash,
   buildRefundExpiredBoutiqueOrder,
+  cancelOrderTx,
 } = require('../orderActions');
 
 // Fake Firestore : un Map en mémoire + de quoi satisfaire get/set/update/add
 // hors et dans une transaction — même style que test/pendingActions.test.js.
 function makeFakeDb(seed = {}) {
-  const store = new Map(Object.entries(seed));
+  // Ces tests couvrent la facturation historique (sans acceptedTotal) : la politique
+  // transitoire 'no_commission' la laisse créer des commandes (défaut 'block' testé ailleurs).
+  const geographicSeed = {
+    'config/billing': { legacyPartnerAcceptance: 'no_commission' },
+    'zones_livraison/abengourou': {
+      type: 'ville', cityId: 'abengourou', isActive: true,
+      isServiceable: true, coordinateSource: 'own',
+      lat: 6.7, lng: -3.5, radiusKm: 100,
+    },
+    'zones_livraison/centre': {
+      type: 'quartier', cityId: 'abengourou', isActive: true,
+      isServiceable: true, coordinateSource: 'own',
+      lat: 6.7, lng: -3.5, radiusKm: 100,
+    },
+  };
+  const normalizedSeed = Object.fromEntries(Object.entries(seed).map(([path, data]) => [
+    path,
+    path.startsWith('sellers/') ? { lat: 6.7, lng: -3.5, ...data } : data,
+  ]));
+  const store = new Map(Object.entries({ ...geographicSeed, ...normalizedSeed }));
   const added = [];
   let autoId = 0;
 
@@ -63,6 +84,23 @@ function makeFakeDb(seed = {}) {
   }
 
   function makeCollection(name) {
+    const makeQuery = (filters = []) => ({
+      where: (field, op, value) => makeQuery([...filters, { field, op, value }]),
+      limit: (n) => ({
+        get: async () => {
+          const docs = [];
+          for (const [path, data] of store.entries()) {
+            if (!path.startsWith(`${name}/`)) continue;
+            if (path.slice(name.length + 1).includes('/')) continue;
+            const matches = filters.every(({ field, op, value }) =>
+              op === '==' && data?.[field] === value);
+            if (matches) docs.push({ id: path.split('/').pop(), data: () => data });
+            if (docs.length >= n) break;
+          }
+          return { empty: docs.length === 0, docs, size: docs.length };
+        },
+      }),
+    });
     return {
       doc: (id) => makeRef(`${name}/${id ?? `auto${autoId++}`}`),
       add: async (data) => {
@@ -71,22 +109,7 @@ function makeFakeDb(seed = {}) {
         added.push({ collection: name, data });
         return { id: path.split('/').pop() };
       },
-      where: (field, _op, value) => ({
-        limit: (n) => ({
-          get: async () => {
-            const docs = [];
-            for (const [path, data] of store.entries()) {
-              if (!path.startsWith(`${name}/`)) continue;
-              if (path.slice(name.length + 1).includes('/')) continue; // pas de sous-collection
-              if (data && data[field] === value) {
-                docs.push({ id: path.split('/').pop(), data: () => data });
-              }
-              if (docs.length >= n) break;
-            }
-            return { empty: docs.length === 0, docs };
-          },
-        }),
-      }),
+      where: (field, op, value) => makeQuery([{ field, op, value }]),
     };
   }
 
@@ -94,7 +117,7 @@ function makeFakeDb(seed = {}) {
     collection: (name) => makeCollection(name),
     runTransaction: async (fn) => {
       const tx = {
-        get: async (ref) => ({ exists: store.has(ref.__path), data: () => store.get(ref.__path) }),
+        get: async (ref) => ref.__path ? ({ exists: store.has(ref.__path), data: () => store.get(ref.__path) }) : ref.get(),
         update: (ref, data) => store.set(ref.__path, applyUpdate(store.get(ref.__path) || {}, data)),
         set: (ref, data) => store.set(ref.__path, data),
       };
@@ -108,6 +131,7 @@ function makeFakeDb(seed = {}) {
 const fakeAdmin = {
   firestore: {
     FieldValue: {
+      delete: () => ({ __delete: true }),
       serverTimestamp: () => '__SERVER_TIMESTAMP__',
       increment: (n) => ({ __increment: n }),
     },
@@ -162,7 +186,10 @@ test('payOrderFromWalletCF: happy path debits client, credits driver, marks orde
   assert.equal(store.get('livreurs/d1').wallet, 700);
   assert.equal(store.get('orders/o1').isPaid, true);
   assert.equal(store.get('orders/o1').paymentMethod, 'wallet');
-  assert.equal(added.filter(a => a.collection.includes('wallet_transactions')).length, 2);
+  // L4 : journaux écrits DANS la transaction, à identifiants déterministes (plus d'ajout post-transaction).
+  assert.equal(added.filter(a => a.collection.includes('wallet_transactions')).length, 0);
+  assert.equal(store.get('clients/c1/wallet_transactions/pay_order_o1').amount, 500);
+  assert.equal(store.get('livreurs/d1/wallet_transactions/earning_pay_order_o1').amount, 500);
   assert.equal(logAudit.calls.length, 1);
   assert.equal(logAudit.calls[0].action, 'pay_order_wallet');
 });
@@ -303,7 +330,7 @@ test('cancelOrderCF: refunds the client wallet when the order was paid by wallet
 
 test('cancelOrderCF: also refunds the driver commission when the order was already accepted', async () => {
   const { db, store } = makeFakeDb({
-    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500, commissionStatus: 'charged', commissionPayerId: 'd1', commissionAmount: 200 },
     'clients/c1':  { wallet: 0 },
     'livreurs/d1': { wallet: 50 },
   });
@@ -318,6 +345,87 @@ test('cancelOrderCF: also refunds the driver commission when the order was alrea
   // budget=1500 >= threshold(1000) -> commission 200 (fakeCalculateCommission)
   assert.equal(store.get('livreurs/d1').wallet, 250);
   assert.equal(store.get('clients/c1').wallet, 0); // cash order: no client refund
+});
+
+test('cancelOrderCF: commission non tracée → aucun crédit au livreur, signalement idempotent, annulation effective', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', isPaid: true, budget: 1500 },
+    'clients/c1':  { wallet: 0 },
+    'livreurs/d1': { wallet: 50 },
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('livreurs/d1').wallet, 50, 'jamais déduit du barème théorique');
+  assert.equal(store.get('clients/c1').wallet, 1500);
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+  assert.equal(store.get('reconciliation_flags/o1_commission_untraced').type, 'commission_untraced');
+});
+
+test('cancelOrderCF: ancienne commande sans trace mais AVEC la transaction de prélèvement → montant prélevé rendu une fois', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'clients/c1':  { wallet: 0 },
+    'livreurs/d1': { wallet: 50 },
+    'livreurs/d1/wallet_transactions/commission_o1_d1': { type: 'commission', amount: 150, orderId: 'o1' },
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 200, '50 + 150 prélevés, jamais le barème (200)');
+  assert.equal(store.get('orders/o1').commissionStatus, 'refunded');
+  assert.equal(store.has('reconciliation_flags/o1_commission_untraced'), false);
+  await assert.rejects(() => fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } }));
+  assert.equal(store.get('livreurs/d1').wallet, 200, 'idempotent');
+});
+
+test('cancelOrderCF: preuves de prélèvement invalides → aucune restitution, signalement', async () => {
+  for (const bad of [
+    { type: 'refund', amount: 150, orderId: 'o1' }, { type: 'commission', amount: 150, orderId: 'autre' },
+    { type: 'commission', amount: 0, orderId: 'o1' }, { type: 'commission', amount: 15.5, orderId: 'o1' },
+    { type: 'commission', amount: '150', orderId: 'o1' },
+  ]) {
+    const { db, store } = makeFakeDb({
+      'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+      'clients/c1':  { wallet: 0 },
+      'livreurs/d1': { wallet: 50 },
+      'livreurs/d1/wallet_transactions/commission_o1_d1': bad,
+    });
+    const fn = buildCancelOrder({
+      db, admin: fakeAdmin, onCall, HttpsError,
+      checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+      calculateCommission: fakeCalculateCommission,
+    });
+    await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+    assert.equal(store.get('livreurs/d1').wallet, 50, JSON.stringify(bad));
+    assert.equal(store.get('orders/o1').status, 'cancelled');
+    assert.equal(store.get('reconciliation_flags/o1_commission_untraced').status, 'open');
+  }
+});
+
+test('cancelOrderCF: preuve de prélèvement d’un AUTRE livreur ignorée (seul le livreur de la commande compte)', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'clients/c1':  { wallet: 0 },
+    'livreurs/d1': { wallet: 50 }, 'livreurs/d2': { wallet: 50 },
+    'livreurs/d2/wallet_transactions/commission_o1_d2': { type: 'commission', amount: 150, orderId: 'o1' },
+  });
+  const fn = buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 50);
+  assert.equal(store.get('livreurs/d2').wallet, 50);
 });
 
 test('cancelOrderCF: debits a marketplace seller already paid at order creation', async () => {
@@ -626,13 +734,38 @@ test('deliverOrderCF: rejects an order that is not accepted/picked_up', async ()
   );
 });
 
+test('LOT 6 SECURITY: deliverOrderCF rejects a second delivery attempt on an already-delivered order — no double credit', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, isPaid: true },
+    'livreurs/d1': { wallet: 0 },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 1000);
+  assert.equal(store.get('orders/o1').status, 'delivered');
+
+  // Deuxième tentative de livraison de la même commande (double-tap, retry
+  // réseau, ou appel malveillant rejoué) — doit être rejetée AVANT tout
+  // nouveau crédit, grâce à la vérification de statut déjà faite à
+  // l'intérieur de la même transaction (status doit être accepted/picked_up).
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } }),
+    (err) => err.code === 'failed-precondition',
+  );
+  assert.equal(store.get('livreurs/d1').wallet, 1000, 'le livreur ne doit pas être crédité deux fois');
+});
+
 // ── payBoutiqueOrderCF ───────────────────────────────────────────────────
 
 test('payBoutiqueOrderCF: happy path debits client, credits seller, decrements stock, creates the order', async () => {
   fakeDispatchOrder.calls = [];
   const { db, store, added } = makeFakeDb({
     'sellers/s1':            { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1':  { name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
+    'boutique_products/p1':  { sellerId: 's1', name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
     'clients/c1':            { wallet: 10000 },
   });
   const logAudit = makeLogAudit();
@@ -646,7 +779,10 @@ test('payBoutiqueOrderCF: happy path debits client, credits seller, decrements s
     data: { productId: 'p1', qty: 2, deliveryLat: 6.7, deliveryLng: -3.5 },
   });
 
+  // Ancienne application : aucun total accepté déclaré → facturation historique
+  // (produits seuls) ; jamais plus que ce que cette version a affiché.
   assert.equal(result.totalPrice, 6000);
+  assert.equal(result.totalAmount, 6000);
   assert.equal(result.dispatched, true);
   assert.equal(store.get('clients/c1').wallet, 4000);
   assert.equal(store.get('sellers/s1').wallet, 6000);
@@ -658,6 +794,17 @@ test('payBoutiqueOrderCF: happy path debits client, credits seller, decrements s
   assert.equal(orderEntry[1].qty, 2);
   assert.equal(orderEntry[1].totalPrice, 6000);
 
+  const deliveryEntry = [...store.entries()].find(([k]) => k.startsWith('orders/'));
+  assert.ok(deliveryEntry, 'delivery order should exist');
+  assert.equal(deliveryEntry[1].latitude, 6.7);
+  assert.equal(deliveryEntry[1].longitude, -3.5);
+  assert.equal(deliveryEntry[1].destLat, 6.7);
+  assert.equal(deliveryEntry[1].destLng, -3.5);
+  assert.equal(deliveryEntry[1].pickupCityId, 'abengourou');
+  assert.equal(deliveryEntry[1].deliveryCityId, 'abengourou');
+  assert.equal(deliveryEntry[1].pickupZoneId, 'centre');
+  assert.equal(deliveryEntry[1].deliveryZoneId, 'centre');
+
   assert.equal(added.filter(a => a.collection.includes('wallet_transactions')).length, 2);
   assert.equal(fakeDispatchOrder.calls.length, 1);
   assert.equal(logAudit.calls.length, 1);
@@ -667,7 +814,7 @@ test('payBoutiqueOrderCF: happy path debits client, credits seller, decrements s
 test('payBoutiqueOrderCF: rejects when stock is insufficient', async () => {
   const { db } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 1 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 1 },
     'clients/c1':           { wallet: 100000 },
   });
   const fn = buildPayBoutiqueOrder({
@@ -676,7 +823,9 @@ test('payBoutiqueOrderCF: rejects when stock is insufficient', async () => {
   });
 
   await assert.rejects(
-    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 5 } }),
+    () => fn.run({ auth: { uid: 'c1' }, data: {
+      productId: 'p1', qty: 5, deliveryLat: 6.7, deliveryLng: -3.5,
+    } }),
     (err) => err.code === 'failed-precondition' && err.message.includes('STOCK_EPUISE'),
   );
 });
@@ -684,7 +833,7 @@ test('payBoutiqueOrderCF: rejects when stock is insufficient', async () => {
 test('payBoutiqueOrderCF: rejects with SOLDE_INSUFFISANT when balance is too low', async () => {
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 10 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 10 },
     'clients/c1':           { wallet: 100 },
   });
   const fn = buildPayBoutiqueOrder({
@@ -693,7 +842,9 @@ test('payBoutiqueOrderCF: rejects with SOLDE_INSUFFISANT when balance is too low
   });
 
   await assert.rejects(
-    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } }),
+    () => fn.run({ auth: { uid: 'c1' }, data: {
+      productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5,
+    } }),
     (err) => err.code === 'failed-precondition' && err.message.includes('SOLDE_INSUFFISANT'),
   );
   // Stock/wallet must be untouched on rejection.
@@ -703,7 +854,7 @@ test('payBoutiqueOrderCF: rejects with SOLDE_INSUFFISANT when balance is too low
 
 test('payBoutiqueOrderCF: rejects when no boutique seller is configured', async () => {
   const { db } = makeFakeDb({
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 10 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 10 },
     'clients/c1':           { wallet: 100000 },
   });
   const fn = buildPayBoutiqueOrder({
@@ -736,7 +887,7 @@ test('payBoutiqueOrderCF: rejects an unknown product', async () => {
 test('payBoutiqueOrderCF: still succeeds (purchase honored) even if dispatch throws', async () => {
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 10 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 10 },
     'clients/c1':           { wallet: 10000 },
   });
   const throwingDispatch = async () => { throw new Error('dispatch is down'); };
@@ -745,7 +896,9 @@ test('payBoutiqueOrderCF: still succeeds (purchase honored) even if dispatch thr
     checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: throwingDispatch,
   });
 
-  const result = await fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } });
+  const result = await fn.run({ auth: { uid: 'c1' }, data: {
+    productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5,
+  } });
 
   assert.equal(result.dispatched, false);
   assert.equal(store.get('clients/c1').wallet, 7000);
@@ -764,6 +917,27 @@ test('payBoutiqueOrderCF: rejects unauthenticated calls', async () => {
   );
 });
 
+test('payBoutiqueOrderCF: refuses a seller whose pickup is 0/0', async () => {
+  const { db, store } = makeFakeDb({
+    'sellers/s1': { type: 'boutique', name: 'Boutique AZ', wallet: 0, lat: 0, lng: 0 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz', price: 1000, stock: 2 },
+    'clients/c1': { wallet: 5000 },
+  });
+  const fn = buildPayBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: {
+      productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5,
+    } }),
+    (err) => err.code === 'failed-precondition' &&
+      err.message.includes('collecte'),
+  );
+  assert.equal(store.get('clients/c1').wallet, 5000);
+});
+
 // ── payBoutiqueOrderCashCF ───────────────────────────────────────────────────
 // Master Prompt 54 : l'ancien chemin cash (boutique_page.dart) décrémentait le
 // stock via une écriture directe PUIS tentait de créer boutique_orders avec un
@@ -774,7 +948,7 @@ test('payBoutiqueOrderCashCF: happy path decrements stock and creates the order 
   fakeDispatchOrder.calls = [];
   const { db, store } = makeFakeDb({
     'sellers/s1':            { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1':  { name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
+    'boutique_products/p1':  { sellerId: 's1', name: 'Riz 5kg', category: 'Alimentation', price: 3000, stock: 10 },
   });
   const logAudit = makeLogAudit();
   const fn = buildPayBoutiqueOrderCash({
@@ -805,7 +979,7 @@ test('payBoutiqueOrderCashCF: happy path decrements stock and creates the order 
 test('payBoutiqueOrderCashCF: rejects when stock is insufficient — no stock decrement, no order created', async () => {
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 1 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 1 },
   });
   const fn = buildPayBoutiqueOrderCash({
     db, admin: fakeAdmin, onCall, HttpsError,
@@ -832,7 +1006,7 @@ test('payBoutiqueOrderCashCF: two purchases against the last unit — only one s
   // survente. La 2ᵉ tentative doit voir le stock déjà à 0 et échouer proprement.
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 1 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 1 },
   });
   const fn = buildPayBoutiqueOrderCash({
     db, admin: fakeAdmin, onCall, HttpsError,
@@ -852,10 +1026,10 @@ test('payBoutiqueOrderCashCF: two purchases against the last unit — only one s
   assert.equal(orders.length, 1); // une seule commande créée, pas deux
 });
 
-test('payBoutiqueOrderCashCF: still succeeds (order honored) even if dispatch throws', async () => {
+test('payBoutiqueOrderCashCF: restores stock exactly once when dispatch throws', async () => {
   const { db, store } = makeFakeDb({
     'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 5 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 5 },
   });
   const throwingDispatch = async () => { throw new Error('dispatch is down'); };
   const fn = buildPayBoutiqueOrderCash({
@@ -863,13 +1037,17 @@ test('payBoutiqueOrderCashCF: still succeeds (order honored) even if dispatch th
     checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: throwingDispatch,
   });
 
-  const result = await fn.run({
-    auth: { uid: 'c1' },
-    data: { productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5 },
-  });
+  await assert.rejects(
+    () => fn.run({
+      auth: { uid: 'c1' },
+      data: { productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5 },
+    }),
+    (err) => err.code === 'unavailable',
+  );
 
-  assert.equal(result.dispatched, false);
-  assert.equal(store.get('boutique_products/p1').stock, 4); // l'achat reste honoré
+  assert.equal(store.get('boutique_products/p1').stock, 5);
+  const order = [...store.entries()].find(([k]) => k.startsWith('boutique_orders/'))?.[1];
+  assert.equal(order.status, 'dispatch_failed');
 });
 
 test('payBoutiqueOrderCashCF: rejects an unknown product', async () => {
@@ -889,7 +1067,7 @@ test('payBoutiqueOrderCashCF: rejects an unknown product', async () => {
 
 test('payBoutiqueOrderCashCF: rejects when no boutique seller is configured', async () => {
   const { db } = makeFakeDb({
-    'boutique_products/p1': { name: 'Riz 5kg', price: 3000, stock: 5 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz 5kg', price: 3000, stock: 5 },
   });
   const fn = buildPayBoutiqueOrderCash({
     db, admin: fakeAdmin, onCall, HttpsError,
@@ -1024,4 +1202,555 @@ test('refundExpiredBoutiqueOrderCF: rejects unauthenticated calls', async () => 
     () => fn.run({ data: { orderId: 'bo1' } }),
     (err) => err.code === 'unauthenticated',
   );
+});
+
+test('deliverOrderCF: synchronizes the linked boutique order atomically', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': {
+      driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 500,
+      sellerId: 's1', sellerType: 'boutique', linkedBoutiqueOrderId: 'bo1',
+    },
+    'boutique_orders/bo1': { status: 'paid', deliveryOrderId: 'o1' },
+    'livreurs/d1': { wallet: 0 },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('orders/o1').status, 'delivered');
+  assert.equal(store.get('boutique_orders/bo1').status, 'delivered');
+});
+
+test('refundExpiredBoutiqueOrderCF: rejects a paid order when its linked delivery is delivered', async () => {
+  const { db, store } = makeFakeDb({
+    'boutique_orders/bo1': {
+      clientId: 'c1', sellerId: 's1', status: 'paid', totalPrice: 5000,
+      deliveryOrderId: 'o1',
+      deliveryDeadline: fakeAdmin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+    },
+    'orders/o1': { status: 'delivered', linkedBoutiqueOrderId: 'bo1' },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 5000 },
+  });
+  const fn = buildRefundExpiredBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { orderId: 'bo1' } }),
+    (err) => err.code === 'failed-precondition',
+  );
+  assert.equal(store.get('clients/c1').wallet, 0);
+  assert.equal(store.get('boutique_orders/bo1').status, 'paid');
+});
+
+test('payBoutiqueOrderCF: credits only the seller declared by the product', async () => {
+  const { db, store } = makeFakeDb({
+    'sellers/s1': { type: 'boutique', wallet: 0 },
+    'sellers/s2': { type: 'boutique', wallet: 0 },
+    'boutique_products/p1': { sellerId: 's2', name: 'Riz', price: 1000, stock: 2 },
+    'clients/c1': { wallet: 5000 },
+  });
+  const fn = buildPayBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: {
+    productId: 'p1', qty: 1, deliveryLat: 6.7, deliveryLng: -3.5,
+  } });
+
+  assert.equal(store.get('sellers/s1').wallet, 0);
+  assert.equal(store.get('sellers/s2').wallet, 1000);
+});
+
+test('payBoutiqueOrderCF: rejects a product without a sellerId', async () => {
+  const { db } = makeFakeDb({
+    'boutique_products/p1': { name: 'Riz', price: 1000, stock: 2 },
+    'clients/c1': { wallet: 5000 },
+  });
+  const fn = buildPayBoutiqueOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } }),
+    (err) => err.code === 'failed-precondition',
+  );
+});
+
+test('payBoutiqueOrderCashCF: rejects a suspended product seller', async () => {
+  const { db } = makeFakeDb({
+    'sellers/s1': { type: 'boutique', isSuspended: true, wallet: 0 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz', price: 1000, stock: 2 },
+  });
+  const fn = buildPayBoutiqueOrderCash({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder,
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 1 } }),
+    (err) => err.code === 'failed-precondition',
+  );
+});
+
+// ── Commission tracée (acceptOrderCF) : remboursement au PAYEUR d'origine ────
+function cancelFn(db) {
+  return buildCancelOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    calculateCommission: fakeCalculateCommission,
+  });
+}
+
+test('cancelOrderCF: commission tracée → remboursée du montant réellement prélevé, une seule fois', async () => {
+  const { db, store } = makeFakeDb({
+    // Configuration changée depuis : le recalcul donnerait 200, le prélèvement réel était 100.
+    'orders/o1': {
+      clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500,
+      commissionStatus: 'charged', commissionPayerId: 'd1', commissionAmount: 100,
+    },
+    'clients/c1': { wallet: 0 },
+    'livreurs/d1': { wallet: 50 },
+  });
+  await cancelFn(db).run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 150);
+  assert.equal(store.get('orders/o1').commissionStatus, 'refunded');
+});
+
+test('cancelOrderCF: le remboursement vise le payeur d’origine, pas le livreur courant', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': {
+      clientId: 'c1', driverId: 'dB', status: 'picked_up', paymentMethod: 'cash', budget: 500,
+      commissionStatus: 'charged', commissionPayerId: 'dA', commissionAmount: 100,
+    },
+    'clients/c1': { wallet: 0 },
+    'livreurs/dA': { wallet: 10 },
+    'livreurs/dB': { wallet: 700 },
+  });
+  // Colis récupéré : le client ne peut plus annuler seul (aucune écriture d'argent).
+  await assert.rejects(() => cancelFn(db).run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } }),
+    (e) => e.code === 'failed-precondition');
+  assert.equal(store.get('livreurs/dA').wallet, 10);
+  // Décision administrative : même cœur transactionnel, commission rendue au PAYEUR d'origine.
+  const orderRef = db.collection('orders').doc('o1');
+  await db.runTransaction(async (tx) => {
+    const order = (await tx.get(orderRef)).data();
+    return cancelOrderTx(tx, { db, admin: fakeAdmin, orderRef, order, uid: 'c1',
+      calculateCommission: fakeCalculateCommission, reason: 'admin_close_stuck', adminDecision: { refundFee: false } });
+  });
+  assert.equal(store.get('livreurs/dA').wallet, 110);
+  assert.equal(store.get('livreurs/dB').wallet, 700, 'B n’a rien payé et ne reçoit rien');
+});
+
+test('cancelOrderCF: commission déjà remboursée → aucun second remboursement', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': {
+      clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 500,
+      commissionStatus: 'refunded', commissionPayerId: 'd1', commissionAmount: 100,
+    },
+    'clients/c1': { wallet: 0 },
+    'livreurs/d1': { wallet: 50 },
+  });
+  await cancelFn(db).run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 50);
+});
+
+test('deliverOrderCF: course transférée (settlementHold) — aucun crédit au livreur final, gain retenu, commission journalisée au payeur d’origine', async () => {
+  const { db, store, added } = makeFakeDb({
+    'orders/o1': {
+      driverId: 'dB', previousDriverId: 'dA', status: 'picked_up', paymentMethod: 'wallet',
+      budget: 1000, isPaid: true, settlementHold: true,
+      commissionStatus: 'charged', commissionPayerId: 'dA', commissionAmount: 200,
+    },
+    'livreurs/dA': { wallet: 300 },
+    'livreurs/dB': { wallet: 0, isOnDelivery: true },
+  });
+  const fn = buildDeliverOrder({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'dB' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('livreurs/dB').wallet, 0);
+  assert.equal(store.get('livreurs/dA').wallet, 300);
+  assert.equal(store.get('livreurs/dB').isOnDelivery, false);
+  const o = store.get('orders/o1');
+  assert.equal(o.status, 'delivered');
+  assert.equal(o.heldDriverEarning, 1000);
+  assert.equal(o.settlementStatus, 'pending_admin_review');
+  assert.equal(o.commissionPayerId, 'dA');
+  assert.equal(o.commissionAmount, 200);
+  const commission = added.map((a) => a.data || a).find((d) => d && d.orderId === 'o1' && d.amount !== undefined);
+  if (commission) {
+    assert.equal(commission.driverId, 'dA');
+    assert.equal(commission.amount, 200);
+    assert.equal(commission.driverGain, null);
+  }
+});
+
+test('payOrderFromWalletCF: course transférée — le client est débité, aucun livreur crédité, gain retenu', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':  { clientId: 'c1', driverId: 'dB', budget: 500, isPaid: false, settlementHold: true },
+    'clients/c1': { wallet: 10000 },
+    'livreurs/dB': { wallet: 0 },
+  });
+  const fn = buildPayOrderFromWallet({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+
+  assert.equal(store.get('clients/c1').wallet, 9500);
+  assert.equal(store.get('livreurs/dB').wallet, 0);
+  assert.equal(store.get('orders/o1').isPaid, true);
+  assert.equal(store.get('orders/o1').heldDriverEarning, 500);
+});
+
+const transferredOrder = (extra = {}) => ({
+  driverId: 'dB', status: 'picked_up', budget: 1000, settlementHold: true,
+  latitude: 6.70, longitude: -3.49, destLat: 6.80, destLng: -3.49, pickedUpAt: 1,
+  commissionStatus: 'charged', commissionPayerId: 'dA', commissionAmount: 200,
+  driverHistory: [{ driverId: 'dA', phase: 'after_pickup', transferId: 't1', endedAtMs: 10,
+    handover: { trusted: true, point: { lat: 6.74, lng: -3.49 } } }],
+  ...extra,
+});
+
+test('deliverOrderCF: course transférée payée par wallet — dossier de règlement créé, aucun crédit', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': transferredOrder({ paymentMethod: 'wallet', isPaid: true }),
+    'livreurs/dA': { wallet: 300 },
+    'livreurs/dB': { wallet: 0, isOnDelivery: true },
+  });
+  const fn = buildDeliverOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'dB' }, data: { orderId: 'o1', deliveryPhotoUrl: 'https://x/p.jpg' } });
+  const s = store.get('transfer_settlements/o1');
+  assert.equal(s.method, 'wallet');
+  assert.equal(s.status, 'pending_review');
+  assert.equal(s.holderDriverId, 'dB');
+  assert.equal(Object.values(s.proposal.credits).reduce((a, b) => a + b, 0), 1000);
+  assert.equal(store.get('livreurs/dA').wallet, 300);
+  assert.equal(store.get('livreurs/dB').wallet, 0);
+  assert.equal(store.get('orders/o1').settlementStatus, 'pending_admin_review');
+});
+
+test('deliverOrderCF: course transférée payée en cash — dossier cash créé, wallets intacts', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': transferredOrder({ paymentMethod: 'cash', isPaid: false }),
+    'livreurs/dA': { wallet: 300 },
+    'livreurs/dB': { wallet: 50, isOnDelivery: true },
+  });
+  const fn = buildDeliverOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'dB' }, data: { orderId: 'o1', deliveryPhotoUrl: 'https://x/p.jpg' } });
+  const s = store.get('transfer_settlements/o1');
+  assert.equal(s.method, 'cash');
+  assert.equal(s.cash.collected, 1000);
+  assert.equal(store.get('livreurs/dA').wallet, 300);
+  assert.equal(store.get('livreurs/dB').wallet, 50);
+});
+
+test('deliverOrderCF: GPS de remise absent — dossier créé sans part proposée (validation administrative)', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': transferredOrder({ paymentMethod: 'cash', isPaid: false,
+      driverHistory: [{ driverId: 'dA', phase: 'after_pickup', transferId: 't1', endedAtMs: 10 }] }),
+    'livreurs/dB': { wallet: 0, isOnDelivery: true },
+  });
+  const fn = buildDeliverOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'dB' }, data: { orderId: 'o1', deliveryPhotoUrl: 'https://x/p.jpg' } });
+  const p = store.get('transfer_settlements/o1').proposal;
+  assert.equal(p.needsReview, true);
+  assert.equal(p.credits, null);
+  assert.equal(p.shares, null);
+});
+
+test('deliverOrderCF: commande ordinaire (sans transfert) — aucun dossier de règlement, crédit habituel', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, isPaid: true },
+    'livreurs/d1': { wallet: 0 },
+  });
+  const fn = buildDeliverOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('transfer_settlements/o1'), undefined);
+  assert.equal(store.get('livreurs/d1').wallet, 1000);
+  assert.equal(store.get('orders/o1').settlementHold, undefined);
+});
+
+test('payOrderFromWalletCF: course transférée déjà livrée (paiement différé) — dossier de règlement ouvert', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': transferredOrder({ clientId: 'c1', status: 'delivered', isPaid: false, deliveryPhoto: 'p.jpg' }),
+    'clients/c1': { wallet: 5000 },
+    'livreurs/dB': { wallet: 0 },
+  });
+  const fn = buildPayOrderFromWallet({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('clients/c1').wallet, 4000);
+  assert.equal(store.get('livreurs/dB').wallet, 0);
+  const s = store.get('transfer_settlements/o1');
+  assert.equal(s.method, 'wallet');
+  assert.equal(s.totalPaid, 1000);
+});
+
+test('deliverOrderCF: l’ancien livreur A ne peut plus livrer après le transfert ; le nouveau livreur B le peut', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': transferredOrder({ paymentMethod: 'cash', isPaid: false, previousDriverId: 'dA' }),
+    'livreurs/dA': { wallet: 300, isOnDelivery: false },
+    'livreurs/dB': { wallet: 0, isOnDelivery: true },
+  });
+  const fn = buildDeliverOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await assert.rejects(() => fn.run({ auth: { uid: 'dA' }, data: { orderId: 'o1' } }),
+    (e) => e.code === 'permission-denied');
+  assert.equal(store.get('orders/o1').status, 'picked_up');
+  assert.equal(store.get('transfer_settlements/o1'), undefined);
+  await fn.run({ auth: { uid: 'dB' }, data: { orderId: 'o1', deliveryPhotoUrl: 'https://x/p.jpg' } });
+  assert.equal(store.get('orders/o1').status, 'delivered');
+  await assert.rejects(() => fn.run({ auth: { uid: 'dB' }, data: { orderId: 'o1' } }),
+    (e) => e.code === 'failed-precondition');
+});
+
+test('cancelOrderCF : après transfert, le remboursement de commission revient au payeur initial et une seule fois', async () => {
+  // Cas limite : la commande transférée est annulée (admin/litige) tant qu’elle est annulable.
+  const { db, store } = makeFakeDb({
+    'orders/o1': { clientId: 'c1', driverId: 'dB', previousDriverId: 'dA', status: 'accepted', budget: 1000,
+      paymentMethod: 'cash', isPaid: false, commissionStatus: 'charged', commissionPayerId: 'dA', commissionAmount: 200 },
+    'livreurs/dA': { wallet: 300 },
+    'livreurs/dB': { wallet: 700, isOnDelivery: true },
+    'clients/c1': { wallet: 0 },
+  });
+  const fn = buildCancelOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/dA').wallet, 500);
+  assert.equal(store.get('livreurs/dB').wallet, 700);
+  assert.equal(store.get('orders/o1').commissionStatus, 'refunded');
+});
+
+// ---- Marketplace / boutique : conservation des montants (non-régression) ----
+test('boutique wallet : achat puis remboursement 48 h rendent exactement le solde initial, une seule fois', async () => {
+  fakeDispatchOrder.calls = [];
+  const { db, store } = makeFakeDb({
+    'sellers/s1':           { type: 'boutique', name: 'Boutique AZ', wallet: 0 },
+    'boutique_products/p1': { sellerId: 's1', name: 'Riz', category: 'A', price: 3000, stock: 10 },
+    'clients/c1':           { wallet: 10000 },
+  });
+  const pay = buildPayBoutiqueOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(), dispatchOrder: fakeDispatchOrder });
+  await pay.run({ auth: { uid: 'c1' }, data: { productId: 'p1', qty: 2, deliveryLat: 6.7, deliveryLng: -3.5 } });
+  // ancienne application : débit client = crédit vendeur (0 % de commission sur le produit)
+  assert.equal(10000 - store.get('clients/c1').wallet, store.get('sellers/s1').wallet);
+  const boId = [...store.keys()].find((k) => k.startsWith('boutique_orders/')).split('/')[1];
+  store.get(`boutique_orders/${boId}`).deliveryDeadline = fakeAdmin.firestore.Timestamp.fromMillis(Date.now() - 1000);
+  const refund = buildRefundExpiredBoutiqueOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await refund.run({ auth: { uid: 'c1' }, data: { orderId: boId } });
+  assert.equal(store.get('clients/c1').wallet, 10000);
+  assert.equal(store.get('sellers/s1').wallet, 0);
+  await assert.rejects(() => refund.run({ auth: { uid: 'c1' }, data: { orderId: boId } }),
+    (e) => e.code === 'failed-precondition');
+  assert.equal(store.get('clients/c1').wallet, 10000); // aucun double remboursement
+});
+
+test('marketplace wallet : annulation puis rejeu — client remboursé et vendeur repris une seule fois', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': { clientId: 'c1', status: 'pending', paymentMethod: 'wallet', budget: 5000, isPaid: true,
+      sellerId: 's1', sellerType: 'seller' },
+    'clients/c1': { wallet: 0 },
+    'sellers/s1': { wallet: 5000 },
+  });
+  const fn = buildCancelOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+  assert.deepEqual([store.get('clients/c1').wallet, store.get('sellers/s1').wallet], [5000, 0]);
+  await assert.rejects(() => fn.run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } }));
+  assert.deepEqual([store.get('clients/c1').wallet, store.get('sellers/s1').wallet], [5000, 0]);
+});
+
+test('marketplace cash : la livraison ne crédite ni le vendeur ni le livreur et marque le cash marchand à régler', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': { driverId: 'd1', status: 'picked_up', paymentMethod: 'cash', budget: 5000, isPaid: false,
+      sellerId: 's1', sellerType: 'seller' },
+    'livreurs/d1': { wallet: 700, isOnDelivery: true },
+    'sellers/s1': { wallet: 100 },
+  });
+  const fn = buildDeliverOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+  assert.deepEqual([store.get('livreurs/d1').wallet, store.get('sellers/s1').wallet], [700, 100]);
+  assert.equal(store.get('orders/o1').merchantCashSettled, false);
+});
+
+test('ÉTAT ACTUEL (décision métier en attente) : livraison wallet marketplace/boutique — le livreur n’est pas crédité', async () => {
+  // La commission a été prélevée à l'acceptation (barème sur le budget) mais le
+  // gain de livraison n'est versé ni par le client (débité du seul produit) ni par
+  // AZ. Documenté dans le rapport ; aucune règle commerciale modifiée.
+  const { db, store } = makeFakeDb({
+    'orders/o1': { driverId: 'd1', status: 'picked_up', paymentMethod: 'wallet', budget: 500, isPaid: false,
+      sellerId: 's1', sellerType: 'boutique' },
+    'livreurs/d1': { wallet: 400, isOnDelivery: true },
+    'sellers/s1': { wallet: 3000 },
+  });
+  const fn = buildDeliverOrder({ db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+  await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+  assert.equal(store.get('livreurs/d1').wallet, 400);
+  assert.equal(store.get('sellers/s1').wallet, 3000);
+});
+
+test('deliverOrderCF: partenaire approuvé SANS champ wallet (restaurant, boulangerie, pharmacie) : crédité du montant intégral', async () => {
+  for (const [collection, sellerType] of [['restaurants', 'restaurant'], ['boulangeries', 'boulangerie'], ['pharmacies', 'pharmacie']]) {
+    const { db, store } = makeFakeDb({
+      'orders/o1':           { driverId: 'd1', status: 'accepted', paymentMethod: 'wallet', budget: 1000, sellerId: 'p1', sellerType, isPaid: true },
+      'livreurs/d1':         { wallet: 500 },
+      [`${collection}/p1`]:  { name: 'Partenaire', isActive: true, isOpen: false }, // document d'approbation : aucun wallet
+    });
+    const fn = buildDeliverOrder({
+      db, admin: fakeAdmin, onCall, HttpsError,
+      checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+    });
+
+    await fn.run({ auth: { uid: 'd1' }, data: { orderId: 'o1' } });
+
+    assert.equal(store.get(`${collection}/p1`).wallet, 1000, collection);
+    assert.equal(store.get('livreurs/d1').wallet, 500, collection);
+  }
+});
+
+test('payOrderFromWalletCF: client sans document (compte anonyme) : refus SOLDE_INSUFFISANT, aucune écriture', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'anon1', driverId: 'd1', status: 'accepted', budget: 1000, isPaid: false, paymentMethod: 'wallet' },
+    'livreurs/d1': { wallet: 500 },
+  });
+  const fn = buildPayOrderFromWallet({
+    db, admin: fakeAdmin, onCall, HttpsError,
+    checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit(),
+  });
+
+  await assert.rejects(
+    () => fn.run({ auth: { uid: 'anon1' }, data: { orderId: 'o1' } }),
+    (e) => /SOLDE_INSUFFISANT/.test(e.message),
+  );
+  assert.equal(store.has('clients/anon1'), false);
+  assert.equal(store.get('livreurs/d1').wallet, 500);
+  assert.equal(store.get('orders/o1').isPaid, false);
+});
+
+// ── Régression : journal wallet_transactions inscriptible par le livreur (preuve forgée) ──
+// Avant correctif, une ligne `commission_<commande>_<livreur>` créée librement par le livreur
+// (montant arbitraire) était créditée telle quelle à l'annulation d'une commande sans trace.
+function legacyForgedFixture(proof, budget = 1500) {
+  return makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget },
+    'clients/c1':  { wallet: 0 },
+    'livreurs/d1': { wallet: 50 },
+    'livreurs/d1/wallet_transactions/commission_o1_d1': proof,
+  });
+}
+const cancelO1 = (db) => cancelFn(db).run({ auth: { uid: 'c1' }, data: { orderId: 'o1' } });
+
+test('RÉGRESSION cancelOrderCF: preuve forgée de 100000 FCFA → aucun crédit, commande annulée, signalement avec la raison', async () => {
+  const { db, store } = legacyForgedFixture({ type: 'commission', amount: 100000, orderId: 'o1' });
+  await cancelO1(db);
+  assert.equal(store.get('livreurs/d1').wallet, 50, 'aucun argent créé');
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+  assert.notEqual(store.get('orders/o1').commissionStatus, 'refunded');
+  const flag = store.get('reconciliation_flags/o1_commission_untraced');
+  assert.equal(flag.status, 'open');
+  assert.equal(flag.proofRejectReason, 'proof_exceeds_policy');
+});
+
+test('RÉGRESSION cancelOrderCF: preuve légèrement supérieure au barème (201 > 200) refusée, égale au barème acceptée', async () => {
+  let r = legacyForgedFixture({ type: 'commission', amount: 201, orderId: 'o1' });
+  await cancelO1(r.db);
+  assert.equal(r.store.get('livreurs/d1').wallet, 50);
+  r = legacyForgedFixture({ type: 'commission', amount: 200, orderId: 'o1' });
+  await cancelO1(r.db);
+  assert.equal(r.store.get('livreurs/d1').wallet, 250, 'jamais plus que la commission légitime');
+});
+
+test('RÉGRESSION cancelOrderCF: preuve portant des champs réservés au client (provider/txId) refusée', async () => {
+  for (const extra of [{ provider: 'x' }, { txId: 'y' }]) {
+    const { db, store } = legacyForgedFixture({ type: 'commission', amount: 100, orderId: 'o1', ...extra });
+    await cancelO1(db);
+    assert.equal(store.get('livreurs/d1').wallet, 50, JSON.stringify(extra));
+    assert.equal(store.get('reconciliation_flags/o1_commission_untraced').proofRejectReason, 'proof_client_shape');
+  }
+});
+
+test('RÉGRESSION cancelOrderCF: budget inconnu → barème inconnu → aucun remboursement automatique', async () => {
+  const { db, store } = legacyForgedFixture({ type: 'commission', amount: 100, orderId: 'o1' }, null);
+  await cancelO1(db);
+  assert.equal(store.get('livreurs/d1').wallet, 50);
+  assert.equal(store.get('reconciliation_flags/o1_commission_untraced').proofRejectReason, 'expected_unknown');
+});
+
+test('RÉGRESSION cancelOrderCF: preuve absente → aucun crédit, signalement « proof_missing »', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1':   { clientId: 'c1', driverId: 'd1', status: 'accepted', paymentMethod: 'cash', budget: 1500 },
+    'clients/c1':  { wallet: 0 }, 'livreurs/d1': { wallet: 50 },
+  });
+  await cancelO1(db);
+  assert.equal(store.get('livreurs/d1').wallet, 50);
+  assert.equal(store.get('reconciliation_flags/o1_commission_untraced').proofRejectReason, 'proof_missing');
+});
+
+// ── F2 (Phase A) : annulation client par cancelOrderCF, remboursement unique ─────────────────────
+// L'écran d'attente n'écrit plus `status: cancelled` en direct : tout passe ici. Ces tests verrouillent ce
+// que l'écran suppose du serveur, y compris pour une commande créée par devis (createOrderFromQuoteCF).
+
+const quotedWalletOrder = (extra = {}) => ({
+  clientId: 'c1', status: 'pending', paymentMethod: 'wallet', isPaid: true, type: 'shopping',
+  budget: 1000, shoppingBudget: 3000, tariffQuoteId: 'q1', quotedAmount: 1000, ...extra,
+});
+
+test('F2 cancelOrderCF: commande créée par devis (wallet) → rembourse exactement ce qui a été débité, une seule fois', async () => {
+  const { db, store } = makeFakeDb({ 'orders/o1': quotedWalletOrder(), 'clients/c1': { wallet: 0 } });
+  assert.deepEqual(await cancelO1(db), { success: true });
+  assert.equal(store.get('clients/c1').wallet, 4000);
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+  // Rejeu (réponse perdue côté téléphone) : refusé, aucun second crédit.
+  await assert.rejects(() => cancelO1(db), (err) => err.code === 'failed-precondition');
+  assert.equal(store.get('clients/c1').wallet, 4000);
+});
+
+
+test('F2 cancelOrderCF: commande en espèces → aucun remboursement', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': quotedWalletOrder({ paymentMethod: 'cash', isPaid: false, shoppingBudget: 0 }),
+    'clients/c1': { wallet: 700 },
+  });
+  await cancelO1(db);
+  assert.equal(store.get('clients/c1').wallet, 700);
+  assert.equal(store.get('orders/o1').status, 'cancelled');
+});
+
+test('F2 cancelOrderCF: wallet non encore payé (isPaid false) → aucun remboursement injustifié', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': quotedWalletOrder({ isPaid: false }),
+    'clients/c1': { wallet: 700 },
+  });
+  await cancelO1(db);
+  assert.equal(store.get('clients/c1').wallet, 700);
+});
+
+test('F2 cancelOrderCF: colis déjà récupéré → refusé sans remboursement (demande au support)', async () => {
+  const { db, store } = makeFakeDb({
+    'orders/o1': quotedWalletOrder({ status: 'picked_up', driverId: 'd1' }),
+    'clients/c1': { wallet: 0 }, 'livreurs/d1': { wallet: 0 },
+  });
+  await assert.rejects(() => cancelO1(db), (err) => err.code === 'failed-precondition');
+  assert.equal(store.get('clients/c1').wallet, 0);
+  assert.equal(store.get('orders/o1').status, 'picked_up');
 });

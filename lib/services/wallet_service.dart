@@ -32,7 +32,7 @@ class WalletService {
     final snap = await _db.collection(collection).doc(uid).get();
     final d = snap.data();
     if (d == null) return '';
-    return d['name'] as String?
-        ?? '${d['firstName'] ?? ''} ${d['lastName'] ?? ''}'.trim();
+    return d['name'] as String? ??
+        '${d['firstName'] ?? ''} ${d['lastName'] ?? ''}'.trim();
   }
 }

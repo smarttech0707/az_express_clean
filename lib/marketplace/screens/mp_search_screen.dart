@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -19,8 +19,8 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
   String? _category;
   String? _condition;
   String? _brand;
-  int?    _minPrice;
-  int?    _maxPrice;
+  int? _minPrice;
+  int? _maxPrice;
 
   final _suggestions = [
     'iPhone 13 Pro',
@@ -50,22 +50,22 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
 
   Future<void> _search() async {
     await context.read<MpProvider>().search(
-      query: _queryCtrl.text,
-      category: _category,
-      condition: _condition,
-      brand: _brand,
-      minPrice: _minPrice,
-      maxPrice: _maxPrice,
-    );
+          query: _queryCtrl.text,
+          category: _category,
+          condition: _condition,
+          brand: _brand,
+          minPrice: _minPrice,
+          maxPrice: _maxPrice,
+        );
   }
 
   void _clearFilters() {
     setState(() {
-      _category  = null;
+      _category = null;
       _condition = null;
-      _brand     = null;
-      _minPrice  = null;
-      _maxPrice  = null;
+      _brand = null;
+      _minPrice = null;
+      _maxPrice = null;
     });
     _search();
   }
@@ -202,9 +202,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
         children: [
           Text('Tendances',
               style: GoogleFonts.urbanist(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: kMpText)),
+                  fontSize: 14, fontWeight: FontWeight.w700, color: kMpText)),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -238,23 +236,22 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
           const SizedBox(height: 24),
           Text('Catégories',
               style: GoogleFonts.urbanist(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: kMpText)),
+                  fontSize: 14, fontWeight: FontWeight.w700, color: kMpText)),
           const SizedBox(height: 12),
           ...mpCategories.map((c) => ListTile(
                 onTap: () {
                   setState(() => _category = c['id']);
                   _search();
                 },
-                leading: Text(c['emoji']!,
-                    style: const TextStyle(fontSize: 22)),
+                leading:
+                    Text(c['emoji']!, style: const TextStyle(fontSize: 22)),
                 title: Text(c['label']!,
                     style: GoogleFonts.urbanist(
-                        fontSize: 14, fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                         color: kMpText)),
-                trailing: const Icon(Icons.chevron_right_rounded,
-                    color: kMpMuted),
+                trailing:
+                    const Icon(Icons.chevron_right_rounded, color: kMpMuted),
                 contentPadding: EdgeInsets.zero,
                 dense: true,
               )),
@@ -270,9 +267,7 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
         const SizedBox(height: 12),
         Text('Aucun résultat',
             style: GoogleFonts.urbanist(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: kMpText)),
+                fontSize: 16, fontWeight: FontWeight.w600, color: kMpText)),
         const SizedBox(height: 6),
         Text('Essayez d\'autres mots-clés ou filtres',
             style: GoogleFonts.urbanist(fontSize: 13, color: kMpMuted)),
@@ -290,25 +285,21 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
             Text(
               '${mp.searchResults.length} résultat${mp.searchResults.length > 1 ? 's' : ''}',
               style: GoogleFonts.urbanist(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: kMpMuted),
+                  fontSize: 13, fontWeight: FontWeight.w600, color: kMpMuted),
             ),
           ]),
         ),
         Expanded(
           child: GridView.builder(
             padding: const EdgeInsets.all(12),
-            gridDelegate:
-                const SliverGridDelegateWithFixedCrossAxisCount(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
               childAspectRatio: 0.68,
             ),
             itemCount: mp.searchResults.length,
-            itemBuilder: (_, i) =>
-                MpProductCard(product: mp.searchResults[i]),
+            itemBuilder: (_, i) => MpProductCard(product: mp.searchResults[i]),
           ),
         ),
       ],
@@ -328,11 +319,16 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
 
   String _catLabel(String c) {
     switch (c) {
-      case 'phones':      return 'Téléphones';
-      case 'tablets':     return 'Tablettes';
-      case 'computers':   return 'Ordinateurs';
-      case 'accessories': return 'Accessoires';
-      default: return c;
+      case 'phones':
+        return 'Téléphones';
+      case 'tablets':
+        return 'Tablettes';
+      case 'computers':
+        return 'Ordinateurs';
+      case 'accessories':
+        return 'Accessoires';
+      default:
+        return c;
     }
   }
 
@@ -376,18 +372,17 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                     TextButton(
                       onPressed: () {
                         setState(() {
-                          _category  = null;
+                          _category = null;
                           _condition = null;
-                          _brand     = null;
-                          _minPrice  = null;
-                          _maxPrice  = null;
+                          _brand = null;
+                          _minPrice = null;
+                          _maxPrice = null;
                         });
                         Navigator.pop(ctx);
                       },
                       child: Text('Réinitialiser',
                           style: GoogleFonts.urbanist(
-                              color: Colors.red,
-                              fontWeight: FontWeight.w600)),
+                              color: Colors.red, fontWeight: FontWeight.w600)),
                     ),
                   ]),
                 ),
@@ -404,11 +399,11 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                           runSpacing: 8,
                           children: [
                             ...mpCategories.map((c) => _ChoiceChip(
-                              label: '${c['emoji']} ${c['label']}',
-                              selected: _category == c['id'],
-                              onTap: () => setS(() =>
-                                  _category = _category == c['id'] ? null : c['id']),
-                            )),
+                                  label: '${c['emoji']} ${c['label']}',
+                                  selected: _category == c['id'],
+                                  onTap: () => setS(() => _category =
+                                      _category == c['id'] ? null : c['id']),
+                                )),
                           ],
                         ),
                       ),
@@ -418,13 +413,17 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                         title: 'État',
                         child: Wrap(
                           spacing: 8,
-                          children: mpConditions.map((c) => _ChoiceChip(
-                            label: c['label']! as String,
-                            selected: _condition == c['id'],
-                            onTap: () => setS(() =>
-                                _condition = _condition == c['id'] ? null : c['id'] as String),
-                            color: Color(c['color']! as int),
-                          )).toList(),
+                          children: mpConditions
+                              .map((c) => _ChoiceChip(
+                                    label: c['label']! as String,
+                                    selected: _condition == c['id'],
+                                    onTap: () => setS(() => _condition =
+                                        _condition == c['id']
+                                            ? null
+                                            : c['id'] as String),
+                                    color: Color(c['color']! as int),
+                                  ))
+                              .toList(),
                         ),
                       ),
 
@@ -435,15 +434,21 @@ class _MpSearchScreenState extends State<MpSearchScreen> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            50000, 100000, 200000, 500000, 1000000,
-                          ].map((v) => _ChoiceChip(
-                            label: v >= 1000000
-                                ? '${v ~/ 1000000}M FCFA'
-                                : '${v ~/ 1000}k FCFA',
-                            selected: _maxPrice == v,
-                            onTap: () => setS(() =>
-                                _maxPrice = _maxPrice == v ? null : v),
-                          )).toList(),
+                            50000,
+                            100000,
+                            200000,
+                            500000,
+                            1000000,
+                          ]
+                              .map((v) => _ChoiceChip(
+                                    label: v >= 1000000
+                                        ? '${v ~/ 1000000}M FCFA'
+                                        : '${v ~/ 1000}k FCFA',
+                                    selected: _maxPrice == v,
+                                    onTap: () => setS(() =>
+                                        _maxPrice = _maxPrice == v ? null : v),
+                                  ))
+                              .toList(),
                         ),
                       ),
                     ],
@@ -498,9 +503,7 @@ class _FilterChip extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text(label,
             style: GoogleFonts.urbanist(
-                fontSize: 12,
-                color: kMpOrange,
-                fontWeight: FontWeight.w600)),
+                fontSize: 12, color: kMpOrange, fontWeight: FontWeight.w600)),
         const SizedBox(width: 4),
         GestureDetector(
           onTap: onRemove,
@@ -572,4 +575,3 @@ class _ChoiceChip extends StatelessWidget {
     );
   }
 }
-

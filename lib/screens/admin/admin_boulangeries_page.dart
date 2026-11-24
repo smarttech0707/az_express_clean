@@ -1,22 +1,19 @@
-﻿import 'dart:math';
+import 'dart:io';
 import '../../widgets/scale_button.dart';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'admin_partner_account_service.dart';
+import '../../widgets/partner_temp_credentials_dialog.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../services/subscription_service.dart';
+import '../../utils/storage_cleanup.dart';
+import '../../utils/partner_location_validator.dart';
+import '../../widgets/partner_location_input.dart';
 
 class AdminBoulangeriesPage extends StatelessWidget {
   const AdminBoulangeriesPage({super.key});
-
-  // ── Génère un mot de passe temporaire sécurisé ────────────────────
-  static String _generatePassword() {
-    const chars =
-        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    final rand = Random.secure();
-    return List.generate(8, (_) => chars[rand.nextInt(chars.length)]).join();
-  }
 
   static Widget _field(
     TextEditingController c,
@@ -39,21 +36,25 @@ class AdminBoulangeriesPage extends StatelessWidget {
   // ── Dialogue ajouter / modifier boulangerie ───────────────────────
   void _showForm(BuildContext context, {DocumentSnapshot? existing}) {
     final data = existing?.data() as Map<String, dynamic>?;
-    final nameCtrl    = TextEditingController(text: data?['name']      ?? '');
-    final addressCtrl = TextEditingController(text: data?['address']   ?? '');
-    final phoneCtrl   = TextEditingController(text: data?['phone']     ?? '');
-    final openCtrl    = TextEditingController(text: data?['openTime']  ?? '06:00');
-    final closeCtrl   = TextEditingController(text: data?['closeTime'] ?? '13:00');
-    final passCtrl    = TextEditingController(
-        text: existing == null ? _generatePassword() : '');
-    bool showPass = existing == null;
-    bool saving   = false;
+    final nameCtrl = TextEditingController(text: data?['name'] ?? '');
+    final addressCtrl = TextEditingController(text: data?['address'] ?? '');
+    final phoneCtrl = TextEditingController(text: data?['phone'] ?? '');
+    final openCtrl = TextEditingController(text: data?['openTime'] ?? '06:00');
+    final closeCtrl =
+        TextEditingController(text: data?['closeTime'] ?? '13:00');
+    final latCtrl = TextEditingController(text: data?['lat']?.toString() ?? '');
+    final lngCtrl = TextEditingController(text: data?['lng']?.toString() ?? '');
+    // Création : mot de passe temporaire généré par le serveur. Édition :
+    // réinitialisation optionnelle (nouveau mot de passe temporaire serveur).
+    bool resetPassword = false;
+    bool saving = false;
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text(existing == null
               ? 'Ajouter une boulangerie'
               : 'Modifier la boulangerie'),
@@ -63,68 +64,33 @@ class AdminBoulangeriesPage extends StatelessWidget {
               children: [
                 _field(nameCtrl, 'Nom', Icons.bakery_dining_rounded),
                 const SizedBox(height: 10),
-                _field(addressCtrl, 'Adresse / Quartier', Icons.location_on_outlined),
+                PartnerLocationInput(
+                  latitudeController: latCtrl,
+                  longitudeController: lngCtrl,
+                ),
+                const SizedBox(height: 10),
+                _field(addressCtrl, 'Adresse / Quartier',
+                    Icons.location_on_outlined),
                 const SizedBox(height: 10),
                 _field(phoneCtrl, 'Téléphone', Icons.phone_outlined,
                     type: TextInputType.phone),
                 const SizedBox(height: 10),
                 Row(children: [
-                  Expanded(child: _field(openCtrl, 'Ouverture', Icons.wb_sunny_outlined)),
+                  Expanded(
+                      child: _field(
+                          openCtrl, 'Ouverture', Icons.wb_sunny_outlined)),
                   const SizedBox(width: 8),
-                  Expanded(child: _field(closeCtrl, 'Fermeture', Icons.nights_stay_outlined)),
+                  Expanded(
+                      child: _field(
+                          closeCtrl, 'Fermeture', Icons.nights_stay_outlined)),
                 ]),
                 const SizedBox(height: 10),
 
                 // ── Mot de passe ─────────────────────────────────────
-                TextField(
-                  controller: passCtrl,
-                  obscureText: !showPass,
-                  decoration: InputDecoration(
-                    labelText: existing == null
-                        ? 'Mot de passe temporaire'
-                        : 'Nouveau mot de passe (laisser vide = inchangé)',
-                    prefixIcon: const Icon(Icons.lock_outline, size: 20),
-                    suffixIcon: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: Icon(showPass
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined),
-                          tooltip: showPass
-                              ? 'Masquer le mot de passe'
-                              : 'Afficher le mot de passe',
-                          onPressed: () => setS(() => showPass = !showPass),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.copy_outlined),
-                          tooltip: 'Copier',
-                          onPressed: () {
-                            Clipboard.setData(
-                                ClipboardData(text: passCtrl.text));
-                            ScaffoldMessenger.of(ctx).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Mot de passe copié'),
-                                  duration: Duration(seconds: 2)),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                  ),
-                ),
-                if (existing == null) ...[
-                  const SizedBox(height: 6),
-                  TextButton.icon(
-                    icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Régénérer', style: TextStyle(fontSize: 12)),
-                    onPressed: () =>
-                        setS(() => passCtrl.text = _generatePassword()),
-                  ),
+                // Jamais choisi par l'administrateur : généré par le serveur
+                // (temporaire), changé par la boulangerie à sa première
+                // connexion.
+                if (existing == null)
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
@@ -138,14 +104,25 @@ class AdminBoulangeriesPage extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Copiez ce mot de passe et partagez-le avec la boulangerie.',
+                          'Un mot de passe temporaire sera généré à la création '
+                          'et affiché une seule fois.',
                           style: TextStyle(
                               fontSize: 11, color: Colors.amber.shade800),
                         ),
                       ),
                     ]),
+                  )
+                else
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Réinitialiser le mot de passe',
+                        style: TextStyle(fontSize: 13)),
+                    subtitle: const Text(
+                        'Génère un nouveau mot de passe temporaire ; l\'ancien cesse de fonctionner.',
+                        style: TextStyle(fontSize: 11)),
+                    value: resetPassword,
+                    onChanged: (v) => setS(() => resetPassword = v),
                   ),
-                ],
               ],
             ),
           ),
@@ -164,72 +141,93 @@ class AdminBoulangeriesPage extends StatelessWidget {
               onPressed: saving
                   ? null
                   : () async {
-                      final name    = nameCtrl.text.trim();
+                      final name = nameCtrl.text.trim();
                       final address = addressCtrl.text.trim();
-                      final phone   = phoneCtrl.text.trim();
+                      final phone = phoneCtrl.text.trim();
                       if (name.isEmpty || phone.isEmpty) {
                         ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
                             content: Text('Nom et téléphone obligatoires')));
                         return;
                       }
+                      // Le profil est finalisé côté serveur à la création :
+                      // il doit être complet (sinon refus avant tout compte).
+                      if (existing == null &&
+                          (address.isEmpty ||
+                              openCtrl.text.trim().isEmpty ||
+                              closeCtrl.text.trim().isEmpty)) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                            content: Text(
+                                'Adresse et horaires obligatoires pour créer une boulangerie')));
+                        return;
+                      }
+                      final locationError =
+                          PartnerLocationValidator.validateText(
+                              latCtrl.text, lngCtrl.text);
+                      if (locationError != null) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text(locationError)));
+                        return;
+                      }
                       setS(() => saving = true);
                       try {
-                        final db  = FirebaseFirestore.instance;
-                        final pass = passCtrl.text.trim();
+                        final db = FirebaseFirestore.instance;
 
                         if (existing == null) {
                           // Créer compte Firebase Auth
                           final email = '$phone@az-boulangerie.ci';
-                          final cred = await FirebaseAuth.instance
-                              .createUserWithEmailAndPassword(
-                                  email: email, password: pass);
-                          // Restaurer la session anonyme
-                          await FirebaseAuth.instance.signOut();
-                          try {
-                            await FirebaseAuth.instance.signInAnonymously();
-                          } catch (_) {}
-
-                          await db
-                              .collection('boulangeries')
-                              .doc(cred.user!.uid)
-                              .set({
-                            'name':      name,
-                            'address':   address,
-                            'phone':     phone,
-                            'openTime':  openCtrl.text.trim(),
-                            'closeTime': closeCtrl.text.trim(),
-                            'isOpen':    false,
-                            'wallet':    0,
-                            'isActive':  true,
-                            'createdAt': FieldValue.serverTimestamp(),
-                          });
+                          // Compte Auth ET profil complet (isOpen, wallet,
+                          // isActive...) posés côté serveur, de façon
+                          // reprenable : plus de seconde écriture Flutter.
+                          final created = await AdminPartnerAccountService.create(
+                            kind: 'boulangerie',
+                            email: email,
+                            profile: {
+                              'name': name,
+                              'address': address,
+                              'phone': phone,
+                              'openTime': openCtrl.text.trim(),
+                              'closeTime': closeCtrl.text.trim(),
+                              'lat': double.parse(latCtrl.text.trim()),
+                              'lng': double.parse(lngCtrl.text.trim()),
+                            },
+                          );
+                          if (ctx.mounted) {
+                            await showPartnerTempCredentialsDialog(
+                              ctx,
+                              title: 'Boulangerie créée',
+                              identifier: phone,
+                              tempPassword: created.tempPassword,
+                            );
+                          }
                         } else {
                           final Map<String, dynamic> updates = {
-                            'name':      name,
-                            'address':   address,
-                            'phone':     phone,
-                            'openTime':  openCtrl.text.trim(),
+                            'name': name,
+                            'address': address,
+                            'phone': phone,
+                            'openTime': openCtrl.text.trim(),
                             'closeTime': closeCtrl.text.trim(),
+                            'lat': double.parse(latCtrl.text.trim()),
+                            'lng': double.parse(lngCtrl.text.trim()),
                           };
-                          if (pass.isNotEmpty) {
-                            await FirebaseAuth.instance
-                                .signInWithEmailAndPassword(
-                                    email: '$phone@az-boulangerie.ci',
-                                    password: pass)
-                                .then((_) async {
-                              await FirebaseAuth.instance.currentUser
-                                  ?.updatePassword(pass);
-                              await FirebaseAuth.instance.signOut();
-                              try {
-                                await FirebaseAuth.instance
-                                    .signInAnonymously();
-                              } catch (_) {}
-                            }).catchError((_) {});
-                          }
                           await db
                               .collection('boulangeries')
                               .doc(existing.id)
                               .update(updates);
+                          if (resetPassword) {
+                            final temp = await AdminPartnerAccountService
+                                .resetToTemporaryPassword(
+                              kind: 'boulangerie',
+                              uid: existing.id,
+                            );
+                            if (ctx.mounted) {
+                              await showPartnerTempCredentialsDialog(
+                                ctx,
+                                title: 'Mot de passe réinitialisé',
+                                identifier: phone,
+                                tempPassword: temp,
+                              );
+                            }
+                          }
                         }
                         if (ctx.mounted) Navigator.pop(ctx);
                       } catch (e) {
@@ -271,8 +269,7 @@ class AdminBoulangeriesPage extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Supprimer'),
         content: Text('Supprimer "$name" ? Cette action est irréversible.'),
         actions: [
@@ -281,8 +278,7 @@ class AdminBoulangeriesPage extends StatelessWidget {
               child: const Text('Annuler')),
           ScaleButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white),
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
             onPressed: () async {
               await FirebaseFirestore.instance
                   .collection('boulangeries')
@@ -333,8 +329,7 @@ class AdminBoulangeriesPage extends StatelessWidget {
                       size: 72, color: Colors.brown.shade200),
                   const SizedBox(height: 16),
                   const Text('Aucune boulangerie',
-                      style:
-                          TextStyle(color: Colors.grey, fontSize: 16)),
+                      style: TextStyle(color: Colors.grey, fontSize: 16)),
                 ],
               ),
             );
@@ -343,16 +338,17 @@ class AdminBoulangeriesPage extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
             itemCount: docs.length,
             itemBuilder: (context, i) {
-              final doc  = docs[i];
+              final doc = docs[i];
               final data = doc.data() as Map<String, dynamic>;
-              final name     = data['name']    ?? '—';
-              final address  = data['address'] ?? '—';
-              final phone    = data['phone']   ?? '—';
-              final openTime  = data['openTime']  ?? '—';
+              final name = data['name'] ?? '—';
+              final address = data['address'] ?? '—';
+              final phone = data['phone'] ?? '—';
+              final openTime = data['openTime'] ?? '—';
               final closeTime = data['closeTime'] ?? '—';
-              final isOpen    = data['isOpen'] == true;
-              final wallet    = (data['wallet'] as num?)?.toInt() ?? 0;
-              final subStatus = data['subscriptionStatus'] as String? ?? 'active';
+              final isOpen = data['isOpen'] == true;
+              final wallet = (data['wallet'] as num?)?.toInt() ?? 0;
+              final subStatus =
+                  data['subscriptionStatus'] as String? ?? 'active';
               final vipStatus = data['vipStatus'] as String? ?? 'none';
 
               return Container(
@@ -369,8 +365,7 @@ class AdminBoulangeriesPage extends StatelessWidget {
                 child: Column(
                   children: [
                     ListTile(
-                      contentPadding:
-                          const EdgeInsets.fromLTRB(16, 10, 12, 4),
+                      contentPadding: const EdgeInsets.fromLTRB(16, 10, 12, 4),
                       leading: Container(
                         width: 48,
                         height: 48,
@@ -382,9 +377,7 @@ class AdminBoulangeriesPage extends StatelessWidget {
                         ),
                         child: Icon(
                           Icons.bakery_dining_rounded,
-                          color: isOpen
-                              ? Colors.green.shade700
-                              : Colors.grey,
+                          color: isOpen ? Colors.green.shade700 : Colors.grey,
                           size: 26,
                         ),
                       ),
@@ -392,17 +385,19 @@ class AdminBoulangeriesPage extends StatelessWidget {
                         Expanded(
                           child: Text(name,
                               style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15)),
+                                  fontWeight: FontWeight.bold, fontSize: 15)),
                         ),
                         // Subscription dot
                         Container(
-                          width: 10, height: 10,
+                          width: 10,
+                          height: 10,
                           margin: const EdgeInsets.only(right: 4),
                           decoration: BoxDecoration(
-                            color: subStatus == 'active' ? Colors.green
-                                : subStatus == 'trial' ? Colors.blue
-                                : Colors.red,
+                            color: subStatus == 'active'
+                                ? Colors.green
+                                : subStatus == 'trial'
+                                    ? Colors.blue
+                                    : Colors.red,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -438,8 +433,7 @@ class AdminBoulangeriesPage extends StatelessWidget {
                               style: const TextStyle(fontSize: 12)),
                           Text('$openTime – $closeTime',
                               style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.brown.shade400)),
+                                  fontSize: 11, color: Colors.brown.shade400)),
                           Text('Wallet : $wallet FCFA',
                               style: TextStyle(
                                   fontSize: 11,
@@ -453,8 +447,7 @@ class AdminBoulangeriesPage extends StatelessWidget {
                       children: [
                         Expanded(
                           child: TextButton.icon(
-                            icon: const Icon(Icons.menu_book_rounded,
-                                size: 16),
+                            icon: const Icon(Icons.menu_book_rounded, size: 16),
                             label: const Text('Menu',
                                 style: TextStyle(fontSize: 12)),
                             style: TextButton.styleFrom(
@@ -488,8 +481,7 @@ class AdminBoulangeriesPage extends StatelessWidget {
                                 style: TextStyle(fontSize: 12)),
                             style: TextButton.styleFrom(
                                 foregroundColor: Colors.blue.shade700),
-                            onPressed: () =>
-                                _showForm(context, existing: doc),
+                            onPressed: () => _showForm(context, existing: doc),
                           ),
                         ),
                         Expanded(
@@ -539,13 +531,15 @@ class _BoulangerieMenuPage extends StatelessWidget {
   ];
 
   void _showItemForm(BuildContext context, {DocumentSnapshot? existing}) {
-    final data       = existing?.data() as Map<String, dynamic>?;
-    final nameCtrl   = TextEditingController(text: data?['name']        ?? '');
-    final priceCtrl  = TextEditingController(
-        text: data?['price']?.toString() ?? '');
-    final descCtrl   = TextEditingController(text: data?['description'] ?? '');
-    String category  = data?['category'] ?? _categories.first;
-    bool available   = data?['isAvailable'] ?? true;
+    final data = existing?.data() as Map<String, dynamic>?;
+    final nameCtrl = TextEditingController(text: data?['name'] ?? '');
+    final priceCtrl =
+        TextEditingController(text: data?['price']?.toString() ?? '');
+    final descCtrl = TextEditingController(text: data?['description'] ?? '');
+    String category = data?['category'] ?? _categories.first;
+    bool available = data?['isAvailable'] ?? true;
+    File? pickedImage;
+    final existingImageUrl = data?['imageUrl'] as String?;
 
     showDialog(
       context: context,
@@ -558,12 +552,42 @@ class _BoulangerieMenuPage extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                GestureDetector(
+                  onTap: () async {
+                    final img = await ImagePicker().pickImage(
+                        source: ImageSource.gallery, imageQuality: 80);
+                    if (img != null) setS(() => pickedImage = File(img.path));
+                  },
+                  child: Container(
+                    width: 90,
+                    height: 90,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.brown.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                      image: pickedImage != null
+                          ? DecorationImage(
+                              image: FileImage(pickedImage!), fit: BoxFit.cover)
+                          : (existingImageUrl != null &&
+                                  existingImageUrl.isNotEmpty)
+                              ? DecorationImage(
+                                  image: NetworkImage(existingImageUrl),
+                                  fit: BoxFit.cover)
+                              : null,
+                    ),
+                    child: (pickedImage == null &&
+                            (existingImageUrl == null ||
+                                existingImageUrl.isEmpty))
+                        ? Icon(Icons.add_a_photo_outlined,
+                            color: Colors.brown.shade300, size: 28)
+                        : null,
+                  ),
+                ),
                 TextField(
                   controller: nameCtrl,
                   decoration: InputDecoration(
                     labelText: 'Nom de l\'article',
-                    prefixIcon:
-                        const Icon(Icons.fastfood_rounded, size: 20),
+                    prefixIcon: const Icon(Icons.fastfood_rounded, size: 20),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
@@ -599,16 +623,14 @@ class _BoulangerieMenuPage extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12)),
                   ),
                   items: _categories
-                      .map((c) =>
-                          DropdownMenuItem(value: c, child: Text(c)))
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                       .toList(),
                   onChanged: (v) => setS(() => category = v!),
                 ),
                 const SizedBox(height: 10),
                 SwitchListTile(
                   title: const Text('Disponible'),
-                  subtitle: Text(
-                      available ? 'En stock' : 'Rupture de stock',
+                  subtitle: Text(available ? 'En stock' : 'Rupture de stock',
                       style: const TextStyle(fontSize: 11)),
                   value: available,
                   activeThumbColor: Colors.green,
@@ -628,7 +650,7 @@ class _BoulangerieMenuPage extends StatelessWidget {
                 foregroundColor: Colors.white,
               ),
               onPressed: () async {
-                final name  = nameCtrl.text.trim();
+                final name = nameCtrl.text.trim();
                 final price = int.tryParse(priceCtrl.text.trim()) ?? 0;
                 if (name.isEmpty || price <= 0) {
                   ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
@@ -639,16 +661,25 @@ class _BoulangerieMenuPage extends StatelessWidget {
                     .collection('boulangeries')
                     .doc(boulangerieId)
                     .collection('menu_items');
+                final itemId = existing?.id ?? ref.doc().id;
+                String? imageUrl = existingImageUrl;
+                if (pickedImage != null) {
+                  final storageRef = FirebaseStorage.instance
+                      .ref('bakery/$boulangerieId/$itemId.jpg');
+                  await storageRef.putFile(pickedImage!);
+                  imageUrl = await storageRef.getDownloadURL();
+                }
                 final payload = {
-                  'name':        name,
-                  'price':       price,
+                  'name': name,
+                  'price': price,
                   'description': descCtrl.text.trim(),
-                  'category':    category,
+                  'category': category,
                   'isAvailable': available,
-                  'updatedAt':   FieldValue.serverTimestamp(),
+                  'imageUrl': imageUrl ?? '',
+                  'updatedAt': FieldValue.serverTimestamp(),
                 };
                 if (existing == null) {
-                  await ref.add({
+                  await ref.doc(itemId).set({
                     ...payload,
                     'createdAt': FieldValue.serverTimestamp(),
                   });
@@ -670,8 +701,7 @@ class _BoulangerieMenuPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: Text('Menu — $boulangerieName',
-            overflow: TextOverflow.ellipsis),
+        title: Text('Menu — $boulangerieName', overflow: TextOverflow.ellipsis),
         backgroundColor: Colors.brown.shade700,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -704,12 +734,13 @@ class _BoulangerieMenuPage extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
             itemCount: docs.length,
             itemBuilder: (context, i) {
-              final doc  = docs[i];
-              final d    = doc.data() as Map<String, dynamic>;
-              final name  = d['name']        ?? '—';
+              final doc = docs[i];
+              final d = doc.data() as Map<String, dynamic>;
+              final name = d['name'] ?? '—';
               final price = (d['price'] as num?)?.toInt() ?? 0;
-              final cat   = d['category']    ?? '—';
+              final cat = d['category'] ?? '—';
               final avail = d['isAvailable'] ?? true;
+              final imageUrl = d['imageUrl'] as String?;
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
@@ -717,9 +748,7 @@ class _BoulangerieMenuPage extends StatelessWidget {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                      color: avail
-                          ? Colors.transparent
-                          : Colors.red.shade100),
+                      color: avail ? Colors.transparent : Colors.red.shade100),
                   boxShadow: [
                     BoxShadow(
                         color: Colors.black.withValues(alpha: 0.04),
@@ -727,15 +756,24 @@ class _BoulangerieMenuPage extends StatelessWidget {
                   ],
                 ),
                 child: ListTile(
-                  leading: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      width: 44,
+                      height: 44,
                       color: Colors.brown.shade50,
-                      borderRadius: BorderRadius.circular(10),
+                      child: (imageUrl != null && imageUrl.isNotEmpty)
+                          ? Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Icon(
+                                  Icons.bakery_dining_rounded,
+                                  color: Colors.brown.shade400,
+                                  size: 22),
+                            )
+                          : Icon(Icons.bakery_dining_rounded,
+                              color: Colors.brown.shade400, size: 22),
                     ),
-                    child: Icon(Icons.bakery_dining_rounded,
-                        color: Colors.brown.shade400, size: 22),
                   ),
                   title: Text(name,
                       style: const TextStyle(
@@ -749,9 +787,8 @@ class _BoulangerieMenuPage extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: avail
-                              ? Colors.green.shade50
-                              : Colors.red.shade50,
+                          color:
+                              avail ? Colors.green.shade50 : Colors.red.shade50,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -767,8 +804,7 @@ class _BoulangerieMenuPage extends StatelessWidget {
                         icon: const Icon(Icons.edit_outlined, size: 18),
                         color: Colors.blue.shade600,
                         tooltip: 'Modifier',
-                        onPressed: () =>
-                            _showItemForm(context, existing: doc),
+                        onPressed: () => _showItemForm(context, existing: doc),
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete_outline, size: 18),
@@ -781,6 +817,7 @@ class _BoulangerieMenuPage extends StatelessWidget {
                               .collection('menu_items')
                               .doc(doc.id)
                               .delete();
+                          await deleteStorageUrls([imageUrl]);
                         },
                       ),
                     ],
@@ -815,7 +852,9 @@ class _BoulangerieSubPageState extends State<_BoulangerieSubPage> {
       await action();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Opération réussie'), backgroundColor: Colors.green),
+          const SnackBar(
+              content: Text('Opération réussie'),
+              backgroundColor: Colors.green),
         );
       }
     } catch (e) {
@@ -848,7 +887,8 @@ class _BoulangerieSubPageState extends State<_BoulangerieSubPage> {
             .doc(widget.docId)
             .snapshots(),
         builder: (context, snap) {
-          final data = snap.data?.data() as Map<String, dynamic>? ?? widget.data;
+          final data =
+              snap.data?.data() as Map<String, dynamic>? ?? widget.data;
           final subStatus = data['subscriptionStatus'] as String? ?? 'active';
           final subExpiry = data['subscriptionExpiresAt'];
           final vipStatus = data['vipStatus'] as String? ?? 'none';
@@ -861,69 +901,108 @@ class _BoulangerieSubPageState extends State<_BoulangerieSubPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Wallet : $wallet FCFA',
-                    style: TextStyle(color: Colors.grey.shade700, fontSize: 14)),
+                    style:
+                        TextStyle(color: Colors.grey.shade700, fontSize: 14)),
                 const SizedBox(height: 16),
 
                 // Subscription
                 const Text('Abonnement Standard (1 000 F/mois)',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 8),
                 Row(children: [
                   _buildChip(
-                    label: subStatus == 'active' ? 'Actif'
-                        : subStatus == 'trial' ? 'Trial'
-                        : 'Suspendu',
-                    color: subStatus == 'active' ? Colors.green
-                        : subStatus == 'trial' ? Colors.blue
-                        : Colors.red,
+                    label: subStatus == 'active'
+                        ? 'Actif'
+                        : subStatus == 'trial'
+                            ? 'Trial'
+                            : 'Suspendu',
+                    color: subStatus == 'active'
+                        ? Colors.green
+                        : subStatus == 'trial'
+                            ? Colors.blue
+                            : Colors.red,
                   ),
                   const SizedBox(width: 10),
-                  Text('Expire : ${SubscriptionService.formatExpiry(subExpiry)}',
+                  Text(
+                      'Expire : ${SubscriptionService.formatExpiry(subExpiry)}',
                       style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 ]),
                 const SizedBox(height: 10),
                 _loading
                     ? const Center(child: CircularProgressIndicator())
                     : Wrap(spacing: 8, runSpacing: 8, children: [
-                        _buildBtn('Activer (1 000 F)', Colors.brown.shade700, () => _run(() =>
-                            SubscriptionService.adminActivateSubscription('boulangeries', widget.docId, chargeWallet: true))),
-                        _buildBtn('Gratuit', Colors.green, () => _run(() =>
-                            SubscriptionService.adminActivateSubscription('boulangeries', widget.docId, chargeWallet: false))),
-                        _buildBtn('Suspendre', Colors.red, () => _run(() =>
-                            SubscriptionService.adminSuspend('boulangeries', widget.docId))),
+                        _buildBtn(
+                            'Activer (1 000 F)',
+                            Colors.brown.shade700,
+                            () => _run(() =>
+                                SubscriptionService.adminActivateSubscription(
+                                    'boulangeries', widget.docId,
+                                    chargeWallet: true))),
+                        _buildBtn(
+                            'Gratuit',
+                            Colors.green,
+                            () => _run(() =>
+                                SubscriptionService.adminActivateSubscription(
+                                    'boulangeries', widget.docId,
+                                    chargeWallet: false))),
+                        _buildBtn(
+                            'Suspendre',
+                            Colors.red,
+                            () => _run(() => SubscriptionService.adminSuspend(
+                                'boulangeries', widget.docId))),
                       ]),
 
                 const Divider(height: 28),
 
                 // VIP
                 const Text('Abonnement VIP (2 000 F/mois)',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 8),
                 Row(children: [
                   _buildChip(
-                    label: vipStatus == 'active' ? '👑 VIP Actif'
-                        : vipStatus == 'expired' ? 'VIP Expiré'
-                        : 'Aucun VIP',
-                    color: vipStatus == 'active' ? const Color(0xFFFFD700)
-                        : vipStatus == 'expired' ? Colors.orange
-                        : Colors.grey,
-                    textColor: vipStatus == 'active' ? Colors.black87 : Colors.white,
+                    label: vipStatus == 'active'
+                        ? '👑 VIP Actif'
+                        : vipStatus == 'expired'
+                            ? 'VIP Expiré'
+                            : 'Aucun VIP',
+                    color: vipStatus == 'active'
+                        ? const Color(0xFFFFD700)
+                        : vipStatus == 'expired'
+                            ? Colors.orange
+                            : Colors.grey,
+                    textColor:
+                        vipStatus == 'active' ? Colors.black87 : Colors.white,
                   ),
                   const SizedBox(width: 10),
                   if (vipExpiry != null)
-                    Text('Expire : ${SubscriptionService.formatExpiry(vipExpiry)}',
-                        style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text(
+                        'Expire : ${SubscriptionService.formatExpiry(vipExpiry)}',
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey)),
                 ]),
                 const SizedBox(height: 10),
                 Wrap(spacing: 8, runSpacing: 8, children: [
-                  _buildBtn('Activer VIP (2 000 F)', const Color(0xFFFFD700),
-                      () => _run(() => SubscriptionService.adminActivateVip('boulangeries', widget.docId, chargeWallet: true)),
+                  _buildBtn(
+                      'Activer VIP (2 000 F)',
+                      const Color(0xFFFFD700),
+                      () => _run(() => SubscriptionService.adminActivateVip(
+                          'boulangeries', widget.docId,
+                          chargeWallet: true)),
                       textColor: Colors.black87),
-                  _buildBtn('VIP Gratuit', Colors.amber,
-                      () => _run(() => SubscriptionService.adminActivateVip('boulangeries', widget.docId, chargeWallet: false)),
+                  _buildBtn(
+                      'VIP Gratuit',
+                      Colors.amber,
+                      () => _run(() => SubscriptionService.adminActivateVip(
+                          'boulangeries', widget.docId,
+                          chargeWallet: false)),
                       textColor: Colors.black87),
-                  _buildBtn('Retirer VIP', Colors.grey.shade600,
-                      () => _run(() => SubscriptionService.adminDeactivateVip('boulangeries', widget.docId))),
+                  _buildBtn(
+                      'Retirer VIP',
+                      Colors.grey.shade600,
+                      () => _run(() => SubscriptionService.adminDeactivateVip(
+                          'boulangeries', widget.docId))),
                 ]),
               ],
             ),
@@ -933,21 +1012,31 @@ class _BoulangerieSubPageState extends State<_BoulangerieSubPage> {
     );
   }
 
-  Widget _buildChip({required String label, required Color color, Color textColor = Colors.white}) {
+  Widget _buildChip(
+      {required String label,
+      required Color color,
+      Color textColor = Colors.white}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
-      child: Text(label, style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.bold)),
+      decoration:
+          BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+      child: Text(label,
+          style: TextStyle(
+              color: textColor, fontSize: 12, fontWeight: FontWeight.bold)),
     );
   }
 
-  Widget _buildBtn(String label, Color color, VoidCallback onTap, {Color textColor = Colors.white}) {
+  Widget _buildBtn(String label, Color color, VoidCallback onTap,
+      {Color textColor = Colors.white}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
-        child: Text(label, style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w600)),
+        decoration: BoxDecoration(
+            color: color, borderRadius: BorderRadius.circular(10)),
+        child: Text(label,
+            style: TextStyle(
+                color: textColor, fontSize: 12, fontWeight: FontWeight.w600)),
       ),
     );
   }

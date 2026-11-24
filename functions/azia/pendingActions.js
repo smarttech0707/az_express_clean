@@ -1,6 +1,11 @@
 'use strict';
 
 const { buildConfirmResponse } = require('./responseBuilder');
+// Tombstone relu dans la transaction de confirmation (Mission 7E-68).
+const { assertNewAccountActivity } = require('../accountAdmission');
+// Expurgation partagée (jeton, en-tête d'autorisation, URL, téléphone) —
+// voir functions/feexpaySanitize.js.
+const { sanitizeProviderMessage } = require('../feexpaySanitize');
 
 // 5 minutes pour toutes les actions (décision validée avec l'utilisateur —
 // pas de durée différenciée par type d'action).
@@ -32,11 +37,16 @@ async function createPendingAction(db, admin, { uid, conversationId, toolName, t
 // même transaction que la mutation réelle — même schéma que
 // `ekClientConfirmOrder` dans functions/index.js — pour empêcher un replay
 // (un double-tap voit status !== 'pending' et échoue proprement).
-function buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByName }) {
+function buildConfirmAction({
+  db, admin, onCall, logAudit, HttpsError, toolsByName, secrets = [], options = {},
+}) {
   return onCall({
     region:         'europe-west1',
     timeoutSeconds: 60,
     memory:         '256MiB',
+    secrets,
+    // Plafond propre à la préproduction (pilotLightOptions) : vide ailleurs, donc production inchangée.
+    ...options,
   }, async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Vous devez être connecté');
@@ -70,10 +80,16 @@ function buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByNa
       if (data.uid !== uid) throw new HttpsError('permission-denied', 'Non autorisé');
       if (data.status !== 'pending') throw new HttpsError('failed-precondition', 'Cette action a déjà été traitée');
 
+      // Une action préparée avant la quarantaine ne doit jamais être exécutée après : le marqueur est relu ICI,
+      // avant tout confirmHandler (commande, débit wallet, recharge). Une erreur de lecture fait échouer la confirmation.
+      await assertNewAccountActivity(tx, db, HttpsError, uid);
+
       const expiresAtMs = data.expiresAt?.toMillis ? data.expiresAt.toMillis() : 0;
       if (expiresAtMs < Date.now()) {
         tx.update(ref, { status: 'expired', resolvedAt: admin.firestore.FieldValue.serverTimestamp() });
-        throw new HttpsError('deadline-exceeded', 'Cette action a expiré. Recommencez la demande.');
+        // Laisser la transaction committer le statut avant de renvoyer
+        // l'erreur callable. Lever ici annulerait aussi l'update Firestore.
+        return { expired: true };
       }
 
       const tool = toolsByName.get(data.toolName);
@@ -86,6 +102,10 @@ function buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByNa
       return { toolName: data.toolName, amount: data.amount, result };
     });
 
+    if (outcome.expired) {
+      throw new HttpsError('deadline-exceeded', 'Cette action a expiré. Recommencez la demande.');
+    }
+
     // Étape optionnelle, hors transaction : un outil comme la recharge
     // wallet doit appeler une API externe (FeexPay) après la bascule de
     // statut — jamais à l'intérieur d'une transaction Firestore, qui peut
@@ -96,8 +116,13 @@ function buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByNa
       try {
         finalResult = await tool.afterConfirm(uid, finalResult);
       } catch (err) {
-        console.error(`aiConfirmAction afterConfirm error (${outcome.toolName}):`, err.message);
-        finalResult = { ...finalResult, afterConfirmError: err.message };
+        // `afterConfirm` effectue le seul appel réseau externe du mécanisme
+        // (recharge FeexPay). Le message d'erreur était journalisé ET renvoyé
+        // au client tel quel : il pouvait porter une URL à query string ou un
+        // en-tête d'autorisation. On l'expurge des deux côtés.
+        const safe = sanitizeProviderMessage(err.message);
+        console.error(`aiConfirmAction afterConfirm error (${outcome.toolName}):`, safe);
+        finalResult = { ...finalResult, afterConfirmError: safe };
       }
     }
 

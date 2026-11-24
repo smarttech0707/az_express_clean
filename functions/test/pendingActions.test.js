@@ -28,12 +28,18 @@ function makeFakeDb(seed = {}) {
       return { doc: (id) => makeRef(`${name}/${id ?? `auto${autoId++}`}`) };
     },
     runTransaction: async (fn) => {
+      const writes = [];
       const tx = {
         get: async (ref) => ({ exists: store.has(ref.__path), data: () => store.get(ref.__path) }),
-        update: (ref, data) => store.set(ref.__path, { ...(store.get(ref.__path) || {}), ...data }),
-        set: (ref, data) => store.set(ref.__path, data),
+        update: (ref, data) => writes.push(() => store.set(
+          ref.__path,
+          { ...(store.get(ref.__path) || {}), ...data },
+        )),
+        set: (ref, data) => writes.push(() => store.set(ref.__path, data)),
       };
-      return fn(tx);
+      const result = await fn(tx);
+      writes.forEach((write) => write());
+      return result;
     },
   };
   return { db, store };
@@ -161,7 +167,13 @@ test('aiConfirmAction: an expired action fails closed and flips to expired', asy
       expiresAt: { toMillis: () => Date.now() - 1000 }, // déjà expirée
     },
   });
-  const toolsByName = new Map([['t', { confirmHandler: async () => ({}) }]]);
+  let confirmCalls = 0;
+  const toolsByName = new Map([['t', {
+    confirmHandler: async () => {
+      confirmCalls++;
+      return {};
+    },
+  }]]);
   const fn = buildConfirmAction({ db, admin: fakeAdmin, onCall, logAudit: makeLogAudit(), HttpsError, toolsByName });
 
   await assert.rejects(
@@ -169,6 +181,7 @@ test('aiConfirmAction: an expired action fails closed and flips to expired', asy
     (err) => err.code === 'deadline-exceeded',
   );
   assert.equal(store.get('ai_pending_actions/a1').status, 'expired');
+  assert.equal(confirmCalls, 0);
 });
 
 test('aiConfirmAction: a double-tap (replay) is rejected once the action is already completed', async () => {

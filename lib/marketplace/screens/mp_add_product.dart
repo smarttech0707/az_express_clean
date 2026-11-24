@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,6 +9,8 @@ import 'dart:typed_data';
 import '../mp_constants.dart';
 import '../models/mp_product.dart';
 import '../services/mp_service.dart';
+import '../../utils/storage_cleanup.dart';
+import '../../services/permission_primer.dart';
 
 class MpAddProductScreen extends StatefulWidget {
   final MpProduct? editProduct; // null = new product
@@ -21,25 +24,35 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
   final _formKey = GlobalKey<FormState>();
 
   // Controllers
-  final _titleCtrl   = TextEditingController();
-  final _descCtrl    = TextEditingController();
-  final _priceCtrl   = TextEditingController();
+  final _titleCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  final _priceCtrl = TextEditingController();
   final _batteryCtrl = TextEditingController();
 
   // Selections
-  String _category  = 'phones';
+  String _category = 'phones';
   String _condition = 'used';
-  String _brand     = '';
+  String _brand = '';
   String? _storage;
   String? _ram;
   String? _color;
-  String _city      = 'Abengourou';
+  String _city = 'Abengourou';
 
   // Images
-  final List<XFile>  _newImages   = [];
+  final List<XFile> _newImages = [];
   final List<String> _existingUrls = [];
+  // Snapshot des URLs présentes à l'ouverture de l'écran — sert uniquement à
+  // détecter, à l'enregistrement, quelles photos ont été retirées pendant
+  // l'édition pour nettoyer leur fichier Storage (sinon fichier orphelin :
+  // retiré du tableau Firestore mais jamais supprimé du Storage).
+  final List<String> _originalUrls = [];
   final _picker = ImagePicker();
   bool _uploading = false;
+  bool _discardConfirmed = false;
+  // Fixé à l'ouverture de l'écran : tout réessai de CETTE publication réutilise
+  // le même identifiant, donc ne peut pas créer une seconde annonce. Un nouvel
+  // écran (annonce volontairement distincte) génère un nouvel identifiant.
+  final String _publicationId = MpService.newPublicationId();
 
   bool get _isEdit => widget.editProduct != null;
 
@@ -48,19 +61,97 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
     super.initState();
     final p = widget.editProduct;
     if (p != null) {
-      _titleCtrl.text   = p.title;
-      _descCtrl.text    = p.description;
-      _priceCtrl.text   = p.price.toString();
+      _titleCtrl.text = p.title;
+      _descCtrl.text = p.description;
+      _priceCtrl.text = p.price.toString();
       _batteryCtrl.text = p.battery ?? '';
-      _category  = p.category;
+      _category = p.category;
       _condition = p.condition;
-      _brand     = p.brand;
-      _storage   = p.storage;
-      _ram       = p.ram;
-      _color     = p.color;
-      _city      = p.city;
+      _brand = p.brand;
+      _storage = p.storage;
+      _ram = p.ram;
+      _color = p.color;
+      _city = p.city;
       _existingUrls.addAll(p.images);
+      _originalUrls.addAll(p.images);
     }
+    for (final controller in [
+      _titleCtrl,
+      _descCtrl,
+      _priceCtrl,
+      _batteryCtrl,
+    ]) {
+      controller.addListener(_onFormChanged);
+    }
+  }
+
+  void _onFormChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool get _hasUnsavedChanges {
+    final p = widget.editProduct;
+    if (p == null) {
+      return _titleCtrl.text.trim().isNotEmpty ||
+          _descCtrl.text.trim().isNotEmpty ||
+          _priceCtrl.text.trim().isNotEmpty ||
+          _batteryCtrl.text.trim().isNotEmpty ||
+          _brand.isNotEmpty ||
+          _storage != null ||
+          _ram != null ||
+          _color != null ||
+          _newImages.isNotEmpty;
+    }
+    return _titleCtrl.text != p.title ||
+        _descCtrl.text != p.description ||
+        _priceCtrl.text != p.price.toString() ||
+        _batteryCtrl.text != (p.battery ?? '') ||
+        _category != p.category ||
+        _condition != p.condition ||
+        _brand != p.brand ||
+        _storage != p.storage ||
+        _ram != p.ram ||
+        _color != p.color ||
+        _city != p.city ||
+        _newImages.isNotEmpty ||
+        !_sameUrls(_existingUrls, _originalUrls);
+  }
+
+  bool _sameUrls(List<String> first, List<String> second) {
+    if (first.length != second.length) return false;
+    for (var i = 0; i < first.length; i++) {
+      if (first[i] != second[i]) return false;
+    }
+    return true;
+  }
+
+  Future<bool> _confirmDiscard() async {
+    if (!_hasUnsavedChanges) return true;
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Abandonner cette annonce ?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Continuer la saisie'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Abandonner'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _requestPop() async {
+    if (!await _confirmDiscard() || !mounted) return;
+    setState(() => _discardConfirmed = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    Navigator.of(context).maybePop();
   }
 
   @override
@@ -73,6 +164,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
   }
 
   Future<void> _pickImages() async {
+    if (!await PermissionPrimer.prepareImage(ImageSource.gallery, context: context)) return;
     final picked = await _picker.pickMultiImage(imageQuality: 75);
     if (picked.isNotEmpty) {
       final total = _existingUrls.length + _newImages.length + picked.length;
@@ -85,6 +177,7 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
   }
 
   Future<void> _submit() async {
+    if (_uploading) return;
     if (!_formKey.currentState!.validate()) return;
     if (_brand.isEmpty) {
       _snack('Sélectionnez une marque', Colors.orange);
@@ -100,13 +193,15 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser!;
       // Get seller info
-      String sellerName  = user.displayName ?? 'Vendeur';
+      String sellerName = user.displayName ?? 'Vendeur';
       String sellerPhone = '';
       try {
         final doc = await FirebaseFirestore.instance
-            .collection('clients').doc(user.uid).get();
+            .collection('clients')
+            .doc(user.uid)
+            .get();
         if (doc.exists) {
-          sellerName  = doc.data()?['name'] ?? sellerName;
+          sellerName = doc.data()?['name'] ?? sellerName;
           sellerPhone = doc.data()?['phone'] ?? '';
         }
       } catch (_) {}
@@ -116,7 +211,9 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
       // Upload new images
       List<String> uploadedUrls = [];
       if (_newImages.isNotEmpty) {
-        final id = _isEdit ? productId : 'tmp_${DateTime.now().millisecondsSinceEpoch}';
+        final id = _isEdit
+            ? productId
+            : 'tmp_${DateTime.now().millisecondsSinceEpoch}';
         uploadedUrls = await MpService.uploadImages(_newImages, id);
       }
 
@@ -124,26 +221,25 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
 
       final data = MpProduct(
         id: productId,
-        sellerId:      user.uid,
-        sellerName:    sellerName,
-        sellerPhone:   sellerPhone,
-        sellerCity:    _city,
+        sellerId: user.uid,
+        sellerName: sellerName,
+        sellerPhone: sellerPhone,
+        sellerCity: _city,
         sellerVerified: false,
-        title:       _titleCtrl.text.trim(),
+        title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
-        price:       int.parse(_priceCtrl.text.trim().replaceAll(' ', '')),
-        category:    _category,
-        brand:       _brand,
-        condition:   _condition,
-        storage:     _storage,
-        ram:         _ram,
-        color:       _color,
-        battery:     _batteryCtrl.text.trim().isEmpty
-            ? null
-            : _batteryCtrl.text.trim(),
-        images:      allImages,
-        city:        _city,
-        status:      'active',
+        price: int.parse(_priceCtrl.text.trim().replaceAll(' ', '')),
+        category: _category,
+        brand: _brand,
+        condition: _condition,
+        storage: _storage,
+        ram: _ram,
+        color: _color,
+        battery:
+            _batteryCtrl.text.trim().isEmpty ? null : _batteryCtrl.text.trim(),
+        images: allImages,
+        city: _city,
+        status: 'active',
       ).toMap();
 
       if (_isEdit) {
@@ -152,15 +248,22 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
           ..remove('createdAt')
           ..remove('views')
           ..remove('favoritesCount')
+          ..remove('expiresAt')
+          ..remove('sellerVerified')
+          ..remove('sellerVipStatus')
+          ..remove('priorityLevel')
           ..['images'] = allImages;
         await MpService.updateProduct(productId, updateData);
+        // Nettoyage Storage des photos retirées pendant cette édition —
+        // seulement maintenant que l'écriture Firestore a réellement réussi.
+        final removed = _originalUrls.where((u) => !allImages.contains(u));
+        if (removed.isNotEmpty) unawaited(deleteStorageUrls(removed));
       } else {
-        await MpService.addProduct(data);
+        await MpService.addProduct(data, publicationId: _publicationId);
       }
 
       if (!mounted) return;
-      _snack(
-          _isEdit ? 'Annonce mise à jour !' : 'Annonce publiée ! 🎉',
+      _snack(_isEdit ? 'Annonce mise à jour !' : 'Annonce publiée ! 🎉',
           Colors.green);
       Navigator.pop(context, true);
     } catch (e) {
@@ -173,297 +276,318 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kMpBg,
-      appBar: AppBar(
-        title: Text(
-          _isEdit ? 'Modifier l\'annonce' : 'Nouvelle annonce',
-          style: GoogleFonts.urbanist(
-              fontSize: 16, fontWeight: FontWeight.w700, color: kMpText),
+    return PopScope(
+      canPop: !_hasUnsavedChanges || _discardConfirmed,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (!didPop) await _requestPop();
+      },
+      child: Scaffold(
+        backgroundColor: kMpBg,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: Navigator.of(context).canPop()
+              ? BackButton(
+                  color: kMpText,
+                  onPressed: _requestPop,
+                )
+              : null,
+          title: Text(
+            _isEdit ? 'Modifier l\'annonce' : 'Nouvelle annonce',
+            style: GoogleFonts.urbanist(
+                fontSize: 16, fontWeight: FontWeight.w700, color: kMpText),
+          ),
+          backgroundColor: Colors.white,
+          foregroundColor: kMpText,
+          elevation: 0,
+          centerTitle: true,
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: kMpText,
-        elevation: 0,
-        centerTitle: true,
-      ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Photos
-              _Section(
-                title: 'Photos',
-                child: Column(
-                  children: [
-                    if (_existingUrls.isNotEmpty || _newImages.isNotEmpty)
-                      SizedBox(
-                        height: 90,
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          children: [
-                            ..._existingUrls.asMap().entries.map((e) => _ImgThumb(
-                              networkUrl: e.value,
-                              onRemove: () =>
-                                  setState(() => _existingUrls.removeAt(e.key)),
-                            )),
-                            ..._newImages.asMap().entries.map((e) => _ImgThumbLocal(
-                              xfile: e.value,
-                              onRemove: () =>
-                                  setState(() => _newImages.removeAt(e.key)),
-                            )),
-                          ],
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-                    GestureDetector(
-                      onTap: _pickImages,
-                      child: Container(
-                        height: 52,
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                              color: kMpOrange,
-                              style: BorderStyle.solid),
-                          borderRadius: BorderRadius.circular(12),
-                          color: kMpOrange.withValues(alpha: 0.05),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.add_photo_alternate_rounded,
-                                color: kMpOrange),
-                            const SizedBox(width: 8),
-                            Text('Ajouter des photos',
-                                style: GoogleFonts.urbanist(
-                                    color: kMpOrange,
-                                    fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_existingUrls.length + _newImages.length}/6 photos  •  Première photo = couverture',
-                      style: GoogleFonts.urbanist(
-                          fontSize: 11, color: kMpMuted),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Category
-              _Section(
-                title: 'Catégorie',
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: mpCategories
-                      .map((c) => _SelChip(
-                            label: '${c['emoji']} ${c['label']}',
-                            selected: _category == c['id'],
-                            onTap: () => setState(() {
-                              _category = c['id']!;
-                              _brand = '';
-                            }),
-                          ))
-                      .toList(),
-                ),
-              ),
-
-              // Brand
-              _Section(
-                title: 'Marque',
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: brandsForCategory(_category)
-                      .map((b) => _SelChip(
-                            label: b,
-                            selected: _brand == b,
-                            onTap: () => setState(() => _brand = b),
-                          ))
-                      .toList(),
-                ),
-              ),
-
-              // Condition
-              _Section(
-                title: 'État du produit',
-                child: Row(
-                  children: mpConditions
-                      .map((c) => Expanded(
-                            child: GestureDetector(
-                              onTap: () => setState(() => _condition = c['id'] as String),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 150),
-                                margin: const EdgeInsets.only(right: 8),
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 12),
-                                decoration: BoxDecoration(
-                                  color: _condition == c['id']
-                                      ? Color(c['color']! as int)
-                                      : Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: _condition == c['id']
-                                        ? Color(c['color']! as int)
-                                        : kMpDivider,
-                                  ),
-                                ),
-                                child: Column(children: [
-                                  Text(
-                                    c['id'] == 'new'
-                                        ? '🌟'
-                                        : c['id'] == 'like_new'
-                                            ? '✨'
-                                            : '💡',
-                                    style: const TextStyle(fontSize: 20),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    c['label']! as String,
-                                    style: GoogleFonts.urbanist(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: _condition == c['id']
-                                          ? Colors.white
-                                          : kMpText,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ]),
-                              ),
-                            ),
-                          ))
-                      .toList(),
-                ),
-              ),
-
-              // Title
-              _Section(
-                title: 'Titre de l\'annonce',
-                child: TextFormField(
-                  controller: _titleCtrl,
-                  validator: (v) =>
-                      (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
-                  decoration: _deco('Ex: iPhone 13 Pro Max 256Go Blanc',
-                      Icons.title_rounded),
-                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                ),
-              ),
-
-              // Price
-              _Section(
-                title: 'Prix (FCFA)',
-                child: TextFormField(
-                  controller: _priceCtrl,
-                  keyboardType: TextInputType.number,
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Obligatoire';
-                    final n = int.tryParse(v.trim().replaceAll(' ', ''));
-                    if (n == null || n <= 0) return 'Prix invalide';
-                    return null;
-                  },
-                  decoration: _deco('Ex: 150000', Icons.payments_rounded),
-                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                ),
-              ),
-
-              // Description
-              _Section(
-                title: 'Description',
-                child: TextFormField(
-                  controller: _descCtrl,
-                  maxLines: 4,
-                  validator: (v) =>
-                      (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
-                  decoration: _deco(
-                      'Décrivez l\'état, les accessoires inclus...',
-                      Icons.description_rounded),
-                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                ),
-              ),
-
-              // Specs (optional)
-              _Section(
-                title: 'Spécifications (optionnel)',
-                child: Column(
-                  children: [
-                    _dropRow('Stockage', storageOptions, _storage,
-                        (v) => setState(() => _storage = v)),
-                    const SizedBox(height: 10),
-                    _dropRow('RAM', ramOptions, _ram,
-                        (v) => setState(() => _ram = v)),
-                    const SizedBox(height: 10),
-                    _dropRow('Couleur', deviceColors, _color,
-                        (v) => setState(() => _color = v)),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _batteryCtrl,
-                      decoration: _deco('Batterie (ex: 4500 mAh)',
-                          Icons.battery_full_rounded),
-                      style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                    ),
-                  ],
-                ),
-              ),
-
-              // City
-              _Section(
-                title: 'Ville',
-                child: DropdownButtonFormField<String>(
-                  initialValue: _city,
-                  items: mpCities
-                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                      .toList(),
-                  onChanged: (v) => setState(() => _city = v ?? _city),
-                  decoration: _deco('Votre ville', Icons.location_city_rounded),
-                  style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Submit
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ScaleButton(
-                  onPressed: _uploading ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kMpOrange,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    elevation: 4,
-                  ),
-                  child: _uploading
-                      ? const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2),
-                            ),
-                            SizedBox(width: 10),
-                            Text('Publication en cours...'),
-                          ],
-                        )
-                      : Text(
-                          _isEdit ? 'Mettre à jour' : 'Publier l\'annonce',
-                          style: GoogleFonts.urbanist(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+        body: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Photos
+                _Section(
+                  title: 'Photos',
+                  child: Column(
+                    children: [
+                      if (_existingUrls.isNotEmpty || _newImages.isNotEmpty)
+                        SizedBox(
+                          height: 90,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: [
+                              ..._existingUrls
+                                  .asMap()
+                                  .entries
+                                  .map((e) => _ImgThumb(
+                                        networkUrl: e.value,
+                                        onRemove: () => setState(() =>
+                                            _existingUrls.removeAt(e.key)),
+                                      )),
+                              ..._newImages
+                                  .asMap()
+                                  .entries
+                                  .map((e) => _ImgThumbLocal(
+                                        xfile: e.value,
+                                        onRemove: () => setState(
+                                            () => _newImages.removeAt(e.key)),
+                                      )),
+                            ],
                           ),
                         ),
+                      const SizedBox(height: 10),
+                      GestureDetector(
+                        onTap: _pickImages,
+                        child: Container(
+                          height: 52,
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: kMpOrange, style: BorderStyle.solid),
+                            borderRadius: BorderRadius.circular(12),
+                            color: kMpOrange.withValues(alpha: 0.05),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.add_photo_alternate_rounded,
+                                  color: kMpOrange),
+                              const SizedBox(width: 8),
+                              Text('Ajouter des photos',
+                                  style: GoogleFonts.urbanist(
+                                      color: kMpOrange,
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_existingUrls.length + _newImages.length}/6 photos  •  Première photo = couverture',
+                        style:
+                            GoogleFonts.urbanist(fontSize: 11, color: kMpMuted),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 40),
-            ],
+
+                // Category
+                _Section(
+                  title: 'Catégorie',
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: mpCategories
+                        .map((c) => _SelChip(
+                              label: '${c['emoji']} ${c['label']}',
+                              selected: _category == c['id'],
+                              onTap: () => setState(() {
+                                _category = c['id']!;
+                                _brand = '';
+                              }),
+                            ))
+                        .toList(),
+                  ),
+                ),
+
+                // Brand
+                _Section(
+                  title: 'Marque',
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: brandsForCategory(_category)
+                        .map((b) => _SelChip(
+                              label: b,
+                              selected: _brand == b,
+                              onTap: () => setState(() => _brand = b),
+                            ))
+                        .toList(),
+                  ),
+                ),
+
+                // Condition
+                _Section(
+                  title: 'État du produit',
+                  child: Row(
+                    children: mpConditions
+                        .map((c) => Expanded(
+                              child: GestureDetector(
+                                onTap: () => setState(
+                                    () => _condition = c['id'] as String),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  margin: const EdgeInsets.only(right: 8),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: _condition == c['id']
+                                        ? Color(c['color']! as int)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: _condition == c['id']
+                                          ? Color(c['color']! as int)
+                                          : kMpDivider,
+                                    ),
+                                  ),
+                                  child: Column(children: [
+                                    Text(
+                                      c['id'] == 'new'
+                                          ? '🌟'
+                                          : c['id'] == 'like_new'
+                                              ? '✨'
+                                              : '💡',
+                                      style: const TextStyle(fontSize: 20),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      c['label']! as String,
+                                      style: GoogleFonts.urbanist(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: _condition == c['id']
+                                            ? Colors.white
+                                            : kMpText,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ]),
+                                ),
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
+
+                // Title
+                _Section(
+                  title: 'Titre de l\'annonce',
+                  child: TextFormField(
+                    controller: _titleCtrl,
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
+                    decoration: _deco('Ex: iPhone 13 Pro Max 256Go Blanc',
+                        Icons.title_rounded),
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                  ),
+                ),
+
+                // Price
+                _Section(
+                  title: 'Prix (FCFA)',
+                  child: TextFormField(
+                    controller: _priceCtrl,
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Obligatoire';
+                      final n = int.tryParse(v.trim().replaceAll(' ', ''));
+                      if (n == null || n <= 0) return 'Prix invalide';
+                      return null;
+                    },
+                    decoration: _deco('Ex: 150000', Icons.payments_rounded),
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                  ),
+                ),
+
+                // Description
+                _Section(
+                  title: 'Description',
+                  child: TextFormField(
+                    controller: _descCtrl,
+                    maxLines: 4,
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Obligatoire' : null,
+                    decoration: _deco(
+                        'Décrivez l\'état, les accessoires inclus...',
+                        Icons.description_rounded),
+                    style: GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                  ),
+                ),
+
+                // Specs (optional)
+                _Section(
+                  title: 'Spécifications (optionnel)',
+                  child: Column(
+                    children: [
+                      _dropRow('Stockage', storageOptions, _storage,
+                          (v) => setState(() => _storage = v)),
+                      const SizedBox(height: 10),
+                      _dropRow('RAM', ramOptions, _ram,
+                          (v) => setState(() => _ram = v)),
+                      const SizedBox(height: 10),
+                      _dropRow('Couleur', deviceColors, _color,
+                          (v) => setState(() => _color = v)),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _batteryCtrl,
+                        decoration: _deco('Batterie (ex: 4500 mAh)',
+                            Icons.battery_full_rounded),
+                        style:
+                            GoogleFonts.urbanist(fontSize: 14, color: kMpText),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // City
+                _Section(
+                  title: 'Ville',
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _city,
+                    items: mpCities.map(_dropdownMenuItem).toList(),
+                    onChanged: (v) => setState(() => _city = v ?? _city),
+                    dropdownColor: Colors.white,
+                    iconEnabledColor: kMpOrange,
+                    decoration: _dropdownDecoration(
+                        'Votre ville', Icons.location_city_rounded),
+                    style: _dropdownTextStyle,
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Submit
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ScaleButton(
+                    onPressed: _uploading ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kMpOrange,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 4,
+                    ),
+                    child: _uploading
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2),
+                              ),
+                              SizedBox(width: 10),
+                              Text('Publication en cours...'),
+                            ],
+                          )
+                        : Text(
+                            _isEdit ? 'Mettre à jour' : 'Publier l\'annonce',
+                            style: GoogleFonts.urbanist(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 40),
+              ],
+            ),
           ),
         ),
       ),
@@ -492,22 +616,23 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
             const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       );
 
-  Widget _dropRow(String label, List<String> options, String? selectedValue,
-      ValueChanged<String?> onChanged) {
-    return DropdownButtonFormField<String>(
-      initialValue: selectedValue,
-      hint: Text('$label (optionnel)',
-          style: GoogleFonts.urbanist(color: kMpMuted, fontSize: 13)),
-      items: options
-          .map((o) => DropdownMenuItem(
-                value: o,
-                child:
-                    Text(o, style: GoogleFonts.urbanist(fontSize: 14, color: kMpText)),
-              ))
-          .toList(),
-      onChanged: onChanged,
-      decoration: InputDecoration(
+  TextStyle get _dropdownTextStyle =>
+      GoogleFonts.urbanist(fontSize: 14, color: kMpText);
+
+  DropdownMenuItem<String> _dropdownMenuItem(String value) => DropdownMenuItem(
+        value: value,
+        child: Text(value, style: _dropdownTextStyle),
+      );
+
+  InputDecoration _dropdownDecoration(String hint, [IconData? icon]) =>
+      InputDecoration(
+        hintText: hint,
+        hintStyle: GoogleFonts.urbanist(color: kMpMuted, fontSize: 13),
+        prefixIcon:
+            icon == null ? null : Icon(icon, color: kMpOrange, size: 20),
         filled: true,
+        // The form itself is white. Keep the popup white too so the explicit
+        // dark text remains readable when iOS uses a dark system theme.
         fillColor: Colors.white,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -523,7 +648,20 @@ class _MpAddProductScreenState extends State<MpAddProductScreen> {
         ),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      ),
+      );
+
+  Widget _dropRow(String label, List<String> options, String? selectedValue,
+      ValueChanged<String?> onChanged) {
+    return DropdownButtonFormField<String>(
+      initialValue: selectedValue,
+      hint: Text('$label (optionnel)',
+          style: GoogleFonts.urbanist(color: kMpMuted, fontSize: 13)),
+      items: options.map(_dropdownMenuItem).toList(),
+      onChanged: onChanged,
+      dropdownColor: Colors.white,
+      iconEnabledColor: kMpOrange,
+      style: _dropdownTextStyle,
+      decoration: _dropdownDecoration('$label (optionnel)'),
     );
   }
 
@@ -559,9 +697,7 @@ class _Section extends StatelessWidget {
           children: [
             Text(title,
                 style: GoogleFonts.urbanist(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: kMpText)),
+                    fontSize: 13, fontWeight: FontWeight.w700, color: kMpText)),
             const SizedBox(height: 12),
             child,
           ],
@@ -588,8 +724,7 @@ class _SelChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? kMpOrange : kMpBg,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: selected ? kMpOrange : kMpDivider),
+          border: Border.all(color: selected ? kMpOrange : kMpDivider),
         ),
         child: Text(label,
             style: GoogleFonts.urbanist(
@@ -643,15 +778,30 @@ class _ImgThumb extends StatelessWidget {
   }
 }
 
-class _ImgThumbLocal extends StatelessWidget {
+class _ImgThumbLocal extends StatefulWidget {
   final XFile xfile;
   final VoidCallback onRemove;
   const _ImgThumbLocal({required this.xfile, required this.onRemove});
 
   @override
+  State<_ImgThumbLocal> createState() => _ImgThumbLocalState();
+}
+
+class _ImgThumbLocalState extends State<_ImgThumbLocal> {
+  late Future<Uint8List> _bytes = widget.xfile.readAsBytes();
+
+  @override
+  void didUpdateWidget(covariant _ImgThumbLocal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.xfile.path != widget.xfile.path) {
+      _bytes = widget.xfile.readAsBytes();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<Uint8List>(
-      future: xfile.readAsBytes(),
+      future: _bytes,
       builder: (_, snap) {
         return Stack(
           children: [
@@ -664,7 +814,11 @@ class _ImgThumbLocal extends StatelessWidget {
                 color: kMpBg,
                 image: snap.hasData
                     ? DecorationImage(
-                        image: MemoryImage(snap.data!),
+                        image: ResizeImage(
+                          MemoryImage(snap.data!),
+                          width: 160,
+                          height: 160,
+                        ),
                         fit: BoxFit.cover,
                       )
                     : null,
@@ -682,7 +836,7 @@ class _ImgThumbLocal extends StatelessWidget {
               top: 2,
               right: 10,
               child: GestureDetector(
-                onTap: onRemove,
+                onTap: widget.onRemove,
                 child: Container(
                   width: 20,
                   height: 20,
@@ -699,4 +853,3 @@ class _ImgThumbLocal extends StatelessWidget {
     );
   }
 }
-

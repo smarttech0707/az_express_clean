@@ -2,33 +2,19 @@
 
 const { getUserMemory } = require('./tools/memory');
 
-// ═══════════════════════════════════════════════════════════════════════════
-// ContextManager (Master Prompt 113, enrichi Master Prompt 118) — assemble,
-// avant le premier appel Claude d'un tour de conversation, tout ce qui est
-// DÉJÀ connu de l'utilisateur (profil clients/{uid}, mémoire
-// ai_user_memory/{uid}, localisation transmise par le client Flutter si le
-// GPS est déjà autorisé, ET DÉSORMAIS des insights dérivés de données
-// RÉELLES — dernière commande, vendeur fréquent, solde wallet faible) en un
-// court bloc de contexte textuel injecté dans le system prompt.
+// Minimisation des données (App Store 5.1.1(i)/5.1.2(i)) : AZ IA n'injecte PLUS
+// automatiquement le profil, les adresses, les commandes, le solde ni le GPS
+// dans chaque appel aux fournisseurs d'IA (Anthropic / Google). Le modèle
+// demande uniquement les rubriques utiles à la demande en cours via l'outil
+// `get_user_context` ; la sélection reste décidée par la demande, et chaque
+// rubrique n'est lue que si elle est demandée.
 //
-// Objectif direct : que le modèle n'ait jamais à demander une information
-// déjà disponible (section 15 du prompt) — sans appel LLM supplémentaire ni
-// aller-retour d'outil, cette lecture Firestore ciblée remplace ce qui
-// aurait autrement nécessité que Claude appelle explicitement un outil de
-// lecture puis reformule la question (section 18 : privilégier Firestore/
-// mémoire avant d'interroger le LLM).
-//
-// Les insights "proactifs" (Master Prompt 118 : "tu commandes souvent ici",
-// "ton portefeuille est faible") sont calculés ICI à partir de données
-// réellement lues (dernières commandes, solde wallet réel) — jamais
-// inventés. Volontairement PAS un système de notification push séparé :
-// l'information est simplement mise à disposition du modèle, qui décide
-// (via le SYSTEM_PROMPT) s'il est pertinent de la mentionner naturellement.
-// ═══════════════════════════════════════════════════════════════════════════
+// Le solde du wallet reste accessible par les outils `get_wallet_*`, qui ne
+// s'exécutent que si l'utilisateur pose une question qui le concerne.
 
-const LOW_WALLET_THRESHOLD_FCFA = 500;
-const FREQUENT_SELLER_MIN_COUNT = 3;
 const RECENT_ORDERS_SAMPLE_SIZE = 10;
+const FREQUENT_SELLER_MIN_COUNT = 3;
+const CONTEXT_FIELDS = Object.freeze(['name', 'phone', 'addresses', 'preferences', 'last_order', 'location']);
 
 async function getLastOrderAndFrequentSeller(db, uid) {
   try {
@@ -64,69 +50,67 @@ async function getLastOrderAndFrequentSeller(db, uid) {
   }
 }
 
-async function buildUserContext(db, uid, location) {
-  const lines = [];
-  let wallet = null;
+// Texte constant, sans aucune donnée personnelle : seul rappel au modèle de
+// l'existence de l'outil.
+const BASE_CONTEXT = "Aucune donnée personnelle n'est jointe à cette conversation. "
+  + "Si (et seulement si) la demande exige une information sur l'utilisateur, appelle l'outil get_user_context "
+  + "en ne demandant que les rubriques strictement nécessaires.";
 
-  try {
-    const clientSnap = await db.collection('clients').doc(uid).get();
-    if (clientSnap.exists) {
-      const c = clientSnap.data();
-      if (c.name)  lines.push(`Nom du client : ${c.name}`);
-      if (c.phone) lines.push(`Téléphone du client : ${c.phone}`);
-      if (typeof c.wallet === 'number') wallet = c.wallet;
-    }
-  } catch (_) {
-    // best-effort — l'absence de profil ne doit jamais bloquer la conversation
-  }
-
-  const memory = await getUserMemory(db, uid);
-  if (memory) {
-    if (memory.firstName)              lines.push(`Prénom : ${memory.firstName}`);
-    if (memory.nickname)               lines.push(`Surnom préféré : ${memory.nickname}`);
-    if (memory.address)                lines.push(`Adresse connue : ${memory.address}`);
-    if (memory.quartier)               lines.push(`Quartier connu : ${memory.quartier}`);
-    if (memory.ville)                  lines.push(`Ville connue : ${memory.ville}`);
-    if (memory.language)               lines.push(`Langue préférée mentionnée : ${memory.language}`);
-    if (memory.preferredPaymentMethod) lines.push(`Moyen de paiement préféré : ${memory.preferredPaymentMethod}`);
-    if (memory.foodPreferences)        lines.push(`Préférences alimentaires : ${memory.foodPreferences}`);
-    if (memory.voicePreference)        lines.push(`Préférence vocale : ${memory.voicePreference}`);
-    if (memory.favoritePharmacyId)     lines.push(`Pharmacie préférée (ID) : ${memory.favoritePharmacyId}`);
-    if (memory.favoriteRestaurantId)   lines.push(`Restaurant préféré (ID) : ${memory.favoriteRestaurantId}`);
-    if (memory.favoriteSellerId)       lines.push(`Boutique/vendeur préféré (ID) : ${memory.favoriteSellerId}`);
-    if (memory.favoriteDriverId) {
-      lines.push(`Livreur préféré (ID) : ${memory.favoriteDriverId} — mentionne-le si pertinent, mais rappelle que l'attribution du livreur reste automatique (aucun outil ne permet de forcer un livreur précis).`);
-    }
-    if (Array.isArray(memory.addresses) && memory.addresses.length > 0) {
-      const list = memory.addresses.map(a => `${a.label} → ${a.address}`).join(' ; ');
-      lines.push(`Adresses nommées connues (utilise-les pour "chez moi"/"au bureau"/"chez maman" sans jamais redemander) : ${list}`);
-    }
-  }
-
-  if (location && typeof location.latitude === 'number' && typeof location.longitude === 'number') {
-    lines.push(`Position GPS actuelle du client (déjà autorisée, ne jamais la redemander) : latitude=${location.latitude}, longitude=${location.longitude}`);
-    if (location.address) lines.push(`Adresse déduite de la position GPS : ${location.address}`);
-  }
-
-  // Insights réels (Master Prompt 118) — dérivés de commandes/solde
-  // effectivement lus, jamais inventés.
-  const { lastOrder, frequentSeller } = await getLastOrderAndFrequentSeller(db, uid);
-  if (lastOrder) {
-    const label = lastOrder.sellerName || lastOrder.description || 'une commande précédente';
-    lines.push(`Dernière commande connue : ${label}${lastOrder.budget ? ` (${lastOrder.budget} FCFA)` : ''} — utile pour "comme hier"/"encore la même chose", mais confirme toujours les détails avant de recréer une commande.`);
-  }
-  if (frequentSeller) {
-    lines.push(`Vendeur/restaurant fréquent récemment : ${frequentSeller.name} (${frequentSeller.count} commandes récentes) — tu peux le mentionner naturellement si pertinent ("tu commandes souvent ici, tu veux recommander ?"), sans insister.`);
-  }
-  if (wallet !== null) {
-    if (wallet < LOW_WALLET_THRESHOLD_FCFA) {
-      lines.push(`Solde wallet actuel : ${wallet} FCFA (faible) — tu peux le mentionner une seule fois si pertinent dans la conversation, sans insister ni le répéter à chaque message.`);
-    }
-  }
-
-  if (lines.length === 0) return null;
-
-  return 'Informations déjà connues sur ce client — ne jamais les redemander :\n' + lines.map(l => `- ${l}`).join('\n');
+async function buildUserContext() {
+  return BASE_CONTEXT;
 }
 
-module.exports = { buildUserContext };
+// Rubriques demandées par le modèle. Aucune lecture hors des rubriques
+// listées : une question générale n'atteint jamais Firestore ici.
+async function collectUserContext(db, uid, fields, location) {
+  const wanted = new Set((Array.isArray(fields) ? fields : []).filter((f) => CONTEXT_FIELDS.includes(f)));
+  const out = {};
+  if (wanted.size === 0) return { error: 'Aucune rubrique valide demandée.', fieldsAvailable: CONTEXT_FIELDS };
+
+  if (wanted.has('name') || wanted.has('phone')) {
+    try {
+      const snap = await db.collection('clients').doc(uid).get();
+      const c = snap.exists ? snap.data() : {};
+      if (wanted.has('name')) out.name = c.name || null;
+      if (wanted.has('phone')) out.phone = c.phone || null;
+    } catch (_) { /* best-effort */ }
+  }
+
+  if (wanted.has('name') || wanted.has('addresses') || wanted.has('preferences')) {
+    const m = (await getUserMemory(db, uid)) || {};
+    if (wanted.has('name')) {
+      if (m.firstName) out.firstName = m.firstName;
+      if (m.nickname) out.nickname = m.nickname;
+    }
+    if (wanted.has('addresses')) {
+      out.address = m.address || null;
+      out.quartier = m.quartier || null;
+      out.ville = m.ville || null;
+      out.namedAddresses = Array.isArray(m.addresses) ? m.addresses.map((a) => ({ label: a.label, address: a.address })) : [];
+    }
+    if (wanted.has('preferences')) {
+      for (const k of ['language', 'preferredPaymentMethod', 'foodPreferences', 'voicePreference',
+        'favoritePharmacyId', 'favoriteRestaurantId', 'favoriteSellerId', 'favoriteDriverId']) {
+        if (m[k]) out[k] = m[k];
+      }
+    }
+  }
+
+  if (wanted.has('last_order')) {
+    const { lastOrder, frequentSeller } = await getLastOrderAndFrequentSeller(db, uid);
+    out.lastOrder = lastOrder
+      ? { label: lastOrder.sellerName || lastOrder.description || null, budget: lastOrder.budget ?? null }
+      : null;
+    out.frequentSeller = frequentSeller;
+  }
+
+  if (wanted.has('location')) {
+    out.location = (location && typeof location.latitude === 'number' && typeof location.longitude === 'number')
+      ? { latitude: location.latitude, longitude: location.longitude, address: location.address || null }
+      : null;
+    if (!out.location) out.locationNote = "Position GPS non disponible (localisation non autorisée) : demande l'adresse à l'utilisateur.";
+  }
+  return out;
+}
+
+module.exports = { buildUserContext, collectUserContext, CONTEXT_FIELDS, BASE_CONTEXT };

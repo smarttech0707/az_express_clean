@@ -1,0 +1,40 @@
+--- functions/partnerFirstLogin.js	2026-10-27 03:58:06.570284200 +0000
++++ C:/Users/User/AppData/Local/Temp/claude/d--az-express-clean/78634419-1e56-4e46-9f16-17d14c8e3b49/scratchpad/b5work/functions/partnerFirstLogin.js	2026-10-27 05:25:23.241661500 +0000
+@@ -83,6 +83,15 @@
+         const state = snapshot.exists ? snapshot.data() : null;
+         const required = state?.mustChangePassword === true
+           && Object.hasOwn(PROFILE_COLLECTIONS, state.kind);
++        if (state?.kind === 'restaurant') {
++          // Réalignement de la projection sur le journal (autorité unique).
++          stage = 'projection';
++          const ownerRef = db.collection('restaurant_owners').doc(uid);
++          const owner = await ownerRef.get();
++          if (owner.exists && owner.data()?.mustChangePassword !== required) {
++            await ownerRef.set({ mustChangePassword: required }, { merge: true });
++          }
++        }
+         if (!required && state?.mustChangePassword === false
+             && request.auth.token?.[MUST_CHANGE_CLAIM] === true) {
+           stage = 'claims';
+@@ -158,12 +167,20 @@
+       await auth.updateUser(uid, { password: newPassword });
+       // Le drapeau est levé IMMÉDIATEMENT après le changement effectif.
+       stage = 'journal';
+-      await markerRef.set({
++      // Journal (autorité) et projection restaurateur dans UN SEUL lot atomique :
++      // ils ne peuvent jamais diverger. merge : si le document propriétaire
++      // manquait (incohérence), le lot ne bloque pas l'activation.
++      const batch = db.batch();
++      batch.set(markerRef, {
+         mustChangePassword: false,
+         passwordChangedAt: fieldValue.serverTimestamp(),
+         tempPasswordHash: fieldValue.delete(),
+         changeLockUntilMs: fieldValue.delete(),
+       }, { merge: true });
++      if (kind === 'restaurant') {
++        batch.set(db.collection('restaurant_owners').doc(uid), { mustChangePassword: false }, { merge: true });
++      }
++      await batch.commit();
+       locked = false;
+ 
+       // Étapes répétables : une panne ici n'invalide pas le changement (le mode

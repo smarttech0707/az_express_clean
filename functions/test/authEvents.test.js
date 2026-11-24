@@ -93,9 +93,9 @@ test('logAuthEvent: rate-limits per caller', async () => {
 
 // ── logAdminAuditEvent ───────────────────────────────────────────────────
 
-test('logAdminAuditEvent: an active admin can log a permissions_changed event', async () => {
+test('logAdminAuditEvent: an active super-admin can log a permissions_changed event', async () => {
   const { db } = (() => {
-    const d = makeFakeDb({ 'admins/a1': { isActive: true } });
+    const d = makeFakeDb({ 'admins/a1': { role: 'super', isActive: true } });
     return { db: d };
   })();
   const logAudit = makeLogAudit();
@@ -132,12 +132,26 @@ test('logAdminAuditEvent: rejects a deactivated admin', async () => {
 });
 
 test('logAdminAuditEvent: rejects an action outside the allowlist', async () => {
-  const db = makeFakeDb({ 'admins/a1': { isActive: true } });
+  const db = makeFakeDb({ 'admins/a1': { role: 'super', isActive: true } });
   const fn = buildLogAdminAuditEvent({ db, onCall, HttpsError, checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
   await assert.rejects(
     () => fn.run({ auth: { uid: 'a1' }, data: { action: 'delete_database' } }),
     (err) => err.code === 'invalid-argument',
   );
+});
+
+test('logAdminAuditEvent: rejects a sub-admin and an unknown role', async () => {
+  for (const admin of [
+    { role: 'sub', isActive: true, permissions: ['commandes'] },
+    { role: 'unknown', isActive: true },
+  ]) {
+    const db = makeFakeDb({ 'admins/a1': admin });
+    const fn = buildLogAdminAuditEvent({ db, onCall, HttpsError, checkRateLimit: makeCheckRateLimit(), logAudit: makeLogAudit() });
+    await assert.rejects(
+      () => fn.run({ auth: { uid: 'a1' }, data: { action: 'permissions_changed' } }),
+      (err) => err.code === 'permission-denied',
+    );
+  }
 });
 
 test('logAdminAuditEvent: rejects unauthenticated calls', async () => {

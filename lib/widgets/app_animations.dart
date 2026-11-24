@@ -78,7 +78,8 @@ class BounceIn extends StatefulWidget {
   State<BounceIn> createState() => _BounceInState();
 }
 
-class _BounceInState extends State<BounceIn> with SingleTickerProviderStateMixin {
+class _BounceInState extends State<BounceIn>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _scale;
 

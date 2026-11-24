@@ -1,9 +1,13 @@
-﻿import 'dart:async';
+import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:uuid/uuid.dart';
+import '../../services/catalog_location_resolver.dart';
+import '../../services/catalog_order_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
+import '../../widgets/catalog_quote_dialog.dart';
+import '../../theme/app_theme.dart';
 
 class EauBoissonsPage extends StatefulWidget {
   const EauBoissonsPage({super.key});
@@ -14,6 +18,7 @@ class EauBoissonsPage extends StatefulWidget {
 
 class _EauBoissonsPageState extends State<EauBoissonsPage> {
   final Map<String, int> _cart = {};
+  final _checkout = CatalogCheckout();
   final _addressCtrl = TextEditingController();
   bool _loading = false;
   String _paymentMethod = 'cash';
@@ -24,28 +29,59 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
   int _deliveryFee = 500;
 
   static final _catAssets = <String, List<dynamic>>{
-    'Eau':         [Icons.water_drop,           const Color(0xFF0288D1)],
-    'Sodas':       [Icons.local_drink,          const Color(0xFFD32F2F)],
-    'Jus':         [Icons.emoji_food_beverage,  const Color(0xFFF57F17)],
-    'Laitiers':    [Icons.coffee,               const Color(0xFF5D4037)],
-    'Énergisants': [Icons.bolt,                 const Color(0xFFFFD600)],
+    'Eau': [Icons.water_drop, const Color(0xFF0288D1)],
+    'Sodas': [Icons.local_drink, const Color(0xFFD32F2F)],
+    'Jus': [Icons.emoji_food_beverage, const Color(0xFFF57F17)],
+    'Laitiers': [Icons.coffee, const Color(0xFF5D4037)],
+    'Énergisants': [Icons.bolt, const Color(0xFFFFD600)],
   };
 
   static const _fallbackProducts = <Map<String, dynamic>>[
-    {"id": "eau_500",    "name": "Eau 500ml",             "category": "Eau",          "price": 200},
-    {"id": "eau_1500",   "name": "Eau 1.5L",              "category": "Eau",          "price": 400},
-    {"id": "casier_eau", "name": "Casier d'eau (12×1.5L)","category": "Eau",          "price": 3500},
-    {"id": "coca_33",    "name": "Coca-Cola 33cl",         "category": "Sodas",       "price": 500},
-    {"id": "fanta_33",   "name": "Fanta 33cl",             "category": "Sodas",       "price": 500},
-    {"id": "sprite_33",  "name": "Sprite 33cl",            "category": "Sodas",       "price": 500},
-    {"id": "jus_tropics","name": "Jus de fruits 50cl",     "category": "Jus",         "price": 600},
-    {"id": "lait_500",   "name": "Lait 500ml",             "category": "Laitiers",    "price": 700},
-    {"id": "energie",    "name": "Boisson énergisante",    "category": "Énergisants", "price": 800},
+    {"id": "eau_500", "name": "Eau 500ml", "category": "Eau", "price": 200},
+    {"id": "eau_1500", "name": "Eau 1.5L", "category": "Eau", "price": 400},
+    {
+      "id": "casier_eau",
+      "name": "Casier d'eau (12×1.5L)",
+      "category": "Eau",
+      "price": 3500
+    },
+    {
+      "id": "coca_33",
+      "name": "Coca-Cola 33cl",
+      "category": "Sodas",
+      "price": 500
+    },
+    {"id": "fanta_33", "name": "Fanta 33cl", "category": "Sodas", "price": 500},
+    {
+      "id": "sprite_33",
+      "name": "Sprite 33cl",
+      "category": "Sodas",
+      "price": 500
+    },
+    {
+      "id": "jus_tropics",
+      "name": "Jus de fruits 50cl",
+      "category": "Jus",
+      "price": 600
+    },
+    {
+      "id": "lait_500",
+      "name": "Lait 500ml",
+      "category": "Laitiers",
+      "price": 700
+    },
+    {
+      "id": "energie",
+      "name": "Boisson énergisante",
+      "category": "Énergisants",
+      "price": 800
+    },
   ];
 
   Map<String, dynamic> _enrich(Map<String, dynamic> p) {
     final cat = p['category'] as String? ?? '';
-    final assets = _catAssets[cat] ?? [Icons.shopping_bag, const Color(0xFF607D8B)];
+    final assets =
+        _catAssets[cat] ?? [Icons.shopping_bag, const Color(0xFF607D8B)];
     return {...p, 'icon': assets[0] as IconData, 'color': assets[1] as Color};
   }
 
@@ -87,8 +123,8 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      setState(() =>
-          _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
+      setState(
+          () => _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
     });
   }
 
@@ -107,7 +143,28 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
 
   int get _totalToPay => _totalPrice + _deliveryFee;
 
+  // Choix envoyés au serveur : identifiants et quantités uniquement, jamais de prix.
+  Map<String, dynamic> get _choices => {
+        'items': [
+          for (final p in _products)
+            if ((_cart[p["id"]] ?? 0) > 0)
+              {'id': p["id"], 'qty': _cart[p["id"]]},
+        ],
+      };
+
+  // Plafonds d'affichage (le serveur fait foi) : 20 par produit, 5 casiers, panier de 50 000 FCFA.
+  int _maxFor(Map<String, dynamic> p) =>
+      p["id"] == 'casier_eau'
+          ? CatalogUiLimits.eauMaxCasiers
+          : CatalogUiLimits.eauMaxPerProduct;
+
+  bool _canAdd(Map<String, dynamic> p, int qty) =>
+      qty < _maxFor(p) &&
+      _totalPrice + (p["price"] as num? ?? 0).toInt() <=
+          CatalogUiLimits.eauMaxBasketFcfa;
+
   Future<void> _placeOrder() async {
+    if (_loading) return;
     if (_totalItems == 0) {
       _snack("Ajoutez au moins un article au panier", Colors.red);
       return;
@@ -116,104 +173,61 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
       _snack("Veuillez entrer votre adresse de livraison", Colors.red);
       return;
     }
-    if (_paymentMethod == 'wallet' && _walletBalance < _totalToPay) {
-      _snack(
-          "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $_totalToPay FCFA",
-          Colors.red);
-      return;
-    }
 
     setState(() => _loading = true);
     try {
-      var user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        await FirebaseAuth.instance.signInAnonymously();
-        user = FirebaseAuth.instance.currentUser;
-      }
-      final uid = user!.uid;
-      final id = const Uuid().v4();
-
-      final items = <Map<String, dynamic>>[];
-      final descParts = <String>[];
-      for (final p in _products) {
-        final qty = _cart[p["id"]] ?? 0;
-        if (qty > 0) {
-          items.add({
-            "id": p["id"],
-            "name": p["name"],
-            "price": p["price"],
-            "qty": qty,
-            "subtotal": qty * (p["price"] as num? ?? 0).toInt(),
-          });
-          descParts.add("${p['name']} ×$qty");
+      if (_paymentMethod == 'wallet') {
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          if (mounted) setState(() => _loading = false);
+          return;
         }
       }
-
-      final orderData = {
-        "id": id,
-        "description":
-            "Eau & Boissons :\n${descParts.join('\n')}\nAdresse : ${_addressCtrl.text.trim()}",
-        "budget": 500,
-        "shoppingBudget": _totalPrice,
-        "status": "pending",
-        "type": "eau_boissons",
-        "items": items,
-        "address": _addressCtrl.text.trim(),
-        "latitude": 0,
-        "longitude": 0,
-        "clientId":      uid,
-        "paymentMethod": _paymentMethod,
-        "isPaid":        false,
-        "createdAt":     FieldValue.serverTimestamp(),
-      };
-
-      if (_paymentMethod == 'wallet') {
-        final clientRef =
-            FirebaseFirestore.instance.collection('clients').doc(uid);
-        final orderRef =
-            FirebaseFirestore.instance.collection('orders').doc(id);
-
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap = await tx.get(clientRef);
-          final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
-          if (wallet < _totalToPay) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': wallet - _totalToPay});
-          tx.set(orderRef, orderData);
-        });
-
-        // Log transaction client
-        await FirebaseFirestore.instance
-            .collection('clients')
-            .doc(uid)
-            .collection('wallet_transactions')
-            .add({
-          'type': 'purchase',
-          'amount': _totalToPay,
-          'description':
-              'Eau & Boissons (${descParts.join(', ')}) + livraison',
-          'orderId': id,
-          'createdAt': Timestamp.now(),
-        });
-      } else {
-        await FirebaseFirestore.instance
-            .collection("orders")
-            .doc(id)
-            .set(orderData);
+      if (!mounted) return;
+      // Correction release readiness : un point de service réel est exigé par le serveur
+      // (createCatalogOrderFromQuoteCF) — jamais de repli sur (0,0), qui rendait la commande
+      // invisible à tout livreur. GPS d'abord, géocodage de l'adresse saisie en secours.
+      final location = await CatalogLocationResolver.resolve(
+        context: context,
+        address: _addressCtrl.text.trim(),
+      );
+      if (location == null) {
+        if (mounted) {
+          _snack(
+            "Impossible de localiser votre adresse. Activez le GPS ou vérifiez l'adresse saisie.",
+            Colors.red,
+          );
+          setState(() => _loading = false);
+        }
+        return;
       }
-
-      if (mounted) {
+      if (!mounted) return;
+      final created = await runCatalogCheckout(
+        context,
+        checkout: _checkout,
+        service: 'eau_boissons',
+        paymentMethod: _paymentMethod,
+        walletBalance: _walletBalance,
+        choices: _choices,
+        details: {
+          'address': _addressCtrl.text.trim(),
+          'lat': location.lat,
+          'lng': location.lng,
+          'coordinateSource': location.serverSourceName,
+        },
+        notify: (m, err) => _snack(m, err ? Colors.red : Colors.green),
+      );
+      if (created && mounted) {
         _snack("Commande passée ! Livraison en cours...", Colors.green);
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) Navigator.pop(context);
         });
       }
     } catch (e) {
-      final msg = e.toString();
-      if (msg.contains('SOLDE_INSUFFISANT')) {
-        _snack("Solde wallet insuffisant", Colors.red);
-      } else {
-        _snack("Erreur : $e", Colors.red);
-      }
+      _snack("Erreur : $e", Colors.red);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -232,24 +246,22 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
   }
 
   Widget _paymentSelector() {
+    final brightness = Theme.of(context).brightness;
+    final muted = AppColors.premiumTextSecondary(brightness);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
-        ],
+        color: AppColors.premiumSurfaceElevated(brightness),
+        borderRadius: AppRadius.lgR,
+        border: Border.all(color: AppColors.premiumBorder(brightness)),
+        boxShadow: AppShadow.xs,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Mode de paiement",
+          Text("Mode de paiement",
               style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey)),
+                  fontSize: 13, fontWeight: FontWeight.bold, color: muted)),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(
@@ -259,24 +271,27 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
                     color: _paymentMethod == 'cash'
-                        ? Colors.teal.shade700
-                        : Colors.grey.shade100,
+                        ? AppColors.primary
+                        : AppColors.premiumSurface(brightness),
+                    border: Border.all(
+                        color: _paymentMethod == 'cash'
+                            ? AppColors.primary
+                            : AppColors.premiumBorder(brightness)),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.money,
-                            color: _paymentMethod == 'cash'
-                                ? Colors.white
-                                : Colors.grey,
+                            color:
+                                _paymentMethod == 'cash' ? Colors.white : muted,
                             size: 18),
                         const SizedBox(width: 6),
                         Text("Espèces",
                             style: TextStyle(
                                 color: _paymentMethod == 'cash'
                                     ? Colors.white
-                                    : Colors.grey,
+                                    : muted,
                                 fontWeight: FontWeight.bold)),
                       ]),
                 ),
@@ -290,32 +305,33 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
                     color: _paymentMethod == 'wallet'
-                        ? Colors.teal.shade700
-                        : Colors.grey.shade100,
+                        ? AppColors.primary
+                        : AppColors.premiumSurface(brightness),
+                    border: Border.all(
+                        color: _paymentMethod == 'wallet'
+                            ? AppColors.primary
+                            : AppColors.premiumBorder(brightness)),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.account_balance_wallet,
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.account_balance_wallet,
+                          color:
+                              _paymentMethod == 'wallet' ? Colors.white : muted,
+                          size: 18),
+                      const SizedBox(width: 6),
+                      Text("Wallet",
+                          style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
-                                  : Colors.grey,
-                              size: 18),
-                          const SizedBox(width: 6),
-                          Text("Wallet",
-                              style: TextStyle(
-                                  color: _paymentMethod == 'wallet'
-                                      ? Colors.white
-                                      : Colors.grey,
-                                  fontWeight: FontWeight.bold)),
-                        ]),
+                                  : muted,
+                              fontWeight: FontWeight.bold)),
+                    ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
                                 ? Colors.white70
-                                : Colors.grey.shade400,
+                                : muted,
                             fontSize: 11)),
                   ]),
                 ),
@@ -329,50 +345,52 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     final categories = <String>{};
     for (final p in _products) {
       categories.add(p["category"] as String);
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.premiumBg(brightness),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             expandedHeight: 150,
             pinned: true,
-            backgroundColor: Colors.teal.shade700,
-            foregroundColor: Colors.white,
+            backgroundColor: AppColors.premiumSurface(brightness),
+            foregroundColor: AppColors.premiumTextPrimary(brightness),
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.teal.shade800, Colors.teal.shade500],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  color: AppColors.premiumSurface(brightness),
+                  border: Border(
+                    bottom:
+                        BorderSide(color: Colors.teal.withValues(alpha: .3)),
                   ),
                 ),
-                child: const SafeArea(
+                child: SafeArea(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      SizedBox(height: 40),
-                      Icon(Icons.water_drop, color: Colors.white, size: 48),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 40),
+                      const Icon(Icons.water_drop,
+                          color: Colors.teal, size: 42),
+                      const SizedBox(height: 8),
                       Text("Eau & Boissons",
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
+                          style: AppTypography.titleLargeStyle(context,
+                              color: AppColors.premiumTextPrimary(brightness))),
                       Text("Livraison rapide à domicile",
-                          style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          style: AppTypography.bodySmallStyle(context,
+                              color:
+                                  AppColors.premiumTextSecondary(brightness))),
                     ],
                   ),
                 ),
               ),
             ),
             title: const Text("Eau & Boissons"),
-            centerTitle: true,
+            centerTitle: false,
           ),
 
           SliverToBoxAdapter(
@@ -384,7 +402,7 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                   // ── ADRESSE ─────────────────────────────────
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.premiumSurfaceElevated(brightness),
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
@@ -402,7 +420,7 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: Theme.of(context).colorScheme.surface,
                       ),
                     ),
                   ),
@@ -432,114 +450,116 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, i) {
-                    final catProducts = _products
-                        .where((p) => p["category"] == cat)
-                        .toList();
+                    final catProducts =
+                        _products.where((p) => p["category"] == cat).toList();
                     if (i >= catProducts.length) return null;
                     final p = catProducts[i];
                     final qty = _cart[p["id"]] ?? 0;
                     final color = p["color"] as Color;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
-                              blurRadius: 6)
-                        ],
-                      ),
-                      child: ListTile(
-                        leading: Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Material(
+                        color: AppColors.premiumSurfaceElevated(brightness),
+                        elevation: 1,
+                        shadowColor: AppColors.black10,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(
+                            color: AppColors.premiumBorder(brightness),
                           ),
-                          child: Icon(p["icon"] as IconData,
-                              color: color, size: 24),
                         ),
-                        title: Text(p["name"],
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600)),
-                        subtitle: Text(
-                          "${p['price']} FCFA",
-                          style: TextStyle(
-                              color: Colors.teal.shade700,
-                              fontWeight: FontWeight.bold),
-                        ),
-                        trailing: qty == 0
-                            ? GestureDetector(
-                                onTap: () => setState(
-                                    () => _cart[p["id"]] = 1),
-                                child: Container(
-                                  width: 36,
-                                  height: 36,
-                                  decoration: BoxDecoration(
-                                    color: Colors.teal.shade700,
-                                    borderRadius:
-                                        BorderRadius.circular(10),
+                        clipBehavior: Clip.antiAlias,
+                        child: ListTile(
+                          leading: Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(p["icon"] as IconData,
+                                color: color, size: 24),
+                          ),
+                          title: Text(p["name"],
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text(
+                            "${p['price']} FCFA",
+                            style: TextStyle(
+                                color: Colors.teal.shade700,
+                                fontWeight: FontWeight.bold),
+                          ),
+                          trailing: qty == 0
+                              ? GestureDetector(
+                                  onTap: () =>
+                                      setState(() => _cart[p["id"]] = 1),
+                                  child: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: Colors.teal.shade700,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(Icons.add,
+                                        color: Colors.white, size: 22),
                                   ),
-                                  child: const Icon(Icons.add,
-                                      color: Colors.white, size: 22),
+                                )
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => setState(() {
+                                        if (qty == 1) {
+                                          _cart.remove(p["id"]);
+                                        } else {
+                                          _cart[p["id"]] = qty - 1;
+                                        }
+                                      }),
+                                      child: Container(
+                                        width: 30,
+                                        height: 30,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade200,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child:
+                                            const Icon(Icons.remove, size: 18),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10),
+                                      child: Text("$qty",
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16)),
+                                    ),
+                                    GestureDetector(
+                                      onTap: !_canAdd(p, qty)
+                                          ? null
+                                          : () => setState(
+                                              () => _cart[p["id"]] = qty + 1),
+                                      child: Container(
+                                        width: 30,
+                                        height: 30,
+                                        decoration: BoxDecoration(
+                                          color: Colors.teal.shade700,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.add,
+                                            color: Colors.white, size: 18),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              )
-                            : Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () => setState(() {
-                                      if (qty == 1) {
-                                        _cart.remove(p["id"]);
-                                      } else {
-                                        _cart[p["id"]] = qty - 1;
-                                      }
-                                    }),
-                                    child: Container(
-                                      width: 30,
-                                      height: 30,
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.shade200,
-                                        borderRadius:
-                                            BorderRadius.circular(8),
-                                      ),
-                                      child: const Icon(Icons.remove,
-                                          size: 18),
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10),
-                                    child: Text("$qty",
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16)),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => setState(
-                                        () => _cart[p["id"]] = qty + 1),
-                                    child: Container(
-                                      width: 30,
-                                      height: 30,
-                                      decoration: BoxDecoration(
-                                        color: Colors.teal.shade700,
-                                        borderRadius:
-                                            BorderRadius.circular(8),
-                                      ),
-                                      child: const Icon(Icons.add,
-                                          color: Colors.white, size: 18),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                        ),
                       ),
                     );
                   },
-                  childCount: _products
-                      .where((p) => p["category"] == cat)
-                      .length,
+                  childCount:
+                      _products.where((p) => p["category"] == cat).length,
                 ),
               ),
             ),
@@ -553,21 +573,18 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
       bottomNavigationBar: _totalItems == 0
           ? null
           : Container(
-              padding:
-                  const EdgeInsets.fromLTRB(16, 12, 16, 20),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 12,
-                      offset: Offset(0, -3))
-                ],
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+              decoration: BoxDecoration(
+                color: AppColors.premiumSurfaceElevated(brightness),
+                border: Border(
+                  top: BorderSide(color: AppColors.premiumBorder(brightness)),
+                ),
+                boxShadow: AppShadow.xs,
               ),
               child: ScaleButton(
                 onPressed: _loading ? null : _placeOrder,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal.shade700,
+                  backgroundColor: AppColors.primary,
                   minimumSize: const Size.fromHeight(52),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),
@@ -610,4 +627,3 @@ class _EauBoissonsPageState extends State<EauBoissonsPage> {
     );
   }
 }
-

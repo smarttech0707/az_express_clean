@@ -2,7 +2,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:uuid/uuid.dart';
+import '../../services/catalog_location_resolver.dart';
+import '../../services/catalog_order_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
+import '../../widgets/catalog_quote_dialog.dart';
+import '../../theme/app_theme.dart';
 
 class BlanchisseriePage extends StatefulWidget {
   const BlanchisseriePage({super.key});
@@ -20,6 +24,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
   String _paymentMethod = 'cash';
   int _walletBalance = 0;
   StreamSubscription? _walletSub;
+  final _checkout = CatalogCheckout();
 
   List<String> _services = const [
     "Lavage + Repassage",
@@ -67,99 +72,76 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      setState(() =>
-          _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
+      setState(
+          () => _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
     });
   }
 
+  Map<String, dynamic> get _choices =>
+      {'serviceType': _serviceType, 'quantity': _quantity};
+
   Future<void> _submit() async {
+    if (_loading) return;
     if (_addressCtrl.text.trim().isEmpty) {
       _snack("Veuillez entrer votre adresse", Colors.red);
-      return;
-    }
-    if (_paymentMethod == 'wallet' && _walletBalance < _totalPrice) {
-      _snack(
-          "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $_totalPrice FCFA",
-          Colors.red);
       return;
     }
 
     setState(() => _loading = true);
     try {
-      var user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        await FirebaseAuth.instance.signInAnonymously();
-        user = FirebaseAuth.instance.currentUser;
-      }
-      final uid = user!.uid;
-      final id = const Uuid().v4();
-
-      final orderData = {
-        "id": id,
-        "description":
-            "Blanchisserie : $_serviceType — $_quantity kg\nAdresse : ${_addressCtrl.text.trim()}"
-            "${_notesCtrl.text.trim().isNotEmpty ? '\nNotes : ${_notesCtrl.text.trim()}' : ''}",
-        "budget": _totalPrice,
-        "shoppingBudget": 0,
-        "status": "pending",
-        "type": "blanchisserie",
-        "serviceType": _serviceType,
-        "quantity": _quantity,
-        "address": _addressCtrl.text.trim(),
-        "notes": _notesCtrl.text.trim(),
-        "latitude": 0,
-        "longitude": 0,
-        "clientId":      uid,
-        "paymentMethod": _paymentMethod,
-        "isPaid":        false,
-        "createdAt":     FieldValue.serverTimestamp(),
-      };
-
       if (_paymentMethod == 'wallet') {
-        final clientRef =
-            FirebaseFirestore.instance.collection('clients').doc(uid);
-        final orderRef =
-            FirebaseFirestore.instance.collection('orders').doc(id);
-
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap = await tx.get(clientRef);
-          final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
-          if (wallet < _totalPrice) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': wallet - _totalPrice});
-          tx.set(orderRef, orderData);
-        });
-
-        await FirebaseFirestore.instance
-            .collection('clients')
-            .doc(uid)
-            .collection('wallet_transactions')
-            .add({
-          'type': 'purchase',
-          'amount': _totalPrice,
-          'description': 'Blanchisserie — $_serviceType × $_quantity kg',
-          'orderId': id,
-          'createdAt': Timestamp.now(),
-        });
-      } else {
-        await FirebaseFirestore.instance
-            .collection("orders")
-            .doc(id)
-            .set(orderData);
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          if (mounted) setState(() => _loading = false);
+          return;
+        }
       }
-
-      if (mounted) {
+      if (!mounted) return;
+      // Correction release readiness : un point de service réel est exigé par le serveur
+      // (createCatalogOrderFromQuoteCF) — jamais de repli sur (0,0), qui rendait la commande
+      // invisible à tout livreur. GPS d'abord, géocodage de l'adresse saisie en secours.
+      final location = await CatalogLocationResolver.resolve(
+        context: context,
+        address: _addressCtrl.text.trim(),
+      );
+      if (location == null) {
+        if (mounted) {
+          _snack(
+            "Impossible de localiser votre adresse. Activez le GPS ou vérifiez l'adresse saisie.",
+            Colors.red,
+          );
+          setState(() => _loading = false);
+        }
+        return;
+      }
+      if (!mounted) return;
+      final created = await runCatalogCheckout(
+        context,
+        checkout: _checkout,
+        service: 'blanchisserie',
+        paymentMethod: _paymentMethod,
+        walletBalance: _walletBalance,
+        choices: _choices,
+        details: {
+          'address': _addressCtrl.text.trim(),
+          'notes': _notesCtrl.text.trim(),
+          'lat': location.lat,
+          'lng': location.lng,
+          'coordinateSource': location.serverSourceName,
+        },
+        notify: (m, err) => _snack(m, err ? Colors.red : Colors.green),
+      );
+      if (created && mounted) {
         _snack("Demande envoyée ! Un livreur va vous contacter.", Colors.green);
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) Navigator.pop(context);
         });
       }
     } catch (e) {
-      final msg = e.toString();
-      if (msg.contains('SOLDE_INSUFFISANT')) {
-        _snack("Solde wallet insuffisant", Colors.red);
-      } else {
-        _snack("Erreur : $e", Colors.red);
-      }
+      _snack("Erreur : $e", Colors.red);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -179,24 +161,22 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
   }
 
   Widget _paymentSelector() {
+    final brightness = Theme.of(context).brightness;
+    final muted = AppColors.premiumTextSecondary(brightness);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
-        ],
+        color: AppColors.premiumSurfaceElevated(brightness),
+        borderRadius: AppRadius.lgR,
+        border: Border.all(color: AppColors.premiumBorder(brightness)),
+        boxShadow: AppShadow.xs,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Mode de paiement",
+          Text("Mode de paiement",
               style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey)),
+                  fontSize: 13, fontWeight: FontWeight.bold, color: muted)),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(
@@ -206,24 +186,28 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
                     color: _paymentMethod == 'cash'
-                        ? Colors.blue.shade700
-                        : Colors.grey.shade100,
+                        ? AppColors.primary
+                        : AppColors.premiumSurface(brightness),
+                    border: Border.all(
+                      color: _paymentMethod == 'cash'
+                          ? AppColors.primary
+                          : AppColors.premiumBorder(brightness),
+                    ),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.money,
-                            color: _paymentMethod == 'cash'
-                                ? Colors.white
-                                : Colors.grey,
+                            color:
+                                _paymentMethod == 'cash' ? Colors.white : muted,
                             size: 18),
                         const SizedBox(width: 6),
                         Text("Espèces",
                             style: TextStyle(
                                 color: _paymentMethod == 'cash'
                                     ? Colors.white
-                                    : Colors.grey,
+                                    : muted,
                                 fontWeight: FontWeight.bold)),
                       ]),
                 ),
@@ -237,32 +221,34 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
                     color: _paymentMethod == 'wallet'
-                        ? Colors.blue.shade700
-                        : Colors.grey.shade100,
+                        ? AppColors.primary
+                        : AppColors.premiumSurface(brightness),
+                    border: Border.all(
+                      color: _paymentMethod == 'wallet'
+                          ? AppColors.primary
+                          : AppColors.premiumBorder(brightness),
+                    ),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.account_balance_wallet,
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.account_balance_wallet,
+                          color:
+                              _paymentMethod == 'wallet' ? Colors.white : muted,
+                          size: 18),
+                      const SizedBox(width: 6),
+                      Text("Wallet",
+                          style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
-                                  : Colors.grey,
-                              size: 18),
-                          const SizedBox(width: 6),
-                          Text("Wallet",
-                              style: TextStyle(
-                                  color: _paymentMethod == 'wallet'
-                                      ? Colors.white
-                                      : Colors.grey,
-                                  fontWeight: FontWeight.bold)),
-                        ]),
+                                  : muted,
+                              fontWeight: FontWeight.bold)),
+                    ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
                                 ? Colors.white70
-                                : Colors.grey.shade400,
+                                : muted,
                             fontSize: 11)),
                   ]),
                 ),
@@ -276,48 +262,48 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppColors.premiumBg(brightness),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             expandedHeight: 150,
             pinned: true,
-            backgroundColor: Colors.blue.shade700,
-            foregroundColor: Colors.white,
+            backgroundColor: AppColors.premiumSurface(brightness),
+            foregroundColor: AppColors.premiumTextPrimary(brightness),
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.blue.shade800, Colors.blue.shade500],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  color: AppColors.premiumSurface(brightness),
+                  border: Border(
+                    bottom:
+                        BorderSide(color: Colors.blue.withValues(alpha: .3)),
                   ),
                 ),
-                child: const SafeArea(
+                child: SafeArea(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      SizedBox(height: 40),
+                      const SizedBox(height: 40),
                       Icon(Icons.local_laundry_service,
-                          color: Colors.white, size: 48),
-                      SizedBox(height: 8),
+                          color: Colors.blue.shade700, size: 42),
+                      const SizedBox(height: 8),
                       Text("Blanchisserie",
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
+                          style: AppTypography.titleLargeStyle(context,
+                              color: AppColors.premiumTextPrimary(brightness))),
                       Text("Dépôt et retrait de linge",
-                          style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          style: AppTypography.bodySmallStyle(context,
+                              color:
+                                  AppColors.premiumTextSecondary(brightness))),
                     ],
                   ),
                 ),
               ),
             ),
             title: const Text("Blanchisserie"),
-            centerTitle: true,
+            centerTitle: false,
           ),
-
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -327,16 +313,17 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                   // ── TYPE DE SERVICE ──────────────────────────
                   _sectionTitle("Type de service"),
                   const SizedBox(height: 10),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
+                  Material(
+                    color: AppColors.premiumSurfaceElevated(brightness),
+                    elevation: 1,
+                    shadowColor: AppColors.black10,
+                    shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.05),
-                            blurRadius: 8)
-                      ],
+                      side: BorderSide(
+                        color: AppColors.premiumBorder(brightness),
+                      ),
                     ),
+                    clipBehavior: Clip.antiAlias,
                     child: RadioGroup<String>(
                       groupValue: _serviceType,
                       onChanged: (v) {
@@ -347,8 +334,13 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                           final selected = s == _serviceType;
                           return RadioListTile<String>(
                             value: s,
+                            selected: selected,
                             title: Text(s,
                                 style: TextStyle(
+                                    color: selected
+                                        ? Colors.blue.shade800
+                                        : AppColors.premiumTextPrimary(
+                                            brightness),
                                     fontWeight: selected
                                         ? FontWeight.bold
                                         : FontWeight.normal)),
@@ -367,7 +359,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.premiumSurfaceElevated(brightness),
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
@@ -401,7 +393,9 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                         ),
                         const SizedBox(width: 20),
                         IconButton(
-                          onPressed: () => setState(() => _quantity++),
+                          onPressed: _quantity < CatalogUiLimits.blanchisserieMaxKg
+                              ? () => setState(() => _quantity++)
+                              : null,
                           icon: const Icon(Icons.add_circle_outline),
                           color: Colors.blue.shade700,
                           iconSize: 32,
@@ -441,7 +435,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                   const SizedBox(height: 10),
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.premiumSurfaceElevated(brightness),
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
@@ -453,13 +447,13 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                       controller: _addressCtrl,
                       decoration: InputDecoration(
                         hintText: "Ex : Quartier Commerce, rue principale...",
-                        prefixIcon:
-                            Icon(Icons.location_on, color: Colors.blue.shade700),
+                        prefixIcon: Icon(Icons.location_on,
+                            color: Colors.blue.shade700),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: Theme.of(context).colorScheme.surface,
                       ),
                     ),
                   ),
@@ -471,7 +465,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                   const SizedBox(height: 10),
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.premiumSurfaceElevated(brightness),
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
@@ -490,7 +484,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none),
                         filled: true,
-                        fillColor: Colors.white,
+                        fillColor: Theme.of(context).colorScheme.surface,
                       ),
                     ),
                   ),
@@ -533,7 +527,7 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
                             fontWeight: FontWeight.bold),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue.shade700,
+                        backgroundColor: AppColors.primary,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
                       ),
@@ -553,8 +547,6 @@ class _BlancheriePageState extends State<BlanchisseriePage> {
   Widget _sectionTitle(String title) => Text(
         title,
         style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey),
+            fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey),
       );
 }

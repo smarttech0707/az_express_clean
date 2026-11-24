@@ -16,6 +16,7 @@ const KNOWN_USER_TYPES = [
   'client', 'livreur', 'seller', 'restaurant', 'pharmacie', 'boulangerie',
   'ekbine_agent', 'real_estate_agent', 'fleet_owner', 'admin', 'artisan',
 ];
+const { requireSuperAdmin } = require('./adminGuards');
 
 function buildLogAuthEvent({ onCall, HttpsError, checkRateLimit, logAudit }) {
   // Master Prompt 122 — quota CPU Cloud Run régional : Groupe C (logs),
@@ -52,10 +53,7 @@ function buildLogAdminAuditEvent({ db, onCall, HttpsError, checkRateLimit, logAu
     if (!request.auth) throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     const uid = request.auth.uid;
 
-    const adminSnap = await db.collection('admins').doc(uid).get();
-    if (!adminSnap.exists || adminSnap.data().isActive === false) {
-      throw new HttpsError('permission-denied', 'Réservé aux administrateurs');
-    }
+    await requireSuperAdmin({ request, db });
 
     const { action, targetId, metadata } = request.data || {};
     if (!ADMIN_AUDIT_ACTIONS.includes(action)) {

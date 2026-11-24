@@ -6,14 +6,22 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:uuid/uuid.dart';
+import 'package:provider/provider.dart';
 
 import '../../models/order_model.dart';
+import '../../services/delivery_quote_service.dart';
 import '../../services/firestore_service.dart';
+import '../../services/quoted_checkout.dart';
 import '../../services/tarif_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
+import '../../providers/active_city_provider.dart';
 import '../../widgets/address_picker_widget.dart';
+import '../../widgets/quoted_checkout_runner.dart';
 import '../../widgets/scale_button.dart';
+import '../../widgets/premium_background.dart';
 import 'order_wait_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../services/permission_primer.dart';
 
 class CoursesScreen extends StatefulWidget {
   const CoursesScreen({super.key});
@@ -23,35 +31,48 @@ class CoursesScreen extends StatefulWidget {
 }
 
 class _CoursesScreenState extends State<CoursesScreen> {
-
+  Brightness get _brightness => Theme.of(context).brightness;
+  Color get _premiumSurface => AppColors.premiumSurface(_brightness);
+  Color get _premiumSurfaceElevated =>
+      AppColors.premiumSurfaceElevated(_brightness);
+  Color get _premiumBorder => AppColors.premiumBorder(_brightness);
+  Color get _premiumText => _brightness == Brightness.dark
+      ? AppColors.premiumTextPrimaryDark
+      : AppColors.premiumTextPrimaryLight;
+  Color get _premiumMuted => _brightness == Brightness.dark
+      ? AppColors.premiumTextMutedDark
+      : AppColors.premiumTextMutedLight;
   // ── Contrôleurs
-  final _listCtrl        = TextEditingController();
-  final _budgetCtrl      = TextEditingController();
-  final _notesCtrl       = TextEditingController();
+  final _listCtrl = TextEditingController();
+  final _budgetCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
   final _mobilePhoneCtrl = TextEditingController();
 
   // ── Articles avec quantités et prix
-  final List<String> _items      = [];
-  final List<int>    _quantities = [];
-  final List<int?>   _prices     = []; // null = pas de prix renseigné
-  final _itemCtrl    = TextEditingController();
+  final List<String> _items = [];
+  final List<int> _quantities = [];
+  final List<int?> _prices = []; // null = pas de prix renseigné
+  final _itemCtrl = TextEditingController();
 
   // ── Adresse de livraison
   AddressResult? _deliveryAddress;
 
   // ── Mode de livraison
   String _deliveryMode = 'standard';
+  final _quotedCheckout = QuotedCheckout(DeliveryQuoteService());
 
   // ── Paiement
   String _payment = 'cash';
-  int    _wallet  = 0;
+  int _wallet = 0;
   StreamSubscription? _walletSub;
 
   // ── Voice
-  final SpeechToText _speech       = SpeechToText();
-  bool               _speechAvailable = false;
-  bool               _listening    = false;
-  String             _liveWords    = '';
+  final SpeechToText _speech = SpeechToText();
+  // Vrai tant que l'initialisation (qui déclenche l'invite micro) n'a pas eu lieu : elle est faite au premier appui.
+  bool _speechAvailable = true;
+  bool _speechInitialized = false;
+  bool _listening = false;
+  String _liveWords = '';
 
   // ── État
   bool _sending = false;
@@ -69,13 +90,14 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   TarifResult get _tarifResult => TarifService.compute(
-        clientLat: _deliveryAddress?.latitude  ?? TarifService.centerLat,
+        clientLat: _deliveryAddress?.latitude ?? TarifService.centerLat,
         clientLng: _deliveryAddress?.longitude ?? TarifService.centerLng,
       );
 
   int get _standardFee => _tarifResult.standardPrice;
-  int get _expressFee  => _tarifResult.expressPrice;
-  int get _deliveryFee => _deliveryMode == 'express' ? _expressFee : _standardFee;
+  int get _expressFee => _tarifResult.expressPrice;
+  int get _deliveryFee =>
+      _deliveryMode == 'express' ? _expressFee : _standardFee;
 
   int get _budgetValue => int.tryParse(_budgetCtrl.text.trim()) ?? 0;
 
@@ -100,7 +122,6 @@ class _CoursesScreenState extends State<CoursesScreen> {
   @override
   void initState() {
     super.initState();
-    _initSpeech();
     _listenWallet();
     _budgetCtrl.addListener(() => setState(() {}));
   }
@@ -134,6 +155,15 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   Future<void> _toggleListening() async {
+    if (!_listening && !_speechInitialized) {
+      // Explication avant l'invite micro/reconnaissance vocale ; refus = on continue au clavier.
+      if (!await PermissionPrimer.prepareMicrophone(context: context)) {
+        _snack('Micro non autorisé : vous pouvez continuer en écrivant', Colors.orange);
+        return;
+      }
+      await _initSpeech();
+      _speechInitialized = true;
+    }
     if (!_speechAvailable) {
       _snack('Micro non disponible sur cet appareil', Colors.orange);
       return;
@@ -142,7 +172,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
       await _speech.stop();
       setState(() => _listening = false);
     } else {
-      setState(() { _listening = true; _liveWords = ''; });
+      setState(() {
+        _listening = true;
+        _liveWords = '';
+      });
       await _speech.listen(
         onResult: _onSpeechResult,
         listenOptions: SpeechListenOptions(
@@ -182,8 +215,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   void _addVoiceItem(String text) {
-    final separators = RegExp(r'[,\.;]|\bet\b|\bpuis\b|\baussi\b', caseSensitive: false);
-    final parts = text.split(separators)
+    final separators =
+        RegExp(r'[,\.;]|\bet\b|\bpuis\b|\baussi\b', caseSensitive: false);
+    final parts = text
+        .split(separators)
         .map((s) => s.trim())
         .where((s) => s.length >= 2)
         .toList();
@@ -222,8 +257,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   void _editItem(int index) {
-    final nameCtrl  = TextEditingController(text: _items[index]);
-    final priceCtrl = TextEditingController(text: _prices[index]?.toString() ?? '');
+    final nameCtrl = TextEditingController(text: _items[index]);
+    final priceCtrl =
+        TextEditingController(text: _prices[index]?.toString() ?? '');
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -239,8 +275,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
             decoration: InputDecoration(
               labelText: 'Article',
               hintText: 'Ex : Huile, Tomates…',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             ),
           ),
           const SizedBox(height: 12),
@@ -254,7 +292,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
               suffixText: 'FCFA',
               suffixStyle: TextStyle(
                   color: Colors.grey.shade500, fontWeight: FontWeight.w600),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             ),
@@ -268,22 +307,26 @@ class _CoursesScreenState extends State<CoursesScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              backgroundColor: AppColors.primary,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () {
-              final name  = nameCtrl.text.trim();
-              final price = int.tryParse(
-                  priceCtrl.text.trim().replaceAll(' ', '').replaceAll(' ', ''));
+              final name = nameCtrl.text.trim();
+              final price = int.tryParse(priceCtrl.text
+                  .trim()
+                  .replaceAll(' ', '')
+                  .replaceAll(' ', ''));
               if (name.isNotEmpty) {
                 setState(() {
-                  _items[index]  = _capitalize(name);
+                  _items[index] = _capitalize(name);
                   _prices[index] = (price != null && price > 0) ? price : null;
                 });
               }
               Navigator.pop(context);
             },
-            child: Text('Valider', style: GoogleFonts.urbanist(color: Colors.white)),
+            child: Text('Valider',
+                style: GoogleFonts.urbanist(color: Colors.white)),
           ),
         ],
       ),
@@ -317,8 +360,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
         .snapshots()
         .listen((s) {
       if (mounted) {
-        setState(
-            () => _wallet = (s.data()?['wallet'] as num?)?.toInt() ?? 0);
+        setState(() => _wallet = (s.data()?['wallet'] as num?)?.toInt() ?? 0);
       }
     });
   }
@@ -347,22 +389,23 @@ class _CoursesScreenState extends State<CoursesScreen> {
                     fontSize: 13, color: Colors.grey.shade600)),
             const SizedBox(height: 10),
             ...missing.map((m) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(children: [
-                const Icon(Icons.cancel_rounded, color: Colors.red, size: 16),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: Text(m,
-                        style: GoogleFonts.urbanist(
-                            fontSize: 13, fontWeight: FontWeight.w600))),
-              ]),
-            )),
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(children: [
+                    const Icon(Icons.cancel_rounded,
+                        color: Colors.red, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Text(m,
+                            style: GoogleFonts.urbanist(
+                                fontSize: 13, fontWeight: FontWeight.w600))),
+                  ]),
+                )),
           ],
         ),
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32),
+              backgroundColor: AppColors.primary,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8)),
             ),
@@ -383,8 +426,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
       return;
     }
 
-    final int shoppingBudget =
-        _isPriceMode ? _articleTotal : _budgetValue;
+    final int shoppingBudget = _isPriceMode ? _articleTotal : _budgetValue;
     final int totalBudget = shoppingBudget + _deliveryFee;
     final needsMobilePhone = _payment != 'cash' && _payment != 'wallet';
 
@@ -427,61 +469,131 @@ class _CoursesScreenState extends State<CoursesScreen> {
               .collection('clients')
               .doc(user!.uid)
               .get();
-          clientName  = profile.data()?['name']  as String?;
+          clientName = profile.data()?['name'] as String?;
           clientPhone = profile.data()?['phone'] as String?;
         } catch (_) {}
       }
 
       final itemList = _items.isNotEmpty
           ? _items.asMap().entries.map((e) {
-              final qty      = _quantities[e.key];
-              final price    = _prices[e.key];
-              final priceStr = price != null
-                  ? ' — ${_fmt(price * qty)}'
-                  : '';
+              final qty = _quantities[e.key];
+              final price = _prices[e.key];
+              final priceStr = price != null ? ' — ${_fmt(price * qty)}' : '';
               return '${e.key + 1}. ${e.value}'
                   '${qty > 1 ? " (x$qty)" : ""}$priceStr';
             }).join('\n')
           : _listCtrl.text.trim();
 
-      final notes       = _notesCtrl.text.trim();
+      final notes = _notesCtrl.text.trim();
       final mobilePhone = _mobilePhoneCtrl.text.trim();
       var desc = itemList + (notes.isNotEmpty ? '\n\nNotes : $notes' : '');
       if (mobilePhone.isNotEmpty) desc += '\nPaiement : $mobilePhone';
 
-      if (_payment == 'wallet') {
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final ref  = FirebaseFirestore.instance
-              .collection('clients')
-              .doc(user!.uid);
-          final snap = await tx.get(ref);
-          final bal  = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
-          if (bal < totalBudget) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(ref, {'wallet': bal - totalBudget});
-        });
-      }
-
       final orderId = const Uuid().v4();
+      final point = _deliveryAddress!;
+      if (!mounted) return;
+      final cityProvider = context.read<ActiveCityProvider>();
+      final cityService = cityProvider.service;
+      final geography = await cityService.resolveDispatchGeography(
+        pickupLatitude: point.latitude,
+        pickupLongitude: point.longitude,
+        deliveryLatitude: point.latitude,
+        deliveryLongitude: point.longitude,
+      );
       final order = OrderModel(
-        id:              orderId,
-        description:     desc,
-        budget:          _deliveryFee,
-        shoppingBudget:  shoppingBudget,
-        status:          'pending',
-        latitude:        _deliveryAddress!.latitude,
-        longitude:       _deliveryAddress!.longitude,
-        deliveryAddress: _deliveryAddress!.address,
-        type:            'shopping',
-        clientId:        user?.uid,
-        clientName:      clientName,
-        clientPhone:     clientPhone,
-        paymentMethod:   _payment,
-        isPaid:          _payment == 'wallet',
-        forSelf:         true,
-        deliveryMode:    _deliveryMode,
+        id: orderId,
+        description: desc,
+        budget: _deliveryFee,
+        shoppingBudget: shoppingBudget,
+        status: 'pending',
+        latitude: point.latitude,
+        longitude: point.longitude,
+        destLat: point.latitude,
+        destLng: point.longitude,
+        deliveryAddress: point.address,
+        type: 'shopping',
+        clientId: user?.uid,
+        clientName: clientName,
+        clientPhone: clientPhone,
+        paymentMethod: _payment,
+        isPaid: _payment == 'wallet',
+        forSelf: true,
+        deliveryMode: _deliveryMode,
+        pickupCityId: geography.pickupCityId,
+        pickupZoneId: geography.pickupZoneId,
+        deliveryCityId: geography.deliveryCityId,
+        deliveryZoneId: geography.deliveryZoneId,
+        pickupCoordinateSource: point.coordinateSource,
+        deliveryCoordinateSource: point.coordinateSource,
+        gpsDetectedCityId: cityService.gpsDetectedCityId,
+        activeCityId: cityService.activeCityId,
+        citySelectionSource: cityService.citySelectionSource,
+        cityResolutionStatus: geography.cityResolutionStatus,
       );
 
-      await FirestoreService().createOrder(order);
+      // Parcours « devis officiel » (--dart-define=AZ_QUOTED_ORDERS=true) : prix des
+      // frais de livraison calculé par le serveur. Le budget d'achat reste LIBRE
+      // (jamais transformé en prix imposé). Inactif par défaut ; mobile money et
+      // comptes anonymes restent sur le parcours historique ci-dessous.
+      if (QuotedOrderConfig.eligible(
+          isAnonymous: user?.isAnonymous ?? true,
+          service: 'courses',
+          paymentMethod: _payment)) {
+        if (!mounted) return;
+        final result = await runQuotedCheckoutWithUi(
+          context,
+          checkout: _quotedCheckout,
+          uid: user!.uid,
+          request: QuoteRequest(
+            serviceType: 'courses',
+            mode: _deliveryMode,
+            pickupLat: point.latitude,
+            pickupLng: point.longitude,
+            destLat: point.latitude,
+            destLng: point.longitude,
+          ),
+          paymentMethod: _payment,
+          walletBalance: _wallet,
+          draft: order,
+          shoppingBudget: shoppingBudget,
+        );
+        if (!mounted) return;
+        await _handleQuotedResult(result);
+        return;
+      }
+
+      if (_payment == 'wallet') {
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService — une
+        // app trop ancienne voit un message clair plutôt qu'un
+        // permission-denied brut au moment du débit.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          setState(() => _sending = false);
+          return;
+        }
+        final clientRef =
+            FirebaseFirestore.instance.collection('clients').doc(user!.uid);
+        final orderRef =
+            FirebaseFirestore.instance.collection('orders').doc(order.id);
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final snap = await tx.get(clientRef);
+          final balance = (snap.data()?['wallet'] as num?)?.toInt() ?? 0;
+          if (balance < totalBudget) throw Exception('SOLDE_INSUFFISANT');
+          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
+          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
+          // débit ne soit réutilisé pour valider plusieurs commandes.
+          tx.update(clientRef, {
+            'wallet': balance - totalBudget,
+            'lastPaidOrderId': order.id,
+          });
+          tx.set(orderRef, order.toMap());
+        });
+        await FirestoreService().createOrder(order, alreadyCreated: true);
+      } else {
+        await FirestoreService().createOrder(order);
+      }
       if (!mounted) return;
 
       // Réinitialiser le formulaire
@@ -511,6 +623,42 @@ class _CoursesScreenState extends State<CoursesScreen> {
     }
   }
 
+  Future<void> _handleQuotedResult(QuotedCheckoutResult result) async {
+    switch (result) {
+      case CheckoutCreated(:final orderId):
+        final created = await finalizeQuotedOrder(orderId);
+        if (!mounted) return;
+        setState(() {
+          _items.clear();
+          _quantities.clear();
+          _prices.clear();
+          _listCtrl.clear();
+          _budgetCtrl.clear();
+          _notesCtrl.clear();
+          _mobilePhoneCtrl.clear();
+          _deliveryAddress = null;
+          _sending = false;
+        });
+        if (created == null) {
+          _snack('Commande enregistrée. Retrouvez-la dans « Mes commandes ».',
+              Colors.green);
+          return;
+        }
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => OrderWaitScreen(order: created)));
+      case CheckoutCancelled():
+        setState(() => _sending = false);
+      case CheckoutFailed():
+        setState(() => _sending = false);
+        _snack(quotedFailureMessage(result), Colors.red);
+      case CheckoutUncertain():
+        setState(() => _sending = false);
+        _snack(
+            'Réponse non reçue. Vérifiez « Mes commandes » avant de recommencer.',
+            Colors.orange);
+    }
+  }
+
   void _snack(String msg, Color color) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
 
@@ -521,32 +669,44 @@ class _CoursesScreenState extends State<CoursesScreen> {
   @override
   Widget build(BuildContext context) {
     final bottomPad = MediaQuery.of(context).padding.bottom;
+    final brightness = Theme.of(context).brightness;
+    final textPrimary = brightness == Brightness.dark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('Mes Courses'),
-        backgroundColor: const Color(0xFF2E7D32),
-        foregroundColor: Colors.white,
-        centerTitle: true,
+        title: Text('Mes Courses',
+            style: AppTypography.titleLargeStyle(context,
+                color: textPrimary, weight: FontWeight.w700)),
+        backgroundColor: AppColors.premiumBg(brightness),
+        foregroundColor: textPrimary,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: false,
         elevation: 0,
       ),
-      body: ListView(
+      body: PremiumBackground(
+          child: ListView(
         padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad + 24),
         physics: const BouncingScrollPhysics(),
         children: [
-
           // ── Articles ─────────────────────────────────────────────────────────
-          const _Section(
+          // LOT 4.1 — icône de section recentrée sur le bleu premium
+          // ("Articles" = zone fonctionnelle de saisie, pas une action ;
+          // l'ancien vert #2E7D32 était une 3ᵉ couleur concurrente sans
+          // signification fonctionnelle réelle).
+          _Section(
             icon: Icons.shopping_basket_rounded,
             title: 'Articles à acheter',
-            color: Color(0xFF2E7D32),
+            color: AppColors.bluePremium(brightness),
           ),
           const SizedBox(height: 6),
           Text(
             'Ajoutez le prix pour un calcul auto · ex : "Huile 500 FCFA"',
             style: GoogleFonts.urbanist(
-                fontSize: 11, color: Colors.grey.shade500),
+                fontSize: 12,
+                color: AppColors.premiumTextSecondary(brightness)),
           ),
           const SizedBox(height: 10),
 
@@ -555,23 +715,26 @@ class _CoursesScreenState extends State<CoursesScreen> {
             decoration: _cardDec,
             padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
             child: Row(children: [
-              const Icon(Icons.add_shopping_cart_rounded,
-                  size: 20, color: Color(0xFF2E7D32)),
+              Icon(Icons.add_shopping_cart_rounded,
+                  size: 20, color: AppColors.bluePremium(brightness)),
               const SizedBox(width: 10),
-              Expanded(child: TextField(
+              Expanded(
+                  child: TextField(
                 controller: _itemCtrl,
-                style: GoogleFonts.urbanist(fontSize: 15),
+                style: GoogleFonts.urbanist(fontSize: 15, color: _premiumText),
+                cursorColor: AppColors.primary,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
                   hintText: 'Huile 500 FCFA, Tomates, Pain…',
-                  hintStyle: GoogleFonts.urbanist(
-                      fontSize: 14, color: Colors.grey.shade400),
+                  hintStyle:
+                      GoogleFonts.urbanist(fontSize: 14, color: _premiumMuted),
                   border: InputBorder.none,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 onSubmitted: (_) => _addManualItem(),
               )),
+              // Action principale de la section = orange AZ (au lieu du
+              // vert précédent, qui n'avait ici aucune valeur fonctionnelle).
               Semantics(
                 label: 'Ajouter l\'article',
                 button: true,
@@ -581,16 +744,22 @@ class _CoursesScreenState extends State<CoursesScreen> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(24),
                     onTap: _addManualItem,
-                    child: Container(
-                      width: 40, height: 40,
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.add_circle_rounded,
-                          color: Color(0xFF2E7D32), size: 28),
+                    child: const SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Center(
+                        child: Icon(Icons.add_circle_rounded,
+                            color: AppColors.primary, size: 28),
+                      ),
                     ),
                   ),
                 ),
               ),
               const SizedBox(width: 4),
+              // Micro : sobre/neutre au repos, vert (AppColors.success)
+              // UNIQUEMENT pendant l'écoute réelle — seule couleur verte
+              // conservée dans cet écran, justifiée par un état fonctionnel
+              // réel (dictée active), conformément au brief.
               Semantics(
                 label: _listening
                     ? 'Arrêter la dictée vocale'
@@ -601,18 +770,20 @@ class _CoursesScreenState extends State<CoursesScreen> {
                   onTap: _toggleListening,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: 44, height: 44,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
-                      color: _listening
-                          ? Colors.red.shade500
-                          : const Color(0xFF2E7D32),
+                      color: _listening ? AppColors.success : _premiumSurface,
                       shape: BoxShape.circle,
+                      border:
+                          _listening ? null : Border.all(color: _premiumBorder),
                     ),
                     child: Icon(
-                      _listening
-                          ? Icons.stop_rounded
-                          : Icons.mic_rounded,
-                      color: Colors.white, size: 22,
+                      _listening ? Icons.stop_rounded : Icons.mic_rounded,
+                      color: _listening
+                          ? Colors.white
+                          : AppColors.bluePremium(brightness),
+                      size: 22,
                     ),
                   ),
                 ),
@@ -620,22 +791,28 @@ class _CoursesScreenState extends State<CoursesScreen> {
             ]),
           ),
 
-          // Transcription en direct
+          // Transcription en direct — même accent vert que le micro actif
+          // (un seul et même état fonctionnel "écoute en cours").
           if (_listening && _liveWords.isNotEmpty) ...[
             const SizedBox(height: 6),
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: AppColors.success.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.red.shade200),
+                border: Border.all(
+                    color: AppColors.success.withValues(alpha: 0.35)),
               ),
               child: Row(children: [
-                Icon(Icons.mic_rounded, color: Colors.red.shade400, size: 14),
+                const Icon(Icons.mic_rounded,
+                    color: AppColors.success, size: 14),
                 const SizedBox(width: 8),
-                Expanded(child: Text(_liveWords,
-                    style: GoogleFonts.urbanist(
-                        fontSize: 13, fontStyle: FontStyle.italic))),
+                Expanded(
+                    child: Text(_liveWords,
+                        style: GoogleFonts.urbanist(
+                            fontSize: 13,
+                            fontStyle: FontStyle.italic,
+                            color: _premiumText))),
               ]),
             ),
           ],
@@ -643,8 +820,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
           if (!_listening && _speechAvailable) ...[
             const SizedBox(height: 6),
             Text('🎙 Dictez vos articles séparés par des virgules',
-                style: GoogleFonts.urbanist(
-                    fontSize: 11, color: Colors.grey.shade500)),
+                style:
+                    GoogleFonts.urbanist(fontSize: 11, color: _premiumMuted)),
           ],
 
           const SizedBox(height: 12),
@@ -655,22 +832,24 @@ class _CoursesScreenState extends State<CoursesScreen> {
               decoration: _cardDec,
               child: Column(
                 children: _items.asMap().entries.map((e) {
-                  final i     = e.key;
-                  final item  = e.value;
-                  final qty   = _quantities[i];
+                  final i = e.key;
+                  final item = e.value;
+                  final qty = _quantities[i];
                   final price = _prices[i];
                   return Column(children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 10),
                       child: Row(children: [
-                        Expanded(child: Column(
+                        Expanded(
+                            child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(item, style: GoogleFonts.urbanist(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87)),
+                            Text(item,
+                                style: GoogleFonts.urbanist(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: _premiumText)),
                             if (price != null)
                               Text(
                                 qty > 1
@@ -678,42 +857,46 @@ class _CoursesScreenState extends State<CoursesScreen> {
                                     : _fmt(price),
                                 style: GoogleFonts.urbanist(
                                     fontSize: 11,
-                                    color: const Color(0xFF2E7D32),
+                                    color: AppColors.primary,
                                     fontWeight: FontWeight.w600),
                               )
                             else
                               Text('Quantité : $qty',
                                   style: GoogleFonts.urbanist(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade500)),
+                                      fontSize: 11, color: _premiumMuted)),
                           ],
                         )),
                         _QtyBtn(
                           icon: Icons.remove,
-                          color: const Color(0xFF2E7D32),
+                          color: AppColors.primary,
                           onTap: () => _changeQty(i, -1),
                         ),
                         Container(
-                          width: 32, alignment: Alignment.center,
-                          child: Text('$qty', style: GoogleFonts.urbanist(
-                              fontSize: 14, fontWeight: FontWeight.w700)),
+                          width: 32,
+                          alignment: Alignment.center,
+                          child: Text('$qty',
+                              style: GoogleFonts.urbanist(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: _premiumText)),
                         ),
                         _QtyBtn(
                           icon: Icons.add,
-                          color: const Color(0xFF2E7D32),
+                          color: AppColors.primary,
                           onTap: () => _changeQty(i, 1),
                         ),
                         const SizedBox(width: 4),
                         GestureDetector(
                           onTap: () => _editItem(i),
                           child: Icon(Icons.edit_outlined,
-                              size: 19, color: Colors.blue.shade300),
+                              size: 19, color: _premiumMuted),
                         ),
                         const SizedBox(width: 8),
                         GestureDetector(
                           onTap: () => _removeItem(i),
                           child: Icon(Icons.delete_outline_rounded,
-                              size: 19, color: Colors.red.shade300),
+                              size: 19,
+                              color: AppColors.error.withValues(alpha: 0.75)),
                         ),
                       ]),
                     ),
@@ -722,28 +905,37 @@ class _CoursesScreenState extends State<CoursesScreen> {
                           height: 1,
                           indent: 14,
                           endIndent: 14,
-                          color: Colors.grey.shade100),
+                          color: _premiumBorder.withValues(alpha: 0.55)),
                   ]);
                 }).toList(),
               ),
             )
           else
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: _cardDec,
-              child: Center(
-                child: Column(children: [
-                  Icon(Icons.shopping_basket_outlined,
-                      size: 40, color: Colors.grey.shade300),
-                  const SizedBox(height: 8),
-                  Text('Aucun article pour l\'instant',
-                      style: GoogleFonts.urbanist(
-                          color: Colors.grey.shade400, fontSize: 13)),
-                  Text('Tapez ou dictez vos courses',
-                      style: GoogleFonts.urbanist(
-                          color: Colors.grey.shade400, fontSize: 11)),
-                ]),
-              ),
+            // LOT 4.1 — état vide compact : plus de grosse carte élevée avec
+            // bordure/ombre, juste icône discrète + titre + texte secondaire
+            // sur une seule ligne pour réduire l'impression de zone vide.
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Row(children: [
+                Icon(Icons.shopping_basket_outlined,
+                    size: 22, color: _premiumMuted.withValues(alpha: 0.6)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Aucun article pour l\'instant',
+                          style: GoogleFonts.urbanist(
+                              color: _premiumText,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13)),
+                      Text('Tapez ou dictez vos courses',
+                          style: GoogleFonts.urbanist(
+                              color: _premiumMuted, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ]),
             ),
 
           const SizedBox(height: 20),
@@ -759,35 +951,44 @@ class _CoursesScreenState extends State<CoursesScreen> {
             Text(
               'Indiquez combien dépenser pour les articles (hors frais de livraison)',
               style: GoogleFonts.urbanist(
-                  fontSize: 11, color: Colors.grey.shade500),
+                  fontSize: 12,
+                  color: AppColors.premiumTextSecondary(brightness)),
             ),
             const SizedBox(height: 10),
+            // LOT 4.1 — le budget devient un point fort de la hiérarchie :
+            // même surface premium que le reste (design system homogène),
+            // mais bordure teintée orange (accent discret, pas un bloc
+            // orange plein) + montant nettement plus grand/plus lisible.
             Container(
-              decoration: _cardDec,
+              decoration: BoxDecoration(
+                color: _premiumSurfaceElevated,
+                borderRadius: AppRadius.premiumLgR,
+                border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.35),
+                    width: 1.2),
+                boxShadow: AppShadow.xs,
+              ),
               child: TextField(
-                controller:   _budgetCtrl,
+                controller: _budgetCtrl,
                 keyboardType: TextInputType.number,
+                cursorColor: AppColors.primary,
                 style: GoogleFonts.urbanist(
-                    fontSize: 18, fontWeight: FontWeight.bold),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: _premiumText),
                 decoration: InputDecoration(
                   hintText: 'ex : 2 500',
-                  hintStyle: GoogleFonts.urbanist(
-                      fontSize: 16, color: Colors.grey.shade400),
-                  prefixIcon: const Icon(
-                      Icons.account_balance_wallet_rounded,
+                  hintStyle:
+                      GoogleFonts.urbanist(fontSize: 18, color: _premiumMuted),
+                  prefixIcon: const Icon(Icons.account_balance_wallet_rounded,
                       color: AppColors.primary),
                   suffixText: 'FCFA',
-                  suffixStyle: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontWeight: FontWeight.w600),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled:    true,
-                  fillColor: Colors.white,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 16),
+                  suffixStyle: GoogleFonts.urbanist(
+                      color: _premiumMuted,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 18),
                 ),
               ),
             ),
@@ -795,43 +996,28 @@ class _CoursesScreenState extends State<CoursesScreen> {
           ],
 
           // ── Adresse de livraison ─────────────────────────────────────────────
-          const _Section(
+          // LOT 4.1 — la confirmation d'adresse affichée séparément ici a été
+          // retirée : `AddressPickerWidget` affiche déjà sa propre carte de
+          // résultat (icône + adresse + coordonnées GPS muted + action
+          // modifier/relancer) dès qu'une adresse est sélectionnée — la
+          // dupliquer juste en dessous ne faisait qu'alourdir la section
+          // sans apporter d'information supplémentaire (brief : "l'adresse
+          // de livraison prend beaucoup d'espace visuel"). Aucune logique de
+          // géolocalisation touchée — uniquement ce bloc d'affichage
+          // redondant, propre à cet écran.
+          _Section(
             icon: Icons.place_rounded,
             title: 'Adresse de livraison',
-            color: Color(0xFF1565C0),
+            color: AppColors.bluePremium(brightness),
           ),
           const SizedBox(height: 10),
           AddressPickerWidget(
-            title:       'Livraison',
-            hint:        'Où livrer ? Tapez quartier, rue, lieu-dit…',
+            title: 'Livraison',
+            hint: 'Où livrer ? Tapez quartier, rue, lieu-dit…',
             initialMode: AddressMode.gps,
-            onChanged:   (r) => setState(() => _deliveryAddress = r),
+            gpsAccentColor: AppColors.bluePremium(brightness),
+            onChanged: (r) => setState(() => _deliveryAddress = r),
           ),
-          if (_deliveryAddress != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 11),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1565C0).withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                    color: const Color(0xFF1565C0).withValues(alpha: 0.3)),
-              ),
-              child: Row(children: [
-                const Icon(Icons.location_on_rounded,
-                    color: Color(0xFF1565C0), size: 18),
-                const SizedBox(width: 10),
-                Expanded(child: Text(_deliveryAddress!.address,
-                    style: GoogleFonts.urbanist(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF1565C0)))),
-                const Icon(Icons.check_circle_rounded,
-                    color: Color(0xFF1565C0), size: 16),
-              ]),
-            ),
-          ],
 
           const SizedBox(height: 20),
 
@@ -843,28 +1029,33 @@ class _CoursesScreenState extends State<CoursesScreen> {
           ),
           const SizedBox(height: 10),
           _CourseModeCard(
-            mode:       'standard',
-            icon:       Icons.electric_bike_rounded,
-            title:      'STANDARD',
-            subtitle:   'Le livreur peut combiner plusieurs courses',
-            etaText:    '45 – 90 min',
-            priceText:  _fmt(_standardFee),
-            iconColor:  const Color(0xFF2E7D32),
+            mode: 'standard',
+            icon: Icons.electric_bike_rounded,
+            title: 'STANDARD',
+            subtitle: 'Le livreur peut combiner plusieurs courses',
+            etaText: '45 – 90 min',
+            priceText: _fmt(_standardFee),
+            // LOT 4.1 — Standard et Express partagent désormais le même
+            // accent de sélection (orange AZ) : l'ancien vert sur Standard
+            // laissait croire à deux catégories différentes alors que seul
+            // l'état sélectionné/non sélectionné doit être signalé (brief
+            // section 10). Aucune règle Standard/Express modifiée.
+            iconColor: AppColors.primary,
             isSelected: _deliveryMode == 'standard',
-            onTap:      () => setState(() => _deliveryMode = 'standard'),
+            onTap: () => setState(() => _deliveryMode = 'standard'),
           ),
           const SizedBox(height: 8),
           _CourseModeCard(
-            mode:       'express',
-            icon:       Icons.rocket_launch_rounded,
-            title:      'EXPRESS',
-            subtitle:   'Mission dédiée uniquement pour vous',
-            etaText:    '15 – 30 min',
-            priceText:  _fmt(_expressFee),
-            iconColor:  AppColors.primary,
+            mode: 'express',
+            icon: Icons.rocket_launch_rounded,
+            title: 'EXPRESS',
+            subtitle: 'Mission dédiée uniquement pour vous',
+            etaText: '15 – 30 min',
+            priceText: _fmt(_expressFee),
+            iconColor: AppColors.primary,
             isSelected: _deliveryMode == 'express',
-            onTap:      () => setState(() => _deliveryMode = 'express'),
-            badge:      'Prioritaire',
+            onTap: () => setState(() => _deliveryMode = 'express'),
+            badge: 'Prioritaire',
           ),
 
           const SizedBox(height: 20),
@@ -885,18 +1076,19 @@ class _CoursesScreenState extends State<CoursesScreen> {
             decoration: _cardDec,
             child: TextField(
               controller: _notesCtrl,
-              maxLines:   4,
-              style:      GoogleFonts.urbanist(fontSize: 14),
+              maxLines: 4,
+              style: GoogleFonts.urbanist(fontSize: 14, color: _premiumText),
+              cursorColor: AppColors.primary,
               decoration: InputDecoration(
                 hintText:
                     'Ne pas sonner, appeler avant d\'arriver,\nmonter au 2e étage, laisser au gardien…',
-                hintStyle: GoogleFonts.urbanist(
-                    fontSize: 13, color: Colors.grey.shade400),
-                prefixIcon: const Padding(
-                  padding: EdgeInsets.only(
+                hintStyle:
+                    GoogleFonts.urbanist(fontSize: 13, color: _premiumMuted),
+                prefixIcon: Padding(
+                  padding: const EdgeInsets.only(
                       left: 14, right: 10, top: 14, bottom: 100),
                   child: Icon(Icons.sticky_note_2_rounded,
-                      size: 20, color: Color(0xFF607D8B)),
+                      size: 20, color: _premiumMuted),
                 ),
                 prefixIconConstraints: const BoxConstraints(),
                 border: InputBorder.none,
@@ -908,16 +1100,20 @@ class _CoursesScreenState extends State<CoursesScreen> {
           const SizedBox(height: 20),
 
           // ── Paiement ─────────────────────────────────────────────────────────
-          const _Section(
+          _Section(
             icon: Icons.credit_card_rounded,
             title: 'Mode de paiement',
-            color: Color(0xFF2E7D32),
+            color: AppColors.bluePremium(brightness),
           ),
           const SizedBox(height: 10),
           ...[
             _PayRow(
               icon: Icons.money_rounded,
-              iconColor: const Color(0xFF2E7D32),
+              // Espèces n'a pas d'identité de marque externe (contrairement
+              // à Orange Money/MTN/Wave ci-dessous, volontairement
+              // inchangés) — recentré sur un ton neutre plutôt que le vert
+              // arbitraire précédent.
+              iconColor: _premiumMuted,
               label: 'Espèces',
               subtitle: 'Paiement au livreur',
               selected: _payment == 'cash',
@@ -949,14 +1145,14 @@ class _CoursesScreenState extends State<CoursesScreen> {
             ),
             if (_wallet > 0)
               _PayRow(
-                icon:      Icons.account_balance_wallet_rounded,
+                icon: Icons.account_balance_wallet_rounded,
                 iconColor: const Color(0xFF6A1B9A),
-                label:     'Wallet · ${_fmt(_wallet)}',
-                subtitle:  _wallet >= _orderTotal && _orderTotal > 0
+                label: 'Wallet · ${_fmt(_wallet)}',
+                subtitle: _wallet >= _orderTotal && _orderTotal > 0
                     ? 'Solde suffisant — paiement immédiat'
                     : 'Solde disponible',
-                selected:  _payment == 'wallet',
-                onTap:     () => setState(() => _payment = 'wallet'),
+                selected: _payment == 'wallet',
+                onTap: () => setState(() => _payment = 'wallet'),
               ),
           ],
           if (_payment != 'cash' && _payment != 'wallet') ...[
@@ -964,18 +1160,21 @@ class _CoursesScreenState extends State<CoursesScreen> {
             Container(
               decoration: _cardDec,
               child: TextField(
-                controller:   _mobilePhoneCtrl,
+                controller: _mobilePhoneCtrl,
                 keyboardType: TextInputType.phone,
+                cursorColor: AppColors.primary,
                 style: GoogleFonts.urbanist(
-                    fontSize: 15, fontWeight: FontWeight.w500),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: _premiumText),
                 decoration: InputDecoration(
                   hintText: _payment == 'orange_money'
                       ? 'Numéro Orange Money (ex : 07 XX XX XX XX)'
                       : _payment == 'mtn_money'
                           ? 'Numéro MTN MoMo (ex : 05 XX XX XX XX)'
                           : 'Numéro Wave (ex : 01 XX XX XX XX)',
-                  hintStyle: GoogleFonts.urbanist(
-                      fontSize: 13, color: Colors.grey.shade400),
+                  hintStyle:
+                      GoogleFonts.urbanist(fontSize: 13, color: _premiumMuted),
                   prefixIcon: Icon(
                     Icons.phone_rounded,
                     color: _payment == 'orange_money'
@@ -984,14 +1183,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
                             ? const Color(0xFFFFCC00)
                             : const Color(0xFF1ABCFE),
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled:    true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 16),
+                  border: InputBorder.none,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                 ),
               ),
             ),
@@ -1002,7 +1196,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           // ── Bouton commander ─────────────────────────────────────────────────
           _buildCommanderButton(),
         ],
-      ),
+      )),
     );
   }
 
@@ -1010,26 +1204,29 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
   Widget _buildRecap() {
     final modeName = _deliveryMode == 'express' ? 'Express' : 'Standard';
-    final fee      = _deliveryFee;
+    final fee = _deliveryFee;
 
     if (_isPriceMode) {
-      // Mode prix : affiche articles + livraison + total
+      // Mode prix : affiche articles + livraison + total.
+      // LOT 4.1 — recentré sur l'accent orange AZ (au lieu du dégradé vert
+      // précédent), pour ne former qu'un seul et même style de récapitulatif
+      // avec la variante "mode budget" juste en dessous (design system
+      // homogène, brief section 3/9) ; le TOTAL gagne en présence (18→20).
       final artTotal = _articleTotal;
-      final total    = artTotal + fee;
+      final total = artTotal + fee;
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFF2E7D32).withValues(alpha: 0.08),
-              const Color(0xFF1B5E20).withValues(alpha: 0.03),
+              AppColors.primary.withValues(alpha: 0.08),
+              AppColors.primary.withValues(alpha: 0.03),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-              color: const Color(0xFF2E7D32).withValues(alpha: 0.2)),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
         ),
         child: Column(children: [
           // En-tête
@@ -1037,18 +1234,21 @@ class _CoursesScreenState extends State<CoursesScreen> {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
+                color: AppColors.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(Icons.receipt_long_rounded,
-                  color: Color(0xFF2E7D32), size: 16),
+                  color: AppColors.primary, size: 16),
             ),
             const SizedBox(width: 10),
-            Text('Récapitulatif de commande',
-                style: GoogleFonts.urbanist(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black87)),
+            Expanded(
+              child: Text('Récapitulatif de commande',
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.urbanist(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _premiumText)),
+            ),
           ]),
           const SizedBox(height: 14),
           _recapLine(
@@ -1063,21 +1263,21 @@ class _CoursesScreenState extends State<CoursesScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Divider(
-                height: 1,
-                color: const Color(0xFF2E7D32).withValues(alpha: 0.3)),
+                height: 1, color: AppColors.primary.withValues(alpha: 0.25)),
           ),
           Row(children: [
-            Expanded(child: Text('TOTAL',
-                style: GoogleFonts.urbanist(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.black87))),
+            Expanded(
+                child: Text('TOTAL',
+                    style: GoogleFonts.urbanist(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: _premiumText))),
             Text(
               _items.isNotEmpty ? _fmt(total) : '—',
               style: GoogleFonts.urbanist(
-                  fontSize: 18,
+                  fontSize: 20,
                   fontWeight: FontWeight.w800,
-                  color: const Color(0xFF2E7D32)),
+                  color: AppColors.primary),
             ),
           ]),
         ]),
@@ -1085,7 +1285,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
     }
 
     // Mode budget : affiche budget + livraison Standard + livraison Express
-    final budget   = _budgetValue;
+    final budget = _budgetValue;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1098,8 +1298,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.25)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
       ),
       child: Column(children: [
         // En-tête
@@ -1114,12 +1313,20 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 color: AppColors.primary, size: 16),
           ),
           const SizedBox(width: 10),
-          Text(
-            'Estimation du coût total${_tarifResult.isNight ? " 🌙" : ""}',
-            style: GoogleFonts.urbanist(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: Colors.black87),
+          // LOT 4.1 — bug réel trouvé et corrigé : ce titre (surtout avec le
+          // suffixe nocturne "🌙") pouvait dépasser la largeur disponible
+          // sur un écran étroit (RenderFlex overflow, 56px mesurés sur
+          // iPhone 390px). Même correction appliquée au récapitulatif "mode
+          // prix" juste au-dessus dans ce fichier.
+          Expanded(
+            child: Text(
+              'Estimation du coût total${_tarifResult.isNight ? " 🌙" : ""}',
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.urbanist(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _premiumText),
+            ),
           ),
         ]),
         const SizedBox(height: 14),
@@ -1128,22 +1335,24 @@ class _CoursesScreenState extends State<CoursesScreen> {
           value: budget > 0 ? _fmt(budget) : '—',
         ),
         const SizedBox(height: 12),
-        // Ligne Standard
+        // Ligne Standard — même accent orange que Express (LOT 4.1, voir
+        // note sur _CourseModeCard plus haut : seul l'état sélectionné doit
+        // être signalé par une couleur, pas le mode lui-même).
         _recapModeRow(
-          label:      'Standard',
-          icon:       Icons.electric_bike_rounded,
-          total:      budget > 0 ? budget + _standardFee : 0,
+          label: 'Standard',
+          icon: Icons.electric_bike_rounded,
+          total: budget > 0 ? budget + _standardFee : 0,
           isSelected: _deliveryMode == 'standard',
-          color:      const Color(0xFF2E7D32),
+          color: AppColors.primary,
         ),
         const SizedBox(height: 8),
         // Ligne Express
         _recapModeRow(
-          label:      'Express',
-          icon:       Icons.rocket_launch_rounded,
-          total:      budget > 0 ? budget + _expressFee : 0,
+          label: 'Express',
+          icon: Icons.rocket_launch_rounded,
+          total: budget > 0 ? budget + _expressFee : 0,
           isSelected: _deliveryMode == 'express',
-          color:      AppColors.primary,
+          color: AppColors.primary,
         ),
       ]),
     );
@@ -1151,56 +1360,51 @@ class _CoursesScreenState extends State<CoursesScreen> {
 
   Widget _recapLine({required String label, required String value}) {
     return Row(children: [
-      Expanded(child: Text(label,
-          style: GoogleFonts.urbanist(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: Colors.grey.shade700))),
+      Expanded(
+          child: Text(label,
+              style: GoogleFonts.urbanist(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.premiumTextSecondary(_brightness)))),
       Text(value,
           style: GoogleFonts.urbanist(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: Colors.black87)),
+              fontSize: 13, fontWeight: FontWeight.w700, color: _premiumText)),
     ]);
   }
 
   Widget _recapModeRow({
-    required String   label,
+    required String label,
     required IconData icon,
-    required int      total,
-    required bool     isSelected,
-    required Color    color,
+    required int total,
+    required bool isSelected,
+    required Color color,
   }) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: isSelected
-            ? color.withValues(alpha: 0.10)
-            : Colors.white.withValues(alpha: 0.70),
+        color: isSelected ? color.withValues(alpha: 0.10) : _premiumSurface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isSelected ? color : Colors.grey.shade200,
+          color: isSelected ? AppColors.primary : _premiumBorder,
           width: isSelected ? 1.5 : 1,
         ),
       ),
       child: Row(children: [
-        Icon(icon,
-            size: 16,
-            color: isSelected ? color : Colors.grey.shade400),
+        Icon(icon, size: 16, color: isSelected ? color : _premiumMuted),
         const SizedBox(width: 8),
-        Expanded(child: Text(label,
-            style: GoogleFonts.urbanist(
-                fontSize: 13,
-                fontWeight:
-                    isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: isSelected ? color : Colors.grey.shade600))),
+        Expanded(
+            child: Text(label,
+                style: GoogleFonts.urbanist(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    color: isSelected ? color : _premiumMuted))),
         Text(
           total > 0 ? _fmt(total) : '—',
           style: GoogleFonts.urbanist(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: isSelected ? color : Colors.grey.shade500),
+              color: isSelected ? color : _premiumMuted),
         ),
         if (isSelected) ...[
           const SizedBox(width: 6),
@@ -1218,9 +1422,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
       child: ScaleButton(
         onPressed: _sending ? null : _sendOrder,
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF2E7D32),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
+          backgroundColor: AppColors.primary,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           elevation: 0,
         ),
         child: _sending
@@ -1228,31 +1432,42 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   SizedBox(
-                    width: 20, height: 20,
+                    width: 20,
+                    height: 20,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.5),
                   ),
                   SizedBox(width: 12),
-                  Text('Recherche en cours…',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600)),
+                  Flexible(
+                    child: Text('Recherche en cours…',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.w600)),
+                  ),
                 ],
               )
             : Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  // LOT 4.1 — bug réel trouvé et corrigé : sur un petit
+                  // écran (Android d'entrée de gamme ~320px, ou certains
+                  // iPhone), l'icône + le libellé pouvaient dépasser la
+                  // largeur du bouton (RenderFlex overflow, jusqu'à 40px
+                  // mesurés). `Flexible`+ellipsis, callback/texte inchangés.
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Icon(Icons.shopping_cart_checkout_rounded,
                           color: Colors.white, size: 20),
                       const SizedBox(width: 10),
-                      Text('Commander maintenant',
-                          style: GoogleFonts.urbanist(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white)),
+                      Flexible(
+                        child: Text('Commander maintenant',
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.urbanist(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white)),
+                      ),
                     ],
                   ),
                   if (showTotal) ...[
@@ -1270,67 +1485,82 @@ class _CoursesScreenState extends State<CoursesScreen> {
   }
 
   BoxDecoration get _cardDec => BoxDecoration(
-    color:        Colors.white,
-    borderRadius: BorderRadius.circular(14),
-    boxShadow: [
-      BoxShadow(
-          color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
-    ],
-  );
+        color: _premiumSurfaceElevated,
+        borderRadius: AppRadius.premiumLgR,
+        border: Border.all(color: _premiumBorder),
+        boxShadow: AppShadow.xs,
+      );
 }
 
 // ── Widgets locaux ─────────────────────────────────────────────────────────────
 
 class _Section extends StatelessWidget {
   final IconData icon;
-  final String   title;
-  final Color    color;
+  final String title;
+  final Color color;
   const _Section(
       {required this.icon, required this.title, required this.color});
 
   @override
-  Widget build(BuildContext context) => Row(children: [
-    Container(
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8)),
-      child: Icon(icon, color: color, size: 16),
-    ),
-    const SizedBox(width: 10),
-    Text(title,
-        style: GoogleFonts.urbanist(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: Colors.black87)),
-  ]);
+  Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final textColor = brightness == Brightness.dark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+    return Row(children: [
+      Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8)),
+        child: Icon(icon, color: color, size: 16),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Text(title,
+            style: GoogleFonts.urbanist(
+                fontSize: 14, fontWeight: FontWeight.w700, color: textColor)),
+      ),
+    ]);
+  }
 }
 
 class _QtyBtn extends StatelessWidget {
-  final IconData      icon;
-  final Color         color;
-  final VoidCallback  onTap;
-  const _QtyBtn(
-      {required this.icon, required this.color, required this.onTap});
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  const _QtyBtn({required this.icon, required this.color, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: 30, height: 30,
-      decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
-      child: Icon(icon, color: color, size: 16),
-    ),
-  );
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: AppRadius.pillR,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    shape: BoxShape.circle),
+                child: Icon(icon, color: color, size: 16),
+              ),
+            ),
+          ),
+        ),
+      );
 }
 
 class _PayRow extends StatelessWidget {
   final IconData? icon;
-  final String?   imagePath;
-  final Color     iconColor;
-  final String    label, subtitle;
-  final bool      selected;
+  final String? imagePath;
+  final Color iconColor;
+  final String label, subtitle;
+  final bool selected;
   final VoidCallback? onTap;
 
   const _PayRow({
@@ -1345,27 +1575,36 @@ class _PayRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final surface = AppColors.premiumSurfaceElevated(brightness);
+    final border = AppColors.premiumBorder(brightness);
+    final textPrimary = brightness == Brightness.dark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+    final textMuted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        // LOT 4.1 — l'état sélectionné n'a plus qu'un seul accent (orange
+        // AZ) : bordure, tinte de fond et coche partageaient auparavant
+        // deux couleurs différentes (bordure orange, fond/coche verts).
         decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFF2E7D32).withValues(alpha: 0.06)
-              : Colors.white,
-          borderRadius: BorderRadius.circular(14),
+          color: selected ? AppColors.primary.withValues(alpha: 0.06) : surface,
+          borderRadius: AppRadius.premiumLgR,
           border: Border.all(
-            color: selected
-                ? const Color(0xFF2E7D32)
-                : Colors.grey.shade200,
+            color: selected ? AppColors.primary : border,
             width: selected ? 2 : 1,
           ),
         ),
         child: Row(children: [
           Container(
-            width: 36, height: 36,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: iconColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
@@ -1376,35 +1615,33 @@ class _PayRow extends StatelessWidget {
                     child: Image.asset(
                       imagePath!,
                       fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => Icon(
-                          Icons.payment_rounded,
-                          color: iconColor,
-                          size: 20),
+                      errorBuilder: (_, __, ___) => Icon(Icons.payment_rounded,
+                          color: iconColor, size: 20),
                     ),
                   )
                 : Icon(icon ?? Icons.payment_rounded,
                     color: iconColor, size: 20),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Column(
+          Expanded(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
                   style: GoogleFonts.urbanist(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: Colors.black87)),
+                      color: textPrimary)),
               Text(subtitle,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 11, color: Colors.grey.shade500)),
+                  style: GoogleFonts.urbanist(fontSize: 11, color: textMuted)),
             ],
           )),
           if (selected)
             const Icon(Icons.check_circle_rounded,
-                color: Color(0xFF2E7D32), size: 20)
+                color: AppColors.primary, size: 20)
           else
             Icon(Icons.radio_button_unchecked_rounded,
-                color: Colors.grey.shade300, size: 20),
+                color: textMuted, size: 20),
         ]),
       ),
     );
@@ -1412,16 +1649,16 @@ class _PayRow extends StatelessWidget {
 }
 
 class _CourseModeCard extends StatelessWidget {
-  final String     mode;
-  final IconData   icon;
-  final String     title;
-  final String     subtitle;
-  final String     etaText;
-  final String?    priceText;
-  final Color      iconColor;
-  final bool       isSelected;
+  final String mode;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String etaText;
+  final String? priceText;
+  final Color iconColor;
+  final bool isSelected;
   final VoidCallback onTap;
-  final String?    badge;
+  final String? badge;
 
   const _CourseModeCard({
     required this.mode,
@@ -1438,6 +1675,15 @@ class _CourseModeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final surface = AppColors.premiumSurfaceElevated(brightness);
+    final border = AppColors.premiumBorder(brightness);
+    final textPrimary = brightness == Brightness.dark
+        ? AppColors.premiumTextPrimaryDark
+        : AppColors.premiumTextPrimaryLight;
+    final textMuted = brightness == Brightness.dark
+        ? AppColors.premiumTextMutedDark
+        : AppColors.premiumTextMutedLight;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -1445,36 +1691,41 @@ class _CourseModeCard extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: isSelected
-              ? iconColor.withValues(alpha: 0.06)
-              : Colors.white,
-          borderRadius: BorderRadius.circular(14),
+              ? iconColor.withValues(
+                  alpha: brightness == Brightness.dark ? 0.14 : 0.06)
+              : surface,
+          borderRadius: AppRadius.premiumLgR,
           border: Border.all(
-            color: isSelected ? iconColor : Colors.grey.shade200,
+            color: isSelected ? AppColors.primary : border,
             width: isSelected ? 2 : 1,
           ),
           boxShadow: isSelected
-              ? [BoxShadow(
-                  color: iconColor.withValues(alpha: 0.12),
-                  blurRadius: 8)]
-              : [BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 4)],
+              ? [
+                  BoxShadow(
+                      color: iconColor.withValues(alpha: 0.12), blurRadius: 8)
+                ]
+              : [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 4)
+                ],
         ),
         child: Row(children: [
           Container(
-            width: 44, height: 44,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: isSelected
                   ? iconColor.withValues(alpha: 0.14)
-                  : Colors.grey.shade100,
+                  : border.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon,
-                color: isSelected ? iconColor : Colors.grey.shade500,
-                size: 22),
+            child:
+                Icon(icon, color: isSelected ? iconColor : textMuted, size: 22),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Column(
+          Expanded(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
@@ -1482,14 +1733,12 @@ class _CourseModeCard extends StatelessWidget {
                     style: GoogleFonts.urbanist(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
-                        color: isSelected
-                            ? iconColor
-                            : Colors.black87)),
+                        color: isSelected ? iconColor : textPrimary)),
                 if (badge != null) ...[
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: iconColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6),
@@ -1504,28 +1753,36 @@ class _CourseModeCard extends StatelessWidget {
               ]),
               const SizedBox(height: 2),
               Text(subtitle,
-                  style: GoogleFonts.urbanist(
-                      fontSize: 11, color: Colors.grey.shade600)),
+                  style: GoogleFonts.urbanist(fontSize: 11, color: textMuted)),
               const SizedBox(height: 2),
+              // LOT 4.1 — bug réel trouvé et corrigé : sur un écran étroit
+              // (iPhone 390px et petit Android), l'heure d'arrivée + le prix
+              // pouvaient dépasser la largeur disponible de la carte
+              // (RenderFlex overflow). `Flexible`+ellipsis au lieu de textes
+              // à largeur intrinsèque non contrainte.
               Row(children: [
-                const Icon(Icons.access_time_rounded,
-                    size: 12, color: Colors.grey),
+                Icon(Icons.access_time_rounded, size: 12, color: textMuted),
                 const SizedBox(width: 3),
-                Text(etaText,
-                    style: GoogleFonts.urbanist(
-                        fontSize: 11,
-                        color: Colors.grey.shade500,
-                        fontWeight: FontWeight.w600)),
-                if (priceText != null) ...[
-                  const SizedBox(width: 10),
-                  const Icon(Icons.payments_outlined,
-                      size: 12, color: Colors.grey),
-                  const SizedBox(width: 3),
-                  Text(priceText!,
+                Flexible(
+                  child: Text(etaText,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.urbanist(
                           fontSize: 11,
-                          color: Colors.grey.shade500,
+                          color: textMuted,
                           fontWeight: FontWeight.w600)),
+                ),
+                if (priceText != null) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.payments_outlined, size: 12, color: textMuted),
+                  const SizedBox(width: 3),
+                  Flexible(
+                    child: Text(priceText!,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.urbanist(
+                            fontSize: 11,
+                            color: textMuted,
+                            fontWeight: FontWeight.w600)),
+                  ),
                 ],
               ]),
             ],
@@ -1534,7 +1791,7 @@ class _CourseModeCard extends StatelessWidget {
             isSelected
                 ? Icons.radio_button_checked_rounded
                 : Icons.radio_button_unchecked_rounded,
-            color: isSelected ? iconColor : Colors.grey.shade400,
+            color: isSelected ? iconColor : textMuted,
             size: 22,
           ),
         ]),

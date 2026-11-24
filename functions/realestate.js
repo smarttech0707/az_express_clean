@@ -12,6 +12,7 @@ const VISIT_TRANSITIONS = {
   decline: { by: 'agent',  from: ['pending', 'proposed'], to: 'declined',  requiresDate: false },
   cancel:  { by: 'client', from: ['pending', 'proposed'], to: 'cancelled', requiresDate: false },
 };
+const { requireSuperAdmin } = require('./adminGuards');
 
 // `tx` optionnel : fourni par le confirmHandler de l'outil AZ IA
 // `request_property_visit` (déjà à l'intérieur de la transaction qui bascule
@@ -74,10 +75,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
   const approveRealEstateAgentRequest = onCall({ maxInstances: 2 }, async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
     const uid = request.auth.uid;
-    const adminSnap = await db.collection('admins').doc(uid).get();
-    if (!adminSnap.exists || adminSnap.data().isActive === false) {
-      throw new HttpsError('permission-denied', 'Réservé aux administrateurs');
-    }
+    await requireSuperAdmin({ request, db });
 
     const { requestId, decision } = request.data || {};
     if (!requestId || !['approve', 'reject'].includes(decision)) {
@@ -159,6 +157,28 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
         ...(transition.requiresDate ? { proposedDate } : {}),
         resolvedAt:   admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      // Master Prompt "GPS privé V2" — accorder l'accès à la localisation
+      // exacte UNIQUEMENT sur une confirmation réelle de visite, dans la
+      // MÊME transaction que le changement de statut : jamais un statut
+      // "confirmed" sans l'accès correspondant, ni l'inverse. La transition
+      // `decline`/`cancel` ne part jamais du statut `confirmed` (voir
+      // VISIT_TRANSITIONS ci-dessus), donc aucun accès déjà accordé ne peut
+      // être annulé par ce chemin — rien à révoquer explicitement ici.
+      if (transition.to === 'confirmed') {
+        const accessRef = db.collection('real_estate_location_access')
+          .doc(`${data.listingId}_${data.clientId}`);
+        tx.set(accessRef, {
+          listingId:      data.listingId,
+          clientId:       data.clientId,
+          grantedBy:      'respondToVisitRequest',
+          visitRequestId: requestId,
+          isActive:       true,
+          expiresAt:      null,
+          createdAt:      admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt:      admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
     });
 
     await logAudit({
@@ -169,7 +189,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
   });
 
   const notifyAgentOnVisitRequest = onDocumentCreated(
-    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 2 },
+    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 1 },
     async (event) => {
       const data = event.data.data();
       if (!data?.agentId) return;
@@ -185,7 +205,7 @@ function createRealEstateFunctions({ db, admin, onCall, onDocumentCreated, onDoc
   );
 
   const notifyClientOnVisitUpdate = onDocumentUpdated(
-    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 2 },
+    { document: 'real_estate_visit_requests/{requestId}', maxInstances: 1 },
     async (event) => {
       const before = event.data.before.data();
       const after  = event.data.after.data();

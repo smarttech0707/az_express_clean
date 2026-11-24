@@ -1,31 +1,279 @@
 'use strict';
 
-const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
-const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onCall: rawOnCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten, onDocumentDeleted } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
+const { capInstances, pilotOnlyInstanceOptions, pilotLightOptions, pilotRetry } = require('./pilotCap');
+const { createNotificationGuard } = require('./notificationGuard');
+const { defineSecret } = require('firebase-functions/params');
 const admin  = require('firebase-admin');
 const axios  = require('axios');
+const crypto = require('crypto');
+const { expireOrderTx, rateLimitCancelTx, PARTNER_RESPONSE_TIMEOUT_MS } = require('./orderRefunds');
+const { retryPendingDispatch, newlyNotifiedDriverIds } = require('./dispatchRetry');
+const { observeOrderTariff } = require('./tariffObservation');
+const { scanStuckOrders, scanOverdueCashRemittances, scanPartnerOrderWaits, alertDispatchExhausted } = require('./stuckOrderAlerts');
+const { buildAdminBilling } = require('./adminBilling');
+const { buildAdminOrderDispute } = require('./adminOrderDisputes');
+const { selectDepositAccount, isEligibleAgent } = require('./ekbineFlow');
+const {
+  isAuthorizedWebhookCall,
+  processFeexPayWebhookEvent,
+  resolvePayoutEndpoint,
+  sanitizePayoutMotif,
+  assertWithdrawalCanStart,
+  classifyPayoutInitiation,
+  compensateFailedWithdrawal,
+  classifyCollectInitiationFailure,
+  buildInitiationFailureLog,
+  COLLECT_UNCERTAIN_STATUS,
+  UNCERTAIN_RETRY_BLOCK_MS,
+} = require('./feexpayPayments');
+const {
+  delayMsForCheck,
+  verifyAndApplyWithdrawal,
+  buildPendingWithdrawalChecker,
+} = require('./feexpayPayoutScheduler');
+const {
+  createStatusVerifier,
+  createPayoutStatusVerifier,
+} = require('./feexpayVerification');
+const { buildResetAccountPassword } = require('./passwordReset');
+const { buildManageProfessionalSubscription } = require('./professionalSubscriptions');
+const { buildManageAdminPartnerAccount } = require('./adminPartnerAccounts');
+const { buildCompletePartnerFirstPasswordChange } = require('./partnerFirstLogin');
+const { assertPartnerActivated } = require('./partnerActivationGuard');
+const { requireAdminPermission, requireSuperAdmin, requireWithdrawalAccess } = require('./adminGuards');
+const { validatePermissions, adminNotificationTokens, NOTIFICATION_PERMISSION } = require('./adminPermissions');
+const {
+  buildPublishMarketplaceProduct,
+  buildRepublishMarketplaceProduct,
+  buildExpireMarketplaceProducts,
+} = require('./marketplacePublishing');
+const {
+  DisabledExternalPharmacyGuardProvider,
+  syncProvider: syncPharmacyGuardProvider,
+} = require('./pharmacyGuards');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'europe-west1' });
 
 const db = admin.firestore();
+const {buildPartnerQr,available:qrAvailable,COLLECTIONS:QR_COLLECTIONS}=require('./partnerQr');
+const partnerQr=buildPartnerQr({db,auth:admin.auth(),HttpsError,requireSuperAdmin,checkRateLimit,logAudit});
+exports.getPartnerQr=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.manage);
+exports.resolvePartnerQr=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.resolve);
+exports.listPartnerQrEstablishments=rawOnCall({region:'europe-west1',maxInstances:2},partnerQr.list);
+exports.setPartnerQrManager=onCall({region:'europe-west1',maxInstances:1},partnerQr.grant);
+for(const [kind,collection] of Object.entries(QR_COLLECTIONS)){
+  exports['syncPartnerQr_'+kind]=onDocumentWritten({document:collection+'/{id}',region:'europe-west1',maxInstances:1,retry:true},event=>{
+    const before=event.data?.before.data(),after=event.data?.after.data();
+    if(!qrAvailable(after)||qrAvailable(before))return;
+    return partnerQr.sync(kind,event.params.id);
+  });
+}
+
+// Refuse stale authenticated sessions once a verified deletion enters quarantine.
+// Financial webhooks/schedulers are deliberately not wrapped.
+const { buildAccountDeletion, assertAccountEnabled } = require('./accountDeletion');
+// Relecture du tombstone DANS la transaction financière (Mission 7E-68) : la garde du wrapper onCall ne protège pas contre
+// une quarantaine posée entre ce contrôle et l'écriture.
+const { assertNewAccountActivity, assertTargetNotClosing } = require('./accountAdmission');
+function onCall(options, handler) {
+  if(typeof options==='function'){handler=options;options={};}
+  return rawOnCall(options,async(request,...rest)=>{
+    await assertAccountEnabled(db,request.auth?.uid,HttpsError);
+    return handler(request,...rest);
+  });
+}
+// L3 : enveloppe fermée des cinq fonctions qui terminent une opération engagée pour un compte en quarantaine (accountClosureActor.js).
+const onCallClosing = require('./accountClosureActor').buildOnCallClosing({ rawOnCall, db, HttpsError });
+const accountDeletion=buildAccountDeletion({db,auth:admin.auth(),admin,HttpsError,checkRateLimit,logAudit,
+  eraseAssets:async(uid,role)=>{
+    await require('./accountPersonalAssets').erasePersonalAssets(admin.storage().bucket(),uid,role);
+  }});
+exports.requestAccountDeletionCF=rawOnCall({region:'europe-west1',maxInstances:1,cpu:0.5,concurrency:1,timeoutSeconds:120,memory:'256MiB'},accountDeletion.request);
+exports.getAccountDeletionStatusCF=rawOnCall({region:'europe-west1',maxInstances:1,cpu:0.25,concurrency:1,timeoutSeconds:30,memory:'256MiB'},accountDeletion.status);
+exports.retryAccountDeletions=onSchedule({schedule:'every 15 minutes',region:'europe-west1',maxInstances:1,cpu:0.25,concurrency:1,timeoutSeconds:120,memory:'256MiB'},accountDeletion.drain);
+const {buildAccountDeletionSupport}=require('./accountDeletionSupport');
+exports.manageAccountDeletionCF=onCall({region:'europe-west1',maxInstances:1,cpu:0.25,concurrency:1,timeoutSeconds:120,memory:'256MiB'},
+  buildAccountDeletionSupport({db,admin,HttpsError,process:accountDeletion.process}));
+const {buildPharmacyOwnerIdentity}=require('./pharmacyOwnerIdentity');
+exports.managePharmacyOwnerIdentityCF=onCall({region:'europe-west1',maxInstances:1,timeoutSeconds:60,memory:'256MiB'},
+  buildPharmacyOwnerIdentity({db,auth:admin.auth(),admin,HttpsError}));
+
+
+const { settleTerminalOrder, diagnoseDriver, clearAcceptedOffers } = require('./driverLifecycle');
+const { assertDriverRechargeAllowed } = require('./driverWalletPolicy');
+const { buildAcceptOrder } = require('./driverAcceptance');
+const { buildAdminDriverRecharge } = require('./adminDriverRecharge');
+const { buildCreateFleetDriver } = require('./fleetDriverCreation');
+const { buildManageArtisanPhotos } = require('./artisanPhotos');
+const { buildManualAccountDeletion } = require('./manualAccountDeletion');
+const { buildReleaseOrderBeforePickup } = require('./driverRelease');
+const { buildDeclineLegacyOrder } = require('./driverDecline');
+const { buildDeliveryTransfer, expireDueTransfers } = require('./driverTransfer');
+const { buildSettleTransferEarnings } = require('./transferSettlement');
+const { shouldProcess: shouldApplyDriverRating, applyDriverRating } = require('./driverRatings');
+const { syncDriverPublicOnCreate, syncDriverPublicOnUpdate, syncDriverPublicOnDelete } = require('./driverPublicSync');
+
+// Forward-only lifecycle repair: never handles deletions or scans old drivers.
+exports.syncDriverOrderLifecycle = onDocumentUpdated({
+  document: 'orders/{orderId}', maxInstances: 1, retry: pilotRetry(true),
+}, async event => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (before.status === after.status) return;
+  if (['cancelled', 'delivered'].includes(after.status)) {
+    await settleTerminalOrder(db, admin, event.params.orderId, before);
+  } else if (after.status === 'accepted') {
+    await clearAcceptedOffers(db, admin, event.params.orderId, before);
+  }
+});
+
+// Note client → moyenne du livreur. Le client note la commande (règles
+// Firestore : `rating` seul) ; seul le serveur écrit `livreurs.avgRating`.
+// Aucun montant ni statut touché. cpu/maxInstances minimaux (quota régional).
+exports.applyDriverRatingOnOrderUpdate = onDocumentUpdated({
+  document: 'orders/{orderId}', maxInstances: 1, cpu: 0.5, concurrency: 1,
+  memory: '256MiB', retry: true,
+}, async event => {
+  const before = event.data.before.data();
+  if (!shouldApplyDriverRating(event.data.after.data(), before)) return;
+  const result = await applyDriverRating({ db, orderId: event.params.orderId, before });
+  if (result.applied) {
+    console.log('driver_rating_applied', JSON.stringify({ orderId: event.params.orderId, ...result }));
+  }
+});
+
+// Explicit Admin invocation only. No Firestore writes or corrective mode.
+exports.diagnoseDriverOccupancy = onCall({ maxInstances: 1 }, async request => {
+  await requireSuperAdmin({ request, db });
+  const { driverId, mode } = request.data || {};
+  if (typeof driverId !== 'string' || !driverId || driverId.includes('/') ||
+      (mode != null && mode !== 'diagnostic')) {
+    throw new HttpsError('invalid-argument', 'Driver ID required; diagnostic mode only.');
+  }
+  const result = await diagnoseDriver(db, driverId);
+  console.info('[driverOccupancyDiagnostic]', result);
+  return result;
+});
+
+
+exports.manageAdminPartnerAccount = onCall(
+  { maxInstances: 2 },
+  buildManageAdminPartnerAccount({
+    db,
+    auth: admin.auth(),
+    fieldValue: admin.firestore.FieldValue,
+    checkRateLimit,
+    logAudit,
+    logSecurityEvent,
+  }),
+);
+
+// Première connexion des partenaires créés par l'administration (restaurant,
+// vendeur, boulangerie) : changement OBLIGATOIRE du mot de passe temporaire,
+// effectué par le serveur. maxInstances 1 (quota Cloud Run régional).
+exports.completePartnerFirstPasswordChange = onCall(
+  { maxInstances: 1, cpu: 0.5 },
+  buildCompletePartnerFirstPasswordChange({
+    db,
+    auth: admin.auth(),
+    fieldValue: admin.firestore.FieldValue,
+    checkRateLimit,
+    logAudit,
+  }),
+);
+
+// maxInstances 5 → 2 (quota Cloud Run régional, voir la note plus bas sur les
+// déclencheurs de notification) : avec une concurrence de 80, 2 instances
+// servent déjà 160 publications simultanées.
+exports.publishMarketplaceProduct = onCall(
+  { maxInstances: 2 },
+  buildPublishMarketplaceProduct({ db, admin }),
+);
+exports.republishMarketplaceProduct = onCall(
+  { maxInstances: 2 },
+  buildRepublishMarketplaceProduct({ db, admin }),
+);
+exports.expireMarketplaceProducts = onSchedule(
+  { schedule: 'every day 02:15', timeZone: 'Africa/Abidjan', maxInstances: 1 },
+  buildExpireMarketplaceProducts({ db, admin }),
+);
+
+// Architecture prête pour une API officielle future. Tant qu'aucune source
+// autorisée n'est configurée, cette tâche ne modifie aucune donnée et conserve
+// intégralement les gardes manuelles/déjà synchronisées dans Firestore.
+exports.syncPharmacyGuards = onSchedule(
+  { schedule: '0 5,17 * * *', timeZone: 'Africa/Abidjan', maxInstances: 1 },
+  async () => {
+    const now = new Date();
+    const to = new Date(now.getTime() + 32 * 24 * 60 * 60 * 1000);
+    return syncPharmacyGuardProvider({
+      db,
+      admin,
+      provider: new DisabledExternalPharmacyGuardProvider(),
+      city: 'Abengourou',
+      from: now,
+      to,
+      logger: console,
+    });
+  },
+);
 
 // ── Environnement ───────────────────────────────────────────────────────────
-// Créez functions/.env avec :
-//   FEEXPAY_TOKEN=votre_token_feexpay
-//   FEEXPAY_WEBHOOK_SECRET=votre_secret_webhook
-const FEEXPAY_TOKEN          = process.env.FEEXPAY_TOKEN;
-const FEEXPAY_WEBHOOK_SECRET = process.env.FEEXPAY_WEBHOOK_SECRET;
+// Configurer FEEXPAY_TOKEN et FEEXPAY_WEBHOOK_SECRET dans Secret Manager.
+const FEEXPAY_TOKEN_SECRET = defineSecret('FEEXPAY_TOKEN');
+const FEEXPAY_WEBHOOK_SECRET = defineSecret('FEEXPAY_WEBHOOK_SECRET');
+const ANTHROPIC_API_KEY_SECRET = defineSecret('ANTHROPIC_API_KEY');
+const DELIVERY_PROOF_PEPPER_SECRET = defineSecret('DELIVERY_PROOF_PEPPER');
+
+// ── Clés des fournisseurs IA — Secret Manager, jamais functions/.env ────────
+// Elles étaient jusqu'ici de simples variables d'environnement issues de
+// `functions/.env`. Or le CLI Firebase applique ce fichier à TOUTES les
+// fonctions du codebase, quel que soit le `--only` du déploiement : les clés
+// se retrouvaient donc montées en clair jusque sur les fonctions de paiement
+// FeexPay, les triggers de notification et `pharmacieLogin`, qui n'en ont
+// aucun usage. Une variable d'environnement n'a ni versionnage, ni rotation,
+// ni traçabilité d'accès, et reste lisible par quiconque obtient un droit de
+// lecture sur le projet.
+//
+// Les providers lisent `process.env.<NOM>` : `defineSecret` monte la valeur
+// sous ce même nom au runtime, donc AUCUN code de provider ne change — seule
+// la déclaration `secrets:` par fonction détermine qui y a accès.
+// Seuls les fournisseurs réellement en service sont déclarés : Claude
+// (principal) et Gemini (repli). `defineSecret` crée une dépendance de
+// DÉPLOIEMENT — déclarer un secret absent de Secret Manager ferait échouer le
+// déploiement, or OPENAI/GROQ/MISTRAL/DEEPSEEK n'y existent pas.
+//
+// Pour activer un fournisseur optionnel plus tard, trois gestes :
+//   1. `firebase functions:secrets:set <NOM>` (saisie masquée)
+//   2. rétablir ici `const X_SECRET = defineSecret('<NOM>');`
+//   3. l'ajouter à `azIaChatSecrets` ET à `fallbackProviders`
+//      (`settings/ai` ou AI_FALLBACK_PROVIDERS)
+// Sans ces gestes, le provider reste présent dans le code mais inerte :
+// `isConfigured()` renvoie false et aucune requête ne part.
+const GEMINI_API_KEY_SECRET = defineSecret('GEMINI_API_KEY');
+
 const FEEXPAY_API_URL        = 'https://api.feexpay.me';
-const PROJECT_ID             = 'az-express-b0469';
+// Identifiant de boutique exige par l'API Payout V2 (champ `shop`). Ce n'est
+// pas un secret : valeur de configuration lue depuis l'environnement des
+// fonctions. Absente, les retraits echouent proprement AVANT tout debit.
+const FEEXPAY_SHOP_ID        = () => String(process.env.FEEXPAY_SHOP_ID || '').trim();
+// GCLOUD_PROJECT est défini par Cloud Functions : un projet de test ne doit jamais
+// pointer le webhook de paiement vers la production.
+const PROJECT_ID             = process.env.GCLOUD_PROJECT || 'az-express-b0469';
 
 // Le secret est inclus dans l'URL du webhook → FeexPay le renvoie
 // sans avoir à vérifier une signature HMAC (que FeexPay ne supporte pas)
-const WEBHOOK_URL = FEEXPAY_WEBHOOK_SECRET
-  ? `https://europe-west1-${PROJECT_ID}.cloudfunctions.net/feexPayWebhook?wh_secret=${FEEXPAY_WEBHOOK_SECRET}`
-  : `https://europe-west1-${PROJECT_ID}.cloudfunctions.net/feexPayWebhook`;
+function feexpayWebhookUrl() {
+  const webhookSecret = FEEXPAY_WEBHOOK_SECRET.value();
+  return webhookSecret
+    ? `https://europe-west1-${PROJECT_ID}.cloudfunctions.net/feexPayWebhook?wh_secret=${webhookSecret}`
+    : `https://europe-west1-${PROJECT_ID}.cloudfunctions.net/feexPayWebhook`;
+}
 
 // ── Rate Limiting ────────────────────────────────────────────────────────────
 async function checkRateLimit(uid, action, maxRequests, windowSeconds) {
@@ -81,8 +329,9 @@ async function logSecurityEvent(userId, eventType, severity, description) {
     });
     // Si critique : notifier les admins
     if (severity === 'critical' || severity === 'high') {
-      const adminsSnap = await db.collection('admins').where('isActive', '!=', false).get();
-      const tokens = adminsSnap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
+      // Les alertes de sécurité exposent des informations sensibles : super-admin seul.
+      const adminsSnap = await db.collection('admins').where('isActive', '==', true).get();
+      const tokens = adminNotificationTokens(adminsSnap.docs, NOTIFICATION_PERMISSION.security_alert);
       if (tokens.length) {
         await sendToMultipleTokens(tokens,
           `🔴 Alerte sécurité — ${eventType}`,
@@ -127,12 +376,19 @@ function feexpayOperatorCode(operator) {
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. INITIER UN PAIEMENT FEEXPAY (Callable Flutter)
 // ═══════════════════════════════════════════════════════════════════════════
-exports.initiateFeexPayPayment = onCall(async (request) => {
+exports.initiateFeexPayPayment = onCall({
+  secrets: [FEEXPAY_TOKEN_SECRET, FEEXPAY_WEBHOOK_SECRET],
+  ...pilotLightOptions(),
+}, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
   }
 
   const uid = request.auth.uid;
+  // Partenaire créé par l'administration : aucune recharge avant le changement du
+  // mot de passe temporaire. Contrôle placé AVANT toute validation, limitation
+  // de débit ou création de transaction ; aucun effet pour les autres rôles.
+  await assertPartnerActivated({ db, request });
   const { amount, phone, operator, userType } = request.data;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -154,6 +410,12 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
   // ── Rate limiting ─────────────────────────────────────────────────────────
   await checkRateLimit(uid, 'payment', 5, 60);
 
+  // Livreur : portefeuille initial 0 FCFA, première recharge d'au moins 1 000 FCFA
+  // (solde utilisable, pas des frais). Contrôle serveur, avant toute transaction.
+  if (userType === 'driver') {
+    await assertDriverRechargeAllowed({ db, uid, amount, HttpsError });
+  }
+
   // ── Vérifier qu'il n'y a pas déjà une transaction pending pour cet utilisateur ──
   const pendingSnap = await db.collection('wallet_transactions')
     .where('userId', '==', uid)
@@ -164,21 +426,50 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
     throw new HttpsError('already-exists', 'Un paiement est déjà en cours. Attendez sa confirmation.');
   }
 
+  // Un échec AMBIGU (502, timeout…) laisse la transaction en
+  // `provider_uncertain` : FeexPay a peut-être créé la demande et sollicité le
+  // téléphone. Relancer immédiatement risquerait un second débit réel pour une
+  // seule intention d'achat. On bloque donc une nouvelle tentative pendant une
+  // fenêtre bornée — jamais indéfiniment, sinon un utilisateur resterait
+  // bloqué si aucun webhook n'arrive jamais. Requête à deux égalités, de même
+  // forme que celle ci-dessus : aucun nouvel index composite nécessaire.
+  const uncertainSnap = await db.collection('wallet_transactions')
+    .where('userId', '==', uid)
+    .where('status', '==', COLLECT_UNCERTAIN_STATUS)
+    .limit(5)
+    .get();
+  const blockingUncertain = uncertainSnap.docs.find((doc) => {
+    const createdAt = doc.data().createdAt?.toDate?.();
+    return createdAt ? (Date.now() - createdAt.getTime()) < UNCERTAIN_RETRY_BLOCK_MS : true;
+  });
+  if (blockingUncertain) {
+    throw new HttpsError(
+      'already-exists',
+      'Une demande de paiement précédente est encore en cours de vérification. '
+      + 'Vérifiez votre téléphone, puis réessayez dans quelques minutes.',
+    );
+  }
+
   // ── Créer la transaction pending ─────────────────────────────────────────
   const txRef = db.collection('wallet_transactions').doc();
   const txId  = txRef.id;
 
-  await txRef.set({
-    userId:        uid,
-    userType:      userType || 'client',
-    amount:        amount,
-    status:        'pending',
-    paymentMethod: operator || 'mtn',
-    provider:      'FeexPay',
-    phone:         String(phone).trim(),
-    createdAt:     admin.firestore.FieldValue.serverTimestamp(),
-    validatedAt:   null,
-    credited:      false,
+  // Mission 7E-68 : tombstone / suppression relus dans la même transaction que la création. Toute erreur de lecture
+  // propage l'échec : aucune nouvelle demande de paiement n'est créée si l'état du compte est inconnu.
+  await db.runTransaction(async (accountTx) => {
+    await assertNewAccountActivity(accountTx, db, HttpsError, uid, [[collectionFor(userType), uid]]);
+    accountTx.set(txRef, {
+      userId:        uid,
+      userType:      userType || 'client',
+      amount:        amount,
+      status:        'pending',
+      paymentMethod: operator || 'mtn',
+      provider:      'FeexPay',
+      phone:         String(phone).trim(),
+      createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+      validatedAt:   null,
+      credited:      false,
+    });
   });
   await logAudit({ userId: uid, userType: userType, action: 'payment_initiated', targetId: txId, amount: amount, status: 'pending' });
 
@@ -190,7 +481,7 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
       {
         amount:       amount,
         id:           txId,
-        callback:     WEBHOOK_URL,
+        callback:     feexpayWebhookUrl(),
         description:  'Recharge wallet AZ Express',
         currency:     'XOF',
         pay_in_phone: String(phone).trim(),
@@ -198,7 +489,7 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
       },
       {
         headers: {
-          Authorization:  `Bearer ${FEEXPAY_TOKEN}`,
+          Authorization:  `Bearer ${FEEXPAY_TOKEN_SECRET.value()}`,
           'Content-Type': 'application/json',
         },
         timeout: 20000,
@@ -206,9 +497,49 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
     );
     feexpayData = response.data;
   } catch (err) {
-    const msg = err.response?.data?.message || err.message;
-    await txRef.update({ status: 'error', errorMessage: msg });
-    throw new HttpsError('internal', `Erreur FeexPay : ${msg}`);
+    // Diagnostic structuré : l'ancien chemin ne retenait que
+    // `data.message || err.message`, donc un 502 de passerelle ne laissait
+    // qu'un message axios générique, remonté tel quel à l'application et
+    // absent de Cloud Logging. Aucun corps brut, aucune URL complète, aucun
+    // jeton, aucun téléphone ne sort d'ici.
+    const verdict = classifyCollectInitiationFailure(err);
+    console.error(buildInitiationFailureLog(verdict, txId));
+
+    // Un échec AMBIGU n'est jamais marqué comme définitif : la transaction
+    // reste rapprochable par `txId` (le même identifiant a été envoyé à
+    // FeexPay dans le champ `id`), et un webhook tardif pourra toujours la
+    // créditer après vérification serveur.
+    await txRef.update({
+      status: verdict.txStatus,
+      errorReason: verdict.reason,
+      providerHttpStatus: verdict.httpStatus,
+      providerCode: verdict.providerCode,
+      providerStatusRaw: verdict.providerStatus,
+      providerReference: verdict.providerReference,
+      errorMessage: verdict.providerMessage,
+      ambiguous: verdict.ambiguous,
+      ...(verdict.ambiguous ? { needsReview: true } : {}),
+      failedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await logAudit({
+      userId: uid, userType, action: 'payment_initiation_failed',
+      targetId: txId, amount, status: verdict.txStatus,
+    });
+
+    if (verdict.ambiguous) {
+      // Ne jamais annoncer un échec définitif sur un état incertain.
+      throw new HttpsError(
+        'unavailable',
+        'Le service de paiement est momentanément indisponible. '
+        + 'Vérifiez votre téléphone : si une demande de paiement y apparaît, elle reste valable.',
+        { provider: 'FeexPay', httpStatus: verdict.httpStatus, retryable: true },
+      );
+    }
+    throw new HttpsError(
+      'failed-precondition',
+      "La demande de paiement n'a pas pu être créée. Vérifiez le numéro et l'opérateur, puis réessayez.",
+      { provider: 'FeexPay', httpStatus: verdict.httpStatus, retryable: false },
+    );
   }
 
   await txRef.update({
@@ -230,141 +561,75 @@ exports.initiateFeexPayPayment = onCall(async (request) => {
 //    URL à configurer dans le dashboard FeexPay :
 //    https://europe-west1-az-express-b0469.cloudfunctions.net/feexPayWebhook
 // ═══════════════════════════════════════════════════════════════════════════
-exports.feexPayWebhook = onRequest(async (req, res) => {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
+exports.feexPayWebhook = onRequest({
+  // FEEXPAY_TOKEN est requis pour la vérification serveur obligatoire du
+  // paiement : sans cette déclaration, `token()` échouerait à l'exécution.
+  secrets: [FEEXPAY_WEBHOOK_SECRET, FEEXPAY_TOKEN_SECRET],
+  ...pilotLightOptions(),
+}, async (req, res) => {
   // ── Vérification du token secret dans l'URL ──────────────────────────────
   // FeexPay renvoie l'URL telle quelle → le secret est dans ?wh_secret=
-  if (!FEEXPAY_WEBHOOK_SECRET) {
-    console.error('FEEXPAY_WEBHOOK_SECRET manquant — webhook désactivé par sécurité');
-    return res.status(503).json({ error: 'Service temporairement indisponible' });
-  }
-  const receivedSecret = req.query.wh_secret;
-  if (!receivedSecret || receivedSecret !== FEEXPAY_WEBHOOK_SECRET) {
-    console.error('Webhook : token secret invalide ou manquant');
-    await logSecurityEvent('system', 'webhook_invalid_secret', 'high',
-      `Tentative webhook avec secret invalide depuis ${req.ip}`);
-    return res.status(401).json({ error: 'Non autorisé' });
-  }
-
-  const body   = req.body;
-  // FeexPay envoie le txId dans "order_id" (= le champ "id" qu'on a passé à l'API)
-  const txId   = body.order_id || body.id || body.custom_id || body.reference;
-  const status = (body.status || '').toUpperCase();
-  const reseau = body.reseau || body.phoneNumber || '';
-
-  console.log(`Webhook FeexPay → txId=${txId} status=${status} reseau=${reseau}`);
-
-  if (!txId) {
-    return res.status(400).json({ error: 'ID transaction manquant' });
-  }
-
-  const txRef  = db.collection('wallet_transactions').doc(txId);
-  const txSnap = await txRef.get();
-
-  if (!txSnap.exists) {
-    console.error(`Transaction ${txId} introuvable`);
-    return res.status(404).json({ error: 'Transaction introuvable' });
-  }
-
-  const tx = txSnap.data();
-
-  // Vérifier l'âge de la transaction (protection anti-replay)
-  const txCreatedAt = tx.createdAt?.toDate ? tx.createdAt.toDate() : null;
-  if (txCreatedAt) {
-    const ageMs = Date.now() - txCreatedAt.getTime();
-    if (ageMs > 24 * 60 * 60 * 1000) {
-      console.warn(`Transaction ${txId} trop ancienne (${Math.floor(ageMs/3600000)}h) — possible replay`);
-      await logSecurityEvent(tx.userId, 'webhook_replay_attempt', 'high',
-        `Webhook pour transaction ${txId} vieille de ${Math.floor(ageMs/3600000)}h`);
-      return res.status(400).json({ error: 'Transaction expirée' });
+  const auth = isAuthorizedWebhookCall({
+    method: req.method,
+    receivedSecret: req.query.wh_secret,
+    expectedSecret: FEEXPAY_WEBHOOK_SECRET.value(),
+  });
+  if (!auth.ok) {
+    // Ne jamais journaliser le secret ni l'URL complète qui le contient.
+    if (auth.reason === 'secret_not_configured') {
+      console.error('FEEXPAY_WEBHOOK_SECRET manquant — webhook désactivé par sécurité');
+      return res.status(503).json({ error: 'Service temporairement indisponible' });
     }
-  }
-
-  // ── Idempotence ───────────────────────────────────────────────────────────
-  if (tx.credited === true || tx.status === 'completed') {
-    console.log(`Transaction ${txId} déjà traitée — ignorée`);
-    return res.status(200).json({ message: 'Déjà traité' });
-  }
-
-  // ── Paiement réussi → crédit atomique du wallet ───────────────────────────
-  if (['SUCCESSFUL', 'SUCCESS', 'COMPLETED', 'PAID'].includes(status)) {
-    try {
-      await db.runTransaction(async (firestoreTx) => {
-        const colName    = collectionFor(tx.userType);
-        const clientRef  = db.collection(colName).doc(tx.userId);
-        const clientSnap = await firestoreTx.get(clientRef);
-
-        if (!clientSnap.exists) {
-          throw new Error(`Utilisateur ${tx.userId} introuvable`);
-        }
-
-        const currentWallet = clientSnap.data().wallet || 0;
-
-        // Crédit wallet
-        firestoreTx.update(clientRef, {
-          wallet:         currentWallet + tx.amount,
-          lastRechargeAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        // Transaction complétée
-        firestoreTx.update(txRef, {
-          status:            'completed',
-          credited:          true,
-          validatedAt:       admin.firestore.FieldValue.serverTimestamp(),
-          feexpayOperator:   body.reseau          || body.operator || null,
-          feexpayPhone:      body.phoneNumber     || null,
-          feexpayRef:        body.ref_operator    || body.reference || null,
-        });
-
-        // Historique wallet (sous-collection existante)
-        const histRef = db.collection(colName).doc(tx.userId)
-          .collection('wallet_transactions').doc();
-        firestoreTx.set(histRef, {
-          type:        'recharge',
-          amount:      tx.amount,
-          description: `Recharge FeexPay ${(tx.paymentMethod || '').toUpperCase()} — ${tx.amount} FCFA`,
-          provider:    'FeexPay',
-          txId:        txId,
-          createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-        });
-      });
-
-      console.log(`✅ Wallet crédité : user=${tx.userId} +${tx.amount} FCFA`);
-      await logAudit({ userId: tx.userId, userType: tx.userType, action: 'wallet_credited', targetId: txId, amount: tx.amount, status: 'success' });
-    } catch (err) {
-      console.error('Erreur crédit wallet :', err);
-      await txRef.update({ status: 'error', errorMessage: err.message });
-      return res.status(500).json({ error: 'Erreur crédit wallet' });
+    if (auth.reason === 'invalid_secret') {
+      console.error('Webhook : token secret invalide ou manquant');
+      await logSecurityEvent('system', 'webhook_invalid_secret', 'high',
+        `Tentative webhook avec secret invalide depuis ${req.ip}`);
+      return res.status(401).json({ error: 'Non autorisé' });
     }
-
-  // ── Paiement échoué ou annulé ─────────────────────────────────────────────
-  } else if (['FAILED', 'CANCELLED', 'CANCELED', 'REJECTED'].includes(status)) {
-    const finalStatus = ['CANCELLED', 'CANCELED'].includes(status) ? 'cancelled' : 'failed';
-    await txRef.update({
-      status:        finalStatus,
-      validatedAt:   admin.firestore.FieldValue.serverTimestamp(),
-      failureReason: body.reason     || null,
-      feexpayPhone:  body.phoneNumber || null,
-    });
-    console.log(`Transaction ${txId} → ${finalStatus} (reason: ${body.reason})`);
+    return res.status(auth.httpStatus).json({ error: 'Method not allowed' });
   }
 
-  return res.status(200).json({ message: 'OK' });
+  // Le traitement de l'événement (référence, expiration, idempotence, montant,
+  // statut inconnu, crédit atomique) vit dans functions/feexpayPayments.js,
+  // testable hors ligne — voir functions/test/feexpayPayments.test.js.
+  const result = await processFeexPayWebhookEvent({
+    db,
+    admin,
+    body: req.body,
+    collectionFor,
+    logAudit,
+    logSecurityEvent,
+    // Vérification serveur OBLIGATOIRE auprès de FeexPay (endpoint officiel
+    // /api/transactions/public/single/status/{reference}). Si ce vérificateur
+    // venait à manquer, aucun crédit ne serait effectué : le traitement est
+    // fail-closed, jamais permissif.
+    verifier: createStatusVerifier({
+      axios,
+      token: () => FEEXPAY_TOKEN_SECRET.value(),
+    }),
+  });
+
+  // Journalisation sans secret, sans URL complète, sans donnée personnelle.
+  console.log(`Webhook FeexPay → outcome=${result.outcome}${result.reason ? ` reason=${result.reason}` : ''}`);
+  return res.status(result.httpStatus).json(result.payload);
 });
 
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 3. INITIER UN RETRAIT FEEXPAY (Callable Flutter)
 // ═══════════════════════════════════════════════════════════════════════════
-exports.initiateWithdrawal = onCall(async (request) => {
+exports.initiateWithdrawal = onCall({
+  secrets: [FEEXPAY_TOKEN_SECRET],
+  ...pilotLightOptions(),
+}, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
   }
 
   const uid = request.auth.uid;
+  // Partenaire créé par l'administration : aucun retrait avant le changement du
+  // mot de passe temporaire (contrôle serveur, indépendant de l'application).
+  await assertPartnerActivated({ db, request });
   const { amount, phone, operator, userType, userName } = request.data;
 
   const VALID_USER_TYPES = ['client', 'driver', 'seller', 'restaurant', 'boulangerie', 'pharmacie', 'fleet'];
@@ -382,6 +647,24 @@ exports.initiateWithdrawal = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'Numéro de téléphone invalide');
   }
 
+  // ── Contrôles préalables AU DÉBIT ─────────────────────────────────────────
+  // Tout ce qui peut empêcher l'initiation doit être vérifié avant de toucher
+  // au solde : un débit suivi d'une initiation impossible laisserait l'argent
+  // bloqué dans un état ambigu.
+  const preconditions = assertWithdrawalCanStart({ operator, shopId: FEEXPAY_SHOP_ID() });
+  if (!preconditions.ok) {
+    // Allowlist stricte pour l'opérateur ; `shop` obligatoire côté FeexPay V2
+    // et sans valeur par défaut légitime : on échoue proprement, avant tout
+    // débit, plutôt que d'en inventer une. La valeur n'est jamais journalisée.
+    throw new HttpsError(
+      preconditions.code,
+      preconditions.reason === 'unknown_operator'
+        ? 'Opérateur de retrait non pris en charge'
+        : 'Retraits momentanément indisponibles (configuration incomplète)',
+    );
+  }
+  const endpoint = preconditions.endpoint;
+
   // ── Rate limiting ─────────────────────────────────────────────────────────
   await checkRateLimit(uid, 'withdrawal', 3, 60);
 
@@ -391,6 +674,8 @@ exports.initiateWithdrawal = onCall(async (request) => {
   // ── Déduire le solde atomiquement ──────────────────────────────────────────
   try {
     await db.runTransaction(async (firestoreTx) => {
+      // Mission 7E-68 : aucun fonds réservé ni débité pour un compte supprimé ou en quarantaine.
+      await assertNewAccountActivity(firestoreTx, db, HttpsError, uid, [[colName, uid]]);
       const userRef  = db.collection(colName).doc(uid);
       const userSnap = await firestoreTx.get(userRef);
 
@@ -439,43 +724,145 @@ exports.initiateWithdrawal = onCall(async (request) => {
     throw new HttpsError('internal', 'Erreur interne. Veuillez réessayer.');
   }
 
-  // ── Appel API FeexPay Payout ───────────────────────────────────────────────
+  // ── Initiation Payout FeexPay V2 ──────────────────────────────────────────
+  // Le solde est déjà débité. Une réponse "PENDING / Payout request accepted"
+  // ne prouve PAS que l'argent est arrivé : elle ouvre seulement un suivi par
+  // référence (checkWithdrawalStatus). Trois issues, jamais confondues :
+  //   accepted             → référence obtenue, état NON final à vérifier.
+  //   rejected_no_reference→ aucune référence créée : rien n'a pu partir,
+  //                          compensation sûre et unique.
+  //   ambiguous            → référence présente malgré l'erreur, réseau, 5xx
+  //                          ou acceptation sans référence : NE JAMAIS
+  //                          rembourser ni relancer, le transfert a pu partir.
+  let response = null;
+  let error = null;
   try {
-    const response = await axios.post(
-      `${FEEXPAY_API_URL}/api/v1/payout`,
+    response = await axios.post(
+      endpoint.url,
       {
+        phoneNumber: phoneStr2,
         amount:      amount,
-        phone:       String(phone).trim(),
-        type:        feexpayOperatorCode(operator),
-        id:          withdrawId,
-        description: `Retrait AZ Express ${withdrawId}`,
-        currency:    'XOF',
+        shop:        FEEXPAY_SHOP_ID(),
+        motif:       sanitizePayoutMotif(`Retrait AZ Express ${withdrawId}`),
       },
       {
         headers: {
-          Authorization:  `Bearer ${FEEXPAY_TOKEN}`,
+          Authorization:  `Bearer ${FEEXPAY_TOKEN_SECRET.value()}`,
           'Content-Type': 'application/json',
         },
         timeout: 20000,
       }
     );
-
-    const newStatus = response.data?.status === 'SUCCESS' ? 'sent' : 'pending_manual';
-    await db.collection('withdrawal_requests').doc(withdrawId).update({
-      status:          newStatus,
-      feexpayResponse: response.data?.status || null,
-    });
-
-    return { withdrawId, status: newStatus, auto: true };
   } catch (err) {
-    // Auto échoué → traitement manuel (solde déjà déduit)
-    console.warn('FeexPay payout failed, traitement manuel :', err.message);
-    await db.collection('withdrawal_requests').doc(withdrawId).update({
-      status:    'pending_manual',
-      autoError: err.message,
-    });
-    return { withdrawId, status: 'pending_manual', auto: false };
+    error = err;
   }
+
+  const verdict = classifyPayoutInitiation({ response, error });
+  const wdRef = db.collection('withdrawal_requests').doc(withdrawId);
+
+  if (verdict.outcome === 'rejected_no_reference') {
+    // Aucune référence n'existe : FeexPay a refusé avant de créer le payout,
+    // donc aucun transfert ne peut aboutir — la compensation est sûre.
+    const compensation = await compensateFailedWithdrawal({
+      db, admin, withdrawId, collectionFor, logAudit, reason: verdict.reason,
+    });
+    console.warn(`Payout ${withdrawId} refusé sans référence — compensé=${compensation.compensated}`);
+    return { withdrawId, status: 'failed_refunded', auto: false, refunded: compensation.compensated };
+  }
+
+  if (verdict.outcome === 'ambiguous') {
+    await wdRef.update({
+      status:              'pending_manual',
+      provider:            'feexpay',
+      providerReference:   verdict.reference || null,
+      providerStatus:      verdict.providerStatus || null,
+      settlementConfirmed: false,
+      ambiguous:           true,
+      autoRetryBlocked:    true,
+      autoError:           verdict.reason,
+    });
+    await logAudit({
+      userId: uid, userType: userType, action: 'withdrawal_ambiguous',
+      targetId: withdrawId, amount: amount, status: 'pending_manual',
+    });
+    console.warn(`Payout ${withdrawId} ambigu (${verdict.reason}) — rapprochement manuel requis`);
+    return { withdrawId, status: 'pending_manual', auto: false, ambiguous: true };
+  }
+
+  // accepted : référence obtenue, transfert EN COURS — surtout pas final.
+  // `nextStatusCheckAt` arme la vérification automatique côté serveur : le
+  // retrait se résout même si l'utilisateur ferme l'application.
+  await wdRef.update({
+    status:              'provider_pending',
+    provider:            'feexpay',
+    providerReference:   verdict.reference,
+    providerStatus:      verdict.providerStatus || 'PENDING',
+    settlementConfirmed: false,
+    autoRetryBlocked:    true,
+    statusCheckCount:    0,
+    statusCheckStopped:  false,
+    nextStatusCheckAt:   admin.firestore.Timestamp.fromMillis(Date.now() + delayMsForCheck(0)),
+  });
+  return {
+    withdrawId, status: 'provider_pending', auto: true,
+    settlementConfirmed: false, providerStatus: verdict.providerStatus || 'PENDING',
+  };
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3 bis. VÉRIFIER LE STATUT D'UN RETRAIT (Callable — propriétaire ou admin)
+//   GET /api/payouts/status/public/{reference} — vérification imposée par la
+//   documentation FeexPay après une initiation PENDING. Toute mutation
+//   financière reste ici, côté serveur.
+// ═══════════════════════════════════════════════════════════════════════════
+exports.checkWithdrawalStatus = onCall({
+  secrets: [FEEXPAY_TOKEN_SECRET],
+}, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Vous devez être connecté');
+  }
+  const uid = request.auth.uid;
+  const withdrawId = String(request.data?.withdrawId || '').trim();
+  if (!withdrawId || withdrawId.includes('/') || withdrawId.length > 200) {
+    throw new HttpsError('invalid-argument', 'Identifiant de retrait invalide');
+  }
+
+  const wdSnap = await db.collection('withdrawal_requests').doc(withdrawId).get();
+  if (!wdSnap.exists) throw new HttpsError('not-found', 'Retrait introuvable');
+  const wd = wdSnap.data();
+
+  // Autorisation : le propriétaire du retrait, ou le super-administrateur.
+  // Cette vérification peut régler ou rembourser un retrait : un sous-admin
+  // (même actif) ou un client ne peut jamais la déclencher pour autrui.
+  await requireWithdrawalAccess({ request, db, withdrawal: wd });
+  await checkRateLimit(uid, 'withdrawal_status', 10, 60);
+
+  if (!wd.providerReference) {
+    return { withdrawId, status: wd.status, settlementConfirmed: wd.settlementConfirmed === true,
+      checked: false, reason: 'no_provider_reference' };
+  }
+
+  // Exactement la même logique financière que la vérification automatique :
+  // une seule machine d'états, jamais deux implémentations divergentes.
+  const result = await verifyAndApplyWithdrawal({
+    db, admin, withdrawId, data: wd, collectionFor, logAudit, logSecurityEvent,
+    verifier: createPayoutStatusVerifier({
+      axios, token: () => FEEXPAY_TOKEN_SECRET.value(),
+    }),
+  });
+
+  // Jamais de référence, de jeton ni d'URL dans les journaux.
+  console.log(`Statut retrait ${withdrawId} → ${result.outcome || result.reason} (${result.state || '—'})`);
+  return {
+    withdrawId,
+    outcome: result.outcome || null,
+    state: result.state || null,
+    settled: result.state === 'settled',
+    refunded: result.state === 'compensated',
+    checked: result.checked,
+    ...(result.checked ? {} : { reason: result.reason }),
+  };
 });
 
 
@@ -485,8 +872,25 @@ exports.initiateWithdrawal = onCall(async (request) => {
 
 // ── Helpers FCM ─────────────────────────────────────────────────────────────
 
-async function sendToToken(token, title, body, data = {}) {
-  if (!token) return;
+// Préproduction : aucun envoi sans autorisation explicite (notificationGuard.js). Production : garde transparent.
+const notificationGuard = createNotificationGuard({ db });
+// Envoi à des destinataires identifiés [{ role, id, token }] : le garde décide qui reçoit (ctx = { fn, eventId, order }).
+async function guardedSend(ctx, recipients, title, body, data) {
+  const authorized = await notificationGuard.authorize(ctx, recipients);
+  const { tokens, authorization } = authorized;
+  if (!tokens.length) return;
+  if (tokens.length === 1 && !ctx.multicast) {
+    const outcome = await sendToToken(tokens[0], title, body, data, authorization);
+    await notificationGuard.settle(authorized, [{ token: tokens[0], ...outcome }]);
+    return;
+  }
+  const outcomes = await sendToMultipleTokens(tokens, title, body, data, null, authorization);
+  await notificationGuard.settle(authorized, outcomes);
+}
+
+async function sendToToken(token, title, body, data = {}, authorization = null) {
+  if (!token) return { ok: false, code: 'no-token' };
+  if (!notificationGuard.permits(token, authorization)) return { ok: false, code: 'blocked' };
   try {
     await admin.messaging().send({
       token,
@@ -495,6 +899,7 @@ async function sendToToken(token, title, body, data = {}) {
       apns:    { payload: { aps: { sound: 'default', badge: 1 } } },
       data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
     });
+    return { ok: true };
   } catch (err) {
     console.warn(`FCM failed token ${token?.slice(0, 20)} : ${err.message}`);
     // Même détection que sendToMultipleTokens (Prompt 30) — sans ça, les
@@ -506,37 +911,47 @@ async function sendToToken(token, title, body, data = {}) {
         token, detectedAt: admin.firestore.FieldValue.serverTimestamp(),
       }).catch(() => {});
     }
+    return { ok: false, code: err.code || 'unknown' };
   }
 }
 
-async function sendToMultipleTokens(tokens, title, body, data = {}, collectionHint = null) {
-  if (!tokens?.length) return;
+// Renvoie l'issue par token [{ token, ok, code }] (ignorée par les appelants historiques ; utilisée par le garde de préproduction).
+async function sendToMultipleTokens(tokens, title, body, data = {}, collectionHint = null, authorization = null) {
+  if (!tokens?.length) return [];
+  const outcomes = [];
+  const uniqueTokens = [...new Set(tokens.filter((t) => t && notificationGuard.permits(t, authorization)))];
   const dataStr = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
-  try {
-    const result = await admin.messaging().sendEachForMulticast({
-      tokens,
-      notification: { title, body },
-      android: { priority: 'high', notification: { sound: 'default' } },
-      apns:    { payload: { aps: { sound: 'default', badge: 1 } } },
-      data:    dataStr,
-    });
-    // Nettoyer les tokens invalides
-    result.responses.forEach((resp, i) => {
-      if (!resp.success) {
-        const code = resp.error?.code;
-        if (code === 'messaging/registration-token-not-registered' ||
-            code === 'messaging/invalid-registration-token') {
-          console.log(`Token invalide détecté — marqué pour nettoyage: ${tokens[i]?.slice(0, 20)}`);
-          // Nettoyage asynchrone non-bloquant
-          db.collection('invalid_fcm_tokens').add({
-            token: tokens[i], detectedAt: admin.firestore.FieldValue.serverTimestamp(),
-          }).catch(() => {});
+  for (let start = 0; start < uniqueTokens.length; start += 500) {
+    const tokenBatch = uniqueTokens.slice(start, start + 500);
+    try {
+      const result = await admin.messaging().sendEachForMulticast({
+        tokens: tokenBatch,
+        notification: { title, body },
+        android: { priority: 'high', notification: { sound: 'default' } },
+        apns:    { payload: { aps: { sound: 'default', badge: 1 } } },
+        data:    dataStr,
+      });
+      // Nettoyer les tokens invalides
+      result.responses.forEach((resp, i) => {
+        outcomes.push({ token: tokenBatch[i], ok: !!resp.success, code: resp.error?.code });
+        if (!resp.success) {
+          const code = resp.error?.code;
+          if (code === 'messaging/registration-token-not-registered' ||
+              code === 'messaging/invalid-registration-token') {
+            console.log(`Token invalide détecté — marqué pour nettoyage: ${tokenBatch[i]?.slice(0, 20)}`);
+            // Nettoyage asynchrone non-bloquant
+            db.collection('invalid_fcm_tokens').add({
+              token: tokenBatch[i], detectedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }).catch(() => {});
+          }
         }
-      }
-    });
-  } catch (err) {
-    console.warn('Multicast FCM error:', err.message);
+      });
+    } catch (err) {
+      console.warn('Multicast FCM error:', err.message);
+      for (const t of tokenBatch) outcomes.push({ token: t, ok: false, code: err.code || 'exception' });
+    }
   }
+  return outcomes;
 }
 
 // ── Détection du type de service ─────────────────────────────────────────────
@@ -547,7 +962,7 @@ function getServiceType(order) {
   if (st === 'boulangerie') return 'boulangerie';
   if (st === 'seller')      return 'marketplace';
   if (t  === 'pharmacie')   return 'pharmacie';
-  if (t  === 'courses')     return 'courses';
+  if (t  === 'courses' || t === 'shopping') return 'courses';
   return 'livraison';
 }
 
@@ -616,8 +1031,19 @@ const CLIENT_STATUS_MESSAGES = {
 // ─────────────────────────────────────────────────────────────────────────────
 // CLIENT — Confirmation immédiate à la création de commande
 // Tous services confondus (livraison, courses, restaurant, pharmacie…)
+//
+// QUOTA CLOUD RUN (2026-10-02) : les déclencheurs Firestore de notification
+// passent de maxInstances 2 à 1. Le quota régional « total allowable CPU »
+// était saturé (178,5 unités pour 83 fonctions), ce qui empêchait TOUTE mise
+// à jour : une mise à jour fait coexister l'ancienne et la nouvelle révision,
+// et il ne restait plus la marge nécessaire. Sans incidence pratique ici :
+// chaque instance sert jusqu'à 80 événements simultanés (concurrence = 80),
+// très au-delà du volume réel. Les notifications de chat restent à 3
+// (latence ressentie directement par l'utilisateur), et aucune fonction
+// appelée par l'app (onCall) n'est réduite. La correction de fond reste une
+// augmentation du quota côté console GCP.
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyClientOnOrderCreated = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyClientOnOrderCreated = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   try {
     const order = event.data.data();
     if (!order || !order.clientId) return;
@@ -642,19 +1068,52 @@ exports.notifyClientOnOrderCreated = onDocumentCreated({ document: 'orders/{orde
 // CLIENT — Suivi complet par statut, messages adaptés au service
 // Couvre : assigned, broadcast, accepted, picked_up, delivered, cancelled
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
-    if (!before || !after || before.status === after.status) return;
+    if (!before || !after) return;
+    const ctx = { fn: 'notifyClientOnOrderUpdate', eventId: event.id, order: after };
+    const toClient = (t) => [{ role: 'client', id: after.clientId, token: t }];
+
+    // Changement de livreur sans changement de statut (transfert après
+    // récupération) ou remise en file après abandon : le client est prévenu,
+    // le suivi pointe sur le nouveau livreur via order.driverId.
+    const driverSwapped = before.status === after.status && after.status === 'picked_up' &&
+      before.driverId && after.driverId && before.driverId !== after.driverId;
+    const requeued = ['accepted', 'assigned'].includes(before.status) && after.status === 'pending' &&
+      !!before.driverId && !after.driverId;
+    if (driverSwapped || requeued) {
+      const cDoc = await db.collection('clients').doc(after.clientId).get();
+      const cToken = cDoc.data()?.fcmToken;
+      if (!cToken) return;
+      await guardedSend(ctx, toClient(cToken),
+        driverSwapped ? '🔁 Nouveau livreur' : '🔎 Nouveau livreur en recherche',
+        driverSwapped
+          ? 'Votre colis a été confié à un autre livreur. Suivez-le en direct : un nouveau code de livraison sera demandé.'
+          : 'Votre livreur ne peut pas poursuivre. Nous cherchons un autre livreur pour votre commande.',
+        { type: driverSwapped ? 'driver_changed' : 'driver_reassigned', orderId: event.params.orderId, status: after.status });
+      return;
+    }
+    if (before.status === after.status) return;
 
     const clientDoc = await db.collection('clients').doc(after.clientId).get();
     const token     = clientDoc.data()?.fcmToken;
     if (!token) return;
 
+    // Commande Restaurant/Boulangerie v2 jamais acceptée par le partenaire (annulée à 60 min, remboursée intégralement)
+    if (after.status === 'cancelled' && after.cancelReason === 'partner_no_response') {
+      await guardedSend(ctx, toClient(token),
+        '😔 Commande annulée',
+        'Le partenaire n’a pas répondu à votre commande. Elle est annulée et, si vous aviez payé avec le wallet, vous êtes remboursé intégralement.',
+        { type: 'partner_no_response', orderId: event.params.orderId, status: 'cancelled' }
+      );
+      return;
+    }
+
     // Annulation automatique "aucun livreur" — message spécifique
     if (after.status === 'cancelled' && after.cancelReason === 'no_driver_found') {
-      await sendToToken(token,
+      await guardedSend(ctx, toClient(token),
         '😔 Aucun livreur disponible',
         'Nous n\'avons trouvé aucun livreur disponible pour le moment. Vous pouvez réessayer dans quelques minutes.',
         { type: 'no_driver_found', orderId: event.params.orderId, status: 'cancelled' }
@@ -671,7 +1130,7 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
       ? 'driver_found'
       : after.status === 'cancelled' ? 'order_cancelled' : 'order_update';
 
-    await sendToToken(token, notif.title, notif.body, {
+    await guardedSend(ctx, toClient(token), notif.title, notif.body, {
       type:    notifType,
       orderId: event.params.orderId,
       status:  after.status,
@@ -685,15 +1144,14 @@ exports.notifyClientOnOrderUpdate = onDocumentUpdated({ document: 'orders/{order
 // LIVREURS (broadcast) — FCM push à tous les livreurs ciblés simultanément
 // Déclenché quand status → 'broadcast' (transition uniquement)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyBroadcastDrivers = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyBroadcastDrivers = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
     if (!before || !after) return;
-    if (before.status === 'broadcast' || after.status !== 'broadcast') return;
-
-    const driverIds = after.notifiedDriverIds;
-    if (!Array.isArray(driverIds) || driverIds.length === 0) return;
+    // Transition vers broadcast : tous les livreurs ; élargissement du rayon : seulement les nouveaux.
+    const driverIds = newlyNotifiedDriverIds(before, after);
+    if (driverIds.length === 0) return;
 
     const driverDocs = await Promise.all(
       driverIds.map(id => db.collection('livreurs').doc(id).get())
@@ -722,7 +1180,7 @@ exports.notifyBroadcastDrivers = onDocumentUpdated({ document: 'orders/{orderId}
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR (assignation directe) — FCM push quand un seul livreur est désigné
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnAssigned = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriverOnAssigned = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   try {
     const before = event.data.before.data();
     const after  = event.data.after.data();
@@ -755,7 +1213,50 @@ exports.notifyDriverOnAssigned = onDocumentUpdated({ document: 'orders/{orderId}
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Alerte solde bas (< 500 FCFA)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverLowBalance = onDocumentUpdated({ document: 'livreurs/{driverId}', maxInstances: 2 }, async (event) => {
+// SEC-01 / driver_public (phase S5.2) : synchronisation serveur des 7 champs non-GPS
+// (name, photoUrl, isOnline, isAvailable, isOnDelivery, avgRating, ratingCount) vers la
+// projection publique `driver_public/{driverId}`. Les champs GPS restent exclusivement gérés
+// par la double écriture client (S4/S4.1) : jamais lus, écrits ni effacés ici. Idempotent (pas
+// d'écriture si rien n'a changé) ; `retry: true` car un échec transitoire ne doit pas laisser
+// `driver_public` durablement obsolète (aucun montant, aucun statut métier sensible ici).
+// Projection initiale à la création (SEC-01, phase S5.3.1 — réserve S5.3 levée) : un livreur
+// fraîchement créé (driver_requests_page.dart ou fleetDriverCreation.js) obtient immédiatement
+// sa fiche `driver_public` pour les champs non-GPS déjà présents et valides, au lieu d'attendre
+// qu'un de ces champs change après coup. Même module, même validation, aucune nouvelle logique.
+// SEC-01 / S5.3.3 : les données de l'événement (`event.data`) ne sont plus utilisées — création
+// et mise à jour relisent désormais l'état COURANT de `livreurs`/`driver_public` dans une
+// transaction (voir `functions/driverPublicSync.js::reconcileDriverPublicFromSource`), pour ne
+// jamais écrire une valeur périmée si un événement s'exécute en retard par rapport à un autre
+// (RISK A, `docs/SEC01_S5_3_2_CONCURRENCY_AUDIT.md`). Seul `driverId` est tiré de l'événement.
+exports.syncDriverPublicOnLivreurCreate = onDocumentCreated({
+  document: 'livreurs/{driverId}', maxInstances: 1, cpu: 0.5, concurrency: 1,
+  memory: '256MiB', retry: true,
+}, async (event) => {
+  await syncDriverPublicOnCreate({ db, admin, driverId: event.params.driverId });
+});
+
+exports.syncDriverPublicOnLivreurUpdate = onDocumentUpdated({
+  document: 'livreurs/{driverId}', maxInstances: 1, cpu: 0.5, concurrency: 1,
+  memory: '256MiB', retry: true,
+}, async (event) => {
+  await syncDriverPublicOnUpdate({ db, admin, driverId: event.params.driverId });
+});
+
+// Suppression réelle de `livreurs/{driverId}` (ex. "Supprimer le livreur", admin,
+// lib/screens/admin/drivers_page.dart) : la clôture de compte normale (accountDeletion.js)
+// n'efface JAMAIS ce document (anonymisation en place, document conservé) — ce déclencheur ne
+// couvre donc que la suppression directe et définitive, pour ne jamais laisser une fiche
+// publique exposer un livreur qui n'existe plus. SEC-01 / S5.3.3 : relit `livreurs` dans une
+// transaction avant de supprimer — si le document a été recréé entre-temps (événement de
+// suppression en retard), la suppression de `driver_public` est annulée (RISK B).
+exports.syncDriverPublicOnLivreurDelete = onDocumentDeleted({
+  document: 'livreurs/{driverId}', maxInstances: 1, cpu: 0.25, concurrency: 1,
+  memory: '256MiB', retry: true,
+}, async (event) => {
+  await syncDriverPublicOnDelete({ db, driverId: event.params.driverId });
+});
+
+exports.notifyDriverLowBalance = onDocumentUpdated({ document: 'livreurs/{driverId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -772,7 +1273,7 @@ exports.notifyDriverLowBalance = onDocumentUpdated({ document: 'livreurs/{driver
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Mission terminée (livraison confirmée)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnMissionEnd = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriverOnMissionEnd = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -799,7 +1300,7 @@ exports.notifyDriverOnMissionEnd = onDocumentUpdated({ document: 'orders/{orderI
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVREUR — Annulation d'une commande (broadcast, assigné ou accepté)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriverOnOrderCancelled = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriverOnOrderCancelled = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -849,7 +1350,7 @@ exports.notifyDriverOnOrderCancelled = onDocumentUpdated({ document: 'orders/{or
 // PARTENAIRES — Notification à la création de commande
 // Restaurant, pharmacie, boulangerie, marketplace — inchangés
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyRestaurantOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyRestaurantOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'restaurant' || !order.sellerId) return;
 
@@ -868,14 +1369,16 @@ exports.notifyRestaurantOnOrder = onDocumentCreated({ document: 'orders/{orderId
   if (!token) return;
 
   const desc = (order.description ?? 'Commande').substring(0, 60);
-  await sendToToken(token,
+  // Le token vient du propriétaire ou, à défaut, du restaurant : dans les deux cas le destinataire est le restaurant sellerId.
+  await guardedSend({ fn: 'notifyRestaurantOnOrder', eventId: event.id, order },
+    [{ role: 'restaurant', id: order.sellerId, token }],
     '🍽️ Nouvelle commande !',
     `${desc} — ${order.budget ?? 0} FCFA`,
     { type: 'new_seller_order', orderId: event.params.orderId, sellerType: 'restaurant' }
   );
 });
 
-exports.notifyPharmacieOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyPharmacieOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.type !== 'pharmacie' || !order.pharmacieId) return;
 
@@ -890,7 +1393,7 @@ exports.notifyPharmacieOnOrder = onDocumentCreated({ document: 'orders/{orderId}
   );
 });
 
-exports.notifyBoulangerieOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyBoulangerieOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'boulangerie' || !order.sellerId) return;
 
@@ -908,7 +1411,31 @@ exports.notifyBoulangerieOnNewOrder = onDocumentCreated({ document: 'orders/{ord
   );
 });
 
-exports.notifySellerOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+// Client — suivi de préparation des commandes boulangerie. Ces transitions
+// utilisent sellerStatus sans modifier le statut logistique de la commande.
+exports.notifyClientOnBoulangeriePreparation = onDocumentUpdated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!before || !after || after.sellerType !== 'boulangerie') return;
+  if (before.sellerStatus === after.sellerStatus) return;
+
+  const notifications = {
+    preparing: { title: '🥐 Préparation en cours', body: 'La boulangerie prépare votre commande.' },
+    ready: { title: '✅ Commande prête', body: 'Votre commande est prête pour la livraison.' },
+  };
+  const notif = notifications[after.sellerStatus];
+  if (!notif || !after.clientId) return;
+
+  const clientDoc = await db.collection('clients').doc(after.clientId).get();
+  const token = clientDoc.data()?.fcmToken;
+  if (!token) return;
+
+  await sendToToken(token, notif.title, notif.body, {
+    type: 'order_update', orderId: event.params.orderId, status: after.sellerStatus,
+  });
+});
+
+exports.notifySellerOnOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.sellerType !== 'seller' || !order.sellerId) return;
 
@@ -934,7 +1461,7 @@ exports.notifySellerOnOrder = onDocumentCreated({ document: 'orders/{orderId}', 
 // Exclut les commandes partenaires (restaurant/boulangerie/pharmacie/marketplace)
 // car celles-ci passent par notifyDriverOnAssigned / notifyBroadcastDrivers
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || (order.status && order.status !== 'pending')) return;
 
@@ -947,12 +1474,14 @@ exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId
   if (partnerOrder) return;
 
   const snapshot = await db.collection('livreurs').where('isOnline', '==', true).limit(50).get();
-  const tokens   = snapshot.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
-  if (!tokens.length) return;
+  const recipients = snapshot.docs
+    .map(d => ({ role: 'driver', id: d.id, token: d.data().fcmToken }))
+    .filter(r => r.token?.length > 10);
+  if (!recipients.length) return;
 
   const budget = order.budget ?? 0;
   const desc   = (order.description ?? 'Livraison').substring(0, 60);
-  await sendToMultipleTokens(tokens,
+  await guardedSend({ fn: 'notifyDriversOnNewOrder', eventId: event.id, order, multicast: true }, recipients,
     '🛵 Nouvelle course disponible !',
     `${desc} — ${budget} FCFA`,
     { type: 'new_order', orderId: event.params.orderId, budget: String(budget) }
@@ -968,6 +1497,9 @@ exports.notifyDriversOnNewOrder = onDocumentCreated({ document: 'orders/{orderId
 const EK_CLIENT_MESSAGES = {
   assigned:         { title: '👤 Agent trouvé !',          body: 'Un agent a pris en charge votre demande.' },
   awaiting_deposit: { title: '💰 Dépôt requis',            body: 'Votre agent attend votre dépôt pour démarrer.' },
+  deposit_proof_sent: { title: '📨 Preuve envoyée',        body: 'Votre preuve est en attente de validation par l’agent.' },
+  deposit_confirmed: { title: '✅ Dépôt confirmé',         body: 'Votre agent peut maintenant commencer l’opération.' },
+  deposit_rejected: { title: '⚠️ Preuve rejetée',          body: 'Votre agent a rejeté la preuve. Vous pouvez en envoyer une nouvelle.' },
   in_progress:      { title: '⏳ Traitement en cours',     body: 'Votre agent traite votre dossier.' },
   proof_sent:       { title: '📄 Justificatif envoyé',     body: 'Votre agent a envoyé le justificatif. Vérifiez.' },
   completed:        { title: '✅ Transaction terminée',    body: 'Votre demande E-Kbine a été complétée avec succès.' },
@@ -976,7 +1508,7 @@ const EK_CLIENT_MESSAGES = {
 };
 
 // ─── Client — Confirmation à la création ────────────────────────────────────
-exports.notifyEkClientOnOrderCreated = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkClientOnOrderCreated = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || !order.clientId) return;
 
@@ -993,7 +1525,7 @@ exports.notifyEkClientOnOrderCreated = onDocumentCreated({ document: 'ekbine_ord
 });
 
 // ─── Client — Suivi par statut ───────────────────────────────────────────────
-exports.notifyEkClientOnStatusChange = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkClientOnStatusChange = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after || before.status === after.status) return;
@@ -1014,13 +1546,21 @@ exports.notifyEkClientOnStatusChange = onDocumentUpdated({ document: 'ekbine_ord
 });
 
 // ─── Agents disponibles — Nouvelle demande E-Kbine ──────────────────────────
-exports.notifyEkAgentsOnNewOrder = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkAgentsOnNewOrder = onDocumentCreated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const order = event.data.data();
   if (!order || order.status !== 'pending') return;
 
-  // Chercher les agents actifs (subscriptionActive ou trialActive)
+  // Chercher les agents en ligne — `isActive` n'a jamais existé dans le
+  // schéma réel de ekbine_agents (seuls isOnline/isVerified/isSuspended/
+  // subscriptionStatus existent), donc cette requête ne renvoyait jamais
+  // aucun document depuis l'origine : aucun agent n'a jamais reçu cette
+  // notification. `isOnline` est le champ réel déjà utilisé partout
+  // ailleurs (toggleAgentOnline, streamPendingForAgent). L'éligibilité
+  // complète (isVerified/isSuspended/subscriptionStatus) reste de toute
+  // façon revérifiée par isEligibleAgent() au moment de l'acceptation
+  // (ekbineAcceptOrder) — être notifié n'accorde aucun droit en soi.
   const agentsSnap = await db.collection('ekbine_agents')
-    .where('isActive', '==', true)
+    .where('isOnline', '==', true)
     .get();
 
   const tokens = agentsSnap.docs
@@ -1039,7 +1579,7 @@ exports.notifyEkAgentsOnNewOrder = onDocumentCreated({ document: 'ekbine_orders/
 });
 
 // ─── Agent — Confirmation d'assignation ─────────────────────────────────────
-exports.notifyEkAgentOnAssigned = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkAgentOnAssigned = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -1061,7 +1601,7 @@ exports.notifyEkAgentOnAssigned = onDocumentUpdated({ document: 'ekbine_orders/{
 });
 
 // ─── Agent — Mission Ekbine terminée ────────────────────────────────────────
-exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 2 }, async (event) => {
+exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after) return;
@@ -1078,7 +1618,7 @@ exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/
   await sendToToken(token,
     '✅ Mission accomplie !',
     `Transaction E-Kbine complétée.${earning ? ` Gain : +${earning} FCFA.` : ''}`,
-    { type: 'mission_end', orderId: event.params.orderId }
+    { type: 'ek_mission_end', orderId: event.params.orderId }
   );
 });
 
@@ -1090,7 +1630,24 @@ exports.notifyEkAgentOnCompleted = onDocumentUpdated({ document: 'ekbine_orders/
 // Master Prompt 122 — quota CPU Cloud Run régional : fonction utilisateur
 // secondaire (Groupe B), réduction légère de maxInstances uniquement (cpu
 // inchangé, l'utilisateur attend une réponse en direct sur cet écran).
-exports.resetAccountPassword = onCall({ maxInstances: 2 }, async (request) => {
+exports.resetAccountPassword = onCall({ maxInstances: 2 }, buildResetAccountPassword({
+  db,
+  auth: admin.auth(),
+  fieldValue: admin.firestore.FieldValue,
+  hashSecret,
+  checkRateLimit,
+}));
+// maxInstances 5 → 2 : même raison de quota Cloud Run que ci-dessus.
+exports.manageProfessionalSubscription = onCall({ maxInstances: 2 },
+  buildManageProfessionalSubscription({
+    db,
+    auth: admin.auth(),
+    timestamp: admin.firestore.Timestamp,
+    fieldValue: admin.firestore.FieldValue,
+  }));
+/* Ancienne implementation desactivee: elle ne garantissait pas une resolution
+ * unique du numero verifie vers l'UID Firebase Auth cible.
+const resetAccountPasswordLegacy = async (request) => {
   // Le caller doit être authentifié via vérification téléphonique (OTP)
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Authentification requise');
@@ -1178,6 +1735,7 @@ exports.resetAccountPassword = onCall({ maxInstances: 2 }, async (request) => {
   await admin.auth().updateUser(uid, { password: String(newValue) });
   return { success: true };
 });
+*/
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1227,67 +1785,66 @@ exports.checkClientPhone = onCall({ maxInstances: 2 }, async (request) => {
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe C, réduction
 // modérée de maxInstances, cpu inchangé.
 exports.submitServiceProviderApplication = onCall({ maxInstances: 2 }, async (request) => {
-  const { name, phone, address, description, subcategory, category, photos, lat, lng, docId } = request.data;
-  if (!name || !phone || !address || !subcategory) {
-    throw new HttpsError('invalid-argument', 'Nom, téléphone, adresse et catégorie requis');
-  }
+  // Forme et taille des champs validées avant toute écriture (module testé).
+  const { name, phone, address, description, subcategory, category, photos, lat, lng, docId } =
+    sanitizeApplication(request.data);
 
-  await checkRateLimit(`sp_apply_${phone}`, 'service_provider_apply', 5, 3600);
+  await enforceApplicationLimits({ checkRateLimit, request, phone });
 
   // Réutilise l'ID généré côté client (avant l'appel, pour uploader les
   // photos au bon chemin Storage service_providers/{docId}/...) si fourni.
   const docRef = docId ? db.collection('service_providers').doc(String(docId))
                         : db.collection('service_providers').doc();
-  await docRef.set({
-    name:        String(name),
-    phone:       String(phone),
-    address:     String(address),
-    description: description ? String(description) : '',
-    subcategory: String(subcategory),
-    category:    category ? String(category) : 'artisans',
-    photos:      Array.isArray(photos) ? photos.slice(0, 10).map(String) : [],
-    lat:         typeof lat === 'number' ? lat : 0,
-    lng:         typeof lng === 'number' ? lng : 0,
+
+  // Une seule demande ou un seul compte par numéro (hors demande refusée) :
+  // un réessai de la MÊME demande renvoie le même identifiant ; l'ancien
+  // `set()` écrasait n'importe quel document dont l'identifiant était connu.
+  const sameNumber = await db.collection('service_providers')
+    .where('phone', '==', phone).limit(10).get();
+  const blocking = sameNumber.docs.filter((d) => d.data().status !== 'rejected');
+  if (blocking.some((d) => d.id === docRef.id)) return { docId: docRef.id };
+  if (blocking.length > 0) {
+    throw new HttpsError('already-exists', 'Une demande ou un compte existe déjà pour ce numéro');
+  }
+
+  await docRef.create({
+    name, phone, address, description, subcategory, category, photos, lat, lng,
     isAvailable: false,
     isVerified:  false,
     status:      'pending',
     rating:      0,
     ratingCount: 0,
-    artisanPin:  '',
+    // LOT 6.2 SECURITY : plus de placeholder artisanPin ici — le PIN n'est
+    // désormais jamais présent en clair sur ce document, même vide ; il est
+    // défini exclusivement par setArtisanPin (haché, artisan_credentials)
+    // au moment de l'approbation.
     createdAt:   admin.firestore.FieldValue.serverTimestamp(),
   });
 
   return { docId: docRef.id };
 });
 
+// LOT 6 SECURITY (2026-09) — ne compare plus jamais le PIN en clair via une
+// requête Firestore directe (`where('artisanPin','==',pin)`), qui exigeait
+// structurellement que le PIN reste lisible en clair dans le document
+// (et l'était : service_providers a `allow read: if isAuth()`, donc N'IMPORTE
+// QUEL utilisateur authentifié pouvait lire le PIN de n'importe quel artisan
+// simplement en lisant son document — confirmé exploitable, pas théorique).
+// Recherche désormais par téléphone seul, puis vérifie le PIN contre
+// artisan_credentials/{providerId} (haché, CF-only, jamais exposé par les
+// Repli public uniquement en absence de credential prive.
+// LOT 7.4 phase A : les comptes historiques restent acceptes sans creation
+// de credential ni suppression du PIN public. Aucune migration au login.
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
 // légère de maxInstances uniquement.
-exports.artisanLogin = onCall({ maxInstances: 2 }, async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'Authentification requise');
-  }
-  const { phone, pin } = request.data;
-  if (!phone || !pin) {
-    throw new HttpsError('invalid-argument', 'Téléphone et PIN requis');
-  }
-
-  await checkRateLimit(`artisan_login_${phone}`, 'artisan_login', 10, 300);
-
-  const snap = await db.collection('service_providers')
-    .where('phone', '==', phone)
-    .where('artisanPin', '==', pin)
-    .limit(1)
-    .get();
-  if (snap.empty) return { success: false };
-
-  const doc = snap.docs[0];
-  const uid = request.auth.uid;
-  if (doc.data().artisanUid !== uid) {
-    await doc.ref.update({ artisanUid: uid });
-  }
-
-  return { success: true, docId: doc.id, data: doc.data() };
-});
+const { buildArtisanLogin, buildSetArtisanPin } = require('./artisanAccounts');
+const { sanitizeApplication, enforceApplicationLimits } = require('./serviceProviderApplication');
+exports.artisanLogin = onCall({ maxInstances: 2 }, buildArtisanLogin({
+  db, checkRateLimit,
+}));
+exports.setArtisanPin = onCall({ maxInstances: 2 }, buildSetArtisanPin({
+  db, fieldValue: admin.firestore.FieldValue,
+}));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTHENTIFICATION PHARMACIE — mot de passe haché (pharmacie_credentials)
@@ -1299,6 +1856,9 @@ exports.artisanLogin = onCall({ maxInstances: 2 }, async (request) => {
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe B, réduction
 // légère de maxInstances uniquement.
 exports.pharmacieLogin = onCall({ maxInstances: 2 }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Authentification requise');
+  }
   const { pharmacieId, password } = request.data;
   if (!pharmacieId || !password) {
     throw new HttpsError('invalid-argument', 'Paramètres manquants');
@@ -1311,14 +1871,19 @@ exports.pharmacieLogin = onCall({ maxInstances: 2 }, async (request) => {
   if (!pharmacieSnap.exists) return { success: false };
   const data = pharmacieSnap.data();
 
+  if (data.isDeleted === true) return { success: false };
+
   const credRef  = db.collection('pharmacie_credentials').doc(pharmacieId);
   const credSnap = await credRef.get();
 
   if (credSnap.exists) {
     const ok = verifySecret(password, credSnap.data().hash);
-    return ok
-      ? { success: true, mustChangePassword: data.mustChangePassword === true }
-      : { success: false };
+    if (!ok) return { success: false };
+    // La liaison de session est créée uniquement après preuve du mot de passe.
+    // Les règles Firestore peuvent ensuite autoriser ce seul propriétaire à
+    // actualiser fcmToken sans permettre une auto-attribution cross-user.
+    await pharmacieRef.update({ currentUid: request.auth.uid });
+    return { success: true, mustChangePassword: data.mustChangePassword === true };
   }
 
   // Pas encore migrée — comparer avec l'ancien champ en clair, puis migrer.
@@ -1334,6 +1899,7 @@ exports.pharmacieLogin = onCall({ maxInstances: 2 }, async (request) => {
   await pharmacieRef.update({
     password:   admin.firestore.FieldValue.delete(),
     accessCode: admin.firestore.FieldValue.delete(),
+    currentUid: request.auth.uid,
   });
 
   return { success: true, mustChangePassword: data.mustChangePassword === true };
@@ -1363,13 +1929,21 @@ exports.setPharmaciePassword = onCall({ maxInstances: 2 }, async (request) => {
   if (!pharmacieSnap.exists) {
     throw new HttpsError('not-found', 'Pharmacie introuvable');
   }
+  // Mission 7E-68 : ni mot de passe, ni accès, pour une pharmacie supprimée ou dont le propriétaire est en suppression.
+  await assertTargetNotClosing(db, HttpsError, [String(pharmacieId), pharmacieSnap.data().currentUid], pharmacieSnap.data());
 
-  const adminSnap      = await db.collection('admins').doc(uid).get();
-  const isCallerAdmin  = adminSnap.exists && adminSnap.data().isActive !== false;
   const isCallerOwner  = pharmacieSnap.data().currentUid === uid;
-
-  if (!isCallerAdmin && !isCallerOwner) {
-    throw new HttpsError('permission-denied', 'Non autorisé');
+  let isCallerAdmin = false;
+  if (!isCallerOwner) {
+    await requireAdminPermission({ request, db, permission: 'pharmacies' });
+    isCallerAdmin = true;
+  } else {
+    try {
+      await requireAdminPermission({ request, db, permission: 'pharmacies' });
+      isCallerAdmin = true;
+    } catch (_) {
+      // The linked pharmacy owner retains the established self-service flow.
+    }
   }
   if (!isCallerAdmin) {
     await checkRateLimit(uid, 'set_pharmacie_password', 5, 3600);
@@ -1406,17 +1980,16 @@ exports.setPharmaciePassword = onCall({ maxInstances: 2 }, async (request) => {
 // Master Prompt 122 — quota CPU Cloud Run régional : Groupe C, réduction
 // modérée de maxInstances, cpu inchangé.
 exports.createSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Non authentifié');
-
-  const callerDoc = await db.collection('admins').doc(request.auth.uid).get();
-  if (!callerDoc.exists || callerDoc.data().role !== 'super') {
-    throw new HttpsError('permission-denied', 'Réservé à l\'admin principal');
-  }
+  await requireSuperAdmin({ request, db });
 
   const { name, email, password, phone, permissions } = request.data;
   if (!name || !email || !password) {
     throw new HttpsError('invalid-argument', 'Champs name, email, password requis');
   }
+  // Clés inconnues refusées AVANT toute création de compte (liste officielle).
+  let cleanPermissions;
+  try { cleanPermissions = validatePermissions(permissions); }
+  catch (e) { throw new HttpsError('invalid-argument', e.message); }
 
   await checkRateLimit(request.auth.uid, 'create_admin', 10, 3600);
 
@@ -1427,7 +2000,7 @@ exports.createSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
     email,
     phone:       phone || '',
     role:        'sub',
-    permissions: permissions || [],
+    permissions: cleanPermissions,
     isActive:    true,
     createdAt:   admin.firestore.FieldValue.serverTimestamp(),
     createdBy:   request.auth.uid,
@@ -1438,12 +2011,7 @@ exports.createSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
 });
 
 exports.deleteSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Non authentifié');
-
-  const callerDoc = await db.collection('admins').doc(request.auth.uid).get();
-  if (!callerDoc.exists || callerDoc.data().role !== 'super') {
-    throw new HttpsError('permission-denied', 'Réservé à l\'admin principal');
-  }
+  await requireSuperAdmin({ request, db });
 
   const { uid } = request.data;
   if (!uid) throw new HttpsError('invalid-argument', 'uid manquant');
@@ -1459,11 +2027,11 @@ exports.deleteSubAdmin = onCall({ maxInstances: 2 }, async (request) => {
 });
 
 // ─── Notify admins on new driver registration ────────────────────────────────
-exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{driverId}', maxInstances: 2 }, async (event) => {
+exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{driverId}', maxInstances: 1 }, async (event) => {
   const driver = event.data.data();
   if (!driver) return;
-  const snap = await db.collection('admins').where('isActive', '!=', false).get();
-  const tokens = snap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
+  const snap = await db.collection('admins').where('isActive', '==', true).get();
+  const tokens = adminNotificationTokens(snap.docs, NOTIFICATION_PERMISSION.admin_new_driver);
   if (!tokens.length) return;
   await sendToMultipleTokens(tokens,
     '🛵 Nouvelle demande livreur',
@@ -1473,11 +2041,11 @@ exports.notifyAdminsOnNewDriver = onDocumentCreated({ document: 'livreurs/{drive
 });
 
 // ─── Notify admins on new service provider pending request ───────────────────
-exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'service_providers/{id}', maxInstances: 2 }, async (event) => {
+exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'service_providers/{id}', maxInstances: 1 }, async (event) => {
   const provider = event.data.data();
   if (!provider || provider.status !== 'pending') return;
-  const snap = await db.collection('admins').where('isActive', '!=', false).get();
-  const tokens = snap.docs.map(d => d.data().fcmToken).filter(t => t?.length > 10);
+  const snap = await db.collection('admins').where('isActive', '==', true).get();
+  const tokens = adminNotificationTokens(snap.docs, NOTIFICATION_PERMISSION.admin_new_service_provider);
   if (!tokens.length) return;
   await sendToMultipleTokens(tokens,
     '🏪 Nouveau prestataire en attente',
@@ -1488,7 +2056,7 @@ exports.notifyAdminsOnNewServiceProvider = onDocumentCreated({ document: 'servic
 
 // ═══════════════════════════════════════════════════════════════════════════
 
-exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_requests/{reqId}', maxInstances: 2 }, async (event) => {
+exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_requests/{reqId}', maxInstances: 1 }, async (event) => {
   const before = event.data.before.data();
   const after  = event.data.after.data();
   if (!before || !after || before.status === after.status || after.status !== 'approved') return;
@@ -1505,58 +2073,141 @@ exports.notifyClientOnRecharge = onDocumentUpdated({ document: 'recharge_request
 });
 
 // ─── E-KBINE — Confirmation commande client (remplace l'écriture Firestore directe) ──
-exports.ekClientConfirmOrder = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'Authentification requise');
-  }
-  const uid     = request.auth.uid;
-  const orderId = request.data.orderId;
-  if (!orderId || typeof orderId !== 'string') {
-    throw new HttpsError('invalid-argument', 'orderId manquant');
-  }
+const { buildEkCreateOrder, buildEkCancelOrder, buildEkClientConfirmOrder, buildEkbineAcceptOrder } = require('./ekbineOrders');
+// Logique dans ekbineOrders.js : l'agent n'est credite que du montant prouve debite (voir docs/FINANCIAL_EKBINE_2026-11-03.md).
+exports.ekClientConfirmOrder = buildEkClientConfirmOrder({
+  db, admin, onCall: (h) => onCallClosing('ekClientConfirmOrder', { maxInstances: 2, cpu: 0.5 }, h), HttpsError, checkRateLimit,
+});
 
-  const orderRef = db.collection('ekbine_orders').doc(orderId);
+exports.notifyEkAgentOnDepositProof = onDocumentUpdated({ document: 'ekbine_orders/{orderId}', maxInstances: 1 }, async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!before || !after || before.status === 'deposit_proof_sent' || after.status !== 'deposit_proof_sent') return;
+  if (!after.agentId) return;
+  const agent = await db.collection('ekbine_agents').doc(after.agentId).get();
+  const token = agent.data()?.fcmToken;
+  if (!token) return;
+  await sendToToken(token, '📨 Preuve de dépôt reçue', 'Vérifiez la preuve avant de confirmer la réception.', {
+    type: 'ek_deposit_proof', orderId: event.params.orderId,
+  });
+});
+
+// E-Kbine deposit gate. These callables own every transition before service
+// execution so a client cannot self-confirm and an agent cannot start early.
+// Logique dans ekbineOrders.js : commande wallet à débit prouvé → 'deposit_confirmed' (aucun second paiement demandé).
+exports.ekbineAcceptOrder = buildEkbineAcceptOrder({ db, admin, onCall, HttpsError });
+
+// Only the authenticated agent can change deposit accounts. Historical
+// operatorNumbers are retained; this callable migrates them on first save.
+exports.ekbineUpdateDepositAccounts = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
+  const incoming = request.data?.depositAccounts;
+  if (!Array.isArray(incoming) || incoming.length > 20) {
+    throw new HttpsError('invalid-argument', 'Liste de numéros invalide');
+  }
+  const validOperators = new Set(['orange', 'mtn', 'moov', 'wave']);
+  const agentRef = db.collection('ekbine_agents').doc(request.auth.uid);
   await db.runTransaction(async (tx) => {
-    const orderSnap = await tx.get(orderRef);
-    if (!orderSnap.exists) throw new HttpsError('not-found', 'Commande introuvable');
-    const order = orderSnap.data();
-    // Vérifier que c'est bien le client propriétaire
-    if (order.clientId !== uid) throw new HttpsError('permission-denied', 'Non autorisé');
-    // Vérifier le statut
-    if (order.status !== 'proof_sent') throw new HttpsError('failed-precondition', 'Statut invalide');
-    const agentId  = order.agentId;
-    const earning  = order.agentEarning;
-    if (!agentId || typeof earning !== 'number' || earning <= 0) {
-      throw new HttpsError('invalid-argument', 'Données commande invalides');
+    const snap = await tx.get(agentRef);
+    if (!snap.exists) throw new HttpsError('not-found', 'Agent introuvable');
+    const seen = new Set();
+    const primaryByOperator = new Set();
+    const normalized = incoming.map((raw) => {
+      const operator = String(raw?.operator || '').toLowerCase();
+      const phoneNumber = String(raw?.phoneNumber || '').replace(/[^0-9]/g, '').replace(/^225/, '');
+      if (!validOperators.has(operator) || phoneNumber.length < 8 || phoneNumber.length > 12) {
+        throw new HttpsError('invalid-argument', 'Numéro ou opérateur invalide');
+      }
+      const key = `${operator}:${phoneNumber}`;
+      if (seen.has(key)) throw new HttpsError('already-exists', 'Numéro de dépôt en double');
+      seen.add(key);
+      const isActive = raw?.isActive !== false;
+      const isPrimary = raw?.isPrimary === true && isActive;
+      if (isPrimary && primaryByOperator.has(operator)) {
+        throw new HttpsError('failed-precondition', 'Un seul numéro principal actif par opérateur');
+      }
+      if (isPrimary) primaryByOperator.add(operator);
+      return {
+        id: typeof raw?.id === 'string' && raw.id.length <= 80 ? raw.id : crypto.randomUUID(),
+        operator, phoneNumber, label: typeof raw?.label === 'string' ? raw.label.trim().slice(0, 60) : null,
+        isPrimary, isActive, updatedAt: admin.firestore.Timestamp.now(),
+      };
+    });
+    if (!normalized.some((account) => account.isActive)) {
+      throw new HttpsError('failed-precondition', 'Au moins un numéro actif est requis');
     }
-    const agRef = db.collection('ekbine_agents').doc(agentId);
-    const agentSnap = await tx.get(agRef);
-    if (!agentSnap.exists) throw new HttpsError('not-found', 'Agent introuvable');
+    const legacy = snap.data().operatorNumbers || {};
+    for (const [operator, number] of Object.entries(legacy)) {
+      if (!normalized.some((account) => account.operator === operator && account.phoneNumber === String(number).replace(/[^0-9]/g, '').replace(/^225/, ''))) {
+        normalized.push({ id: `legacy_${operator}`, operator, phoneNumber: String(number).replace(/[^0-9]/g, '').replace(/^225/, ''), label: 'Historique', isPrimary: false, isActive: true, updatedAt: admin.firestore.Timestamp.now() });
+      }
+    }
+    tx.update(agentRef, { depositAccounts: normalized, depositAccountsUpdatedAt: admin.firestore.FieldValue.serverTimestamp() });
+  });
+  return { success: true };
+});
 
-    tx.update(orderRef, {
-      status:      'completed',
-      completedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    tx.update(agRef, {
-      walletBalance:  admin.firestore.FieldValue.increment(earning),
-      totalCompleted: admin.firestore.FieldValue.increment(1),
-      lastOrderId:    orderId,
-    });
-
-    // Audit log
-    const auditRef = db.collection('audit_logs').doc();
-    tx.set(auditRef, {
-      userId:    uid,
-      userType:  'client',
-      action:    'ekbine_confirm_order',
-      targetId:  orderId,
-      amount:    earning,
-      agentId:   agentId,
-      status:    'success',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+exports.ekbineSubmitDepositProof = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
+  const { orderId, depositProofUrl, transactionReference } = request.data || {};
+  if (typeof orderId !== 'string' || typeof depositProofUrl !== 'string' || depositProofUrl.length > 2048) {
+    throw new HttpsError('invalid-argument', 'Preuve de dépôt invalide');
+  }
+  const ref = db.collection('ekbine_orders').doc(orderId);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('not-found', 'Commande introuvable');
+    const order = snap.data();
+    if (order.clientId !== request.auth.uid) throw new HttpsError('permission-denied', 'Non autorisé');
+    if (!['awaiting_deposit', 'deposit_rejected'].includes(order.status)) {
+      throw new HttpsError('failed-precondition', 'La preuve ne peut pas être envoyée maintenant');
+    }
+    tx.update(ref, {
+      depositProofUrl,
+      transactionReference: typeof transactionReference === 'string' ? transactionReference.trim().slice(0, 100) : null,
+      depositRejectionReason: admin.firestore.FieldValue.delete(),
+      status: 'deposit_proof_sent',
+      depositProofSentAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   });
   return { success: true };
+});
+
+exports.ekbineAgentDepositAction = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Authentification requise');
+  const { orderId, action, rejectionReason } = request.data || {};
+  if (typeof orderId !== 'string' || !['confirm', 'reject', 'start'].includes(action)) {
+    throw new HttpsError('invalid-argument', 'Action de dépôt invalide');
+  }
+  const ref = db.collection('ekbine_orders').doc(orderId);
+  const agentRef = db.collection('ekbine_agents').doc(request.auth.uid);
+  let alreadyConfirmed = false;
+  await db.runTransaction(async (tx) => {
+    const [snap, agentSnap] = await Promise.all([tx.get(ref), tx.get(agentRef)]);
+    if (!snap.exists || !agentSnap.exists) throw new HttpsError('not-found', 'Commande ou agent introuvable');
+    const order = snap.data();
+    if (order.agentId !== request.auth.uid || !isEligibleAgent(agentSnap.data())) {
+      throw new HttpsError('permission-denied', 'Agent non autorisé');
+    }
+    if (action === 'confirm') {
+      if (order.status === 'deposit_confirmed') { alreadyConfirmed = true; return; }
+      if (order.status !== 'deposit_proof_sent' || !order.depositProofUrl) {
+        throw new HttpsError('failed-precondition', 'Aucune preuve à confirmer');
+      }
+      tx.update(ref, { status: 'deposit_confirmed', depositConfirmedAt: admin.firestore.FieldValue.serverTimestamp() });
+    } else if (action === 'reject') {
+      if (order.status !== 'deposit_proof_sent') throw new HttpsError('failed-precondition', 'Preuve non rejetable');
+      tx.update(ref, {
+        status: 'deposit_rejected',
+        depositRejectionReason: typeof rejectionReason === 'string' ? rejectionReason.trim().slice(0, 300) : 'Preuve non validée',
+        depositRejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } else {
+      if (order.status !== 'deposit_confirmed') throw new HttpsError('failed-precondition', 'Dépôt non confirmé');
+      tx.update(ref, { status: 'in_progress', startedAt: admin.firestore.FieldValue.serverTimestamp() });
+    }
+  });
+  return { success: true, alreadyConfirmed };
 });
 
 
@@ -1578,6 +2229,28 @@ exports.autoExpireOrders = onSchedule({
   // schedulers (Groupe D) qui, eux, passent aussi à cpu:0.5.
   maxInstances:   1,
 }, async () => {
+  // L'expiration / remboursement passe toujours en premier ; la reprise du
+  // dispatch (I2) ne s'exécute qu'ensuite et ne peut jamais la bloquer.
+  try {
+    await expireStaleOrders();
+  } finally {
+    await retryPendingDispatch({ db, admin, dispatchOrder, DispatchError, observe: (id, o) => observeOrderTariff(db, id, o),
+      onExhausted: (orderId, order, reason) => alertDispatchExhausted({ db, sendToToken, logAudit, orderId, order, reason }) });
+    // I3 : alertes (lecture seule, aucune action sur les commandes), toutes les 5 minutes.
+    if (Math.floor(Date.now() / 60000) % 5 === 0) {
+      await scanStuckOrders({ db, admin, sendToToken, logAudit })
+        .catch((err) => console.error('[stuckOrders]', err.message));
+      // 7B-3B-C : alerte (sans sanction) sur les reversements cash v2 non confirmés après 24 h.
+      await scanOverdueCashRemittances({ db, sendToToken, logAudit })
+        .catch((err) => console.error('[cashRemittance]', err.message));
+      // 7C-1 : commandes v2 sans réponse du partenaire, ou préparées sans livreur (plus d'expiration automatique).
+      await scanPartnerOrderWaits({ db, sendToToken, logAudit })
+        .catch((err) => console.error('[partnerOrderWaits]', err.message));
+    }
+  }
+});
+
+async function expireStaleOrders() {
   const now       = admin.firestore.Timestamp.now();
   const tenMinAgo = new admin.firestore.Timestamp(now.seconds - 600, now.nanoseconds);
 
@@ -1595,113 +2268,20 @@ exports.autoExpireOrders = onSchedule({
     const order   = doc.data();
 
     try {
-      // Transaction atomique — protège contre la race condition avec acceptOrder()
-      await db.runTransaction(async (tx) => {
-        const fresh = await tx.get(doc.ref);
-        if (!fresh.exists) return;
-        const freshData = fresh.data();
+      // Commande partenaire v2 pas encore acceptée : le partenaire a 60 min pour répondre (alerte admin à 10 min) ; la
+      // décision finale (annulation + remboursement) est reprise dans la transaction d'expiration.
+      if (order.amountsVersion === 2 && !order.partnerAcceptedAtMs
+        && Date.now() - (order.createdAt?.toMillis?.() || Date.now()) < PARTNER_RESPONSE_TIMEOUT_MS) continue;
+      // Transaction atomique — protège contre la race condition avec acceptOrder().
+      // Logique (annulation, remboursement client, reprise vendeur, métriques)
+      // dans orderRefunds.js pour être testée.
+      const expiry = await db.runTransaction((tx) => expireOrderTx(tx, { db, admin, orderRef: doc.ref, orderId }));
+      // Rien n'a été expiré (acceptée entre-temps, délai v2 non écoulé...) : ni règlement ni journal « annulée ».
+      if (expiry && expiry.expired === false) continue;
 
-        // Vérifier que le statut est encore annulable (un livreur a peut-être accepté)
-        if (!['pending', 'broadcast', 'assigned'].includes(freshData.status)) return;
-
-        const willRefund = freshData.paymentMethod === 'wallet' && freshData.isPaid === true;
-        // Marketplace ('seller') est crédité en entier à la création de la
-        // commande (voir PREPAID_PARTNER_TYPES, Master Prompt 46) — sans ce
-        // débit en retour, l'expiration automatique créerait de l'argent à
-        // partir de rien (client remboursé + vendeur déjà payé), exactement
-        // comme pour cancelOrderCF (Master Prompt 47). Même limitation
-        // volontaire qu'orderActions.js:buildCancelOrder — n'inclut pas
-        // 'boutique', dont le document `orders` ici ne représente que le
-        // trajet de livraison (montant différent du paiement réel, qui vit
-        // sur `boutique_orders` séparément) : débiter `budget` ici serait
-        // incorrect pour ce type, documenté comme trouvaille distincte.
-        const needsSellerDebit = willRefund && freshData.sellerId && freshData.sellerType === 'seller';
-        // Toutes les lectures doivent précéder toute écriture dans une
-        // transaction Firestore — lire le vendeur ici, avant tx.update(doc.ref)
-        // ci-dessous, pour pouvoir plafonner le débit à 0 (pas de solde négatif).
-        const sellerRef  = needsSellerDebit ? db.collection('sellers').doc(freshData.sellerId) : null;
-        const sellerSnap = needsSellerDebit ? await tx.get(sellerRef) : null;
-
-        // Annuler la commande
-        tx.update(doc.ref, {
-          status:       'cancelled',
-          cancelReason: 'no_driver_found',
-          cancelledAt:  admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        // Remboursement wallet si paiement par wallet
-        if (willRefund) {
-          const amount    = freshData.budget || 0;
-          const clientRef = db.collection('clients').doc(freshData.clientId);
-          tx.update(clientRef, {
-            wallet: admin.firestore.FieldValue.increment(amount),
-          });
-          const histRef = clientRef.collection('wallet_transactions').doc();
-          tx.set(histRef, {
-            type:        'refund',
-            amount:      amount,
-            description: 'Remboursement — aucun livreur disponible',
-            orderId:     orderId,
-            createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-          });
-
-          if (needsSellerDebit && sellerSnap.exists) {
-            const w = Number(sellerSnap.data().wallet || 0);
-            // Plafonné à 0 : si le vendeur a déjà retiré une partie de ce
-            // crédit avant l'expiration, on reprend ce qu'il reste plutôt que
-            // de créer un solde négatif (même logique que cancelOrderCF).
-            const sellerDebit = Math.min(amount, w);
-            if (sellerDebit > 0) {
-              tx.update(sellerRef, {
-                wallet: w - sellerDebit,
-              });
-              const sellerHistRef = sellerRef.collection('wallet_transactions').doc();
-              tx.set(sellerHistRef, {
-                type:        'debit',
-                amount:      sellerDebit,
-                description: 'Commande expirée (aucun livreur) — reprise du paiement',
-                orderId:     orderId,
-                createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-              });
-            }
-          }
-        }
-
-        // Métriques dispatching — incrémente le compteur de la tranche horaire/zone
-        const today  = new Date().toISOString().split('T')[0];
-        const hour   = new Date().getHours();
-        const slot   = Math.floor(hour / 3) * 3; // tranches de 3h
-        const zone   = freshData.pickupZone || freshData.deliveryZone || 'unknown';
-        const svc    = freshData.type || 'livraison';
-        const metricRef = db.collection('dispatch_metrics')
-          .doc(`${today}_${zone}_${slot}h`);
-        tx.set(metricRef, {
-          date:               today,
-          zone,
-          serviceType:        svc,
-          hourSlot:           slot,
-          noDriverFoundCount: admin.firestore.FieldValue.increment(1),
-          lastUpdated:        admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-      });
-
-      // Nettoyage pendingOrderId chez les livreurs notifiés (hors transaction)
-      const notifiedIds = order.notifiedDriverIds;
-      if (Array.isArray(notifiedIds) && notifiedIds.length > 0) {
-        const batch = db.batch();
-        notifiedIds.forEach(driverId => {
-          batch.update(db.collection('livreurs').doc(driverId), {
-            pendingOrderId: admin.firestore.FieldValue.delete(),
-          });
-        });
-        await batch.commit().catch(err =>
-          console.warn(`Cleanup pendingOrderId batch (${orderId}):`, err.message));
-      }
-      if (order.driverId) {
-        await db.collection('livreurs').doc(order.driverId)
-          .update({ pendingOrderId: admin.firestore.FieldValue.delete() })
-          .catch(() => {});
-      }
+      // Re-read terminal state and compare each reference transactionally.
+      // If acceptance won the race, this does nothing.
+      await settleTerminalOrder(db, admin, orderId, order);
 
       // Audit log
       const searchSecs = order.createdAt
@@ -1728,7 +2308,7 @@ exports.autoExpireOrders = onSchedule({
       console.error(`❌ Erreur expiration commande ${orderId}:`, err.message);
     }
   }
-});
+}
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1737,7 +2317,7 @@ exports.autoExpireOrders = onSchedule({
 // 10 commandes en 1 heure. Aucune modification Flutter nécessaire.
 // Le remboursement wallet est automatique si la commande était payée.
 // ═══════════════════════════════════════════════════════════════════════════
-exports.enforceOrderRateLimit = onDocumentCreated('orders/{orderId}', async (event) => {
+exports.enforceOrderRateLimit = onDocumentCreated({ document: 'orders/{orderId}', maxInstances: 3 }, async (event) => {
   try {
     const order   = event.data.data();
     const orderId = event.params.orderId;
@@ -1768,31 +2348,7 @@ exports.enforceOrderRateLimit = onDocumentCreated('orders/{orderId}', async (eve
 
     // Trop de commandes — annuler immédiatement
     const orderRef = db.collection('orders').doc(orderId);
-    await db.runTransaction(async (tx) => {
-      const fresh = await tx.get(orderRef);
-      if (!fresh.exists || fresh.data().status !== 'pending') return;
-
-      tx.update(orderRef, {
-        status:       'cancelled',
-        cancelReason: 'rate_limit_exceeded',
-        cancelledAt:  admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      // Remboursement automatique si payé par wallet
-      if (order.paymentMethod === 'wallet' && order.isPaid === true) {
-        const amount    = order.budget || 0;
-        const clientRef = db.collection('clients').doc(clientId);
-        tx.update(clientRef, { wallet: admin.firestore.FieldValue.increment(amount) });
-        const histRef = clientRef.collection('wallet_transactions').doc();
-        tx.set(histRef, {
-          type:        'refund',
-          amount,
-          description: 'Remboursement — limite de commandes dépassée',
-          orderId,
-          createdAt:   admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-    });
+    await db.runTransaction((tx) => rateLimitCancelTx(tx, { db, admin, orderRef, orderId, order, clientId }));
 
     await logSecurityEvent(clientId, 'order_rate_limit_exceeded', 'medium',
       `Client ${clientId} a dépassé la limite de 10 commandes/heure`);
@@ -1812,9 +2368,14 @@ exports.enforceOrderRateLimit = onDocumentCreated('orders/{orderId}', async (eve
 // dispatch tourne désormais uniquement côté serveur (Admin SDK, ignore les
 // règles). Réutilise la même logique que les outils AZ IA (functions/dispatch.js).
 // ═══════════════════════════════════════════════════════════════════════════
-const { dispatchOrder, calculateCommission } = require('./dispatch');
+const {
+  dispatchOrder,
+  calculateCommission,
+  DispatchError,
+  assertValidDispatchPoint,
+} = require('./dispatch');
 
-exports.dispatchOrderToDriver = onCall(async (request) => {
+exports.dispatchOrderToDriver = onCall({ maxInstances: capInstances(3) }, async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Vous devez être connecté');
   }
@@ -1838,22 +2399,50 @@ exports.dispatchOrderToDriver = onCall(async (request) => {
   const isOwner = order.clientId === uid;
   let isCallerAdmin = false;
   if (!isOwner) {
-    const adminSnap = await db.collection('admins').doc(uid).get();
-    isCallerAdmin = adminSnap.exists && adminSnap.data().isActive !== false;
+    await requireAdminPermission({ request, db, permission: 'commandes' });
+    isCallerAdmin = true;
   }
   if (!isOwner && !isCallerAdmin) {
     throw new HttpsError('permission-denied', 'Non autorisé');
   }
 
+  // Commande Restaurant/Boulangerie v2 : le dispatch est piloté par le SERVEUR (acceptation du partenaire, puis reprise bornée
+  // dispatchRetry.js : plafonds d'essais et fenêtre absolue). Les relances du client (minuteries de l'application) n'y ajoutent
+  // rien et ne doivent pas contourner ces plafonds ; seul un administrateur peut forcer une proposition.
+  if (order.amountsVersion === 2 && !isCallerAdmin) return { dispatched: false, mode: 'server_managed' };
+
+  // C2 phase 0 : journal des écarts de tarif, jamais bloquant (aucun refus, aucune modification).
+  await observeOrderTariff(db, String(orderId), order);
+
   const lat    = Number(order.latitude ?? order.deliveryLatitude ?? 0);
   const lng    = Number(order.longitude ?? order.deliveryLongitude ?? 0);
+  const destLat = Number(order.destLat ?? 0);
+  const destLng = Number(order.destLng ?? 0);
   const budget = Number(order.budget || 0);
+  const pickupCityId = order.pickupCityId;
+  const cityResolutionStatus = order.cityResolutionStatus;
 
-  const result = await dispatchOrder(db, admin, {
-    orderId:  String(orderId),
-    lat, lng, budget,
-    ...(typeof radiusKm === 'number' ? { radiusKm } : {}),
-  });
+  let result;
+  try {
+    assertValidDispatchPoint(lat, lng, 'collecte');
+    assertValidDispatchPoint(destLat, destLng, 'livraison');
+    result = await dispatchOrder(db, admin, {
+      orderId: String(orderId),
+      lat,
+      lng,
+      pickupCityId,
+      cityResolutionStatus,
+      budget,
+      ...(typeof radiusKm === 'number' ? { radiusKm } : {}),
+    });
+  } catch (error) {
+    if (error instanceof DispatchError) {
+      throw new HttpsError('failed-precondition', error.message, {
+        dispatchCode: error.code,
+      });
+    }
+    throw error;
+  }
 
   return result; // { dispatched: boolean, mode: 'assigned'|'broadcast'|'none' }
 });
@@ -1875,14 +2464,136 @@ exports.dispatchOrderToDriver = onCall(async (request) => {
 // dans orderActions.js (testables sans Firebase Admin, même pattern que
 // azia/pendingActions.js:buildConfirmAction).
 // ═══════════════════════════════════════════════════════════════════════════
-const { buildPayOrderFromWallet, buildCancelOrder, buildDeliverOrder, buildPayBoutiqueOrder, buildPayBoutiqueOrderCash, buildRefundExpiredBoutiqueOrder } = require('./orderActions');
+const {
+  buildPayOrderFromWallet,
+  buildCancelOrder,
+  buildDeliverOrder,
+  buildDeliverOrderWithProof,
+  buildPayBoutiqueOrder,
+  buildPayBoutiqueOrderCash,
+  buildRefundExpiredBoutiqueOrder,
+} = require('./orderActions');
+const {
+  buildPrepareOrderProof,
+  buildConfirmPickupWithProof,
+} = require('./deliveryProofs');
+// SEC-01 / S6.8 : accès contrôlé au téléphone du livreur, conçu en S6.7
+// (docs/SEC01_S6_7_PHONE_ACCESS_DESIGN_AUDIT.md). Aucun lecteur Flutter/Web
+// n'est migré vers cette callable dans cette phase (S6.8 isolée).
+const { buildGetDriverPhoneForOrder } = require('./driverPhoneAccess');
 
-exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
-exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, calculateCommission });
-exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
-exports.payBoutiqueOrderCF   = buildPayBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
-exports.payBoutiqueOrderCashCF = buildPayBoutiqueOrderCash({ db, admin, onCall, HttpsError, checkRateLimit, logAudit, dispatchOrder });
-exports.refundExpiredBoutiqueOrderCF = buildRefundExpiredBoutiqueOrder({ db, admin, onCall, HttpsError, checkRateLimit, logAudit });
+exports.payOrderFromWalletCF = buildPayOrderFromWallet({ db, admin, onCall: (h) => onCallClosing('payOrderFromWalletCF', { maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
+exports.getDriverPhoneForOrderCF = buildGetDriverPhoneForOrder({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
+exports.cancelOrderCF        = buildCancelOrder({ db, admin, onCall: (h) => onCallClosing('cancelOrderCF', { maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission });
+// Photo de livraison : même contrôle d'existence Storage que le selfie d'acceptation (Mission 7E-11-T).
+const deliveryPhotoCheck = { get bucketName() { return admin.storage().bucket().name; }, exists: async (path) => (await admin.storage().bucket().file(path).exists())[0] };
+exports.deliverOrderCF       = buildDeliverOrder({ db, admin, onCall: (o, h) => onCallClosing('deliverOrderCF', { ...o, maxInstances: capInstances(3) }, h), HttpsError, checkRateLimit, logAudit, deliveryPhotoCheck });
+exports.acceptOrderCF        = buildAcceptOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(5) }, h), HttpsError, checkRateLimit, logAudit, calculateCommission,
+  selfieExists: async (path) => (await admin.storage().bucket().file(path).exists())[0],
+  selfieBucketName: () => deliveryPhotoCheck.bucketName,
+});
+exports.adminDriverRechargeCF = buildAdminDriverRecharge({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit, requireAdminPermission,
+});
+exports.completeManualAccountDeletionCF = buildManualAccountDeletion({
+  db, auth: admin.auth(), admin, bucket: { deleteFiles: (options) => admin.storage().bucket().deleteFiles(options) },
+  onCall: (h) => onCall({ maxInstances: 1, cpu: 1, timeoutSeconds: 300, memory: '512MiB' }, h), HttpsError, checkRateLimit, logAudit, requireSuperAdmin,
+});
+exports.manageArtisanPhotosCF = buildManageArtisanPhotos({
+  db, admin, bucket: { get name() { return admin.storage().bucket().name; }, file: (path) => admin.storage().bucket().file(path) }, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, memory: '512MiB' }, h), HttpsError, checkRateLimit, logAudit,
+});
+exports.createFleetDriverCF = buildCreateFleetDriver({
+  db, auth: admin.auth(), admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+});
+exports.declineLegacyOrderCF = buildDeclineLegacyOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit, dispatchOrder, DispatchError,
+});
+exports.deliveryTransferCF = buildDeliveryTransfer({
+  db, admin, onCall, HttpsError, checkRateLimit, logAudit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+  // Push FCM aux livreurs candidats ; le client est prévenu par notifyClientOnOrderUpdate.
+  notify: async ({ collection, ids, event, orderId }) => {
+    if (event !== 'transfer_requested' || !Array.isArray(ids)) return;
+    for (const id of ids) {
+      const token = (await db.collection(collection).doc(id).get()).data()?.fcmToken;
+      if (token) await sendToToken(token, '🔁 Remplacement demandé',
+        'Un livreur de votre ville cherche un remplaçant. Ouvrez l’application pour accepter.',
+        { type: 'transfer_requested', orderId });
+    }
+  },
+});
+exports.settleTransferEarningsCF = buildSettleTransferEarnings({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2 }, h), HttpsError, checkRateLimit, logAudit, requireSuperAdmin,
+});
+// Examen administratif Marketplace / Boutique (livraison bloquée, frais retenus
+// après récupération, remboursement boutique) — super-admin uniquement.
+exports.adminBillingCF = buildAdminBilling({
+  db, admin, onCall, HttpsError, checkRateLimit, logAudit, requireSuperAdmin, calculateCommission,
+});
+// Litiges après récupération du colis (livraisons ordinaires) : décision administrative
+// explicite, jamais de remboursement automatique. Remboursement exceptionnel = super-admin.
+exports.adminOrderDisputeCF = buildAdminOrderDispute({
+  db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+  requireAdminPermission, requireSuperAdmin, calculateCommission,
+});
+// Confirmation ADMINISTRATIVE de livraison (litige après récupération) : super-admin seul, même cœur
+// financier que deliverOrderCF (mode adminConfirm), requestId idempotent, justification et preuve obligatoires.
+exports.adminConfirmDeliveryCF = buildDeliverOrder({
+  db, admin, onCall: (o, h) => onCall({ ...o, maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+  adminConfirm: true, requireSuperAdmin, deliveryPhotoCheck,
+});
+exports.releaseOrderBeforePickupCF = buildReleaseOrderBeforePickup({
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2) }, h), HttpsError, checkRateLimit, logAudit,
+  calculateCommission, dispatchOrder, DispatchError,
+});
+exports.prepareOrderProof    = buildPrepareOrderProof({
+  db, admin, onCall: (o, h) => onCall({ ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+exports.confirmOrderPickupWithProof = buildConfirmPickupWithProof({
+  db, admin, onCall: (o, h) => onCall({ ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+exports.confirmOrderDeliveryWithProof = buildDeliverOrderWithProof({
+  db, admin, onCall: (o, h) => onCallClosing('confirmOrderDeliveryWithProof', { ...o, ...pilotOnlyInstanceOptions() }, h), HttpsError, checkRateLimit, logAudit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+  deliveryPhotoCheck,
+});
+const recipientProofAccess = require('./deliveryProofGuests').buildRecipientProofAccess({
+  db, admin, onCall, HttpsError, checkRateLimit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+exports.createRecipientProofAccess = recipientProofAccess.create;
+exports.redeemRecipientProofAccess = recipientProofAccess.redeem;
+const deliveryProofSms = require('./deliveryProofSms').buildDeliveryProofSms({
+  db, admin, onCall, HttpsError, checkRateLimit,
+  deliveryProofPepper: DELIVERY_PROOF_PEPPER_SECRET,
+});
+exports.configureDeliverySms = deliveryProofSms.configure;
+exports.markDeliverySmsArrival = deliveryProofSms.arrival;
+exports.getDeliverySmsStatus = deliveryProofSms.status;
+exports.retryDeliverySms = deliveryProofSms.retry;
+exports.dispatchDeliverySms = onDocumentUpdated({
+  document: 'delivery_proofs/{sessionId}', maxInstances: 1, retry: true,
+  secrets: [DELIVERY_PROOF_PEPPER_SECRET],
+}, async event => {
+  if (process.env.DELIVERY_SMS_ENABLED !== 'true' || process.env.DELIVERY_PROOFS_ENABLED !== 'true') return;
+  const state = event.data?.after.data();
+  if (event.params.sessionId.startsWith('sms_') && state?.status === 'queued' && typeof state.orderId === 'string') {
+    await deliveryProofSms.dispatch(state.orderId);
+  }
+});
+
+exports.payBoutiqueOrderCF   = buildPayBoutiqueOrder({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit, dispatchOrder });
+exports.payBoutiqueOrderCashCF = buildPayBoutiqueOrderCash({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit, dispatchOrder });
+exports.refundExpiredBoutiqueOrderCF = buildRefundExpiredBoutiqueOrder({ db, admin, onCall: (h) => onCall({ maxInstances: 3 }, h), HttpsError, checkRateLimit, logAudit });
+
+// LOT 6.3 SECURITY — voir functions/eventReservations.js : totalAmount
+// désormais recalculé côté serveur à partir des vrais prix event_offers,
+// jamais confiance au prix/quantité fournis par le client.
+const { buildCreateEventReservation } = require('./eventReservations');
+exports.createEventReservationCF = buildCreateEventReservation({ db, admin, onCall, HttpsError, checkRateLimit });
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1961,16 +2672,77 @@ exports.fcmTokenCleanupCheck = buildFcmTokenCleanup({ db, admin, onSchedule });
 const { buildStaleDriverCleanup } = require('./staleDriverCleanup');
 exports.staleDriverCleanupCheck = buildStaleDriverCleanup({ db, admin, onSchedule });
 
+// Libère le livreur remplaçant (et le verrou de la commande) quand une remise
+// n'est pas confirmée à temps. Même discipline de quota que les autres crons.
+exports.expireDeliveryTransfers = onSchedule({
+  schedule: 'every 5 minutes', timeZone: 'Africa/Abidjan', region: 'europe-west1',
+  timeoutSeconds: 120, memory: '256MiB', maxInstances: 1, cpu: 0.5,
+}, async () => {
+  try {
+    const r = await expireDueTransfers(db, admin);
+    if (r.expired > 0) console.log(`[expireDeliveryTransfers] ${r.expired} transfert(s) expiré(s)`);
+  } catch (e) {
+    console.error('[expireDeliveryTransfers]', e.message);
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUPERVISION ADMIN DES EXÉCUTIONS D'OUTILS AZ IA — LECTURE SEULE
+// `ai_tool_executions` reste fermée aux clients dans firestore.rules ; cet
+// endpoint lit via l'Admin SDK après contrôle serveur de l'identité et de la
+// permission admin. Aucune mutation n'est exposée (ni relance, ni suppression).
+// ═══════════════════════════════════════════════════════════════════════════
+const { buildListAiToolExecutions } = require('./aiToolExecutions');
+exports.listAiToolExecutions = buildListAiToolExecutions({ db, onCall, HttpsError });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VÉRIFICATION AUTOMATIQUE DES RETRAITS FEEXPAY EN ATTENTE
+// Consulte uniquement l'endpoint de STATUT avec une référence déjà obtenue —
+// jamais une ré-initiation de payout. Ne dépend pas de l'application mobile.
+// ═══════════════════════════════════════════════════════════════════════════
+exports.checkPendingWithdrawals = buildPendingWithdrawalChecker({
+  db, admin, onSchedule, collectionFor, logAudit, logSecurityEvent,
+  secrets: [FEEXPAY_TOKEN_SECRET],
+  createVerifier: () => createPayoutStatusVerifier({
+    axios, token: () => FEEXPAY_TOKEN_SECRET.value(),
+  }),
+});
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AZ IA — Assistant conversationnel (Claude)
-// Créez functions/.env avec :
-//   ANTHROPIC_API_KEY=votre_clé_anthropic
+// Configurer ANTHROPIC_API_KEY dans Secret Manager.
 // ═══════════════════════════════════════════════════════════════════════════
 const createAzIa = require('./azia');
 const azIa       = createAzIa({
   db, admin, onCall, onSchedule, checkRateLimit, logAudit, HttpsError,
-  axios, feexpayOperatorCode, FEEXPAY_TOKEN, FEEXPAY_API_URL, WEBHOOK_URL,
+  axios, feexpayOperatorCode,
+  FEEXPAY_TOKEN: FEEXPAY_TOKEN_SECRET,
+  FEEXPAY_API_URL,
+  WEBHOOK_URL: feexpayWebhookUrl,
+  // Moindre privilège, vérifié par lecture des appelants réels :
+  // `azIaChat` est la SEULE fonction qui appelle un modèle (aiGateway →
+  // AIProviderService → providers), donc la seule à recevoir les clés IA.
+  // Elle ne reçoit en revanche AUCUN secret FeexPay : dans `tools/wallet.js`,
+  // `FEEXPAY_TOKEN.value()` et `WEBHOOK_URL()` sont appelés uniquement depuis
+  // `afterConfirm`, exécuté par `aiConfirmAction` — jamais par le tour de
+  // conversation. Le `handler` ne fait que créer une action en attente.
+  // Cible actée : Claude principal + Gemini en repli. Les quatre autres
+  // fournisseurs restent implémentés et sélectionnables par configuration,
+  // mais leurs clés ne sont PAS montées ici : non requises au déploiement, et
+  // un fournisseur sans clé est sauté sans aucun appel réseau
+  // (`isConfigured()` → ProviderNotConfiguredError, jamais de requête).
+  // Pour en activer un plus tard : créer son secret, l'ajouter à cette liste
+  // ET l'ajouter à `fallbackProviders` (settings/ai ou AI_FALLBACK_PROVIDERS).
+  azIaChatSecrets: [
+    ANTHROPIC_API_KEY_SECRET,
+    GEMINI_API_KEY_SECRET,
+  ],
+  // `aiConfirmAction` exécute les `afterConfirm` : elle a besoin de FeexPay
+  // (recharge wallet) et d'aucune clé IA — elle n'appelle jamais de modèle.
+  aiConfirmActionSecrets: [FEEXPAY_TOKEN_SECRET, FEEXPAY_WEBHOOK_SECRET],
   sendToToken,
 });
 exports.azIaChat                       = azIa.azIaChat;
@@ -1995,6 +2767,53 @@ exports.respondToVisitRequest         = realEstate.respondToVisitRequest;
 exports.notifyAgentOnVisitRequest     = realEstate.notifyAgentOnVisitRequest;
 exports.notifyClientOnVisitUpdate     = realEstate.notifyClientOnVisitUpdate;
 
+// ÉVÉNEMENTIEL — réservations et messagerie
+const { createEventNotificationFunctions } = require('./eventNotifications');
+const eventNotifications = createEventNotificationFunctions({
+  db, onDocumentCreated, onDocumentUpdated, sendToToken,
+});
+exports.notifyAdminsOnEventProviderApplication =
+  eventNotifications.notifyAdminsOnEventProviderApplication;
+exports.notifyProvidersOnEventReservation =
+  eventNotifications.notifyProvidersOnEventReservation;
+exports.notifyClientOnEventReservationUpdate =
+  eventNotifications.notifyClientOnEventReservationUpdate;
+exports.notifyEventChatRecipient =
+  eventNotifications.notifyEventChatRecipient;
+exports.updateEventProviderRating =
+  eventNotifications.updateEventProviderRating;
+
+// AUTO & MOTO — notification du destinataire d'un nouveau message.
+const { createVehicleChatNotificationFunction } = require('./vehicleChatNotifications');
+exports.notifyVehicleChatRecipient = createVehicleChatNotificationFunction({
+  db, onDocumentCreated, sendToToken,
+});
+const { buildModerateVehicleEntity } = require('./vehicleModeration');
+exports.moderateVehicleEntity = onCall(
+  { maxInstances: 3 },
+  buildModerateVehicleEntity({
+    db, admin, requireAdminPermission, HttpsError,
+  }),
+);
+
+// Fiche / activation d'un compte vendeur depuis l'admin, avec journal d'audit.
+// Pas encore appelée par un écran rattaché au menu ; quota CPU : 0,5 × 1.
+const { buildManageSellerAccount } = require('./manageSellerAccount');
+exports.manageSellerAccountCF = onCall(
+  { maxInstances: 1, cpu: 0.5 },
+  buildManageSellerAccount({
+    db, admin, HttpsError, requireAdminPermission, checkRateLimit, logAudit,
+  }),
+);
+
+// GPS privé/confidentialité réelle V2 — real_estate_private_locations,
+// real_estate_location_access (voir functions/realEstateLocation.js).
+const { createRealEstateLocationFunctions } = require('./realEstateLocation');
+const realEstateLocation = createRealEstateLocationFunctions({
+  db, admin, onCall, HttpsError, logAudit, checkRateLimit,
+});
+exports.upsertRealEstateLocation = realEstateLocation.upsertRealEstateLocation;
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // IDENTITÉ — journalisation des événements de connexion/rôle (Prompt 24)
@@ -2004,3 +2823,106 @@ exports.notifyClientOnVisitUpdate     = realEstate.notifyClientOnVisitUpdate;
 const { buildLogAuthEvent, buildLogAdminAuditEvent } = require('./authEvents');
 exports.logAuthEvent      = buildLogAuthEvent({ onCall, HttpsError, checkRateLimit, logAudit });
 exports.logAdminAuditEvent = buildLogAdminAuditEvent({ db, onCall, HttpsError, checkRateLimit, logAudit });
+
+// ═════════════════════════════════════════════════
+// DEVIS TARIFAIRE OFFICIEL + CRÉATION DE COMMANDE PAR DEVIS (Livraison et Courses uniquement)
+// Barème côté serveur (tariffConfig.js / officialTariff.js) : le client ne fournit plus le prix. Le devis
+// (`tariff_quotes`, écrit par Admin SDK uniquement) est lié au client, au service, au mode, aux points, au
+// montant, à la version du barème et à une expiration, et ne sert qu'une fois. Fonctions ADDITIVES : les
+// parcours historiques de création directe côté client restent en place tant que le flux n'est pas activé.
+// Quota Cloud Run régional : 0,5 CPU × 2 instances chacune.
+// ═════════════════════════════════════════════════
+const { buildQuoteDeliveryCF, buildCreateOrderFromQuoteCF } = require('./deliveryQuote');
+exports.quoteDeliveryCF = buildQuoteDeliveryCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit,
+});
+exports.createOrderFromQuoteCF = buildCreateOrderFromQuoteCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROXY GOOGLE MAPS (Lot 1) — itinéraire, recherche de lieux, géocodage.
+// La clé reste côté serveur : `defineSecret` crée une dépendance de déploiement, le secret
+// GOOGLE_MAPS_SERVER_KEY doit exister dans Secret Manager AVANT de déployer ces quatre fonctions.
+// Dimensionnement aligné sur les fonctions de devis (quota CPU régional serré) : 4 × (0,5 vCPU × 2).
+// Lot 1.2.1 : seuls les comptes clients/livreurs non suspendus y accèdent (assertEligibleRole, sans cache).
+// ═══════════════════════════════════════════════════════════════════════════
+const { createMapsProxy, buildMapsCallables, SECRET_NAME: MAPS_SECRET_NAME } = require('./mapsProxy');
+const GOOGLE_MAPS_SERVER_KEY_SECRET = defineSecret(MAPS_SECRET_NAME);
+const mapsCallables = buildMapsCallables({
+  onCall: (h) => onCall({
+    secrets: [GOOGLE_MAPS_SERVER_KEY_SECRET], maxInstances: 2, cpu: 0.5, concurrency: 1, timeoutSeconds: 30, memory: '256MiB',
+  }, h),
+  HttpsError,
+  checkRateLimit,
+  proxy: createMapsProxy({ getKey: () => GOOGLE_MAPS_SERVER_KEY_SECRET.value() }),
+  db,
+});
+exports.mapsRouteCF = mapsCallables.mapsRouteCF;
+exports.mapsAutocompleteCF = mapsCallables.mapsAutocompleteCF;
+exports.mapsPlaceDetailsCF = mapsCallables.mapsPlaceDetailsCF;
+exports.mapsGeocodeCF = mapsCallables.mapsGeocodeCF;
+
+// ═════════════════════════════════════════════════
+// APPROBATION ADMIN DES RECHARGES ET RETRAITS MANUELS (remplace les écritures wallet directes de l'écran admin)
+// Transactionnelles, idempotentes, super-admin uniquement. Quota Cloud Run : 0,5 CPU × 1 instance chacune.
+// ═════════════════════════════════════════════════
+const { buildAdminApproveRecharge, buildAdminApproveWithdrawal } = require('./adminWalletRequests');
+exports.adminApproveRechargeCF = buildAdminApproveRecharge({
+  db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+});
+exports.adminApproveWithdrawalCF = buildAdminApproveWithdrawal({
+  db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5 }, h), HttpsError, checkRateLimit, logAudit,
+});
+
+// ═════════════════════════════════════════════════
+// E-KBINE — création / annulation serveur (débit et remboursement atomiques, idempotents). 0,5 CPU × 2 chacune.
+// Les chemins client directs restent ouverts tant que la nouvelle version de l'app n'est pas déployée.
+// ═════════════════════════════════════════════════
+exports.ekCreateOrderCF = buildEkCreateOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+});
+exports.ekCancelOrderCF = buildEkCancelOrder({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+});
+
+// ═════════════════════════════════════════════════
+// DEVIS CATALOGUE — Colis, Blanchisserie, Eau & Boissons : prix calculés côté serveur (catalogTariff.js).
+// Nouveaux points d'entrée, non appelés par l'application actuelle. Quota Cloud Run : 0,5 CPU × 2 chacune (+2).
+// ═════════════════════════════════════════════════
+const { buildQuoteCatalogCF, buildCreateCatalogOrderFromQuoteCF } = require('./catalogQuote');
+exports.quoteCatalogCF = buildQuoteCatalogCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit,
+});
+exports.createCatalogOrderFromQuoteCF = buildCreateCatalogOrderFromQuoteCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: 2, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+});
+
+// ═════════════════════════════════════════════════
+// DEVIS COMMANDES STANDARD Restaurant / Boulangerie (Mission 7B-1) — montants calculés et vérifiés côté serveur.
+// DÉSACTIVÉES par défaut (PARTNER_ORDERS_V2 != 'on' → FEATURE_DISABLED). deliverOrderCF et cancelOrderTx gèrent désormais les
+// commandes amountsVersion 2 (Mission 7B-2) : la création reste fermée tant que PARTNER_ORDERS_V2=on, config/partnerOrdersV2.creationOpen
+// et la liste pilote ne sont pas tous réunis. Quota Cloud Run : 0,5 CPU × 2 chacune (+2).
+// ═════════════════════════════════════════════════
+const { buildQuotePartnerOrderCF, buildCreatePartnerOrderFromQuoteCF } = require('./partnerOrderQuote');
+exports.quotePartnerOrderCF = buildQuotePartnerOrderCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2), cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit,
+});
+exports.createPartnerOrderFromQuoteCF = buildCreatePartnerOrderFromQuoteCF({
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2), cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit,
+});
+// Préparation et reversement cash des commandes Restaurant/Boulangerie v2 (Missions 7B-3B-P/C, locale, non déployée).
+// Gestion des commandes v2 existantes : active par défaut, gel d'urgence PARTNER_ORDERS_V2_MANAGE=off. La CRÉATION (devis +
+// création) reste désactivée par défaut (PARTNER_ORDERS_V2 != 'on'). Quota Cloud Run : 0,5 CPU × 2 (+1).
+// Configuration sécurisée de config/app_versions (Mission M2.2, locale, non déployée). Les règles Firestore interdisent toute
+// écriture cliente de ce document. Quota Cloud Run : 0,5 CPU × 1 (+0,5).
+const { buildSetAppVersionsConfig } = require('./appVersionsAdmin');
+exports.setAppVersionsConfigCF = buildSetAppVersionsConfig({
+  db, admin, onCall: (h) => onCall({ maxInstances: 1, cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, requireSuperAdmin,
+});
+const { buildPartnerOrderAction } = require('./partnerOrderActions');
+const { dispatchAcceptedPartnerOrder } = require('./partnerDispatch');
+exports.partnerOrderActionCF = buildPartnerOrderAction({
+  db, admin, onCall: (h) => onCall({ maxInstances: capInstances(2), cpu: 0.5, concurrency: 1 }, h), HttpsError, checkRateLimit, logAudit, calculateCommission, requireSuperAdmin,
+  dispatchAccepted: (orderId) => dispatchAcceptedPartnerOrder({ db, admin, dispatchOrder, orderId }),
+});

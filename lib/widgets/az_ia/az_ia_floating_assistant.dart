@@ -30,7 +30,11 @@ class _AzIaFloatingAssistantState extends State<AzIaFloatingAssistant>
   static const _yKey = 'az_ia_floating_y';
   static const _size = 64.0;
 
-  Offset _position = const Offset(1, .68);
+  // Position par défaut déjà un coin (bas-droit, convention FAB standard) —
+  // avant ce correctif, .68 n'était pas un coin et pouvait recouvrir un
+  // contenu d'écran dès la première installation, sans qu'aucun glissement
+  // n'ait encore eu lieu.
+  Offset _position = const Offset(1, 1);
   bool _dragging = false;
   bool _hiddenForSession = false;
   bool _minimized = false;
@@ -53,11 +57,31 @@ class _AzIaFloatingAssistantState extends State<AzIaFloatingAssistant>
     final x = prefs.getDouble(_xKey);
     final y = prefs.getDouble(_yKey);
     if (!mounted || x == null || y == null) return;
-    setState(() => _position = Offset(
-          x.clamp(0, 1).toDouble(),
-          y.clamp(0, 1).toDouble(),
-        ));
+    // Auto-correction (Master Prompt "correction du chevauchement AZ IA") :
+    // une position verticale déjà enregistrée avant ce correctif peut être
+    // n'importe où entre 0 et 1 — y compris au milieu de l'écran, là où
+    // certains écrans (ex. le récapitulatif Livraison, dont la feuille du bas
+    // occupe presque tout l'écran dès la phase 6) placent des boutons
+    // "Modifier" réels. On la ramène au coin le plus proche (haut ou bas),
+    // exactement comme _snapToNearestCorner() le fait désormais à chaque
+    // relâchement de glissement — sans coin milieu-écran, aucun écran de
+    // l'app ne peut plus se faire recouvrir par la bulle par défaut.
+    final snapped = _snapToNearestCorner(Offset(
+      x.clamp(0, 1).toDouble(),
+      y.clamp(0, 1).toDouble(),
+    ));
+    setState(() => _position = snapped);
+    if (snapped.dx != x || snapped.dy != y) await _savePosition();
   }
+
+  /// Colle [position] au coin (haut ou bas ; gauche ou droite) le plus
+  /// proche — jamais un point milieu-écran, structurellement le plus
+  /// susceptible de recouvrir un contenu important (ligne "Modifier", champ,
+  /// suggestion...) sur n'importe quel écran de l'app.
+  Offset _snapToNearestCorner(Offset position) => Offset(
+        position.dx >= .5 ? 1 : 0,
+        position.dy >= .5 ? 1 : 0,
+      );
 
   Future<void> _savePosition() async {
     final prefs = await SharedPreferences.getInstance();
@@ -188,7 +212,7 @@ class _AzIaFloatingAssistantState extends State<AzIaFloatingAssistant>
     final media = MediaQuery.of(context);
     final keyboardOpen = media.viewInsets.bottom > 0;
     final bubbleSize = _minimized ? 44.0 : _size;
-    final horizontalPadding = 12.0;
+    const horizontalPadding = 12.0;
     final top = media.padding.top + 12;
     final reservedBottom =
         math.max(media.padding.bottom + 92, media.viewInsets.bottom + 16);
@@ -203,32 +227,23 @@ class _AzIaFloatingAssistantState extends State<AzIaFloatingAssistant>
       children: [
         widget.child,
         if (showBubble)
-          Selector<AzIaProvider, bool>(
-            selector: (_, provider) {
-              final messages = provider.messages;
-              return provider.pendingAction != null ||
-                  (messages.isNotEmpty &&
-                      (messages.last.response?.actions.isNotEmpty ?? false));
-            },
-            builder: (_, hasSuggestion, __) => AnimatedPositioned(
-              duration:
-                  _dragging ? Duration.zero : const Duration(milliseconds: 250),
-              curve: Curves.easeOutBack,
-              left: left,
-              top: keyboardOpen ? math.min(topPosition, maxY) : topPosition,
-              // Largeur/hauteur explicites (Phase 3 — durcissement défensif) :
-              // sans elles, un `Positioned` avec seulement left/top laisse
-              // l'enfant se dimensionner lui-même — si jamais son contenu
-              // devait un jour échouer à se construire, Flutter substituerait
-              // un ErrorWidget qui, non contraint, s'étend pour occuper tout
-              // l'espace restant du Stack (jusqu'au bord de l'écran) au lieu
-              // de rester à la taille réelle de la bulle. Contraindre à
-              // `bubbleSize` ne masque aucune erreur (toujours remontée à
-              // FlutterError.onError/Crashlytics) — ça borne juste son rayon
-              // d'impact visuel à la taille réellement prévue pour la bulle.
-              width: bubbleSize,
-              height: bubbleSize,
-              child: _bubble(
+          AnimatedPositioned(
+            duration:
+                _dragging ? Duration.zero : const Duration(milliseconds: 250),
+            curve: Curves.easeOutBack,
+            left: left,
+            top: keyboardOpen ? math.min(topPosition, maxY) : topPosition,
+            width: bubbleSize,
+            height: bubbleSize,
+            // Constrain the provider lookup too, including its ErrorWidget.
+            child: Selector<AzIaProvider, bool>(
+              selector: (_, provider) {
+                final messages = provider.messages;
+                return provider.pendingAction != null ||
+                    (messages.isNotEmpty &&
+                        (messages.last.response?.actions.isNotEmpty ?? false));
+              },
+              builder: (_, hasSuggestion, __) => _bubble(
                 size: bubbleSize,
                 maxX: maxX,
                 top: top,
@@ -281,12 +296,16 @@ class _AzIaFloatingAssistantState extends State<AzIaFloatingAssistant>
                 ));
           },
           onPanEnd: (_) {
+            // Colle aux DEUX axes (avant : seul dx se collait au bord ; dy
+            // restait libre, ce qui permettait à la bulle de se stabiliser
+            // n'importe où en hauteur — y compris pile sur un bouton
+            // "Modifier" de contenu, comme confirmé sur appareil dans le
+            // récapitulatif Livraison). Un coin (haut/bas × gauche/droite)
+            // est la seule zone structurellement libre sur tous les écrans
+            // de l'app déjà audités.
             setState(() {
               _dragging = false;
-              _position = Offset(
-                _position.dx >= .5 ? 1 : 0,
-                _position.dy.clamp(0, 1).toDouble(),
-              );
+              _position = _snapToNearestCorner(_position);
             });
             _savePosition();
           },

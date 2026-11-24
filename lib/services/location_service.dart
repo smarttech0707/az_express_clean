@@ -9,7 +9,6 @@ import 'package:geolocator/geolocator.dart';
 // Ne garder que calculateDistance(), la seule méthode réellement utilisée
 // (lib/screens/driver/driver_dashboard.dart).
 class LocationService {
-
   /// ================================
   /// CALCUL DISTANCE (KM)
   /// ================================
@@ -19,7 +18,6 @@ class LocationService {
     double endLat,
     double endLng,
   ) {
-
     double distanceMeters = Geolocator.distanceBetween(
       startLat,
       startLng,

@@ -1,0 +1,10 @@
+## Multi-pays / multi-devises — vision long terme, pas un chantier actuel
+
+Ce prompt est différent des autres : c'est un horizon à 10 ans, pas une fonctionnalité à construire maintenant. **L'application est aujourd'hui codée en dur pour la Côte d'Ivoire, et même plus précisément pour Abengourou** : `TarifService` (section Livraison) centre ses calculs sur des coordonnées GPS fixes (6.7273°N, -3.4961°E), `zones_livraison` n'a pas de couche pays/région au-dessus des villes/quartiers, FCFA est codé en dur partout (déjà signalé section Performance, `AppConfig.currency` inutilisé), et `AppText` fr/en (déjà connu) est la seule graine multilingue existante.
+
+Construire une vraie architecture multi-pays (hiérarchie pays→région→ville→quartier administrable, devises indépendantes des calculs, fuseaux horaires, règles métier configurables par pays, paiements multi-prestataires par marché) toucherait quasiment toutes les collections, tous les calculs de prix, toutes les requêtes géo, toutes les notifications et tous les écrans admin — c'est une refonte pluriannuelle, pas une réponse à une charte. **Ne jamais prétendre que cette architecture existe ou est "prête" tant qu'elle n'a pas été réellement construite.**
+
+Les éléments "vision future" du prompt (véhicules autonomes, drones, futurs canaux de paiement/communication) sont explicitement différés par le prompt lui-même ("si un jour disponibles") — aucune action requise, juste ne pas concevoir de nouveau code d'une façon qui les rendrait impossibles plus tard (ce qui est déjà couvert par les principes généraux ci-dessus : extensions additives, pas de couplage fort entre modules).
+
+Si une réduction de portée est utile plus tard : la pièce la plus proche d'être actionnable est l'abstraction de devise déjà signalée section Performance (remplacer les `int` bruts + `' FCFA'` codé en dur par un formateur centralisé, même si un seul pays est supporté aujourd'hui) — c'est un prérequis à tout le reste, pas une fonctionnalité multi-pays en soi.
+

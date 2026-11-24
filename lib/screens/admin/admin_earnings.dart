@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/firestore_service.dart';
 import '../../models/driver_earnings_summary.dart';
@@ -65,12 +65,12 @@ class _AdminEarningsState extends State<AdminEarnings> {
           // ── Liste livreurs ────────────────────────────
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection("livreurs")
-                  .snapshots(),
+              stream:
+                  FirebaseFirestore.instance.collection("livreurs").snapshots(),
               builder: (context, snap) {
                 if (snap.hasError) {
-                  return const StreamErrorState(message: "Impossible de charger les livreurs.");
+                  return const StreamErrorState(
+                      message: "Impossible de charger les livreurs.");
                 }
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
@@ -81,7 +81,7 @@ class _AdminEarningsState extends State<AdminEarnings> {
                 }
                 return ListView.builder(
                   physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: drivers.length,
                   itemBuilder: (context, i) {
                     final doc = drivers[i];
@@ -115,9 +115,7 @@ class _AdminEarningsState extends State<AdminEarnings> {
             color: selected ? AppColors.primary : Colors.white,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: selected
-                  ? AppColors.primary
-                  : Colors.grey.shade300,
+              color: selected ? AppColors.primary : Colors.grey.shade300,
             ),
           ),
           child: Text(
@@ -125,8 +123,7 @@ class _AdminEarningsState extends State<AdminEarnings> {
             textAlign: TextAlign.center,
             style: TextStyle(
               color: selected ? Colors.white : Colors.grey,
-              fontWeight:
-                  selected ? FontWeight.bold : FontWeight.normal,
+              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
               fontSize: 13,
             ),
           ),
@@ -176,16 +173,14 @@ class _GlobalTotals extends StatelessWidget {
           final budget = (data["budget"] as num? ?? 0).toInt();
           totalCourses++;
           totalBudget += budget;
-          totalCommissions +=
-              FirestoreService().calculateCommission(budget);
+          totalCommissions += FirestoreService().calculateCommission(budget);
           if (data["rating"] != null) {
             avgRating += (data["rating"] as num).toDouble();
             ratingCount++;
           }
         }
 
-        final avg =
-            ratingCount > 0 ? avgRating / ratingCount : 0.0;
+        final avg = ratingCount > 0 ? avgRating / ratingCount : 0.0;
 
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -222,8 +217,7 @@ class _GlobalTotals extends StatelessWidget {
                     const SizedBox(width: 4),
                     Text(
                       "Note moyenne : ${avg.toStringAsFixed(1)}/5  ($ratingCount avis)",
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 12),
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
                     ),
                   ],
                 ),
@@ -295,9 +289,7 @@ class _DriverRevenueCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 4)
-            ],
+            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
           ),
           child: Row(
             children: [
@@ -313,11 +305,10 @@ class _DriverRevenueCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(name,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold)),
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
                     Text(phone,
-                        style: const TextStyle(
-                            color: Colors.grey, fontSize: 12)),
+                        style:
+                            const TextStyle(color: Colors.grey, fontSize: 12)),
                     const SizedBox(height: 4),
                     Row(
                       children: [
@@ -333,14 +324,13 @@ class _DriverRevenueCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text("Crédit",
-                      style: TextStyle(
-                          color: Colors.grey.shade500, fontSize: 11)),
+                      style:
+                          TextStyle(color: Colors.grey.shade500, fontSize: 11)),
                   Text(
                     "$wallet FCFA",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color:
-                          wallet < 200 ? Colors.red : Colors.orange,
+                      color: wallet < 200 ? Colors.red : Colors.orange,
                       fontSize: 14,
                     ),
                   ),
@@ -362,9 +352,7 @@ class _DriverRevenueCard extends StatelessWidget {
       ),
       child: Text(label,
           style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.bold)),
+              color: color, fontSize: 11, fontWeight: FontWeight.bold)),
     );
   }
 }
@@ -406,8 +394,7 @@ class _WeeklyChartState extends State<_WeeklyChart>
 
   Future<void> _fetchData() async {
     final now = DateTime.now();
-    final startOfDay =
-        DateTime(now.year, now.month, now.day - 6);
+    final startOfDay = DateTime(now.year, now.month, now.day - 6);
 
     final snap = await FirebaseFirestore.instance
         .collection('orders')
@@ -428,9 +415,8 @@ class _WeeklyChartState extends State<_WeeklyChart>
       if (dayDiff >= 0 && dayDiff < 7) {
         final idx = 6 - dayDiff;
         orders[idx]++;
-        revenues[idx] +=
-            FirestoreService().calculateCommission(
-                (data['budget'] as num? ?? 0).toInt());
+        revenues[idx] += FirestoreService()
+            .calculateCommission((data['budget'] as num? ?? 0).toInt());
       }
     }
 
@@ -455,8 +441,7 @@ class _WeeklyChartState extends State<_WeeklyChart>
   @override
   Widget build(BuildContext context) {
     final data = _showRevenue ? _revenues : _orders;
-    final maxVal =
-        data.isEmpty ? 1 : data.reduce((a, b) => a > b ? a : b);
+    final maxVal = data.isEmpty ? 1 : data.reduce((a, b) => a > b ? a : b);
     final labels = _dayLabels;
 
     return Container(
@@ -477,8 +462,7 @@ class _WeeklyChartState extends State<_WeeklyChart>
             children: [
               const Text(
                 '7 derniers jours',
-                style:
-                    TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
               const Spacer(),
               _ToggleChip(
@@ -506,8 +490,7 @@ class _WeeklyChartState extends State<_WeeklyChart>
           if (_loading)
             const SizedBox(
               height: 100,
-              child:
-                  Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
             )
           else
             AnimatedBuilder(
@@ -605,9 +588,7 @@ class _ToggleChip extends StatelessWidget {
   final VoidCallback onTap;
 
   const _ToggleChip(
-      {required this.label,
-      required this.active,
-      required this.onTap});
+      {required this.label, required this.active, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -615,20 +596,16 @@ class _ToggleChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         decoration: BoxDecoration(
-          color: active
-              ? AppColors.primary
-              : Colors.grey.shade100,
+          color: active ? AppColors.primary : Colors.grey.shade100,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 12,
-            fontWeight:
-                active ? FontWeight.bold : FontWeight.normal,
+            fontWeight: active ? FontWeight.bold : FontWeight.normal,
             color: active ? Colors.white : Colors.grey.shade600,
           ),
         ),

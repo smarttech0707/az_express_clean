@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -45,7 +45,8 @@ class _AdminDriversRankingState extends State<AdminDriversRanking> {
       deliveries[driverId] = (deliveries[driverId] ?? 0) + 1;
       final r = data['rating'];
       if (r != null) {
-        ratingSum[driverId] = (ratingSum[driverId] ?? 0) + (r as num).toDouble();
+        ratingSum[driverId] =
+            (ratingSum[driverId] ?? 0) + (r as num).toDouble();
         ratingCount[driverId] = (ratingCount[driverId] ?? 0) + 1;
       }
     }
@@ -115,7 +116,8 @@ class _AdminDriversRankingState extends State<AdminDriversRanking> {
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFFF5A3C).withValues(alpha: 0.3),
+                            color:
+                                const Color(0xFFFF5A3C).withValues(alpha: 0.3),
                             blurRadius: 14,
                             offset: const Offset(0, 5),
                           ),
@@ -127,8 +129,8 @@ class _AdminDriversRankingState extends State<AdminDriversRanking> {
                           _headerStat('${_entries.length}', 'Livreurs',
                               Icons.people_rounded),
                           _divider(),
-                          _headerStat('$online', 'En ligne',
-                              Icons.circle, color: const Color(0xFF22C55E)),
+                          _headerStat('$online', 'En ligne', Icons.circle,
+                              color: const Color(0xFF22C55E)),
                           _divider(),
                           _headerStat(
                             _entries.isNotEmpty
@@ -147,7 +149,8 @@ class _AdminDriversRankingState extends State<AdminDriversRanking> {
                       ? SliverFillRemaining(
                           child: Center(
                             child: Text('Aucun livreur',
-                                style: GoogleFonts.urbanist(color: Colors.grey)),
+                                style:
+                                    GoogleFonts.urbanist(color: Colors.grey)),
                           ),
                         )
                       : SliverPadding(
@@ -362,8 +365,8 @@ class _RankCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text('Crédit',
-                    style: TextStyle(
-                        color: Colors.grey.shade400, fontSize: 11)),
+                    style:
+                        TextStyle(color: Colors.grey.shade400, fontSize: 11)),
                 const SizedBox(height: 2),
                 Text(
                   '${entry.wallet} F',
@@ -389,8 +392,7 @@ class _Chip extends StatelessWidget {
   final String label;
   final Color color;
 
-  const _Chip(
-      {required this.icon, required this.label, required this.color});
+  const _Chip({required this.icon, required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) {

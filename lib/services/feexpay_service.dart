@@ -2,12 +2,49 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/feexpay_transaction.dart';
 
 class FeexPayService {
   static final _fn = FirebaseFunctions.instanceFor(region: 'europe-west1');
   static final _db = FirebaseFirestore.instance;
+
+  /// Traduit une exception de paiement en message affichable.
+  ///
+  /// Avant ce correctif, l'écran de recharge affichait `e.toString()`, ce qui
+  /// exposait le texte brut remonté par le serveur — lors d'un échec réel,
+  /// l'utilisateur a vu littéralement « Erreur FeexPay : Request failed with
+  /// status code 502 ». Le détail technique reste disponible en journal de
+  /// debug ; l'interface ne montre plus qu'un message propre.
+  static String userMessage(Object error) {
+    if (error is FirebaseFunctionsException) {
+      // Le serveur fournit déjà un message destiné à l'utilisateur pour les
+      // cas qu'il sait qualifier (indisponibilité, refus, doublon, solde).
+      const serverAuthored = {
+        'unavailable',
+        'failed-precondition',
+        'already-exists',
+        'invalid-argument',
+        'resource-exhausted',
+        'unauthenticated',
+      };
+      final detail = error.details;
+      debugPrint('FeexPay error code=${error.code} '
+          'httpStatus=${detail is Map ? detail['httpStatus'] : null} '
+          'message=${error.message}');
+      if (serverAuthored.contains(error.code) &&
+          (error.message ?? '').trim().isNotEmpty) {
+        return error.message!.trim();
+      }
+      return 'Le service de paiement est momentanément indisponible. Réessayez dans quelques instants.';
+    }
+    if (error is ArgumentError) {
+      return error.message?.toString() ?? 'Informations de paiement invalides.';
+    }
+    debugPrint('FeexPay error (non Functions) : $error');
+    return 'Une erreur est survenue. Vérifiez votre connexion, puis réessayez.';
+  }
 
   // ── Initier un paiement ────────────────────────────────────────────────────
   // Retourne le txId pour suivre le statut en temps réel.
@@ -22,15 +59,15 @@ class FeexPayService {
     if (operator.trim().isEmpty) throw ArgumentError('Opérateur requis');
 
     final callable = _fn.httpsCallable('initiateFeexPayPayment');
-    final result   = await callable.call({
-      'amount':   amount,
-      'phone':    phone.trim(),
+    final result = await callable.call({
+      'amount': amount,
+      'phone': phone.trim(),
       'operator': operator.trim(),
       'userType': userType,
     });
 
-    final data       = Map<String, dynamic>.from(result.data as Map);
-    final txId       = data['txId']?.toString();
+    final data = Map<String, dynamic>.from(result.data as Map);
+    final txId = data['txId']?.toString();
     if (txId == null || txId.isEmpty) {
       throw Exception('Réponse invalide du serveur de paiement');
     }
@@ -58,9 +95,9 @@ class FeexPayService {
     String userName = '',
   }) async {
     final callable = _fn.httpsCallable('initiateWithdrawal');
-    final result   = await callable.call({
-      'amount':   amount,
-      'phone':    phone,
+    final result = await callable.call({
+      'amount': amount,
+      'phone': phone,
       'operator': operator,
       'userType': userType,
       'userName': userName,

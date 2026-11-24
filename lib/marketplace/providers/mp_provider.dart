@@ -4,18 +4,18 @@ import '../models/mp_product.dart';
 import '../services/mp_service.dart';
 
 class MpProvider extends ChangeNotifier {
-  List<MpProduct> _products  = [];
+  List<MpProduct> _products = [];
   List<MpProduct> _searchResults = [];
-  bool _loading   = false;
+  bool _loading = false;
   bool _searching = false;
   String _selectedCategory = 'all';
   StreamSubscription<List<MpProduct>>? _sub;
 
-  List<MpProduct> get products       => _products;
-  List<MpProduct> get searchResults  => _searchResults;
-  bool get loading                   => _loading;
-  bool get searching                 => _searching;
-  String get selectedCategory        => _selectedCategory;
+  List<MpProduct> get products => _products;
+  List<MpProduct> get searchResults => _searchResults;
+  bool get loading => _loading;
+  bool get searching => _searching;
+  String get selectedCategory => _selectedCategory;
 
   List<MpProduct> get newProducts =>
       _products.where((p) => p.condition == 'new').take(10).toList();
@@ -42,14 +42,24 @@ class MpProvider extends ChangeNotifier {
         : MpService.streamByCategory(_selectedCategory);
     _sub = stream.listen(
       (list) {
-        // Sort VIP first
+        // À pertinence égale, les vendeurs professionnels vérifiés et leur
+        // niveau de priorité précèdent les annonces de particuliers.
         list.sort((a, b) {
-          if (a.sellerVipStatus == 'active' && b.sellerVipStatus != 'active') return -1;
-          if (b.sellerVipStatus == 'active' && a.sellerVipStatus != 'active') return 1;
+          if (a.sellerVerified != b.sellerVerified) {
+            return a.sellerVerified ? -1 : 1;
+          }
+          final priority = b.priorityLevel.compareTo(a.priorityLevel);
+          if (priority != 0) return priority;
+          if (a.sellerVipStatus == 'active' && b.sellerVipStatus != 'active') {
+            return -1;
+          }
+          if (b.sellerVipStatus == 'active' && a.sellerVipStatus != 'active') {
+            return 1;
+          }
           return 0;
         });
         _products = list;
-        _loading  = false;
+        _loading = false;
         notifyListeners();
       },
       onError: (_) {

@@ -11,45 +11,39 @@ class AdminMap extends StatefulWidget {
 }
 
 class _AdminMapState extends State<AdminMap> {
-
   GoogleMapController? mapController;
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
-
       appBar: AppBar(
         title: const Text("Carte Admin"),
         backgroundColor: Colors.green,
       ),
-
       body: StreamBuilder<QuerySnapshot>(
-
-        stream: FirebaseFirestore.instance
-            .collection("livreurs")
-            .snapshots(),
-
+        stream: FirebaseFirestore.instance.collection("livreurs").snapshots(),
         builder: (context, driverSnapshot) {
-
           if (driverSnapshot.hasError) {
-            return const StreamErrorState(message: "Impossible de charger les livreurs.");
+            return const StreamErrorState(
+                message: "Impossible de charger les livreurs.");
           }
           if (!driverSnapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
           return StreamBuilder<QuerySnapshot>(
-
             stream: FirebaseFirestore.instance
                 .collection("orders")
-                .where("status", whereIn: ["pending", "assigned", "accepted", "picked_up"])
-                .snapshots(),
-
+                .where("status", whereIn: [
+              "pending",
+              "assigned",
+              "accepted",
+              "picked_up"
+            ]).snapshots(),
             builder: (context, orderSnapshot) {
-
               if (orderSnapshot.hasError) {
-                return const StreamErrorState(message: "Impossible de charger les commandes en cours.");
+                return const StreamErrorState(
+                    message: "Impossible de charger les commandes en cours.");
               }
               if (!orderSnapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -62,7 +56,6 @@ class _AdminMapState extends State<AdminMap> {
               /// LIVREURS
               /// =========================
               for (var doc in driverSnapshot.data!.docs) {
-
                 var data = doc.data() as Map<String, dynamic>;
 
                 double lat = (data["lat"] ?? 0).toDouble();
@@ -74,30 +67,24 @@ class _AdminMapState extends State<AdminMap> {
                 String phone = data["phone"] ?? "";
 
                 markers.add(
-
                   Marker(
                     markerId: MarkerId("driver_${doc.id}"),
                     position: LatLng(lat, lng),
-
                     infoWindow: InfoWindow(
                       title: name,
                       snippet: phone,
                     ),
-
                     icon: BitmapDescriptor.defaultMarkerWithHue(
                       BitmapDescriptor.hueBlue,
                     ),
                   ),
-
                 );
-
               }
 
               /// =========================
               /// COMMANDES
               /// =========================
               for (var order in orderSnapshot.data!.docs) {
-
                 var data = order.data() as Map<String, dynamic>;
 
                 double lat = (data["latitude"] ?? 0).toDouble();
@@ -108,21 +95,17 @@ class _AdminMapState extends State<AdminMap> {
                 LatLng orderPosition = LatLng(lat, lng);
 
                 markers.add(
-
                   Marker(
                     markerId: MarkerId("order_${order.id}"),
                     position: orderPosition,
-
                     infoWindow: InfoWindow(
                       title: "Commande",
                       snippet: data["description"] ?? "Course",
                     ),
-
                     icon: BitmapDescriptor.defaultMarkerWithHue(
                       BitmapDescriptor.hueRed,
                     ),
                   ),
-
                 );
 
                 /// =========================
@@ -148,38 +131,26 @@ class _AdminMapState extends State<AdminMap> {
                     }
                   }
                 }
-
               }
 
               return GoogleMap(
-
                 initialCameraPosition: const CameraPosition(
                   target: LatLng(6.7273, -3.4961), // Abengourou
                   zoom: 13,
                 ),
-
                 markers: markers,
                 polylines: polylines,
-
                 zoomControlsEnabled: true,
                 myLocationEnabled: false,
                 myLocationButtonEnabled: true,
-
                 onMapCreated: (controller) {
                   mapController = controller;
                 },
-
               );
-
             },
-
           );
-
         },
-
       ),
-
     );
-
   }
 }

@@ -6,6 +6,7 @@ class RealEstateAgent {
   final String phone;
   final String? agencyName;
   final String? city;
+  final String? photoUrl;
   final bool isVerified;
   final bool isActive;
   final DateTime? createdAt;
@@ -16,6 +17,7 @@ class RealEstateAgent {
     required this.phone,
     this.agencyName,
     this.city,
+    this.photoUrl,
     this.isVerified = false,
     this.isActive = false,
     this.createdAt,
@@ -29,6 +31,7 @@ class RealEstateAgent {
       phone: d['phone'] as String? ?? '',
       agencyName: d['agencyName'] as String?,
       city: d['city'] as String?,
+      photoUrl: d['photoUrl'] as String?,
       isVerified: d['isVerified'] == true,
       isActive: d['isActive'] == true,
       createdAt: (d['createdAt'] as Timestamp?)?.toDate(),

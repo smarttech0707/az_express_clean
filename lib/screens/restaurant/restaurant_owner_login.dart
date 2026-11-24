@@ -1,14 +1,17 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import '../../widgets/pro_back_button.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'restaurant_owner_dashboard.dart';
+import 'restaurant_register.dart';
 import '../../services/notification_service.dart';
 import '../../services/subscription_service.dart';
 import '../../services/auth_service.dart';
 import '../auth/generic_forgot_password_page.dart';
+import '../auth/partner_first_password_page.dart';
 
 class RestaurantOwnerLogin extends StatefulWidget {
   const RestaurantOwnerLogin({super.key});
@@ -19,9 +22,9 @@ class RestaurantOwnerLogin extends StatefulWidget {
 
 class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
   final _phoneCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
-  bool _loading  = false;
-  bool _obscure  = true;
+  final _passCtrl = TextEditingController();
+  bool _loading = false;
+  bool _obscure = true;
 
   // Master Prompt 128 — voir driver_login.dart pour le contexte complet :
   // Firebase Auth persiste déjà la session, cet écran ne la consultait
@@ -63,8 +66,18 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
         setState(() => _autoResuming = false);
         return;
       }
+      // Mot de passe temporaire non remplacé : jamais d'accès au tableau de
+      // bord par reprise de session (le serveur est l'autorité).
+      if (!await PartnerFirstPasswordPage.ensureActivated(context, user)) {
+        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+        if (mounted) setState(() => _autoResuming = false);
+        return;
+      }
       // Même chemin exact que `_login()` en cas de succès.
-      NotificationService().saveToken(user.uid, 'restaurants');
+      NotificationService().saveToken(restaurantId, 'restaurants');
       await SubscriptionService.checkAndRenew('restaurants', restaurantId);
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -91,7 +104,7 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
 
   Future<void> _login() async {
     final phone = _phoneCtrl.text.trim().replaceAll(' ', '');
-    final pass  = _passCtrl.text;
+    final pass = _passCtrl.text;
 
     if (phone.isEmpty || pass.isEmpty) {
       _snack('Veuillez remplir tous les champs', Colors.orange);
@@ -125,15 +138,19 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
             .get();
 
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
 
         if (!mounted) return;
         if (reqDoc.exists) {
           final status = reqDoc.data()?['status'] ?? 'pending';
           if (status == 'pending') {
-            _snack('Votre demande est en cours d\'examen. Patientez 24h.', Colors.orange);
+            _snack('Votre demande est en cours d\'examen. Patientez 24h.',
+                Colors.orange);
           } else if (status == 'rejected') {
-            _snack('Votre demande a été refusée. Contactez l\'admin.', Colors.red);
+            _snack(
+                'Votre demande a été refusée. Contactez l\'admin.', Colors.red);
           } else {
             _snack('Compte non approuvé. Contactez l\'admin.', Colors.red);
           }
@@ -147,7 +164,9 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
       final restaurantId = ownerData['restaurantId'] as String?;
       if (restaurantId == null) {
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
         if (!mounted) return;
         _snack('Restaurant introuvable. Contactez l\'admin.', Colors.red);
         return;
@@ -160,13 +179,29 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
 
       if (!restoDoc.exists) {
         await FirebaseAuth.instance.signOut();
-        try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
         if (!mounted) return;
         _snack('Restaurant introuvable. Contactez l\'admin.', Colors.red);
         return;
       }
 
-      NotificationService().saveToken(uid, 'restaurants');
+      // Première connexion : changement obligatoire du mot de passe temporaire.
+      if (!mounted) return;
+      if (!await PartnerFirstPasswordPage.ensureActivated(
+          context, cred.user!)) {
+        await FirebaseAuth.instance.signOut();
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+        if (!mounted) return;
+        _snack(
+            "Activation requise : définissez votre mot de passe personnel pour accéder à votre espace.",
+            Colors.orange);
+        return;
+      }
+      NotificationService().saveToken(restaurantId, 'restaurants');
       AuthService().logAuthEvent('login', 'restaurant');
       if (!mounted) return;
       await SubscriptionService.checkAndRenew('restaurants', restaurantId);
@@ -183,7 +218,9 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
       );
     } on FirebaseAuthException catch (e) {
       await FirebaseAuth.instance.signOut();
-      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (_) {}
       if (!mounted) return;
       if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
         _snack('Numéro ou mot de passe incorrect.', Colors.red);
@@ -192,7 +229,9 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
       }
     } catch (e) {
       await FirebaseAuth.instance.signOut();
-      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+      try {
+        await FirebaseAuth.instance.signInAnonymously();
+      } catch (_) {}
       if (!mounted) return;
       _snack('Erreur : $e', Colors.red);
     } finally {
@@ -215,7 +254,10 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
     if (_autoResuming) {
       return const Scaffold(
         backgroundColor: Color(0xFFF5F5F5),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF1565C0))),
+        body: BackOverlay(
+            color: Color(0xFF1565C0),
+            child: Center(
+                child: CircularProgressIndicator(color: Color(0xFF1565C0)))),
       );
     }
     return Scaffold(
@@ -270,17 +312,17 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
               keyboardType: TextInputType.phone,
               decoration: InputDecoration(
                 labelText: 'Numéro de téléphone',
-                prefixIcon: const Icon(Icons.phone_outlined,
-                    color: Color(0xFF1565C0)),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                prefixIcon:
+                    const Icon(Icons.phone_outlined, color: Color(0xFF1565C0)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide:
                       const BorderSide(color: Color(0xFF1565C0), width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
             const SizedBox(height: 16),
@@ -291,8 +333,8 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
               obscureText: _obscure,
               decoration: InputDecoration(
                 labelText: 'Mot de passe',
-                prefixIcon: const Icon(Icons.lock_outline,
-                    color: Color(0xFF1565C0)),
+                prefixIcon:
+                    const Icon(Icons.lock_outline, color: Color(0xFF1565C0)),
                 suffixIcon: IconButton(
                   icon: Icon(
                     _obscure
@@ -302,19 +344,36 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
                   ),
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide:
                       const BorderSide(color: Color(0xFF1565C0), width: 2),
                 ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
 
             const SizedBox(height: 8),
+            // Inscription autonome existante (RestaurantRegister →
+            // restaurant_requests → approbation admin) : jusqu'ici aucun écran
+            // n'y menait.
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const RestaurantRegister()),
+                ),
+                child: Text(
+                  'Pas encore inscrit ?',
+                  style: GoogleFonts.urbanist(
+                      color: const Color(0xFF1565C0), fontSize: 13),
+                ),
+              ),
+            ),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
@@ -322,9 +381,9 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => const GenericForgotPasswordPage(
-                      userType:    'restaurant',
+                      userType: 'restaurant',
                       accentColor: Color(0xFF1565C0),
-                      title:       'Mot de passe oublié',
+                      title: 'Mot de passe oublié',
                     ),
                   ),
                 ),
@@ -357,11 +416,9 @@ class _RestaurantOwnerLoginState extends State<RestaurantOwnerLogin> {
                             fontWeight: FontWeight.bold)),
               ),
             ),
-
           ],
         ),
       ),
     );
   }
 }
-

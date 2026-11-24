@@ -1,0 +1,164 @@
+'use strict';
+
+// Bout en bout sur émulateurs Auth + Firestore + STORAGE avec les vraies règles
+// (storage.rules) et de VRAIS jetons : cycle de vie d'un restaurateur.
+// Ignoré hors émulateur. Jamais la production.
+//
+//   npx firebase emulators:exec --config <auth+firestore+storage> --project az-b5-e2e \
+//     --only auth,firestore,storage "node --test functions/test/restaurantStorageActivation.e2e.emulator.test.js"
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const enabled = Boolean(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST
+  && process.env.FIREBASE_STORAGE_EMULATOR_HOST && process.env.AZ_E2E_STORAGE === '1');
+const options = { skip: enabled ? false : 'émulateurs Auth/Firestore/Storage + AZ_E2E_STORAGE=1 requis' };
+
+let admin; let db; let auth; let run; let complete; let project; let bucket;
+
+test.before(async () => {
+  if (!enabled) return;
+  project = process.env.GCLOUD_PROJECT || 'az-b5-e2e';
+  bucket = `${project}.appspot.com`;
+  admin = require('firebase-admin');
+  admin.initializeApp({ projectId: project });
+  db = admin.firestore();
+  auth = admin.auth();
+  const { buildManageAdminPartnerAccount } = require('../adminPartnerAccounts');
+  const { buildCompletePartnerFirstPasswordChange } = require('../partnerFirstLogin');
+  run = buildManageAdminPartnerAccount({
+    db, auth, fieldValue: admin.firestore.FieldValue,
+    checkRateLimit: async () => {}, logAudit: async () => {}, logSecurityEvent: async () => {},
+  });
+  complete = buildCompletePartnerFirstPasswordChange({
+    db, auth, fieldValue: admin.firestore.FieldValue, checkRateLimit: async () => {}, logAudit: async () => {},
+  });
+  await db.collection('admins').doc('root').set({ role: 'super', isActive: true });
+});
+
+const asAdmin = (data) => ({ auth: { uid: 'root', token: { firebase: { sign_in_provider: 'password' } } }, data });
+async function signIn(email, password) {
+  const response = await fetch(
+    `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password, returnSecureToken: true }) });
+  const body = await response.json();
+  assert.equal(response.ok, true, 'connexion');
+  return body.idToken;
+}
+const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+const storageBase = () => `http://${process.env.FIREBASE_STORAGE_EMULATOR_HOST}/v0/b/${bucket}/o`;
+/// Téléversement REST avec un VRAI jeton : les règles Storage s'appliquent.
+async function upload(idToken, objectPath) {
+  // protocole résumable du SDK Firebase : seul chemin où l'émulateur retient le type de contenu
+  const start = await fetch(`${storageBase()}?name=${encodeURIComponent(objectPath)}`, {
+    method: 'POST',
+    headers: {
+      authorization: `Firebase ${idToken}`, 'content-type': 'application/json',
+      'x-goog-upload-protocol': 'resumable', 'x-goog-upload-command': 'start',
+      'x-goog-upload-header-content-type': 'image/jpeg',
+      'x-goog-upload-header-content-length': String(jpeg.length),
+    },
+    body: JSON.stringify({ name: objectPath, contentType: 'image/jpeg' }),
+  });
+  if (start.status !== 200) return start.status;
+  const url = start.headers.get('x-goog-upload-url');
+  const done = await fetch(url, {
+    method: 'POST',
+    headers: { authorization: `Firebase ${idToken}`, 'x-goog-upload-command': 'upload, finalize', 'x-goog-upload-offset': '0' },
+    body: jpeg,
+  });
+  return done.status;
+}
+async function remove(idToken, objectPath) {
+  const response = await fetch(`${storageBase()}/${encodeURIComponent(objectPath)}`, {
+    method: 'DELETE', headers: { authorization: `Firebase ${idToken}` },
+  });
+  return response.status;
+}
+const profile = (n) => ({
+  name: `Resto ${n}`, ownerName: 'Awa', phone: `07000000${n}`, address: 'Rue 1',
+  category: 'Ivoirien', lat: 6.7, lng: -3.5,
+});
+
+test('E2E Storage restaurateur : refusé avant activation, ancien jeton refusé après réinitialisation, autorisé après activation', options, async () => {
+  const email = '0700000051@az-restaurant.ci';
+  const created = await run(asAdmin({ action: 'create', kind: 'restaurant', email, profile: profile(51) }));
+  const logo = `restaurant_logos/${created.restaurantId}/logo.jpg`;
+  const cover = `restaurant_covers/${created.restaurantId}/cover.jpg`;
+  const plat = `restaurant_menu_items/${created.restaurantId}/plat.jpg`;
+  const ownerDoc = () => db.collection('restaurant_owners').doc(created.uid).get().then((d) => d.data());
+  assert.equal((await ownerDoc()).mustChangePassword, true, 'projection posée à la création');
+
+  // 1. téléversement refusé avant activation (projection + revendication)
+  const pending = await signIn(email, created.tempPassword);
+  for (const target of [logo, cover, plat]) assert.equal(await upload(pending, target), 403);
+
+  // 2. changement obligatoire (le serveur lève journal ET projection)
+  const decoded = await auth.verifyIdToken(pending);
+  await complete(requestFromDecoded(decoded, { newPassword: 'MonNouveau9' }));
+  const journal = (await db.collection('partner_provisioning').doc(created.uid).get()).data();
+  assert.equal(journal.mustChangePassword, false);
+  assert.equal((await ownerDoc()).mustChangePassword, false, 'projection alignée sur le journal');
+
+  // 3. après activation : téléversement, remplacement et suppression autorisés
+  const active = await signIn(email, 'MonNouveau9');
+  for (const target of [logo, cover, plat]) {
+    assert.equal(await upload(active, target), 200);
+    assert.equal(await upload(active, target), 200, 'remplacement');
+    assert.equal(await remove(active, target), 204, 'suppression');
+  }
+  // revendication PÉRIMÉE dans l'ancien jeton : la projection fait autorité (autorisé)
+  assert.equal(await upload(pending, logo), 200);
+
+  // 4. réinitialisation administrative (contrat à respecter par l'opération future :
+  //    journal + projection dans le même lot, revendication reposée)
+  const batch = db.batch();
+  batch.set(db.collection('partner_provisioning').doc(created.uid), { mustChangePassword: true, resetBy: 'root' }, { merge: true });
+  batch.set(db.collection('restaurant_owners').doc(created.uid), { mustChangePassword: true }, { merge: true });
+  await batch.commit();
+  await auth.setCustomUserClaims(created.uid, { partnerMustChangePassword: true });
+
+  // ANCIEN jeton (émis après activation, donc SANS revendication) : refusé immédiatement
+  assert.equal((await auth.verifyIdToken(active)).partnerMustChangePassword, undefined);
+  for (const target of [logo, cover, plat]) assert.equal(await upload(active, target), 403);
+  await db.collection('restaurant_owners').doc(created.uid).set({ mustChangePassword: false }, { merge: true });
+  assert.equal(await upload(active, logo), 200);
+  assert.equal(await remove(active, logo), 204);
+  await db.collection('restaurant_owners').doc(created.uid).set({ mustChangePassword: true }, { merge: true });
+  assert.equal(await remove(active, logo), 403, 'suppression refusée de nouveau après une nouvelle réinitialisation');
+});
+
+function requestFromDecoded(decoded, data) { return { auth: { uid: decoded.uid, token: decoded }, data }; }
+
+test('E2E Storage : compte historique, administrateur, client ordinaire et tiers', options, async () => {
+  // restaurateur historique : document propriétaire SANS projection, sans journal, sans revendication
+  const histEmail = '0700000052@az-restaurant.ci';
+  const hist = await auth.createUser({ email: histEmail, password: 'Historique1A' });
+  await db.collection('restaurants').doc('rest-hist').set({ name: 'Historique', isActive: true });
+  await db.collection('restaurant_owners').doc(hist.uid).set({ restaurantId: 'rest-hist', uid: hist.uid });
+  const histToken = await signIn(histEmail, 'Historique1A');
+  assert.equal(await upload(histToken, 'restaurant_logos/rest-hist/logo.jpg'), 200);
+  assert.equal(await upload(histToken, 'restaurant_menu_items/rest-hist/plat.jpg'), 200);
+  assert.equal(await remove(histToken, 'restaurant_menu_items/rest-hist/plat.jpg'), 204);
+  // un restaurateur historique ne touche pas un autre restaurant
+  assert.equal(await upload(histToken, 'restaurant_logos/autre/logo.jpg'), 403);
+
+  // administrateur : accès conservé (e-mail hors domaine restaurateur)
+  const adminUser = await auth.createUser({ email: 'admin53@example.test', password: 'Admin1Pass' });
+  await db.collection('admins').doc(adminUser.uid).set({ role: 'super', isActive: true });
+  const adminToken = await signIn('admin53@example.test', 'Admin1Pass');
+  assert.equal(await upload(adminToken, 'restaurant_covers/rest-hist/cover.jpg'), 200);
+  assert.equal(await remove(adminToken, 'restaurant_covers/rest-hist/cover.jpg'), 204);
+  assert.equal(await upload(adminToken, 'restaurant_menu_items/rest-hist/admin.jpg'), 200);
+
+  // client ordinaire : aucun accès aux chemins restaurant
+  const client = await auth.createUser({ email: 'client54@example.test', password: 'Client1Pass' });
+  const clientToken = await signIn('client54@example.test', 'Client1Pass');
+  assert.equal(await upload(clientToken, 'restaurant_logos/rest-hist/logo.jpg'), 403);
+  // et reste libre d'utiliser ses propres chemins
+  assert.equal(await upload(clientToken, `vehicle_listings/${client.uid}/l1/images/p.jpg`), 200);
+
+  // tiers portant le domaine restaurateur mais sans document de propriété
+  await auth.createUser({ email: '0700000055@az-restaurant.ci', password: 'Intrus1Pass' });
+  const intrus = await signIn('0700000055@az-restaurant.ci', 'Intrus1Pass');
+  assert.equal(await upload(intrus, 'restaurant_logos/rest-hist/logo.jpg'), 403);
+});

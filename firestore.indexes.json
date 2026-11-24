@@ -1,6 +1,97 @@
 {
   "indexes": [
     {
+      "collectionGroup": "boulangeries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sellerId", "order": "ASCENDING" },
+        { "fieldPath": "sellerType", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "withdrawal_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "nextStatusCheckAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ai_tool_executions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "boutique_products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sellerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "menu_items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isAvailable", "order": "ASCENDING" },
+        { "fieldPath": "category", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_providers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "subcategory", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "simple_services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "serviceType", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "service_reviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "providerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "vehicle_conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participantIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pharmacy_guards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cityKey", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "isVerified", "order": "ASCENDING" },
+        { "fieldPath": "guardStartAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "messages",
       "queryScope": "COLLECTION",
       "fields": [
@@ -22,6 +113,27 @@
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "propertyType", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "real_estate_listings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "propertyType", "order": "ASCENDING" },
+        { "fieldPath": "priceType", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "real_estate_listings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "propertyType", "order": "ASCENDING" },
+        { "fieldPath": "priceType", "order": "ASCENDING" },
+        { "fieldPath": "furnished", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
@@ -117,6 +229,15 @@
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "sellerType", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
@@ -177,6 +298,14 @@
       "fields": [
         { "fieldPath": "isActive", "order": "ASCENDING" },
         { "fieldPath": "order",    "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "zones_livraison",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "isMarketplaceEnabled", "order": "ASCENDING" }
       ]
     },
     {
@@ -264,6 +393,22 @@
       ]
     },
     {
+      "collectionGroup": "marketplace_products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sellerId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketplace_products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
@@ -334,6 +479,343 @@
       "fields": [
         { "fieldPath": "status",    "order": "ASCENDING"  },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "category", "order": "ASCENDING" },
+        { "fieldPath": "subcategory", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "providerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_reservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_reservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "providerIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "event_chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "participantIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+      {
+        "collectionGroup": "places",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "verified", "order": "ASCENDING" },
+          { "fieldPath": "normalizedName", "order": "ASCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "places",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "verified", "order": "ASCENDING" },
+          { "fieldPath": "aliases", "arrayConfig": "CONTAINS" }
+        ]
+      },
+      {
+        "collectionGroup": "places",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "normalizedName", "order": "ASCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "places",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "verified", "order": "ASCENDING" },
+          { "fieldPath": "searchCount", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "reviews",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "sellerType", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "reviews",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "rating", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "reviews",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "sellerType", "order": "ASCENDING" },
+          { "fieldPath": "rating", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "price", "order": "ASCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "price", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "year", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "price", "order": "ASCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "price", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "year", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "price", "order": "ASCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "price", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "year", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "price", "order": "ASCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "price", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" },
+          { "fieldPath": "status", "order": "ASCENDING" },
+          { "fieldPath": "cityId", "order": "ASCENDING" },
+          { "fieldPath": "offerType", "order": "ASCENDING" },
+          { "fieldPath": "vehicleType", "order": "ASCENDING" },
+          { "fieldPath": "year", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_listings",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "sellerId", "order": "ASCENDING" },
+          { "fieldPath": "createdAt", "order": "DESCENDING" }
+        ]
+      },
+      {
+        "collectionGroup": "vehicle_seller_profiles",
+        "queryScope": "COLLECTION",
+        "fields": [
+          { "fieldPath": "sellerType", "order": "ASCENDING" },
+          { "fieldPath": "updatedAt", "order": "DESCENDING" }
+        ]
+      },
+    {
+      "collectionGroup": "orders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "amountsVersion", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "partnerAcceptedAtMs", "order": "ASCENDING" }
       ]
     }
   ],

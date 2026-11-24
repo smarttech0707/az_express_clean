@@ -148,7 +148,8 @@ class _AdminOrdersState extends State<AdminOrders> {
                 ? const EmptyState(
                     icon: Icons.inbox_rounded,
                     title: 'Aucune commande',
-                    description: 'Les commandes apparaîtront ici dès qu\'un client en passera une.',
+                    description:
+                        'Les commandes apparaîtront ici dès qu\'un client en passera une.',
                   )
                 : ListView.builder(
                     physics: const BouncingScrollPhysics(),
@@ -163,8 +164,7 @@ class _AdminOrdersState extends State<AdminOrders> {
                           child: Center(child: CircularProgressIndicator()),
                         );
                       }
-                      final data =
-                          _docs[i].data() as Map<String, dynamic>;
+                      final data = _docs[i].data() as Map<String, dynamic>;
                       return _OrderCard(data: data, docId: _docs[i].id);
                     },
                   ),
@@ -190,13 +190,13 @@ class _OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status   = data["status"] as String? ?? 'pending';
-    final client   = data["clientName"] as String? ?? "Client";
-    final phone    = data["clientPhone"] as String? ?? "—";
-    final desc     = data["description"] as String? ?? "—";
-    final budget   = (data["budget"] as num? ?? 0).toInt();
-    final ts       = data["createdAt"] as Timestamp?;
-    final date     = ts?.toDate();
+    final status = data["status"] as String? ?? 'pending';
+    final client = data["clientName"] as String? ?? "Client";
+    final phone = data["clientPhone"] as String? ?? "—";
+    final desc = data["description"] as String? ?? "—";
+    final budget = (data["budget"] as num? ?? 0).toInt();
+    final ts = data["createdAt"] as Timestamp?;
+    final date = ts?.toDate();
     // Détection livreur "commande gardée ouverte" / "refuse de terminer" —
     // aucune expiration automatique n'existe pour accepted/picked_up
     // (autoExpireOrders ne couvre que pending/broadcast/assigned, jamais
@@ -212,7 +212,8 @@ class _OrderCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: isStuck ? Border.all(color: Colors.red.shade300, width: 1.5) : null,
+        border:
+            isStuck ? Border.all(color: Colors.red.shade300, width: 1.5) : null,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),

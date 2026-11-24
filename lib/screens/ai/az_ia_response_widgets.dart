@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/az_ia_service.dart';
+import '../../theme/az_ia_theme.dart';
 import 'az_ia_message_parser.dart';
 import 'az_ia_rich_message.dart';
 
@@ -15,34 +16,34 @@ import 'az_ia_rich_message.dart';
 
 const Map<String, IconData> _icons = {
   'account_balance_wallet': Icons.account_balance_wallet_outlined,
-  'history':                Icons.history,
-  'add_card':               Icons.add_card_outlined,
-  'money_off':               Icons.money_off_outlined,
-  'local_shipping':          Icons.local_shipping_outlined,
-  'cancel':                  Icons.cancel_outlined,
-  'sports_motorsports':      Icons.sports_motorsports_outlined,
-  'restaurant':              Icons.restaurant_outlined,
-  'restaurant_menu':         Icons.restaurant_menu_outlined,
-  'storefront':              Icons.storefront_outlined,
-  'shopping_bag':            Icons.shopping_bag_outlined,
-  'chat':                    Icons.chat_outlined,
-  'swap_horiz':              Icons.swap_horiz,
-  'medication':              Icons.medication_outlined,
-  'bakery_dining':           Icons.bakery_dining_outlined,
-  'home_work':               Icons.home_work_outlined,
-  'event_available':         Icons.event_available_outlined,
-  'support_agent':           Icons.support_agent_outlined,
-  'help_outline':            Icons.help_outline,
-  'quiz':                    Icons.quiz_outlined,
-  'error_outline':           Icons.error_outline,
-  'warning_amber':           Icons.warning_amber_outlined,
-  'check_circle':            Icons.check_circle_outline,
-  'shield':                  Icons.shield_outlined,
-  'notifications':           Icons.notifications_outlined,
-  'payments':                Icons.payments_outlined,
-  'location_on':             Icons.location_on_outlined,
-  'wb_sunny':                Icons.wb_sunny_outlined,
-  'auto_awesome':            Icons.auto_awesome,
+  'history': Icons.history,
+  'add_card': Icons.add_card_outlined,
+  'money_off': Icons.money_off_outlined,
+  'local_shipping': Icons.local_shipping_outlined,
+  'cancel': Icons.cancel_outlined,
+  'sports_motorsports': Icons.sports_motorsports_outlined,
+  'restaurant': Icons.restaurant_outlined,
+  'restaurant_menu': Icons.restaurant_menu_outlined,
+  'storefront': Icons.storefront_outlined,
+  'shopping_bag': Icons.shopping_bag_outlined,
+  'chat': Icons.chat_outlined,
+  'swap_horiz': Icons.swap_horiz,
+  'medication': Icons.medication_outlined,
+  'bakery_dining': Icons.bakery_dining_outlined,
+  'home_work': Icons.home_work_outlined,
+  'event_available': Icons.event_available_outlined,
+  'support_agent': Icons.support_agent_outlined,
+  'help_outline': Icons.help_outline,
+  'quiz': Icons.quiz_outlined,
+  'error_outline': Icons.error_outline,
+  'warning_amber': Icons.warning_amber_outlined,
+  'check_circle': Icons.check_circle_outline,
+  'shield': Icons.shield_outlined,
+  'notifications': Icons.notifications_outlined,
+  'payments': Icons.payments_outlined,
+  'location_on': Icons.location_on_outlined,
+  'wb_sunny': Icons.wb_sunny_outlined,
+  'auto_awesome': Icons.auto_awesome,
 };
 
 IconData iconForName(String name) => _icons[name] ?? Icons.auto_awesome;
@@ -54,7 +55,8 @@ Color colorForHex(String hex) {
   return Color(0xFF000000 | value);
 }
 
-String fcfa(num? amount) => amount == null ? '' : '${amount.toStringAsFixed(0)} FCFA';
+String fcfa(num? amount) =>
+    amount == null ? '' : '${amount.toStringAsFixed(0)} FCFA';
 
 /// Coquille commune à toutes les cartes — icône/couleur en en-tête,
 /// contenu libre en dessous. Évite de dupliquer 9 fois la même décoration.
@@ -70,40 +72,54 @@ class _CardShell extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 340),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AzIaTheme.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color.withValues(alpha: 0.18)),
         boxShadow: [
-          BoxShadow(color: color.withValues(alpha: 0.10), blurRadius: 16, offset: const Offset(0, 6)),
-          const BoxShadow(color: Colors.black12, blurRadius: 3, offset: Offset(0, 1)),
+          BoxShadow(
+              color: color.withValues(alpha: 0.10),
+              blurRadius: 16,
+              offset: const Offset(0, 6)),
+          const BoxShadow(
+              color: Colors.black26, blurRadius: 3, offset: Offset(0, 1)),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 30, height: 30,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [color, color.withValues(alpha: 0.7)],
-                    begin: Alignment.topLeft, end: Alignment.bottomRight,
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(color: AzIaTheme.textPrimary),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [color, color.withValues(alpha: 0.7)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
                   ),
-                  shape: BoxShape.circle,
+                  child: Icon(iconForName(response.icon),
+                      color: Colors.white, size: 16),
                 ),
-                child: Icon(iconForName(response.icon), color: Colors.white, size: 16),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(response.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          child,
-        ],
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(response.title,
+                      style: const TextStyle(
+                          color: AzIaTheme.textPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            child,
+          ],
+        ),
       ),
     );
   }
@@ -112,7 +128,8 @@ class _CardShell extends StatelessWidget {
 /// Texte de `response.message` mis en forme (titres/puces/paragraphes) —
 /// réutilisé à l'identique par toutes les cartes ci-dessous.
 Widget _messageBlocks(AzIaStructuredResponse response) {
-  return AzIaRichBlocks(blocks: AzIaMessageParser.parseBlocks(response.message));
+  return AzIaRichBlocks(
+      blocks: AzIaMessageParser.parseBlocks(response.message));
 }
 
 Widget _kv(String label, String value, {Color? valueColor}) {
@@ -121,8 +138,17 @@ Widget _kv(String label, String value, {Color? valueColor}) {
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(width: 90, child: Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 12.5))),
-        Expanded(child: Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: valueColor))),
+        SizedBox(
+            width: 90,
+            child: Text(label,
+                style: const TextStyle(
+                    color: AzIaTheme.textSecondary, fontSize: 12.5))),
+        Expanded(
+            child: Text(value,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: valueColor ?? AzIaTheme.textPrimary))),
       ],
     ),
   );
@@ -144,7 +170,9 @@ class WalletCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (balance is num) _kv('Solde', fcfa(balance), valueColor: colorForHex(response.color)),
+          if (balance is num)
+            _kv('Solde', fcfa(balance),
+                valueColor: colorForHex(response.color)),
           if (transactions != null && transactions.isNotEmpty) ...[
             const SizedBox(height: 4),
             for (final t in transactions.take(5))
@@ -179,7 +207,8 @@ class PaymentCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (payload['orderId'] != null) _kv('Commande', '#${payload['orderId']}'),
+          if (payload['orderId'] != null)
+            _kv('Commande', '#${payload['orderId']}'),
           if (payload['txId'] != null) _kv('Référence', '${payload['txId']}'),
           if (payload['dispatched'] == true) _kv('Livreur', 'Notifié'),
           const SizedBox(height: 6),
@@ -204,8 +233,10 @@ class DeliveryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (payload['orderId'] != null) _kv('Commande', '#${payload['orderId']}'),
-          if (payload['refundAmount'] != null) _kv('Remboursé', fcfa(payload['refundAmount'] as num?)),
+          if (payload['orderId'] != null)
+            _kv('Commande', '#${payload['orderId']}'),
+          if (payload['refundAmount'] != null)
+            _kv('Remboursé', fcfa(payload['refundAmount'] as num?)),
           const SizedBox(height: 6),
           _messageBlocks(response),
         ],
@@ -229,11 +260,14 @@ class TrackingCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (payload['orderId'] != null) _kv('Commande', '#${payload['orderId']}'),
+          if (payload['orderId'] != null)
+            _kv('Commande', '#${payload['orderId']}'),
           if (payload['status'] != null) _kv('Statut', '${payload['status']}'),
           if (payload['driver'] != null) _kv('Livreur', '${payload['driver']}'),
-          if (agent is Map && agent['name'] != null) _kv('Agent', '${agent['name']}'),
-          if (payload['amount'] != null) _kv('Montant', fcfa(payload['amount'] as num?)),
+          if (agent is Map && agent['name'] != null)
+            _kv('Agent', '${agent['name']}'),
+          if (payload['amount'] != null)
+            _kv('Montant', fcfa(payload['amount'] as num?)),
           const SizedBox(height: 6),
           _messageBlocks(response),
         ],
@@ -280,7 +314,8 @@ class RestaurantCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (payload['orderId'] != null) _kv('Commande', '#${payload['orderId']}'),
+          if (payload['orderId'] != null)
+            _kv('Commande', '#${payload['orderId']}'),
           if (results != null && results.isNotEmpty) _resultsList(results),
           const SizedBox(height: 6),
           _messageBlocks(response),
@@ -328,7 +363,8 @@ class PropertyCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (payload['requestId'] != null) _kv('Demande', '#${payload['requestId']}'),
+          if (payload['requestId'] != null)
+            _kv('Demande', '#${payload['requestId']}'),
           if (results != null && results.isNotEmpty) _resultsList(results),
           const SizedBox(height: 6),
           _messageBlocks(response),
@@ -358,7 +394,8 @@ class ConfirmationCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (payload['summary'] != null)
-            Text('${payload['summary']}', style: const TextStyle(fontSize: 13.5, height: 1.35)),
+            Text('${payload['summary']}',
+                style: const TextStyle(fontSize: 13.5, height: 1.35)),
           if (payload['amount'] != null) ...[
             const SizedBox(height: 4),
             _kv('Montant', fcfa(payload['amount'] as num?)),
@@ -433,12 +470,16 @@ class GenericBubble extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
       decoration: const BoxDecoration(
-        color: Colors.white,
+        color: AzIaTheme.surface,
         borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20), topRight: Radius.circular(20),
-          bottomLeft: Radius.circular(6), bottomRight: Radius.circular(20),
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+          bottomLeft: Radius.circular(6),
+          bottomRight: Radius.circular(20),
         ),
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 3))],
+        boxShadow: [
+          BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 3))
+        ],
       ),
       child: _messageBlocks(response),
     );

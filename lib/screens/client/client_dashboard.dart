@@ -1,5 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../auto_moto/screens/vehicle_chat_screen.dart';
+import '../../auto_moto/vehicle_conversation_repository.dart';
 import '../../services/notification_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/glass_kit.dart';
@@ -9,6 +12,7 @@ import 'notification_center.dart';
 import 'suivi_commande.dart';
 import 'profil_client.dart';
 import 'livraison_screen.dart';
+import '../../widgets/min_version_dialog.dart';
 
 class ClientDashboard extends StatefulWidget {
   const ClientDashboard({super.key});
@@ -29,7 +33,7 @@ class _ClientDashboardState extends State<ClientDashboard>
   ];
 
   late AnimationController _fabCtrl;
-  late Animation<double>   _fabScale;
+  late Animation<double> _fabScale;
 
   @override
   void initState() {
@@ -43,11 +47,34 @@ class _ClientDashboardState extends State<ClientDashboard>
 
     NotificationService.registerTapHandler((type, orderId, status) {
       if (!mounted) return;
-      if (['order_update', 'driver_found', 'order_confirmed',
-           'order_cancelled', 'mission_end'].contains(type)) {
+      if ([
+        'order_update',
+        'driver_found',
+        'order_confirmed',
+        'order_cancelled',
+        'no_driver_found',
+        'mission_end'
+      ].contains(type)) {
         setState(() => _currentIndex = 2);
+      } else if (type == 'recharge') {
+        setState(() => _currentIndex = 1);
+      } else if (type == 'vehicle_chat_message' && orderId != null) {
+        _openVehicleConversationFromNotification(orderId);
       }
+    }, acceptedTypes: const {
+      'order_update',
+      'driver_found',
+      'order_confirmed',
+      'order_cancelled',
+      'no_driver_found',
+      'mission_end',
+      'recharge',
+      'vehicle_chat_message',
     });
+    // Version minimale du rôle client (config/app_versions.client) : sans configuration, aucun effet.
+    WidgetsBinding.instance.addPostFrameCallback((_) => showMinVersionDialogIfNeeded(
+        context, minVersionRoleClient,
+        blockedMessage: 'Installez la dernière version pour continuer à passer des commandes.'));
   }
 
   @override
@@ -67,6 +94,34 @@ class _ClientDashboardState extends State<ClientDashboard>
   void _openNotificationCenter() {
     Navigator.push(context,
         MaterialPageRoute(builder: (_) => const NotificationCenterScreen()));
+  }
+
+  Future<void> _openVehicleConversationFromNotification(
+    String conversationId,
+  ) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return;
+    try {
+      final repository = VehicleConversationRepository();
+      final conversation = await repository.getConversation(conversationId);
+      if (!mounted ||
+          conversation == null ||
+          !conversation.participantIds.contains(user.uid)) {
+        return;
+      }
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VehicleChatScreen(
+            conversation: conversation,
+            currentUserId: user.uid,
+            repository: repository,
+          ),
+        ),
+      );
+    } catch (_) {
+      // Le contrôle Firestore reste la barrière finale pour un payload falsifié.
+    }
   }
 
   @override
@@ -107,7 +162,7 @@ class _ClientDashboardState extends State<ClientDashboard>
   Widget _buildFAB() {
     return Listener(
       onPointerDown: (_) => _fabCtrl.forward(),
-      onPointerUp:   (_) => _fabCtrl.reverse(),
+      onPointerUp: (_) => _fabCtrl.reverse(),
       onPointerCancel: (_) => _fabCtrl.reverse(),
       child: GestureDetector(
         onTap: _openNewOrder,
@@ -171,37 +226,37 @@ class _ClientDashboardState extends State<ClientDashboard>
           child: Row(
             children: [
               _NavItem(
-                icon:       Icons.home_outlined,
+                icon: Icons.home_outlined,
                 activeIcon: Icons.home_rounded,
-                label:      'Accueil',
-                index:      0,
-                current:    _currentIndex,
-                onTap:      (i) => setState(() => _currentIndex = i),
+                label: 'Accueil',
+                index: 0,
+                current: _currentIndex,
+                onTap: (i) => setState(() => _currentIndex = i),
               ),
               _NavItem(
-                icon:       Icons.account_balance_wallet_outlined,
+                icon: Icons.account_balance_wallet_outlined,
                 activeIcon: Icons.account_balance_wallet_rounded,
-                label:      'Wallet',
-                index:      1,
-                current:    _currentIndex,
-                onTap:      (i) => setState(() => _currentIndex = i),
+                label: 'Wallet',
+                index: 1,
+                current: _currentIndex,
+                onTap: (i) => setState(() => _currentIndex = i),
               ),
               const SizedBox(width: 72),
               _NavItem(
-                icon:       Icons.location_on_outlined,
+                icon: Icons.location_on_outlined,
                 activeIcon: Icons.location_on_rounded,
-                label:      'Suivi',
-                index:      2,
-                current:    _currentIndex,
-                onTap:      (i) => setState(() => _currentIndex = i),
+                label: 'Suivi',
+                index: 2,
+                current: _currentIndex,
+                onTap: (i) => setState(() => _currentIndex = i),
               ),
               _NavItem(
-                icon:       Icons.person_outline_rounded,
+                icon: Icons.person_outline_rounded,
                 activeIcon: Icons.person_rounded,
-                label:      'Profil',
-                index:      3,
-                current:    _currentIndex,
-                onTap:      (i) => setState(() => _currentIndex = i),
+                label: 'Profil',
+                index: 3,
+                current: _currentIndex,
+                onTap: (i) => setState(() => _currentIndex = i),
               ),
             ],
           ),
@@ -266,8 +321,8 @@ class _NotificationBell extends StatelessWidget {
 // ── Premium NavItem with animated pill indicator ─────────────────────────────
 class _NavItem extends StatelessWidget {
   final IconData icon, activeIcon;
-  final String   label;
-  final int      index, current;
+  final String label;
+  final int index, current;
   final void Function(int) onTap;
 
   const _NavItem({
@@ -282,23 +337,23 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = index == current;
-    const primary  = AppColors.primary;
+    const primary = AppColors.primary;
 
     return Expanded(
       child: ScaleTap(
-        onTap:     () => onTap(index),
+        onTap: () => onTap(index),
         scaleDown: 0.88,
-        haptic:    true,
+        haptic: true,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             // Pill indicator around icon
             AnimatedContainer(
               duration: const Duration(milliseconds: 220),
-              curve:    Curves.easeOutCubic,
-              padding:  EdgeInsets.symmetric(
+              curve: Curves.easeOutCubic,
+              padding: EdgeInsets.symmetric(
                 horizontal: selected ? 18 : 10,
-                vertical:   5,
+                vertical: 5,
               ),
               decoration: BoxDecoration(
                 color: selected
@@ -309,16 +364,16 @@ class _NavItem extends StatelessWidget {
               child: Icon(
                 selected ? activeIcon : icon,
                 color: selected ? primary : AppColors.textLight,
-                size:  24,
+                size: 24,
               ),
             ),
             const SizedBox(height: 2),
             AnimatedDefaultTextStyle(
               duration: const Duration(milliseconds: 180),
               style: TextStyle(
-                fontSize:   12,
+                fontSize: 12,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color:      selected ? primary : AppColors.textLight,
+                color: selected ? primary : AppColors.textLight,
               ),
               child: Text(label),
             ),

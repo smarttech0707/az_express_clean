@@ -1,11 +1,19 @@
-﻿import 'dart:async';
+import 'dart:async';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
+import '../../services/wallet_payment_compatibility.dart';
+import '../../providers/active_city_provider.dart';
+import '../../services/partner_order_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/partner_order_checkout.dart';
+import '../client/suivi_commande.dart';
 
 class RestaurantMenu extends StatefulWidget {
   final String restaurantId;
@@ -25,6 +33,8 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
   final Map<String, int> _cart = {};
   final Map<String, Map<String, dynamic>> _cartData = {};
   bool _ordering = false;
+  // Devis serveur en cours (commandes v2) : conservé entre deux appuis pour que toute reprise réutilise la même clé.
+  final PartnerCheckout _checkout = PartnerCheckout();
   String _paymentMethod = 'cash';
   int _walletBalance = 0;
   StreamSubscription? _walletSub;
@@ -49,8 +59,8 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      setState(() =>
-          _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
+      setState(
+          () => _walletBalance = (snap.data()?['wallet'] as num? ?? 0).toInt());
     });
   }
 
@@ -78,11 +88,134 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
     });
   }
 
+  /// Point d'entrée de la commande. Restaurant pilote : devis serveur, confirmation du montant exact, création serveur
+  /// (aucun débit wallet ni écriture `orders` depuis l'appareil). Hors pilote : parcours historique, UNIQUEMENT si le
+  /// serveur a répondu PARTNER_NOT_IN_PILOT. Réseau, création fermée, fonction désactivée, réponse inconnue ou client invité :
+  /// la commande est bloquée, jamais redirigée vers l'ancien parcours.
   Future<void> _order() async {
+    if (_cart.isEmpty || _ordering) return;
+    // Verrou posé avant tout await : un second appui est ignoré.
+    setState(() => _ordering = true);
+    var legacy = false;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || user.isAnonymous) {
+        // Les règles refusent déjà toute commande d'un compte anonyme ; et un invité ne peut pas obtenir de devis, donc
+        // prouver qu'un restaurant est hors pilote. Pas de tentative historique : il doit se connecter.
+        _snack('Connectez-vous à votre compte pour commander.', true);
+        return;
+      } else {
+        if (_paymentMethod == 'wallet') {
+          final compatible =
+              await WalletPaymentCompatibilityService.ensureCompatible(context);
+          if (!compatible) return;
+        }
+        if (!mounted) return;
+        final outcome = await runPartnerCheckout(
+          context,
+          checkout: _checkout,
+          sellerType: 'restaurant',
+          sellerId: widget.restaurantId,
+          cart: _cart,
+          paymentMethod: _paymentMethod,
+          walletBalance: _walletBalance,
+          deliveryAddress: 'Ma position actuelle',
+          locate: _locateClient,
+          notify: _snack,
+        );
+        if (!mounted) return;
+        switch (outcome.status) {
+          case PartnerCheckoutStatus.created:
+            setState(() {
+              _cart.clear();
+              _cartData.clear();
+            });
+            _showSentDialog(outcome.total, trackOrders: true);
+            return;
+          case PartnerCheckoutStatus.stopped:
+            return;
+          case PartnerCheckoutStatus.useLegacy:
+            legacy = true;
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _ordering = false);
+    }
+    if (legacy && mounted) await _orderLegacy();
+  }
+
+  Future<({double lat, double lng})> _locateClient() async {
+    final p = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: 12),
+      ),
+    );
+    return (lat: p.latitude, lng: p.longitude);
+  }
+
+  void _snack(String message, bool isError) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: isError ? Colors.red : Colors.green,
+    ));
+  }
+
+  void _showSentDialog(int? total, {bool trackOrders = false}) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 28),
+            SizedBox(width: 10),
+            Text("Commande envoyée"),
+          ],
+        ),
+        content: Text(
+          "Votre commande chez ${widget.restaurantName} a été envoyée.\n\n"
+          "${total != null ? 'Total : $total FCFA\n\n' : ''}"
+          "Un livreur va bientôt prendre en charge votre commande.",
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          if (trackOrders)
+            TextButton(
+              onPressed: () {
+                final navigator = Navigator.of(context);
+                Navigator.pop(dialogContext);
+                navigator.pushReplacement(
+                    AppTransitions.fadeSlide(const SuiviCommandePage()));
+              },
+              child: const Text("Suivre ma commande"),
+            ),
+          ScaleButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1565C0),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              Navigator.pop(context);
+            },
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Parcours historique (restaurants hors pilote, clients invités) : inchangé.
+  Future<void> _orderLegacy() async {
     if (_cart.isEmpty) return;
 
+    final orderTotal = _totalPrice;
+
     // Minimum 500 FCFA (frais de livraison inclus)
-    if (_totalPrice < 500) {
+    if (orderTotal < 500) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Commande minimum 500 FCFA'),
         backgroundColor: Colors.orange,
@@ -90,10 +223,10 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
       return;
     }
 
-    if (_paymentMethod == 'wallet' && _walletBalance < _totalPrice) {
+    if (_paymentMethod == 'wallet' && _walletBalance < orderTotal) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
-            "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $_totalPrice FCFA"),
+            "Solde insuffisant. Vous avez $_walletBalance FCFA, il faut $orderTotal FCFA"),
         backgroundColor: Colors.red,
       ));
       return;
@@ -113,13 +246,46 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
           .join(", ");
 
       final id = const Uuid().v4();
+      final restaurantDoc = await FirebaseFirestore.instance
+          .collection('restaurants')
+          .doc(widget.restaurantId)
+          .get();
+      final restaurantData = restaurantDoc.data();
+      final pickupLat = (restaurantData?['lat'] as num?)?.toDouble();
+      final pickupLng = (restaurantData?['lng'] as num?)?.toDouble();
+      if (pickupLat == null ||
+          pickupLng == null ||
+          (pickupLat == 0 && pickupLng == 0)) {
+        throw StateError(
+          'Les coordonnées du restaurant ne sont pas renseignées. '
+          'La commande ne peut pas être envoyée.',
+        );
+      }
+      final clientPosition = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+      if (!mounted) return;
+      final cityProvider = context.read<ActiveCityProvider>();
+      final cityService = cityProvider.service;
+      final geography = await cityService.resolveDispatchGeography(
+        pickupLatitude: pickupLat,
+        pickupLongitude: pickupLng,
+        deliveryLatitude: clientPosition.latitude,
+        deliveryLongitude: clientPosition.longitude,
+      );
       final order = OrderModel(
         id: id,
         description: "🍽️ ${widget.restaurantName} : $description",
-        budget: _totalPrice,
+        budget: orderTotal,
         status: "pending",
-        latitude: 0,
-        longitude: 0,
+        latitude: pickupLat,
+        longitude: pickupLng,
+        destLat: clientPosition.latitude,
+        destLng: clientPosition.longitude,
+        deliveryAddress: 'Ma position actuelle',
         type: "restaurant",
         clientId: uid,
         sellerId: widget.restaurantId,
@@ -127,9 +293,27 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
         sellerType: "restaurant",
         paymentMethod: _paymentMethod,
         isPaid: _paymentMethod == 'wallet',
+        pickupCityId: geography.pickupCityId,
+        pickupZoneId: geography.pickupZoneId,
+        deliveryCityId: geography.deliveryCityId,
+        deliveryZoneId: geography.deliveryZoneId,
+        pickupCoordinateSource: 'local_place',
+        deliveryCoordinateSource: 'gps',
+        gpsDetectedCityId: cityService.gpsDetectedCityId,
+        activeCityId: cityService.activeCityId,
+        citySelectionSource: cityService.citySelectionSource,
+        cityResolutionStatus: geography.cityResolutionStatus,
       );
 
       if (_paymentMethod == 'wallet') {
+        // LOT 6.3 SECURITY : voir WalletPaymentCompatibilityService.
+        if (!mounted) return;
+        final compatible =
+            await WalletPaymentCompatibilityService.ensureCompatible(context);
+        if (!compatible) {
+          setState(() => _ordering = false);
+          return;
+        }
         final clientRef =
             FirebaseFirestore.instance.collection('clients').doc(uid);
         final orderRef =
@@ -144,8 +328,14 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
         await FirebaseFirestore.instance.runTransaction((tx) async {
           final snap = await tx.get(clientRef);
           final wallet = (snap.data()?['wallet'] as num? ?? 0).toInt();
-          if (wallet < _totalPrice) throw Exception('SOLDE_INSUFFISANT');
-          tx.update(clientRef, {'wallet': wallet - _totalPrice});
+          if (wallet < orderTotal) throw Exception('SOLDE_INSUFFISANT');
+          // LOT 6 SECURITY : lie ce débit précis à CETTE commande (règle
+          // Firestore walletDebitMatchesPaidOrder) — empêche qu'un même
+          // débit ne soit réutilisé pour valider plusieurs commandes.
+          tx.update(clientRef, {
+            'wallet': wallet - orderTotal,
+            'lastPaidOrderId': order.id,
+          });
           tx.set(orderRef, order.toMap());
         });
 
@@ -156,11 +346,16 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
             .collection('wallet_transactions')
             .add({
           'type': 'purchase',
-          'amount': _totalPrice,
+          'amount': orderTotal,
           'description': 'Commande ${widget.restaurantName} (wallet)',
           'orderId': id,
           'createdAt': Timestamp.now(),
         });
+
+        await FirestoreService().createOrder(
+          order,
+          alreadyCreated: true,
+        );
       } else {
         await FirestoreService().createOrder(order);
       }
@@ -168,51 +363,25 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
       if (!mounted) return;
       setState(() => _ordering = false);
 
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.green, size: 28),
-              SizedBox(width: 10),
-              Text("Commande envoyée"),
-            ],
-          ),
-          content: Text(
-            "Votre commande chez ${widget.restaurantName} a été envoyée.\n\n"
-            "Total : $_totalPrice FCFA\n\n"
-            "Un livreur va bientôt prendre en charge votre commande.",
-            style: const TextStyle(fontSize: 14),
-          ),
-          actions: [
-            ScaleButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1565C0),
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () {
-                Navigator.pop(context);
-                Navigator.pop(context);
-              },
-              child: const Text("OK"),
-            ),
-          ],
-        ),
-      );
+      _showSentDialog(orderTotal);
 
-      setState(() => _cart.clear());
+      setState(() {
+        _cart.clear();
+        _cartData.clear();
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _ordering = false);
       final msg = e.toString();
+      // Les règles refusent l'ancien parcours pour un restaurant pilote (transaction atomique : rien n'est débité).
+      final refused = msg.contains('permission-denied');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(msg.contains('SOLDE_INSUFFISANT')
               ? "Solde wallet insuffisant"
-              : "Erreur : $e"),
+              : refused
+                  ? "Ce restaurant utilise un nouveau mode de commande, momentanément indisponible. Réessayez plus tard."
+                  : "Erreur : $e"),
           backgroundColor: Colors.red,
         ),
       );
@@ -286,22 +455,20 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(children: [
-                    Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.account_balance_wallet,
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.account_balance_wallet,
+                          color: _paymentMethod == 'wallet'
+                              ? Colors.white
+                              : Colors.grey,
+                          size: 18),
+                      const SizedBox(width: 6),
+                      Text("Wallet",
+                          style: TextStyle(
                               color: _paymentMethod == 'wallet'
                                   ? Colors.white
                                   : Colors.grey,
-                              size: 18),
-                          const SizedBox(width: 6),
-                          Text("Wallet",
-                              style: TextStyle(
-                                  color: _paymentMethod == 'wallet'
-                                      ? Colors.white
-                                      : Colors.grey,
-                                  fontWeight: FontWeight.bold)),
-                        ]),
+                              fontWeight: FontWeight.bold)),
+                    ]),
                     Text("$_walletBalance FCFA",
                         style: TextStyle(
                             color: _paymentMethod == 'wallet'
@@ -383,8 +550,7 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
               ),
             ),
             title: Text(widget.restaurantName,
-                style:
-                    const TextStyle(color: Colors.white, fontSize: 18)),
+                style: const TextStyle(color: Colors.white, fontSize: 18)),
             centerTitle: true,
           ),
 
@@ -431,6 +597,7 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                       final name = data["name"] ?? "";
                       final price = (data["price"] as num? ?? 0).toInt();
                       final desc = data["description"] ?? "";
+                      final imageUrl = data["imageUrl"] as String?;
                       final qty = _cart[doc.id] ?? 0;
 
                       return Container(
@@ -450,18 +617,30 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                           padding: const EdgeInsets.all(14),
                           child: Row(
                             children: [
-                              Container(
-                                width: 64,
-                                height: 64,
-                                decoration: BoxDecoration(
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: Container(
+                                  width: 64,
+                                  height: 64,
                                   color: const Color(0xFF1565C0)
                                       .withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: const Icon(
-                                  Icons.fastfood_rounded,
-                                  color: Color(0xFF1565C0),
-                                  size: 30,
+                                  child:
+                                      (imageUrl != null && imageUrl.isNotEmpty)
+                                          ? Image.network(
+                                              imageUrl,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  const Icon(
+                                                Icons.fastfood_rounded,
+                                                color: Color(0xFF1565C0),
+                                                size: 30,
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.fastfood_rounded,
+                                              color: Color(0xFF1565C0),
+                                              size: 30,
+                                            ),
                                 ),
                               ),
                               const SizedBox(width: 14),
@@ -502,15 +681,13 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                               ),
                               if (qty == 0)
                                 GestureDetector(
-                                  onTap: () =>
-                                      _increment(doc.id, name, price),
+                                  onTap: () => _increment(doc.id, name, price),
                                   child: Container(
                                     width: 44,
                                     height: 44,
                                     decoration: BoxDecoration(
                                       color: const Color(0xFF1565C0),
-                                      borderRadius:
-                                          BorderRadius.circular(10),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: const Icon(Icons.add,
                                         color: Colors.white, size: 22),
@@ -529,8 +706,8 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
                                           borderRadius:
                                               BorderRadius.circular(8),
                                         ),
-                                        child: const Icon(Icons.remove,
-                                            size: 18),
+                                        child:
+                                            const Icon(Icons.remove, size: 18),
                                       ),
                                     ),
                                     Padding(
@@ -663,4 +840,3 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
     );
   }
 }
-

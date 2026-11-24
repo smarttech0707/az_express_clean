@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../mp_constants.dart';
@@ -68,16 +68,14 @@ class _MpFavoritesScreenState extends State<MpFavoritesScreen> {
                     ]))
               : GridView.builder(
                   padding: const EdgeInsets.all(12),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
                     childAspectRatio: 0.68,
                   ),
                   itemCount: _products!.length,
-                  itemBuilder: (_, i) =>
-                      MpProductCard(product: _products![i]),
+                  itemBuilder: (_, i) => MpProductCard(product: _products![i]),
                 ),
     );
   }

@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Manifeste de debug UTILISÉ SEULEMENT par les builds de test (-PazTestSuffix), voir
+         build.gradle.kts. Il remplace android/app/src/debug/AndroidManifest.xml pour ces builds. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Les émulateurs Firebase parlent en HTTP clair sur le réseau local. -->
+    <application android:usesCleartextTraffic="true">
+        <!-- Aucune télémétrie ni FCM vers les serveurs Google depuis un APK de test. -->
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false"/>
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false"/>
+        <meta-data android:name="firebase_crashlytics_collection_enabled" android:value="false"/>
+        <meta-data android:name="firebase_sessions_enabled" android:value="false"/>
+        <meta-data android:name="google_analytics_adid_collection_enabled" android:value="false"/>
+    </application>
+</manifest>

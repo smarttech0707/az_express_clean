@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../models/cash_remittance_view.dart';
+import '../../widgets/cash_remittance_panel.dart';
+
 /// Cash restaurant/pharmacie non encore réglé au marchand par le livreur.
 ///
 /// Contexte (Master Prompt 76, 2026-07-09) : pour une commande cash avec un
@@ -19,6 +22,14 @@ class AdminCashSettlementPage extends StatelessWidget {
   const AdminCashSettlementPage({super.key});
 
   Future<void> _markSettled(BuildContext context, DocumentSnapshot doc) async {
+    // Commande Restaurant/Boulangerie v2 : jamais d'écriture directe de merchantCashSettled. Le règlement passe par
+    // la confirmation du restaurant ou par la décision administrative serveur (resolveCashRemittance).
+    final raw = doc.data();
+    if (raw is Map && raw['amountsVersion'] == 2) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Commande v2 : utilisez la décision administrative sur sa fiche.')));
+      return;
+    }
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -67,14 +78,16 @@ class AdminCashSettlementPage extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.info_outline, color: Colors.orange.shade700, size: 20),
+                Icon(Icons.info_outline,
+                    color: Colors.orange.shade700, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Commandes cash restaurant/pharmacie où le livreur a collecté '
                     'la part du marchand mais ne l\'a pas encore remise. '
                     'À vérifier chaque jour avant clôture.',
-                    style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+                    style:
+                        TextStyle(fontSize: 12, color: Colors.orange.shade800),
                   ),
                 ),
               ],
@@ -118,12 +131,22 @@ class AdminCashSettlementPage extends StatelessWidget {
                   itemBuilder: (context, i) {
                     final doc = docs[i];
                     final data = doc.data() as Map<String, dynamic>;
+                    if (data['amountsVersion'] == 2) {
+                      return _V2CashTile(orderId: doc.id, data: data);
+                    }
                     final merchant = (data['sellerName'] as String?) ??
                         (data['pharmacieName'] as String?) ??
                         'Marchand';
-                    final amount = (data['budget'] as num?)?.toInt() ?? 0;
+                    // Commandes à montants explicites : le livreur doit reverser
+                    // les produits (cashBreakdown.dueToSeller), pas les frais de
+                    // livraison (budget).
+                    final due = (data['cashBreakdown'] as Map?)?['dueToSeller'] ??
+                        data['productAmount'] ??
+                        data['budget'];
+                    final amount = (due as num?)?.toInt() ?? 0;
                     final driverId = (data['driverId'] as String?) ?? '—';
-                    final deliveredAt = (data['deliveredAt'] as Timestamp?)?.toDate();
+                    final deliveredAt =
+                        (data['deliveredAt'] as Timestamp?)?.toDate();
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -160,7 +183,8 @@ class AdminCashSettlementPage extends StatelessWidget {
                           Text(
                             'Livreur : ${driverId.length > 8 ? driverId.substring(0, 8) : driverId}…'
                             '${deliveredAt != null ? ' · ${deliveredAt.day}/${deliveredAt.month} ${deliveredAt.hour}:${deliveredAt.minute.toString().padLeft(2, '0')}' : ''}',
-                            style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                            style: TextStyle(
+                                color: Colors.grey.shade600, fontSize: 12),
                           ),
                           const SizedBox(height: 10),
                           SizedBox(
@@ -182,6 +206,47 @@ class AdminCashSettlementPage extends StatelessWidget {
               },
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Fiche d'une commande v2 : état du reversement, litige et reste dû. Aucun bouton « Marquer réglé » : le règlement
+/// passe par la confirmation du restaurant ou par la décision d'un super-administrateur (partnerOrderActionCF).
+class _V2CashTile extends StatelessWidget {
+  final String orderId;
+  final Map<String, dynamic> data;
+  const _V2CashTile({required this.orderId, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final view = CashRemittanceView.tryParse(data);
+    final merchant = (data['sellerName'] as String?) ?? 'Restaurant';
+    final driverId = (data['driverId'] as String?) ?? '—';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.red.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(merchant, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const SizedBox(height: 4),
+          Text('Livreur : ${driverId.length > 8 ? driverId.substring(0, 8) : driverId}… · commande v2',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+          if (view == null)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Suivi du reversement absent ou incohérent : à examiner avant toute décision.',
+                  style: TextStyle(color: Colors.red, fontSize: 12)),
+            )
+          else
+            CashRemittancePanel(orderId: orderId, view: view, role: CashRole.admin),
         ],
       ),
     );

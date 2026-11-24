@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -41,6 +41,11 @@ class _MpProductDetailState extends State<MpProductDetail> {
         slivers: [
           // ── Gallery ─────────────────────────────────────────────────────────
           SliverAppBar(
+            leading: IconButton(
+              tooltip: 'Retour',
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
             expandedHeight: 320,
             pinned: true,
             backgroundColor: Colors.white,
@@ -52,7 +57,9 @@ class _MpProductDetailState extends State<MpProductDetail> {
                 return IconButton(
                   onPressed: () => fav.toggle(_p.id),
                   icon: Icon(
-                    isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                    isFav
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
                     color: isFav ? Colors.red : kMpMuted,
                   ),
                 );
@@ -178,15 +185,15 @@ class _MpProductDetailState extends State<MpProductDetail> {
                         size: 14, color: kMpMuted),
                     const SizedBox(width: 4),
                     Text(_p.city,
-                        style:
-                            GoogleFonts.urbanist(fontSize: 13, color: kMpMuted)),
+                        style: GoogleFonts.urbanist(
+                            fontSize: 13, color: kMpMuted)),
                     const SizedBox(width: 16),
                     const Icon(Icons.remove_red_eye_outlined,
                         size: 14, color: kMpMuted),
                     const SizedBox(width: 4),
                     Text('${_p.views} vues',
-                        style:
-                            GoogleFonts.urbanist(fontSize: 13, color: kMpMuted)),
+                        style: GoogleFonts.urbanist(
+                            fontSize: 13, color: kMpMuted)),
                   ]),
                 ],
               ),
@@ -225,8 +232,8 @@ class _MpProductDetailState extends State<MpProductDetail> {
                       if (_p.color != null)
                         _SpecChip(Icons.palette_rounded, _p.color!),
                       if (_p.battery != null)
-                        _SpecChip(Icons.battery_charging_full_rounded,
-                            _p.battery!),
+                        _SpecChip(
+                            Icons.battery_charging_full_rounded, _p.battery!),
                     ],
                   ),
                 ],
@@ -368,7 +375,8 @@ class _MpProductDetailState extends State<MpProductDetail> {
   Widget _imgPlaceholder() => Container(
         color: const Color(0xFFF0F0F0),
         child: const Center(
-          child: Icon(Icons.devices_rounded, size: 64, color: Color(0xFFBDBDBD)),
+          child:
+              Icon(Icons.devices_rounded, size: 64, color: Color(0xFFBDBDBD)),
         ),
       );
 
@@ -383,11 +391,16 @@ class _MpProductDetailState extends State<MpProductDetail> {
 
   String _catLabel(String c) {
     switch (c) {
-      case 'phones':      return 'Téléphone';
-      case 'tablets':     return 'Tablette';
-      case 'computers':   return 'Ordinateur';
-      case 'accessories': return 'Accessoire';
-      default: return c;
+      case 'phones':
+        return 'Téléphone';
+      case 'tablets':
+        return 'Tablette';
+      case 'computers':
+        return 'Ordinateur';
+      case 'accessories':
+        return 'Accessoire';
+      default:
+        return c;
     }
   }
 }
@@ -397,8 +410,7 @@ class _ActionBar extends StatelessWidget {
   final MpProduct product;
   const _ActionBar({required this.product});
 
-  String get _cleaned =>
-      product.sellerPhone.replaceAll(RegExp(r'[^0-9+]'), '');
+  String get _cleaned => product.sellerPhone.replaceAll(RegExp(r'[^0-9+]'), '');
 
   Future<void> _openChat(BuildContext context) async {
     final user = FirebaseAuth.instance.currentUser;
@@ -416,7 +428,9 @@ class _ActionBar extends StatelessWidget {
     String buyerName = 'Acheteur';
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('clients').doc(user.uid).get();
+          .collection('clients')
+          .doc(user.uid)
+          .get();
       buyerName = doc.data()?['name'] ?? buyerName;
     } catch (_) {}
 
@@ -441,7 +455,8 @@ class _ActionBar extends StatelessWidget {
       decoration: const BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Color(0x15000000), blurRadius: 20, offset: Offset(0, -4))
+          BoxShadow(
+              color: Color(0x15000000), blurRadius: 20, offset: Offset(0, -4))
         ],
       ),
       child: Row(children: [
@@ -511,8 +526,8 @@ class _ActionBtn extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           foregroundColor: color,
           side: BorderSide(color: color),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
         ),
       );
@@ -522,14 +537,11 @@ class _ActionBtn extends StatelessWidget {
       icon: Icon(icon, size: 16, color: Colors.white),
       label: Text(label,
           style: GoogleFonts.urbanist(
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-              color: Colors.white)),
+              fontWeight: FontWeight.w700, fontSize: 13, color: Colors.white)),
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         elevation: 0,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         padding: const EdgeInsets.symmetric(vertical: 13),
       ),
     );
@@ -555,9 +567,7 @@ class _SpecChip extends StatelessWidget {
         const SizedBox(width: 6),
         Text(label,
             style: GoogleFonts.urbanist(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: kMpText)),
+                fontSize: 13, fontWeight: FontWeight.w600, color: kMpText)),
       ]),
     );
   }
@@ -626,13 +636,16 @@ class _ReportSheetState extends State<_ReportSheet> {
             groupValue: _selected ?? '',
             onChanged: (v) => setState(() => _selected = v),
             child: Column(
-              children: _reasons.map((r) => RadioListTile<String>(
-                    title: Text(r, style: GoogleFonts.urbanist(fontSize: 14)),
-                    value: r,
-                    activeColor: Colors.red,
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                  )).toList(),
+              children: _reasons
+                  .map((r) => RadioListTile<String>(
+                        title:
+                            Text(r, style: GoogleFonts.urbanist(fontSize: 14)),
+                        value: r,
+                        activeColor: Colors.red,
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ))
+                  .toList(),
             ),
           ),
           const SizedBox(height: 10),
@@ -643,8 +656,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                   ? null
                   : () async {
                       setState(() => _sending = true);
-                      final uid =
-                          FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
                       await MpService.reportProduct(
                           widget.product.id, uid, _selected!);
                       if (!context.mounted) return;
@@ -696,4 +708,3 @@ String _fmt(int price) {
   }
   return '${buf.toString()} FCFA';
 }
-

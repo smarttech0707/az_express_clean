@@ -1,0 +1,37 @@
+[
+  {
+    "id": "driver-fresh",
+    "data": {
+      "name": "Livreur Récent", "phone": "0700000001", "email": "", "identifiant": "ID-1",
+      "photoUrl": "", "idPhotoUrl": "https://x/id1.jpg", "selfieUrl": "https://x/selfie1.jpg",
+      "wallet": 0, "isOnline": false, "lat": 0, "lng": 0, "deliveries": 0,
+      "avgRating": 0.0, "ratingCount": 0
+    }
+  },
+  {
+    "id": "driver-active",
+    "data": {
+      "name": "Livreur Actif", "phone": "0700000002", "photoUrl": "https://x/photo2.jpg",
+      "wallet": 5000, "isOnline": true, "isAvailable": true, "isOnDelivery": false,
+      "lat": 6.7302, "lng": -3.4928, "heading": 180.5, "speed": 0.0,
+      "updatedAt": 1732000000000,
+      "currentCityId": "abengourou", "registeredCityId": "abengourou",
+      "avgRating": 4.6, "ratingCount": 12, "fcmToken": "secret-token", "ownerId": "fleet-1"
+    }
+  },
+  {
+    "id": "driver-suspended",
+    "data": {
+      "name": "Livreur Suspendu", "phone": "0700000003", "wallet": 1200,
+      "isOnline": false, "isAvailable": false, "isSuspended": true, "deletionRequested": false,
+      "lat": 6.73, "lng": -3.49
+    }
+  },
+  {
+    "id": "driver-bad-types",
+    "data": {
+      "name": 12345, "photoUrl": "", "lat": "nord", "lng": 400,
+      "heading": "180", "isOnline": "oui", "avgRating": "quatre", "ratingCount": -3
+    }
+  }
+]

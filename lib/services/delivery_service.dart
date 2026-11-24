@@ -1,7 +1,6 @@
 import 'package:geolocator/geolocator.dart';
 
 class DeliveryService {
-
   // Abengourou et environs — coordonnées de référence
   static const double abengourouLat = 6.7273;
   static const double abengourouLng = -3.4961;
@@ -109,11 +108,17 @@ class PriceBreakdown {
   final bool isNight;
   final String detail;
 
+  /// `true` quand [distanceKm] ne vient pas d'un itinéraire routier réel
+  /// (vol d'oiseau, [RouteModel.isEstimate]) : l'écran doit le signaler,
+  /// le prix reste calculé avec le même barème (aucun tarif modifié).
+  final bool isEstimate;
+
   const PriceBreakdown({
     required this.total,
     required this.distanceKm,
     required this.etaMinutes,
     required this.isNight,
     required this.detail,
+    this.isEstimate = false,
   });
 }

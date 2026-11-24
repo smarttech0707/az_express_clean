@@ -5,14 +5,14 @@ import '../utils/app_haptics.dart';
 /// Utilise Listener au lieu de GestureDetector pour ne pas interférer
 /// avec le gesture arena de ElevatedButton (évite le bug onPressed jamais appelé).
 class ScaleButton extends StatefulWidget {
-  final Widget        child;
+  final Widget child;
   final VoidCallback? onPressed;
-  final ButtonStyle?  style;
-  final bool          loading;
+  final ButtonStyle? style;
+  final bool loading;
   // Master Prompt 125 (Partie 2/4) — optionnel, purement additif : quand
   // fourni, décrit le bouton pour un lecteur d'écran (utile si `child` est
   // une icône seule ou un contenu ambigu sans texte lisible).
-  final String?       semanticLabel;
+  final String? semanticLabel;
 
   const ScaleButton({
     super.key,
@@ -30,7 +30,7 @@ class ScaleButton extends StatefulWidget {
 class _ScaleButtonState extends State<ScaleButton>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
-  late Animation<double>   _scale;
+  late Animation<double> _scale;
 
   @override
   void initState() {
@@ -76,7 +76,8 @@ class _ScaleButtonState extends State<ScaleButton>
           style: widget.style,
           child: widget.loading
               ? const SizedBox(
-                  width: 22, height: 22,
+                  width: 22,
+                  height: 22,
                   child: CircularProgressIndicator(
                       color: Colors.white, strokeWidth: 2.5))
               : widget.child,

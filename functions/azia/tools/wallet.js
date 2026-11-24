@@ -150,14 +150,14 @@ function initiateWalletRecharge({ db, admin, checkRateLimit, axios, feexpayOpera
           {
             amount,
             id:           txId,
-            callback:     WEBHOOK_URL,
+            callback:     WEBHOOK_URL(),
             description:  'Recharge wallet AZ Express (AZ IA)',
             currency:     'XOF',
             pay_in_phone: phone,
             type:         feexpayOperatorCode(operator),
           },
           {
-            headers: { Authorization: `Bearer ${FEEXPAY_TOKEN}`, 'Content-Type': 'application/json' },
+            headers: { Authorization: `Bearer ${FEEXPAY_TOKEN.value()}`, 'Content-Type': 'application/json' },
             timeout: 20000,
           }
         );

@@ -1,10 +1,17 @@
 import 'dart:async';
+import 'dart:ui' show AppLifecycleState;
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
 import 'package:geolocator/geolocator.dart';
+
+import '../models/local_place.dart';
+import 'active_city_service.dart';
+import 'driver_public_projection.dart';
+import 'fcm_policy.dart';
+import 'notification_service.dart';
+import 'permission_primer.dart';
 
 /// État du suivi GPS — utilisé par l'UI pour afficher le bon indicateur.
 enum GpsTrackingState {
@@ -31,12 +38,110 @@ class _AzKeepAliveHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp) async {}
 }
 
+/// Bail de haute précision GPS : jeton unique remis par [DriverLocationService.acquirePrecisionLease]. Tant qu'au moins un
+/// bail existe, le flux GPS du service utilise le filtre fin (5 m) au lieu du filtre normal (50 m). [applied] se termine
+/// quand le flux a pris en compte le changement (utile aux tests ; l'appelant n'a pas besoin de l'attendre).
+class PrecisionLease {
+  PrecisionLease._();
+  Future<void> applied = Future<void>.value();
+}
+
+/// Détenteur d'un bail pour un écran : un seul bail à la fois, libération idempotente, bail rendu quand l'application
+/// quitte le premier plan (aucun filtre fin inutile en arrière-plan) et repris au retour.
+class FinePrecisionScope {
+  FinePrecisionScope([DriverLocationService? service])
+      : _service = service ?? DriverLocationService.instance;
+
+  final DriverLocationService _service;
+  PrecisionLease? _lease;
+
+  bool get isActive => _lease != null;
+
+  void acquire() => _lease ??= _service.acquirePrecisionLease();
+
+  Future<void> release() {
+    final lease = _lease;
+    _lease = null;
+    return lease == null ? Future<void>.value() : _service.releasePrecisionLease(lease);
+  }
+
+  void onLifecycle(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        acquire();
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        release();
+      case AppLifecycleState.inactive:
+        break; // transitoire (centre de contrôle, appel entrant) : on garde le bail
+    }
+  }
+}
+
 /// Service singleton de localisation GPS pour le livreur.
 ///
 /// - Expose [positionStream] (broadcast) — écran carte s'y abonne en lecture seule.
 /// - Écrit dans Firestore avec double throttle : 5 s ET 15 m minimum entre deux saves.
 /// - Lance un [ForegroundService] Android pour survivre au verrouillage écran / OEM killers.
 class DriverLocationService {
+  /// Le service de premier plan `FlutterForegroundTask` n'existe que sur Android (notification persistante exigée par l'OS
+  /// pour survivre au verrouillage). Sur iOS il ne ferait rien d'utile (gestionnaire vide) et ressemblerait à un maintien
+  /// en vie sans fonction (guideline Apple 2.5.4) : il n'y est jamais lancé.
+  @visibleForTesting
+  static bool usesAndroidForegroundService({
+    required bool isWeb,
+    required TargetPlatform platform,
+  }) =>
+      !isWeb && platform == TargetPlatform.android;
+
+  /// iOS : la localisation en arrière-plan n'est autorisée QUE pendant une livraison en cours (commande acceptée ou
+  /// récupérée). Livreur seulement connecté ou disponible : suivi au premier plan uniquement, sans pastille bleue.
+  /// Android : inchangé (le service de premier plan couvre déjà tout le suivi).
+  @visibleForTesting
+  static bool allowsBackgroundLocation({
+    required bool isWeb,
+    required TargetPlatform platform,
+    required bool deliveryActive,
+  }) =>
+      !isWeb && platform == TargetPlatform.iOS && deliveryActive;
+
+  // iOS suspend l'app en arrière-plan sauf si les mises à jour de position sont explicitement autorisées
+  // (UIBackgroundModes `location` seul ne suffit pas) ; la pastille bleue est exigée par Apple.
+  @visibleForTesting
+  static LocationSettings streamSettings({
+    required bool isWeb,
+    required TargetPlatform platform,
+    required bool deliveryActive,
+    bool fine = false,
+  }) {
+    // mètres — throttle Firestore 15m, hausse 10→50m pour réduire écrits GPS ; 5 m seulement sous bail de précision
+    final distanceFilter = fine ? fineDistanceFilter : normalDistanceFilter;
+    if (!isWeb && platform == TargetPlatform.iOS) {
+      final background = allowsBackgroundLocation(
+          isWeb: isWeb, platform: platform, deliveryActive: deliveryActive);
+      return AppleSettings(
+        accuracy: LocationAccuracy.high,
+        activityType: ActivityType.automotiveNavigation,
+        distanceFilter: distanceFilter,
+        pauseLocationUpdatesAutomatically: false,
+        showBackgroundLocationIndicator: background,
+        allowBackgroundLocationUpdates: background,
+      );
+    }
+    return LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: distanceFilter);
+  }
+
+  static const normalDistanceFilter = 50;
+  static const fineDistanceFilter = 5;
+
+  bool get _fineNow => _leases.isNotEmpty;
+
+  bool get _backgroundNow => allowsBackgroundLocation(
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+      deliveryActive: _deliveryActive);
+
   static DriverLocationService? _instance;
   static DriverLocationService get instance =>
       _instance ??= DriverLocationService._();
@@ -54,14 +159,29 @@ class DriverLocationService {
 
   // ── Internes ───────────────────────────────────────────────────────────────
   StreamSubscription<Position>? _positionSub;
-  Timer?    _heartbeatTimer;
-  String?   _currentDriverId;
+  Timer? _heartbeatTimer;
+  String? _currentDriverId;
   DateTime? _lastSave;
   Position? _lastSavedPos;
-  String    _fcmToken = '';
-  bool      _foregroundStarted = false;
+  String _fcmToken = '';
+  bool _foregroundStarted = false;
+  bool _deliveryActive = false;
+  final Set<PrecisionLease> _leases = {};
+  int _streamGeneration = 0;
 
-  static const _minSaveInterval   = Duration(seconds: 5);
+  /// Points d'injection pour les tests (le vrai flux GPS et le vrai service Android passent par des plugins natifs).
+  @visibleForTesting
+  Stream<Position> Function(LocationSettings settings) positionStreamFactory =
+      (settings) => Geolocator.getPositionStream(locationSettings: settings);
+  @visibleForTesting
+  Future<void> Function() foregroundServiceStarter = _startAndroidForegroundTask;
+  @visibleForTesting
+  Future<void> Function() foregroundServiceStopper = _stopAndroidForegroundTask;
+
+  final ActiveCityService _activeCityService = ActiveCityService();
+  String? _registeredCityId;
+
+  static const _minSaveInterval = Duration(seconds: 5);
   static const _minDistanceMeters = 15.0;
   // Master Prompt 129 — cause racine confirmée du dispatch silencieusement
   // cassé pour un livreur stationnaire : le double throttle (temps ET
@@ -91,7 +211,41 @@ class DriverLocationService {
   // indépendant, démarré dans `startTracking()`), qui réécrit la dernière
   // position connue à intervalle fixe qu'un nouvel événement GPS soit
   // survenu ou non.
-  static const _heartbeatInterval = Duration(seconds: 90);
+  //
+  // Correctif du 2026-10-05 (mesure en production sur une course active) : le
+  // `Timer.periodic` et la garde de `_heartbeatTick()` utilisaient la MÊME
+  // durée (90 s). Or `_lastSave` est affecté APRÈS l'`await` de l'écriture
+  // Firestore, donc quelques centaines de ms après le déclenchement du tick :
+  // au tick suivant, `now - _lastSave` valait ~89,5 s, soit strictement moins
+  // que la garde de 90 s → l'écriture était sautée, et un tick sur deux était
+  // perdu. Cadence réelle mesurée : exactement 180 s (écritures à 15:24:19
+  // puis 15:27:19), c'est-à-dire pile le seuil `STALE_MINUTES = 3` du
+  // dispatch — le livreur oscillait en permanence à la limite de l'exclusion.
+  // Corrigé en dissociant les deux durées : le timer de CONTRÔLE bat plus
+  // souvent (30 s) que l'ÂGE MAXIMAL toléré (90 s), si bien qu'un tick dont
+  // la garde renvoie n'a plus aucun effet — le tick suivant, 30 s plus tard,
+  // écrira. Cadence garantie à l'arrêt : 90 s ≤ écriture ≤ 120 s.
+  static const _heartbeatMaxAge = Duration(seconds: 90);
+  static const _heartbeatCheckInterval = Duration(seconds: 30);
+
+  /// Faut-il réécrire la dernière position connue ?
+  ///
+  /// Extrait en fonction pure pour être testable sans Geolocator ni Firestore.
+  /// Une écriture provoquée par un déplacement met aussi `_lastSave` à jour,
+  /// donc elle repousse naturellement le prochain heartbeat.
+  @visibleForTesting
+  static bool shouldHeartbeat({
+    required DateTime? lastSave,
+    required DateTime now,
+    Duration maxAge = _heartbeatMaxAge,
+  }) =>
+      lastSave == null || now.difference(lastSave) >= maxAge;
+
+  @visibleForTesting
+  static Duration get debugHeartbeatMaxAge => _heartbeatMaxAge;
+
+  @visibleForTesting
+  static Duration get debugHeartbeatCheckInterval => _heartbeatCheckInterval;
 
   // ── Démarrage du tracking ──────────────────────────────────────────────────
 
@@ -103,9 +257,10 @@ class DriverLocationService {
 
     await _stopStream();
     _currentDriverId = driverId;
+    await _loadRegisteredCityId(driverId);
 
     // ── Permissions ──────────────────────────────────────────────────────────
-    final perm = await Geolocator.requestPermission();
+    final perm = await PermissionPrimer.requestLocation(driver: true);
     if (perm == LocationPermission.deniedForever) {
       _gpsState = GpsTrackingState.permanentlyDenied;
       return _gpsState;
@@ -115,48 +270,37 @@ class DriverLocationService {
       return _gpsState;
     }
 
-    // ── ForegroundService Android ────────────────────────────────────────────
+    // ── Service de premier plan : Android uniquement (no-op sur iOS) ─────────
     await _ensureForegroundService();
 
     // ── Token FCM ────────────────────────────────────────────────────────────
     try {
-      _fcmToken = await FirebaseMessaging.instance.getToken() ?? '';
+      _fcmToken = await NotificationService().getTokenWhenReady() ?? '';
     } catch (_) {}
 
     // ── Position initiale immédiate ──────────────────────────────────────────
     try {
       final init = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
       _emit(init);
       await _saveToFirestore(init);
     } catch (_) {}
 
     // ── Stream continu ───────────────────────────────────────────────────────
-    _positionSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy:       LocationAccuracy.high,
-        distanceFilter: 50, // mètres — throttle Firestore 15m, hausse 10→50m pour réduire écrits GPS
-      ),
-    ).listen(
-      (pos) {
-        _emit(pos);
-        _maybeSave(pos);
-      },
-      onError: (_) {
-        _gpsState = GpsTrackingState.error;
-        _positionSub?.cancel();
-        _positionSub = null;
-      },
-    );
+    await _subscribeToStream();
 
     // Heartbeat véritablement périodique — indépendant du stream de
     // position, garantit une écriture au moins toutes les
-    // `_heartbeatInterval`, même si le livreur ne bouge jamais assez pour
+    // `_heartbeatMaxAge`, même si le livreur ne bouge jamais assez pour
     // qu'un nouvel événement GPS n'arrive (voir commentaire du 2026-07-19
     // ci-dessus).
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) => _heartbeatTick());
+    _heartbeatTimer =
+        Timer.periodic(_heartbeatCheckInterval, (_) => _heartbeatTick());
 
     _gpsState = GpsTrackingState.active;
     return _gpsState;
@@ -164,11 +308,12 @@ class DriverLocationService {
 
   Future<void> _heartbeatTick() async {
     if (_currentDriverId == null || _lastSavedPos == null) return;
-    // Ne réécrit que si aucune sauvegarde "naturelle" (mouvement réel) n'a
-    // déjà eu lieu depuis le dernier tick — évite une écriture en double
-    // juste après une vraie mise à jour de position.
-    if (_lastSave != null &&
-        DateTime.now().difference(_lastSave!) < _heartbeatInterval) {
+    // Ne réécrit que si la dernière sauvegarde (heartbeat OU mouvement réel)
+    // date d'au moins `_heartbeatMaxAge` — évite toute écriture en double
+    // juste après une vraie mise à jour de position. La garde est volontairement
+    // plus longue que la période du timer : voir le commentaire de
+    // `_heartbeatMaxAge`.
+    if (!shouldHeartbeat(lastSave: _lastSave, now: DateTime.now())) {
       return;
     }
     await _saveToFirestore(_lastSavedPos!);
@@ -182,14 +327,96 @@ class DriverLocationService {
     await startTracking(_currentDriverId!);
   }
 
+  // ── Livraison active (localisation arrière-plan iOS) ──────────────────────
+
+  /// `true` tant qu'une commande du livreur est acceptée ou récupérée ; `false` à la livraison, à l'annulation ou quand le
+  /// livreur quitte le tableau de bord. Sur iOS, c'est le SEUL état qui active la localisation en arrière-plan (et la
+  /// pastille bleue) : le flux GPS est alors recréé avec les réglages adaptés, sans jamais en laisser deux ouverts.
+  /// Sans flux actif, le choix est mémorisé et appliqué au prochain démarrage ; sur Android rien ne change.
+  Future<void> setDeliveryActive(bool active) async {
+    if (_deliveryActive == active) return;
+    final backgroundBefore = _backgroundNow;
+    _deliveryActive = active;
+    if (_positionSub == null || _backgroundNow == backgroundBefore) return;
+    await _subscribeToStream();
+  }
+
+  // ── Bail de haute précision (écran de navigation) ──────────────────────────
+
+  /// Demande le filtre fin (5 m). Plusieurs baux simultanés partagent le MÊME flux ; la libération d'un bail ne touche pas
+  /// les autres ; le dernier libéré rétablit 50 m. Sans flux actif, le bail est appliqué au prochain démarrage. Le bail ne
+  /// change JAMAIS l'autorisation d'arrière-plan (seule la livraison la donne, iOS) ni le service de premier plan Android.
+  PrecisionLease acquirePrecisionLease() {
+    final lease = PrecisionLease._();
+    final fineBefore = _fineNow;
+    _leases.add(lease);
+    if (_positionSub != null && !fineBefore) lease.applied = _subscribeToStream();
+    return lease;
+  }
+
+  /// Rend un bail (idempotent : un bail inconnu, déjà rendu ou effacé par l'arrêt du suivi est ignoré).
+  Future<void> releasePrecisionLease(PrecisionLease lease) async {
+    if (!_leases.remove(lease)) return;
+    if (_positionSub != null && !_fineNow) await _subscribeToStream();
+  }
+
+  /// Vrai si un flux GPS est ouvert avec le filtre fin.
+  bool get fineLocationActive => _positionSub != null && _fineNow;
+
+  @visibleForTesting
+  int get debugLeaseCount => _leases.length;
+
+  /// Vrai si un flux GPS est ouvert avec la localisation arrière-plan autorisée (iOS, livraison en cours).
+  bool get backgroundLocationActive => _positionSub != null && _backgroundNow;
+
+  /// Ouvre le flux GPS en fermant d'abord l'éventuel flux précédent : jamais deux abonnements. Le compteur de génération
+  /// annule un appel plus ancien qui se terminerait après un arrêt ou un autre appel.
+  Future<void> _subscribeToStream() async {
+    final generation = ++_streamGeneration;
+    final previous = _positionSub;
+    _positionSub = null;
+    await previous?.cancel();
+    if (generation != _streamGeneration || _currentDriverId == null) return;
+    _positionSub = positionStreamFactory(streamSettings(
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+      deliveryActive: _deliveryActive,
+      fine: _fineNow,
+    )).listen(
+      (pos) {
+        _emit(pos);
+        _maybeSave(pos);
+      },
+      onError: (_) {
+        _gpsState = GpsTrackingState.error;
+        _positionSub?.cancel();
+        _positionSub = null;
+      },
+    );
+  }
+
+  /// Test seulement : ouvre le flux pour [driverId] sans permission, Firestore ni FCM.
+  @visibleForTesting
+  Future<void> debugAttach(String driverId) async {
+    _currentDriverId = driverId;
+    await _subscribeToStream();
+  }
+
+  @visibleForTesting
+  Future<void> debugEnsureForegroundService() => _ensureForegroundService();
+
+  @visibleForTesting
+  bool get debugForegroundStarted => _foregroundStarted;
+
   // ── Arrêt propre ──────────────────────────────────────────────────────────
 
   Future<void> stopTracking() async {
+    _leases.clear(); // fin du suivi : plus aucun bail (ceux encore détenus par des écrans deviennent inoffensifs)
     await _stopStream();
     _currentDriverId = null;
-    _lastSave        = null;
-    _lastSavedPos    = null;
-    _gpsState        = GpsTrackingState.error;
+    _lastSave = null;
+    _lastSavedPos = null;
+    _gpsState = GpsTrackingState.error;
     await _stopForegroundService();
   }
 
@@ -209,7 +436,9 @@ class DriverLocationService {
     final now = DateTime.now();
 
     // Throttle temporel
-    if (_lastSave != null && now.difference(_lastSave!) < _minSaveInterval) return;
+    if (_lastSave != null && now.difference(_lastSave!) < _minSaveInterval) {
+      return;
+    }
 
     // Throttle distance (évite d'écrire si livreur ne bouge pas) — la
     // fraîcheur de `updatedAt` en l'absence de mouvement est désormais
@@ -217,8 +446,10 @@ class DriverLocationService {
     // startTracking()), pas par ce throttle réactif au stream de position.
     if (_lastSavedPos != null) {
       final dist = Geolocator.distanceBetween(
-        _lastSavedPos!.latitude, _lastSavedPos!.longitude,
-        pos.latitude, pos.longitude,
+        _lastSavedPos!.latitude,
+        _lastSavedPos!.longitude,
+        pos.latitude,
+        pos.longitude,
       );
       if (dist < _minDistanceMeters) return;
     }
@@ -228,26 +459,68 @@ class DriverLocationService {
 
   Future<void> _saveToFirestore(Position pos) async {
     if (_currentDriverId == null) return;
-    _lastSave      = DateTime.now();
-    _lastSavedPos  = pos;
+    _lastSavedPos = pos;
 
     try {
+      final cityState = await _activeCityService.resolveGps(
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+      );
+      final currentCityId = cityState.gpsDetectedCityId;
       final geo = GeoFirePoint(GeoPoint(pos.latitude, pos.longitude));
       await FirebaseFirestore.instance
           .collection('livreurs')
           .doc(_currentDriverId)
           .set({
-        'lat':       pos.latitude,
-        'lng':       pos.longitude,
-        'position':  geo.data,
-        'heading':   pos.heading,
-        'speed':     pos.speed,
-        'fcmToken':  _fcmToken,
-        'isOnline':  true,
+        'lat': pos.latitude,
+        'lng': pos.longitude,
+        'position': geo.data,
+        'heading': pos.heading,
+        'speed': pos.speed,
+        // DISABLE_FCM : le champ n'est pas écrit du tout (même pas une chaîne vide).
+        if (!FcmPolicy.disabled) 'fcmToken': _fcmToken,
+        'isOnline': true,
+        ...driverCityFields(
+          currentCityId: currentCityId,
+          registeredCityId: _registeredCityId,
+        ),
+        if (currentCityId == null) 'currentCityId': FieldValue.delete(),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+      // Une écriture échouée ne doit pas avancer le throttle : sinon, après
+      // une reconnexion, la dernière position pouvait rester absente/stale
+      // jusqu'au prochain heartbeat.
+      _lastSave = DateTime.now();
+      // SEC-01 / driver_public (phase S4) : projection publique au même rythme que
+      // l'écriture `livreurs` ci-dessus (même throttle, pas de timer supplémentaire).
+      // `writeDriverPublicGpsProjection` ne lève jamais : une erreur ici n'affecte ni
+      // `_lastSave` ni l'écriture `livreurs`, déjà effectuée avec succès à cet instant.
+      unawaited(writeDriverPublicGpsProjection(_currentDriverId!, pos));
     } catch (e) {
+      _lastSave = null;
       debugPrint('[DLS] Firestore write error: $e');
+    }
+  }
+
+  Future<void> _loadRegisteredCityId(String driverId) async {
+    _registeredCityId = null;
+    try {
+      final reference =
+          FirebaseFirestore.instance.collection('livreurs').doc(driverId);
+      final snapshot = await reference.get();
+      final data = snapshot.data();
+      if (data == null) return;
+      final cityId = registeredDriverCityId(data);
+      if (cityId == null) return;
+      _registeredCityId = cityId;
+      if (data['registeredCityId'] != cityId) {
+        await reference.set(
+          {'registeredCityId': cityId},
+          SetOptions(merge: true),
+        );
+      }
+    } catch (error) {
+      debugPrint('[DLS] registeredCityId read/write error: $error');
     }
   }
 
@@ -256,8 +529,10 @@ class DriverLocationService {
   }
 
   Future<void> _stopStream() async {
-    await _positionSub?.cancel();
+    _streamGeneration++; // annule un abonnement en cours de création
+    final sub = _positionSub;
     _positionSub = null;
+    await sub?.cancel();
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
   }
@@ -266,33 +541,13 @@ class DriverLocationService {
 
   Future<void> _ensureForegroundService() async {
     if (_foregroundStarted) return;
+    // iOS / web : jamais de service de premier plan (voir [usesAndroidForegroundService]).
+    if (!usesAndroidForegroundService(
+        isWeb: kIsWeb, platform: defaultTargetPlatform)) {
+      return;
+    }
     try {
-      FlutterForegroundTask.init(
-        androidNotificationOptions: AndroidNotificationOptions(
-          channelId:          'az_tracking',
-          channelName:        'AZ Express — GPS actif',
-          channelDescription: 'Maintient la localisation GPS pendant la livraison',
-          channelImportance:  NotificationChannelImportance.LOW,
-          priority:           NotificationPriority.LOW,
-        ),
-        iosNotificationOptions: const IOSNotificationOptions(
-          showNotification:    false,
-          playSound:           false,
-        ),
-        foregroundTaskOptions: ForegroundTaskOptions(
-          eventAction:       ForegroundTaskEventAction.repeat(30000),
-          autoRunOnBoot:     false,
-          allowWakeLock:     true,
-          allowWifiLock:     false,
-        ),
-      );
-
-      await FlutterForegroundTask.startService(
-        serviceId:           1001,
-        notificationTitle:   'AZ Express — Livraison en cours',
-        notificationText:    'GPS actif · position transmise en temps réel',
-        callback:            azTrackingCallback,
-      );
+      await foregroundServiceStarter();
       _foregroundStarted = true;
     } catch (e) {
       debugPrint('[DLS] ForegroundService error: $e');
@@ -300,11 +555,66 @@ class DriverLocationService {
     }
   }
 
+  static Future<void> _startAndroidForegroundTask() async {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'az_tracking',
+        channelName: 'AZ Express — GPS actif',
+        channelDescription:
+            'Maintient la localisation GPS pendant la livraison',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(
+        showNotification: false,
+        playSound: false,
+      ),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(30000),
+        autoRunOnBoot: false,
+        allowWakeLock: true,
+        allowWifiLock: false,
+      ),
+    );
+
+    await FlutterForegroundTask.startService(
+      serviceId: 1001,
+      notificationTitle: 'AZ Express — Livraison en cours',
+      notificationText: 'GPS actif · position transmise en temps réel',
+      callback: azTrackingCallback,
+    );
+  }
+
+  static Future<void> _stopAndroidForegroundTask() async {
+    await FlutterForegroundTask.stopService();
+  }
+
   Future<void> _stopForegroundService() async {
     if (!_foregroundStarted) return;
     try {
-      await FlutterForegroundTask.stopService();
+      await foregroundServiceStopper();
       _foregroundStarted = false;
     } catch (_) {}
   }
 }
+
+@visibleForTesting
+String? registeredDriverCityId(Map<String, dynamic> data) {
+  for (final field in const ['registeredCityId', 'cityId']) {
+    final value = data[field];
+    if (value is String && value.trim().isNotEmpty) return value.trim();
+  }
+  final legacyCity = data['city'];
+  if (legacyCity is! String || legacyCity.trim().isEmpty) return null;
+  return LocalPlace.normalize(legacyCity);
+}
+
+@visibleForTesting
+Map<String, String> driverCityFields({
+  required String? currentCityId,
+  required String? registeredCityId,
+}) =>
+    {
+      if (currentCityId != null) 'currentCityId': currentCityId,
+      if (registeredCityId != null) 'registeredCityId': registeredCityId,
+    };

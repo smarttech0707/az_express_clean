@@ -1,0 +1,2 @@
+# Preserve the exact bytes of the audited production snapshot on every platform.
+/docs/firestore-production/cloud.firestore.9b96657d-bc14-4dc0-bc25-4e52671b6178.rules -text

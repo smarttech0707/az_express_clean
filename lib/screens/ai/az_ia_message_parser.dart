@@ -33,7 +33,8 @@ class AzIaMessageParser {
     void flushParagraph() {
       if (paragraphBuffer.isEmpty) return;
       final joined = paragraphBuffer.join(' ').trim();
-      if (joined.isNotEmpty) blocks.add(AzIaBlock(AzIaBlockType.paragraph, joined));
+      if (joined.isNotEmpty)
+        blocks.add(AzIaBlock(AzIaBlockType.paragraph, joined));
       paragraphBuffer.clear();
     }
 
@@ -51,13 +52,15 @@ class AzIaMessageParser {
       final headingMatch = RegExp(r'^#{1,2}\s+(.*)$').firstMatch(line);
       if (headingMatch != null) {
         flushParagraph();
-        blocks.add(AzIaBlock(AzIaBlockType.heading, headingMatch.group(1)!.trim()));
+        blocks.add(
+            AzIaBlock(AzIaBlockType.heading, headingMatch.group(1)!.trim()));
         continue;
       }
       final subheadingMatch = RegExp(r'^#{3,6}\s+(.*)$').firstMatch(line);
       if (subheadingMatch != null) {
         flushParagraph();
-        blocks.add(AzIaBlock(AzIaBlockType.subheading, subheadingMatch.group(1)!.trim()));
+        blocks.add(AzIaBlock(
+            AzIaBlockType.subheading, subheadingMatch.group(1)!.trim()));
         continue;
       }
       // Une ligne entièrement en gras (ex. "**Récapitulatif**") sert de
@@ -65,13 +68,15 @@ class AzIaMessageParser {
       final boldOnlyMatch = RegExp(r'^\*\*(.+)\*\*:?$').firstMatch(line);
       if (boldOnlyMatch != null) {
         flushParagraph();
-        blocks.add(AzIaBlock(AzIaBlockType.subheading, boldOnlyMatch.group(1)!.trim()));
+        blocks.add(AzIaBlock(
+            AzIaBlockType.subheading, boldOnlyMatch.group(1)!.trim()));
         continue;
       }
       final bulletMatch = RegExp(r'^[-•*]\s+(.*)$').firstMatch(line);
       if (bulletMatch != null) {
         flushParagraph();
-        blocks.add(AzIaBlock(AzIaBlockType.bullet, bulletMatch.group(1)!.trim()));
+        blocks
+            .add(AzIaBlock(AzIaBlockType.bullet, bulletMatch.group(1)!.trim()));
         continue;
       }
       paragraphBuffer.add(line);

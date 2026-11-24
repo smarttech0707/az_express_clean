@@ -6,79 +6,149 @@ import '../theme/app_theme.dart';
 // sous-marque Ekbine (vert), pas un doublon de l'orange AZ Express — ne pas
 // re-brander silencieusement. Seuls les tokens neutres sont repointés vers
 // la palette centrale.
-const kEkGreen     = Color(0xFF00C853);
-const kEkTeal      = Color(0xFF00BFA5);
-const kEkDark      = Color(0xFF0A2E1A);
-const kEkBg        = AppColors.bg;
-const kEkCard      = AppColors.card;
-const kEkText      = AppColors.text;
-const kEkMuted     = AppColors.textMuted;
-const kEkDivider   = AppColors.divider;
-const kEkOrange    = AppColors.primary;
+const kEkGreen = Color(0xFF00C853);
+const kEkTeal = Color(0xFF00BFA5);
+const kEkDark = Color(0xFF0A2E1A);
+const kEkBg = AppColors.bg;
+const kEkCard = AppColors.card;
+const kEkText = AppColors.text;
+const kEkMuted = AppColors.textMuted;
+const kEkDivider = AppColors.divider;
+const kEkOrange = AppColors.primary;
 
 // ── Operators ──────────────────────────────────────────────────────────────────
 const ekOperators = [
   {
-    'id':    'orange',
+    'id': 'orange',
     'label': 'Orange',
-    'color':  0xFFFF6600,
-    'bg':     0xFFFFF3E0,
-    'emoji':  '🟠',
-    'logo':   'assets/payment/orange.png',
+    'color': 0xFFFF6600,
+    'bg': 0xFFFFF3E0,
+    'emoji': '🟠',
+    'logo': 'assets/payment/orange.png',
   },
   {
-    'id':    'mtn',
+    'id': 'mtn',
     'label': 'MTN',
-    'color':  0xFFFFBB00,
-    'bg':     0xFFFFFDE7,
-    'emoji':  '🟡',
-    'logo':   'assets/payment/mtn.png',
+    'color': 0xFFFFBB00,
+    'bg': 0xFFFFFDE7,
+    'emoji': '🟡',
+    'logo': 'assets/payment/mtn.png',
   },
   {
-    'id':    'moov',
+    'id': 'moov',
     'label': 'Moov',
-    'color':  0xFF005EB8,
-    'bg':     0xFFE3F2FD,
-    'emoji':  '🔵',
-    'logo':   'assets/payment/moov.png',
+    'color': 0xFF005EB8,
+    'bg': 0xFFE3F2FD,
+    'emoji': '🔵',
+    'logo': 'assets/payment/moov.png',
   },
   {
-    'id':    'wave',
+    'id': 'wave',
     'label': 'Wave',
-    'color':  0xFF00B9F1,
-    'bg':     0xFFE0F7FA,
-    'emoji':  '🌊',
-    'logo':   'assets/payment/wave.png',
+    'color': 0xFF00B9F1,
+    'bg': 0xFFE0F7FA,
+    'emoji': '🌊',
+    'logo': 'assets/payment/wave.png',
   },
 ];
 
 // ── Services par opérateur ─────────────────────────────────────────────────────
 const ekServices = {
   'orange': [
-    {'id': 'credit',           'label': 'Crédit Orange',      'icon': '📞', 'minAmount': 100},
-    {'id': 'mix',              'label': 'Mix Orange',          'icon': '📦', 'minAmount': 200},
-    {'id': 'internet',         'label': 'Pass Internet',       'icon': '🌐', 'minAmount': 500},
-    {'id': 'transfer',         'label': 'Transfert Orange',    'icon': '↗️', 'minAmount': 500},
-    {'id': 'momo_deposit',     'label': 'Dépôt Orange Money',  'icon': '💰', 'minAmount': 500},
-    {'id': 'momo_withdrawal',  'label': 'Retrait Orange Money','icon': '💵', 'minAmount': 1000},
+    {'id': 'credit', 'label': 'Crédit Orange', 'icon': '📞', 'minAmount': 100},
+    {'id': 'mix', 'label': 'Mix Orange', 'icon': '📦', 'minAmount': 200},
+    {
+      'id': 'internet',
+      'label': 'Pass Internet',
+      'icon': '🌐',
+      'minAmount': 500
+    },
+    {
+      'id': 'transfer',
+      'label': 'Transfert Orange',
+      'icon': '↗️',
+      'minAmount': 500
+    },
+    {
+      'id': 'momo_deposit',
+      'label': 'Dépôt Orange Money',
+      'icon': '💰',
+      'minAmount': 500
+    },
+    {
+      'id': 'momo_withdrawal',
+      'label': 'Retrait Orange Money',
+      'icon': '💵',
+      'minAmount': 1000
+    },
   ],
   'mtn': [
-    {'id': 'credit',           'label': 'Crédit MTN',          'icon': '📞', 'minAmount': 100},
-    {'id': 'internet',         'label': 'Pass Internet MTN',   'icon': '🌐', 'minAmount': 500},
-    {'id': 'transfer',         'label': 'Transfert MTN',       'icon': '↗️', 'minAmount': 500},
-    {'id': 'momo_deposit',     'label': 'Dépôt MTN MoMo',      'icon': '💰', 'minAmount': 500},
-    {'id': 'momo_withdrawal',  'label': 'Retrait MTN MoMo',    'icon': '💵', 'minAmount': 1000},
+    {'id': 'credit', 'label': 'Crédit MTN', 'icon': '📞', 'minAmount': 100},
+    {
+      'id': 'internet',
+      'label': 'Pass Internet MTN',
+      'icon': '🌐',
+      'minAmount': 500
+    },
+    {
+      'id': 'transfer',
+      'label': 'Transfert MTN',
+      'icon': '↗️',
+      'minAmount': 500
+    },
+    {
+      'id': 'momo_deposit',
+      'label': 'Dépôt MTN MoMo',
+      'icon': '💰',
+      'minAmount': 500
+    },
+    {
+      'id': 'momo_withdrawal',
+      'label': 'Retrait MTN MoMo',
+      'icon': '💵',
+      'minAmount': 1000
+    },
   ],
   'moov': [
-    {'id': 'credit',           'label': 'Crédit Moov',         'icon': '📞', 'minAmount': 100},
-    {'id': 'internet',         'label': 'Pass Internet Moov',  'icon': '🌐', 'minAmount': 500},
-    {'id': 'momo_deposit',     'label': 'Dépôt Moov Money',    'icon': '💰', 'minAmount': 500},
-    {'id': 'momo_withdrawal',  'label': 'Retrait Moov Money',  'icon': '💵', 'minAmount': 1000},
+    {'id': 'credit', 'label': 'Crédit Moov', 'icon': '📞', 'minAmount': 100},
+    {
+      'id': 'internet',
+      'label': 'Pass Internet Moov',
+      'icon': '🌐',
+      'minAmount': 500
+    },
+    {
+      'id': 'momo_deposit',
+      'label': 'Dépôt Moov Money',
+      'icon': '💰',
+      'minAmount': 500
+    },
+    {
+      'id': 'momo_withdrawal',
+      'label': 'Retrait Moov Money',
+      'icon': '💵',
+      'minAmount': 1000
+    },
   ],
   'wave': [
-    {'id': 'transfer',         'label': 'Transfert Wave',      'icon': '↗️', 'minAmount': 500},
-    {'id': 'momo_deposit',     'label': 'Dépôt Wave',          'icon': '💰', 'minAmount': 500},
-    {'id': 'momo_withdrawal',  'label': 'Retrait Wave',        'icon': '💵', 'minAmount': 1000},
+    {
+      'id': 'transfer',
+      'label': 'Transfert Wave',
+      'icon': '↗️',
+      'minAmount': 500
+    },
+    {
+      'id': 'momo_deposit',
+      'label': 'Dépôt Wave',
+      'icon': '💰',
+      'minAmount': 500
+    },
+    {
+      'id': 'momo_withdrawal',
+      'label': 'Retrait Wave',
+      'icon': '💵',
+      'minAmount': 1000
+    },
   ],
 };
 
@@ -87,36 +157,62 @@ int ekCalculateFee(String serviceId, int amount) => 0;
 
 // ── Order statuses ─────────────────────────────────────────────────────────────
 const ekStatusLabels = {
-  'pending':           'En attente d\'agent',
-  'assigned':          'Agent trouvé',
-  'awaiting_deposit':  'Envoyez votre preuve de paiement',
-  'in_progress':       'En cours',
-  'proof_sent':        'Preuve envoyée',
-  'completed':         'Terminé',
-  'cancelled':         'Annulé',
-  'disputed':          'Litige',
+  'pending': 'En attente d\'agent',
+  'assigned': 'Agent trouvé',
+  'awaiting_deposit': 'Envoyez votre preuve de paiement',
+  'deposit_proof_sent': 'Preuve envoyée — en attente de validation',
+  'deposit_confirmed': 'Dépôt confirmé',
+  'deposit_rejected': 'Preuve de dépôt rejetée',
+  'in_progress': 'En cours',
+  'proof_sent': 'Preuve envoyée',
+  'completed': 'Terminé',
+  'cancelled': 'Annulé',
+  'disputed': 'Litige',
 };
 
 Color ekStatusColor(String status) {
   switch (status) {
-    case 'pending':          return const Color(0xFFFF8F00);
-    case 'assigned':         return const Color(0xFF2196F3);
-    case 'awaiting_deposit': return const Color(0xFFE65100);
-    case 'in_progress':      return const Color(0xFF9C27B0);
-    case 'proof_sent':  return const Color(0xFF00BCD4);
-    case 'completed':   return kEkGreen;
-    case 'cancelled':   return Colors.red;
-    case 'disputed':    return Colors.deepOrange;
-    default:            return kEkMuted;
+    case 'pending':
+      return const Color(0xFFFF8F00);
+    case 'assigned':
+      return const Color(0xFF2196F3);
+    case 'awaiting_deposit':
+      return const Color(0xFFE65100);
+    case 'deposit_proof_sent':
+      return const Color(0xFF1565C0);
+    case 'deposit_confirmed':
+      return const Color(0xFF2E7D32);
+    case 'deposit_rejected':
+      return Colors.redAccent;
+    case 'in_progress':
+      return const Color(0xFF9C27B0);
+    case 'proof_sent':
+      return const Color(0xFF00BCD4);
+    case 'completed':
+      return kEkGreen;
+    case 'cancelled':
+      return Colors.red;
+    case 'disputed':
+      return Colors.deepOrange;
+    default:
+      return kEkMuted;
   }
 }
 
 // ── Payment methods ────────────────────────────────────────────────────────────
 const ekPaymentMethods = [
-  {'id': 'wallet',      'label': 'Wallet AZ Express', 'icon': Icons.account_balance_wallet_rounded},
-  {'id': 'orange_money','label': 'Orange Money',      'icon': Icons.phone_android_rounded},
-  {'id': 'mtn_momo',   'label': 'MTN MoMo',          'icon': Icons.phone_android_rounded},
-  {'id': 'wave',        'label': 'Wave',               'icon': Icons.waves_rounded},
+  {
+    'id': 'wallet',
+    'label': 'Wallet AZ Express',
+    'icon': Icons.account_balance_wallet_rounded
+  },
+  {
+    'id': 'orange_money',
+    'label': 'Orange Money',
+    'icon': Icons.phone_android_rounded
+  },
+  {'id': 'mtn_momo', 'label': 'MTN MoMo', 'icon': Icons.phone_android_rounded},
+  {'id': 'wave', 'label': 'Wave', 'icon': Icons.waves_rounded},
 ];
 
 // ── Quick amount presets ───────────────────────────────────────────────────────

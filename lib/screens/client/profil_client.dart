@@ -1,15 +1,16 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../l10n/app_text.dart';
-import '../../services/account_deletion_service.dart';
+import '../../widgets/account_deletion_dialog.dart';
 import '../../services/auth_service.dart';
-import '../home/home_screen.dart';
+import '../auth/client_auth_page.dart';
 import '../support/support_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../legal/legal_renderer.dart';
 import '../../widgets/fade_slide_in.dart';
 import '../../widgets/glass_kit.dart';
 import '../../widgets/single_photo_editor.dart';
@@ -22,13 +23,13 @@ class ProfilClient extends StatefulWidget {
 }
 
 class _ProfilClientState extends State<ProfilClient> {
-  final _nameCtrl  = TextEditingController();
+  final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   String? _createdAt;
   String? _photoUrl;
   bool _editing = false;
-  bool _saving  = false;
+  bool _saving = false;
 
   int _totalOrders = 0;
   int _deliveredOrders = 0;
@@ -46,7 +47,8 @@ class _ProfilClientState extends State<ProfilClient> {
   Future<void> _loadOrderStats() async {
     final uid = _uid;
     if (uid == null) return;
-    final col = FirebaseFirestore.instance.collection("orders")
+    final col = FirebaseFirestore.instance
+        .collection("orders")
         .where("clientId", isEqualTo: uid);
     try {
       final results = await Future.wait([
@@ -67,19 +69,18 @@ class _ProfilClientState extends State<ProfilClient> {
     final uid = _uid;
     if (uid == null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection("clients")
-          .doc(uid)
-          .get();
+      final doc =
+          await FirebaseFirestore.instance.collection("clients").doc(uid).get();
       if (doc.exists && mounted) {
         final ts = doc.data()?['createdAt'];
         String? created;
         if (ts is Timestamp) {
           final d = ts.toDate();
-          created = '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+          created =
+              '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
         }
         setState(() {
-          _nameCtrl.text  = doc['name']  ?? '';
+          _nameCtrl.text = doc['name'] ?? '';
           _phoneCtrl.text = doc['phone'] ?? '';
           _emailCtrl.text = doc['email'] ?? '';
           _createdAt = created;
@@ -101,7 +102,9 @@ class _ProfilClientState extends State<ProfilClient> {
             ? "Activez la connexion anonyme dans Firebase Console → Authentication → Sign-in method → Anonyme"
             : "Erreur Firebase : ${e.code}";
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg), backgroundColor: Colors.red,
+          SnackBar(
+              content: Text(msg),
+              backgroundColor: Colors.red,
               duration: const Duration(seconds: 6)),
         );
         return;
@@ -130,11 +133,26 @@ class _ProfilClientState extends State<ProfilClient> {
     setState(() => _saving = true);
 
     try {
-      await FirebaseFirestore.instance.collection("clients").doc(uid).set({
-        "name":      name,
-        "phone":     phone,
-        "updatedAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final ref = FirebaseFirestore.instance.collection("clients").doc(uid);
+      // Un client anonyme n'a pas encore de document : la 1re sauvegarde est une CRÉATION, que les règles
+      // n'acceptent qu'avec la liste exacte de champs (wallet 0, sans updatedAt). Les mises à jour suivantes
+      // ne touchent jamais au wallet.
+      if ((await ref.get()).exists) {
+        await ref.set({
+          "name": name,
+          "phone": phone,
+          "updatedAt": FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } else {
+        await ref.set({
+          "name": name,
+          "phone": phone,
+          "wallet": 0,
+          "cashOnDeliveryEnabled": true,
+          "fakeOrderCount": 0,
+          "createdAt": FieldValue.serverTimestamp(),
+        });
+      }
 
       if (!mounted) return;
       setState(() {
@@ -168,8 +186,8 @@ class _ProfilClientState extends State<ProfilClient> {
   // ── Dialogues de sécurité ────────────────────────────────────────────────
 
   void _showChangePassword() {
-    final curCtrl  = TextEditingController();
-    final newCtrl  = TextEditingController();
+    final curCtrl = TextEditingController();
+    final newCtrl = TextEditingController();
     final confCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -178,34 +196,68 @@ class _ProfilClientState extends State<ProfilClient> {
         return StatefulBuilder(
           builder: (ctx, setS) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
               title: const Text('Changer le mot de passe'),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
-                _SecField(ctrl: curCtrl,  label: 'Mot de passe actuel'),
+                _SecField(ctrl: curCtrl, label: 'Mot de passe actuel'),
                 const SizedBox(height: 10),
-                _SecField(ctrl: newCtrl,  label: 'Nouveau mot de passe'),
+                _SecField(ctrl: newCtrl, label: 'Nouveau mot de passe'),
                 const SizedBox(height: 10),
                 _SecField(ctrl: confCtrl, label: 'Confirmer'),
               ]),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Annuler')),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                  onPressed: loading ? null : () async {
-                    final err = AuthService.validatePassword(newCtrl.text);
-                    if (err != null) { if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(err), backgroundColor: Colors.orange)); return; }
-                    if (newCtrl.text != confCtrl.text) { if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Les mots de passe ne correspondent pas'), backgroundColor: Colors.red)); return; }
-                    setS(() => loading = true);
-                    try {
-                      await AuthService().updatePassword(currentPassword: curCtrl.text, newPassword: newCtrl.text);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mot de passe mis à jour'), backgroundColor: Colors.green));
-                    } catch (e) {
-                      setS(() => loading = false);
-                      if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red));
-                    }
-                  },
-                  child: const Text('Enregistrer', style: TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary),
+                  onPressed: loading
+                      ? null
+                      : () async {
+                          final err =
+                              AuthService.validatePassword(newCtrl.text);
+                          if (err != null) {
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                                  content: Text(err),
+                                  backgroundColor: Colors.orange));
+                            }
+                            return;
+                          }
+                          if (newCtrl.text != confCtrl.text) {
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                                  content: Text(
+                                      'Les mots de passe ne correspondent pas'),
+                                  backgroundColor: Colors.red));
+                            }
+                            return;
+                          }
+                          setS(() => loading = true);
+                          try {
+                            await AuthService().updatePassword(
+                                currentPassword: curCtrl.text,
+                                newPassword: newCtrl.text);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Mot de passe mis à jour'),
+                                      backgroundColor: Colors.green));
+                            }
+                          } catch (e) {
+                            setS(() => loading = false);
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                                  content: Text('Erreur : $e'),
+                                  backgroundColor: Colors.red));
+                            }
+                          }
+                        },
+                  child: const Text('Enregistrer',
+                      style: TextStyle(color: Colors.white)),
                 ),
               ],
             );
@@ -216,7 +268,7 @@ class _ProfilClientState extends State<ProfilClient> {
   }
 
   void _showChangeEmail() {
-    final passCtrl  = TextEditingController();
+    final passCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -225,30 +277,60 @@ class _ProfilClientState extends State<ProfilClient> {
         return StatefulBuilder(
           builder: (ctx, setS) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
               title: const Text('Modifier l\'email'),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
-                _SecField(ctrl: passCtrl,  label: 'Mot de passe actuel'),
+                _SecField(ctrl: passCtrl, label: 'Mot de passe actuel'),
                 const SizedBox(height: 10),
-                _SecField(ctrl: emailCtrl, label: 'Nouvel email', isEmail: true),
+                _SecField(
+                    ctrl: emailCtrl, label: 'Nouvel email', isEmail: true),
               ]),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Annuler')),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                  onPressed: loading ? null : () async {
-                    if (!AuthService.isValidEmail(emailCtrl.text)) { if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Email invalide'), backgroundColor: Colors.orange)); return; }
-                    setS(() => loading = true);
-                    try {
-                      await AuthService().updateEmail(currentPassword: passCtrl.text, newEmail: emailCtrl.text, collection: 'clients');
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Un lien de vérification a été envoyé à votre nouvel email'), backgroundColor: Colors.green, duration: Duration(seconds: 4)));
-                    } catch (e) {
-                      setS(() => loading = false);
-                      if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red));
-                    }
-                  },
-                  child: const Text('Envoyer la vérification', style: TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary),
+                  onPressed: loading
+                      ? null
+                      : () async {
+                          if (!AuthService.isValidEmail(emailCtrl.text)) {
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Email invalide'),
+                                      backgroundColor: Colors.orange));
+                            }
+                            return;
+                          }
+                          setS(() => loading = true);
+                          try {
+                            await AuthService().updateEmail(
+                                currentPassword: passCtrl.text,
+                                newEmail: emailCtrl.text,
+                                collection: 'clients');
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          'Un lien de vérification a été envoyé à votre nouvel email'),
+                                      backgroundColor: Colors.green,
+                                       duration: Duration(seconds: 4)));
+                            }
+                          } catch (e) {
+                            setS(() => loading = false);
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                                  content: Text('Erreur : $e'),
+                                  backgroundColor: Colors.red));
+                            }
+                          }
+                        },
+                  child: const Text('Envoyer la vérification',
+                      style: TextStyle(color: Colors.white)),
                 ),
               ],
             );
@@ -259,7 +341,7 @@ class _ProfilClientState extends State<ProfilClient> {
   }
 
   void _showChangePhone() {
-    final passCtrl  = TextEditingController();
+    final passCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -268,31 +350,62 @@ class _ProfilClientState extends State<ProfilClient> {
         return StatefulBuilder(
           builder: (ctx, setS) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
               title: const Text('Modifier le téléphone'),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
-                _SecField(ctrl: passCtrl,  label: 'Mot de passe actuel'),
+                _SecField(ctrl: passCtrl, label: 'Mot de passe actuel'),
                 const SizedBox(height: 10),
-                _SecField(ctrl: phoneCtrl, label: 'Nouveau numéro', isPhone: true),
+                _SecField(
+                    ctrl: phoneCtrl, label: 'Nouveau numéro', isPhone: true),
               ]),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Annuler')),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                  onPressed: loading ? null : () async {
-                    if (!AuthService.isValidPhone(phoneCtrl.text)) { if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Numéro invalide'), backgroundColor: Colors.orange)); return; }
-                    setS(() => loading = true);
-                    try {
-                      await AuthService().updatePhone(currentPassword: passCtrl.text, newPhone: phoneCtrl.text, collection: 'clients');
-                      if (mounted) setState(() => _phoneCtrl.text = phoneCtrl.text.trim());
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Numéro mis à jour'), backgroundColor: Colors.green));
-                    } catch (e) {
-                      setS(() => loading = false);
-                      if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Erreur : $e'), backgroundColor: Colors.red));
-                    }
-                  },
-                  child: const Text('Enregistrer', style: TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary),
+                  onPressed: loading
+                      ? null
+                      : () async {
+                          if (!AuthService.isValidPhone(phoneCtrl.text)) {
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Numéro invalide'),
+                                      backgroundColor: Colors.orange));
+                            }
+                            return;
+                          }
+                          setS(() => loading = true);
+                          try {
+                            await AuthService().updatePhone(
+                                currentPassword: passCtrl.text,
+                                newPhone: phoneCtrl.text,
+                                collection: 'clients');
+                            if (mounted) {
+                              setState(() =>
+                                  _phoneCtrl.text = phoneCtrl.text.trim());
+                            }
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Numéro mis à jour'),
+                                      backgroundColor: Colors.green));
+                            }
+                          } catch (e) {
+                            setS(() => loading = false);
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                                  content: Text('Erreur : $e'),
+                                  backgroundColor: Colors.red));
+                            }
+                          }
+                        },
+                  child: const Text('Enregistrer',
+                      style: TextStyle(color: Colors.white)),
                 ),
               ],
             );
@@ -309,7 +422,8 @@ class _ProfilClientState extends State<ProfilClient> {
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: (MediaQuery.of(context).size.height * 0.25).clamp(180.0, 260.0),
+            expandedHeight:
+                (MediaQuery.of(context).size.height * 0.25).clamp(180.0, 260.0),
             pinned: true,
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
@@ -336,8 +450,16 @@ class _ProfilClientState extends State<ProfilClient> {
                             await FirebaseFirestore.instance
                                 .collection('clients')
                                 .doc(_uid)
-                                .set({'photoUrl': url}, SetOptions(merge: true));
+                                .set(
+                                    {'photoUrl': url}, SetOptions(merge: true));
                             if (mounted) setState(() => _photoUrl = url);
+                          },
+                          onDeleted: () async {
+                            await FirebaseFirestore.instance
+                                .collection('clients')
+                                .doc(_uid)
+                                .update({'photoUrl': FieldValue.delete()});
+                            if (mounted) setState(() => _photoUrl = null);
                           },
                         )
                       else
@@ -348,11 +470,14 @@ class _ProfilClientState extends State<ProfilClient> {
                             color: Colors.white.withValues(alpha: 0.25),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.person, color: Colors.white, size: 44),
+                          child: const Icon(Icons.person,
+                              color: Colors.white, size: 44),
                         ),
                       const SizedBox(height: 10),
                       Text(
-                        _nameCtrl.text.isEmpty ? context.tr('my_profile') : _nameCtrl.text,
+                        _nameCtrl.text.isEmpty
+                            ? context.tr('my_profile')
+                            : _nameCtrl.text,
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 20,
@@ -364,16 +489,17 @@ class _ProfilClientState extends State<ProfilClient> {
                 ),
               ),
             ),
-            title: Text(context.tr('my_profile'), style: const TextStyle(color: Colors.white)),
+            title: Text(context.tr('my_profile'),
+                style: const TextStyle(color: Colors.white)),
             centerTitle: true,
             actions: [
               IconButton(
-                icon: Icon(_editing ? Icons.close : Icons.edit, color: Colors.white),
+                icon: Icon(_editing ? Icons.close : Icons.edit,
+                    color: Colors.white),
                 onPressed: () => setState(() => _editing = !_editing),
               ),
             ],
           ),
-
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -385,15 +511,19 @@ class _ProfilClientState extends State<ProfilClient> {
                   const SizedBox(height: 10),
                   _infoCard(
                     children: [
-                      _infoField(_nameCtrl, context.tr('full_name'), Icons.person, _editing),
+                      _infoField(_nameCtrl, context.tr('full_name'),
+                          Icons.person, _editing),
                       const Divider(height: 1),
-                      _infoField(_phoneCtrl, context.tr('phone'), Icons.phone, _editing,
+                      _infoField(_phoneCtrl, context.tr('phone'), Icons.phone,
+                          _editing,
                           type: TextInputType.phone),
                       const Divider(height: 1),
-                      _infoField(_emailCtrl, 'Email', Icons.email_outlined, false),
+                      _infoField(
+                          _emailCtrl, 'Email', Icons.email_outlined, false),
                       if (_createdAt != null) ...[
                         const Divider(height: 1),
-                        _readOnlyField('Membre depuis', _createdAt!, Icons.calendar_today_outlined),
+                        _readOnlyField('Membre depuis', _createdAt!,
+                            Icons.calendar_today_outlined),
                       ],
                     ],
                   ),
@@ -411,9 +541,11 @@ class _ProfilClientState extends State<ProfilClient> {
                               borderRadius: BorderRadius.circular(12)),
                         ),
                         child: _saving
-                            ? const CircularProgressIndicator(color: Colors.white)
+                            ? const CircularProgressIndicator(
+                                color: Colors.white)
                             : Text(context.tr('save'),
-                                style: const TextStyle(color: Colors.white, fontSize: 16)),
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 16)),
                       ),
                     ),
                   ],
@@ -431,8 +563,8 @@ class _ProfilClientState extends State<ProfilClient> {
                       _menuItem(Icons.email_outlined, 'Modifier l\'email',
                           _showChangeEmail),
                       const Divider(height: 1),
-                      _menuItem(Icons.phone_android_outlined, 'Modifier le téléphone',
-                          _showChangePhone),
+                      _menuItem(Icons.phone_android_outlined,
+                          'Modifier le téléphone', _showChangePhone),
                     ],
                   ),
 
@@ -446,8 +578,11 @@ class _ProfilClientState extends State<ProfilClient> {
                       _statCard(context.tr('total_orders'), "$_totalOrders",
                           Icons.receipt_long, AppColors.primary),
                       const SizedBox(width: 10),
-                      _statCard(context.tr('delivered_orders'), "$_deliveredOrders",
-                          Icons.check_circle, Colors.green),
+                      _statCard(
+                          context.tr('delivered_orders'),
+                          "$_deliveredOrders",
+                          Icons.check_circle,
+                          Colors.green),
                       const SizedBox(width: 10),
                       _statCard(context.tr('pending_orders'), "$_pendingOrders",
                           Icons.hourglass_top, Colors.orange),
@@ -471,7 +606,8 @@ class _ProfilClientState extends State<ProfilClient> {
                       _menuItem(
                         Icons.support_agent_rounded,
                         'Aide & Support',
-                        () => Navigator.push(context,
+                        () => Navigator.push(
+                            context,
                             MaterialPageRoute(
                                 builder: (_) => const SupportScreen())),
                         color: AppColors.primary,
@@ -486,17 +622,29 @@ class _ProfilClientState extends State<ProfilClient> {
                   const SizedBox(height: 10),
                   _infoCard(
                     children: [
-                      _menuItem(Icons.privacy_tip_outlined, context.tr('privacy'),
-                          () => _showLegal(context, context.tr('privacy'), _privacy)),
+                      _menuItem(
+                          Icons.privacy_tip_outlined,
+                          context.tr('privacy'),
+                          () => _showLegal(
+                              context, context.tr('privacy'), _privacy)),
                       const Divider(height: 1),
-                      _menuItem(Icons.gavel_outlined, context.tr('terms'),
-                          () => _showLegal(context, context.tr('terms'), _terms)),
+                      _menuItem(
+                          Icons.gavel_outlined,
+                          context.tr('terms'),
+                          () =>
+                              _showLegal(context, context.tr('terms'), _terms)),
                       const Divider(height: 1),
-                      _menuItem(Icons.local_shipping_outlined, context.tr('delivery_policy'),
-                          () => _showLegal(context, context.tr('delivery_policy'), _delivery)),
+                      _menuItem(
+                          Icons.local_shipping_outlined,
+                          context.tr('delivery_policy'),
+                          () => _showLegal(context,
+                              context.tr('delivery_policy'), _delivery)),
                       const Divider(height: 1),
-                      _menuItem(Icons.payments_outlined, context.tr('payment_policy'),
-                          () => _showLegal(context, context.tr('payment_policy'), _payment)),
+                      _menuItem(
+                          Icons.payments_outlined,
+                          context.tr('payment_policy'),
+                          () => _showLegal(
+                              context, context.tr('payment_policy'), _payment)),
                       const Divider(height: 1),
                       _menuItem(Icons.info_outline, context.tr('about'),
                           () => _showAbout(context)),
@@ -519,7 +667,9 @@ class _ProfilClientState extends State<ProfilClient> {
                   // ── DANGER ──────────────────────────────────
                   _infoCard(
                     children: [
-                      _menuItem(Icons.delete_forever_outlined, context.tr('delete_account'),
+                      _menuItem(
+                          Icons.delete_forever_outlined,
+                          context.tr('delete_account'),
                           () => _showDeleteAccount(context),
                           color: Colors.red),
                     ],
@@ -547,14 +697,19 @@ class _ProfilClientState extends State<ProfilClient> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
           ],
         ),
-        child: Column(children: children),
+        child: Material(
+          type: MaterialType.transparency,
+          child: Column(children: children),
+        ),
       );
 
-  Widget _infoField(TextEditingController ctrl, String label, IconData icon,
-      bool editable, {TextInputType? type}) {
+  Widget _infoField(
+      TextEditingController ctrl, String label, IconData icon, bool editable,
+      {TextInputType? type}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
@@ -581,7 +736,9 @@ class _ProfilClientState extends State<ProfilClient> {
                                 color: Colors.grey, fontSize: 11)),
                         const SizedBox(height: 2),
                         Text(
-                          ctrl.text.isEmpty ? context.tr('not_provided') : ctrl.text,
+                          ctrl.text.isEmpty
+                              ? context.tr('not_provided')
+                              : ctrl.text,
                           style: TextStyle(
                             fontSize: 15,
                             color: ctrl.text.isEmpty
@@ -604,9 +761,9 @@ class _ProfilClientState extends State<ProfilClient> {
       leading: Icon(icon, color: color ?? AppColors.primary, size: 22),
       title: Text(title,
           style: TextStyle(
-              color: color ?? Colors.black87,
-              fontWeight: FontWeight.w500)),
-      trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+              color: color ?? Colors.black87, fontWeight: FontWeight.w500)),
+      trailing:
+          const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
       onTap: onTap,
     );
   }
@@ -619,7 +776,8 @@ class _ProfilClientState extends State<ProfilClient> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
           ],
         ),
         child: Column(
@@ -628,9 +786,7 @@ class _ProfilClientState extends State<ProfilClient> {
             const SizedBox(height: 6),
             Text(value,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold)),
+                    color: color, fontSize: 20, fontWeight: FontWeight.bold)),
             Text(label,
                 style: const TextStyle(color: Colors.grey, fontSize: 11)),
           ],
@@ -656,7 +812,8 @@ class _ProfilClientState extends State<ProfilClient> {
                       style: const TextStyle(color: Colors.grey, fontSize: 11)),
                   const SizedBox(height: 2),
                   Text(value,
-                      style: const TextStyle(fontSize: 15, color: Colors.black87)),
+                      style:
+                          const TextStyle(fontSize: 15, color: Colors.black87)),
                 ],
               ),
             ),
@@ -707,8 +864,7 @@ class _ProfilClientState extends State<ProfilClient> {
             ),
             const SizedBox(height: 14),
             const Text("AZ Express",
-                style:
-                    TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             const Text("Version 1.0.0",
                 style: TextStyle(color: Colors.grey, fontSize: 13)),
@@ -716,7 +872,8 @@ class _ProfilClientState extends State<ProfilClient> {
             Text(
               context.tr('about_app_text'),
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.5),
+              style: const TextStyle(
+                  fontSize: 13, color: Colors.black87, height: 1.5),
             ),
             const SizedBox(height: 12),
             Text(context.tr('copyright'),
@@ -754,10 +911,12 @@ class _ProfilClientState extends State<ProfilClient> {
               Navigator.pop(ctx);
               AuthService().logAuthEvent('logout', 'client');
               await FirebaseAuth.instance.signOut();
-              try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+              try {
+                await FirebaseAuth.instance.signInAnonymously();
+              } catch (_) {}
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const HomeScreen()),
+                  MaterialPageRoute(builder: (_) => const ClientAuthPage()),
                   (route) => false,
                 );
               }
@@ -770,144 +929,11 @@ class _ProfilClientState extends State<ProfilClient> {
   }
 
   void _showDeleteAccount(BuildContext context) {
-    final passCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(children: [
-          Icon(Icons.warning_rounded, color: Colors.red, size: 22),
-          SizedBox(width: 8),
-          Text('Supprimer mon compte', style: TextStyle(fontSize: 16)),
-        ]),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Cette action est irréversible. Toutes tes données seront supprimées.',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            const Text('Confirme avec ton mot de passe :',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: passCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(
-                hintText: 'Mot de passe',
-                prefixIcon: Icon(Icons.lock_outline, size: 18),
-                isDense: true,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () { passCtrl.dispose(); Navigator.pop(ctx); },
-              child: const Text('Annuler')),
-          ScaleButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () async {
-              final password = passCtrl.text.trim();
-              if (password.isEmpty) return;
-              Navigator.pop(ctx);
-              await _deleteAccount(context, password);
-              passCtrl.dispose();
-            },
-            child: const Text('Supprimer'),
-          ),
-        ],
-      ),
-    );
+    showAccountDeletionRequestDialog(context, role: 'client', initialPhone: _phoneCtrl.text);
   }
 
-  Future<void> _deleteAccount(BuildContext context, String password) async {
-    try {
-      if (FirebaseAuth.instance.currentUser == null) return;
-
-      // Ré-authentification + suppression Firestore/Auth déléguées au flux
-      // unique partagé par les 9 rôles (voir AccountDeletionService) —
-      // comportement inchangé pour le client, seulement extrait pour être
-      // réutilisable.
-      await AccountDeletionService.deleteClientAccountNow(password: password);
-
-      // Reconnecter en anonyme
-      await FirebaseAuth.instance.signInAnonymously();
-
-      if (!context.mounted) return;
-      // Retour à l'accueil
-      Navigator.of(context).popUntil((route) => route.isFirst);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Compte supprimé avec succès'),
-        backgroundColor: Colors.red,
-      ));
-    } on FirebaseAuthException catch (e) {
-      if (!context.mounted) return;
-      String msg = 'Erreur lors de la suppression';
-      if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
-        msg = 'Mot de passe incorrect';
-      }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg),
-        backgroundColor: Colors.red,
-      ));
-    } on StateError catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(e.message),
-        backgroundColor: Colors.red,
-      ));
-    }
-  }
-
-  static const String _privacy = """POLITIQUE DE CONFIDENTIALITÉ — AZ Express
-
-Dernière mise à jour : 2026
-
-AZ Express est une application de livraison permettant aux utilisateurs de commander des courses et de se faire livrer des produits.
-
-1. DONNÉES COLLECTÉES
-
-Nous collectons les informations suivantes :
-• Nom et prénom
-• Numéro de téléphone
-• Adresse de livraison
-• Localisation GPS
-• Informations liées aux commandes
-
-2. UTILISATION DES DONNÉES
-
-Les données sont utilisées pour :
-• Traiter et livrer les commandes
-• Mettre en relation clients et livreurs
-• Améliorer l'application
-• Assurer la sécurité des utilisateurs
-
-3. PARTAGE DES DONNÉES
-
-Nous pouvons partager certaines informations avec :
-• Les livreurs (pour effectuer la livraison)
-• Nos services techniques (Firebase, etc.)
-
-Nous ne vendons aucune donnée personnelle.
-
-4. SÉCURITÉ
-
-Nous mettons en place des mesures de sécurité pour protéger vos informations personnelles.
-
-5. VOS DROITS
-
-Vous pouvez :
-• Modifier vos informations (section "Mon profil")
-• Demander la suppression de votre compte
-
-6. CONTACT
-
-Pour toute question :
-Email : znm0905@gmail.com""";
+  // Source unique : lib/legal/privacy_content.dart (mission M2.9)
+  static final String _privacy = LegalRenderer.privacyPlainText();
 
   static const String _terms = """CONDITIONS D'UTILISATION — AZ Express
 
@@ -1114,10 +1140,12 @@ class _RecentOrders extends StatelessWidget {
               boxShadow: AppShadow.card,
             ),
             child: Column(
-              children: List.generate(3, (i) => Padding(
-                padding: EdgeInsets.only(bottom: i == 2 ? 0 : 12),
-                child: const AzShimmerRow(iconSize: 42, maxWidth: 180),
-              )),
+              children: List.generate(
+                  3,
+                  (i) => Padding(
+                        padding: EdgeInsets.only(bottom: i == 2 ? 0 : 12),
+                        child: const AzShimmerRow(iconSize: 42, maxWidth: 180),
+                      )),
             ),
           );
         }
@@ -1168,81 +1196,80 @@ class _RecentOrders extends StatelessWidget {
               return FadeSlideIn(
                 index: i,
                 child: Column(
-                children: [
-                  if (i > 0) const Divider(height: 1, indent: 16),
-                  ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 6),
-                    leading: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
+                  children: [
+                    if (i > 0) const Divider(height: 1, indent: 16),
+                    ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 6),
+                      leading: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child:
+                            Icon(_statusIcon(status), color: color, size: 20),
                       ),
-                      child: Icon(_statusIcon(status),
-                          color: color, size: 20),
-                    ),
-                    title: Text(
-                      desc,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.urbanist(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.text,
+                      title: Text(
+                        desc,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.urbanist(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.text,
+                        ),
                       ),
-                    ),
-                    subtitle: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            _statusLabel(status),
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: color,
+                      subtitle: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              _statusLabel(status),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: color,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _formatDate(ts),
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade400),
-                        ),
-                        if (rating != null) ...[
                           const SizedBox(width: 6),
-                          ...List.generate(
-                            5,
-                            (j) => Icon(
-                              j < rating
-                                  ? Icons.star_rounded
-                                  : Icons.star_outline_rounded,
-                              color: Colors.amber,
-                              size: 12,
-                            ),
+                          Text(
+                            _formatDate(ts),
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade400),
                           ),
+                          if (rating != null) ...[
+                            const SizedBox(width: 6),
+                            ...List.generate(
+                              5,
+                              (j) => Icon(
+                                j < rating
+                                    ? Icons.star_rounded
+                                    : Icons.star_outline_rounded,
+                                color: Colors.amber,
+                                size: 12,
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
-                    ),
-                    trailing: Text(
-                      '$budget F',
-                      style: GoogleFonts.urbanist(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: const Color(0xFFFF5A3C),
+                      ),
+                      trailing: Text(
+                        '$budget F',
+                        style: GoogleFonts.urbanist(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: const Color(0xFFFF5A3C),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
                 ),
               );
             }).toList(),
@@ -1252,4 +1279,3 @@ class _RecentOrders extends StatelessWidget {
     );
   }
 }
-

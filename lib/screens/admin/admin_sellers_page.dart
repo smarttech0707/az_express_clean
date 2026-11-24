@@ -1,8 +1,34 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../widgets/scale_button.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'admin_partner_account_service.dart';
 import '../../services/subscription_service.dart';
+import '../../utils/partner_location_validator.dart';
+import '../../widgets/partner_location_input.dart';
+import '../../widgets/partner_temp_credentials_dialog.dart';
+
+/// Payload du formulaire : l'édition ne réécrit jamais un solde, même lu avant
+/// une transaction concurrente. Les valeurs initiales sont réservées à CREATE.
+Map<String, dynamic> buildSellerProfileData({
+  required bool isCreating,
+  required String name,
+  required String phone,
+  required String type,
+  required bool isActive,
+  required double latitude,
+  required double longitude,
+}) =>
+    {
+      'name': name,
+      'phone': phone,
+      'type': type,
+      'isActive': isActive,
+      'lat': latitude,
+      'lng': longitude,
+      if (isCreating) 'wallet': 0,
+      if (isCreating) 'createdAt': FieldValue.serverTimestamp(),
+    };
 
 class AdminSellersPage extends StatelessWidget {
   const AdminSellersPage({super.key});
@@ -57,7 +83,7 @@ class AdminSellersPage extends StatelessWidget {
           }
           return ListView.builder(
             physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             itemCount: docs.length,
             itemBuilder: (_, i) {
               final doc = docs[i];
@@ -78,22 +104,37 @@ class _SellerCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _SellerCard({required this.docId, required this.data});
 
-  Future<void> _toggleActive() async {
+  // Une écriture refusée par les règles (ex. sous-admin sans la permission)
+  // ne doit pas rester silencieuse.
+  Future<void> _setActive(BuildContext context, bool active) async {
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      await FirebaseFirestore.instance
-          .collection('sellers')
-          .doc(docId)
-          .update({'isActive': !(data['isActive'] ?? true)});
-    } catch (_) {}
+      await AdminPartnerAccountService.manageSeller(
+          sellerId: docId, isActive: active);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text("Action refusée ou impossible. Réessayez."),
+        backgroundColor: Colors.red,
+      ));
+    }
   }
 
-  Future<void> _delete(BuildContext context) async {
+  Future<void> _toggleActive(BuildContext context) =>
+      _setActive(context, !(data['isActive'] ?? true));
+
+  // Le document n'est jamais supprimé depuis cet écran : un simple delete()
+  // laissait le compte Auth, les produits et les commandes orphelins, sans
+  // trace d'audit. La suppression définitive passe par le flux de suppression
+  // de compte (demande + moteur serveur). Ici : désactivation réversible.
+  Future<void> _deactivate(BuildContext context) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Supprimer ce vendeur ?"),
+        title: const Text("Désactiver ce vendeur ?"),
         content: Text(
-            "\"${data['name'] ?? ''}\" sera supprimé. Il ne pourra plus se connecter."),
+            "\"${data['name'] ?? ''}\" ne pourra plus se connecter. Ses données "
+            "sont conservées et le compte peut être réactivé. La suppression "
+            "définitive passe par une demande de suppression de compte."),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -101,18 +142,13 @@ class _SellerCard extends StatelessWidget {
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text("Supprimer"),
+            child: const Text("Désactiver"),
           ),
         ],
       ),
     );
-    if (ok != true) return;
-    try {
-      await FirebaseFirestore.instance
-          .collection('sellers')
-          .doc(docId)
-          .delete();
-    } catch (_) {}
+    if (ok != true || !context.mounted) return;
+    await _setActive(context, false);
   }
 
   @override
@@ -137,8 +173,7 @@ class _SellerCard extends StatelessWidget {
         ],
       ),
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: Container(
           width: 48,
           height: 48,
@@ -158,12 +193,15 @@ class _SellerCard extends StatelessWidget {
             ),
             // Subscription status dot
             Container(
-              width: 10, height: 10,
+              width: 10,
+              height: 10,
               margin: const EdgeInsets.only(right: 4),
               decoration: BoxDecoration(
-                color: subStatus == 'active' ? Colors.green
-                    : subStatus == 'trial' ? Colors.blue
-                    : Colors.red,
+                color: subStatus == 'active'
+                    ? Colors.green
+                    : subStatus == 'trial'
+                        ? Colors.blue
+                        : Colors.red,
                 shape: BoxShape.circle,
               ),
             ),
@@ -172,8 +210,7 @@ class _SellerCard extends StatelessWidget {
               const Text('👑', style: TextStyle(fontSize: 14)),
             const SizedBox(width: 4),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: isActive
                     ? Colors.green.withValues(alpha: 0.1)
@@ -196,13 +233,11 @@ class _SellerCard extends StatelessWidget {
           children: [
             const SizedBox(height: 4),
             Text(phone,
-                style:
-                    TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
             if (type.isNotEmpty)
               Container(
                 margin: const EdgeInsets.only(top: 4),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1565C0).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
@@ -219,14 +254,13 @@ class _SellerCard extends StatelessWidget {
         ),
         trailing: PopupMenuButton<String>(
           onSelected: (v) {
-            if (v == 'toggle') _toggleActive();
-            if (v == 'delete') _delete(context);
+            if (v == 'toggle') _toggleActive(context);
+            if (v == 'delete') _deactivate(context);
             if (v == 'edit') {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) =>
-                      _SellerFormPage(docId: docId, existing: data),
+                  builder: (_) => _SellerFormPage(docId: docId, existing: data),
                 ),
               );
             }
@@ -250,8 +284,7 @@ class _SellerCard extends StatelessWidget {
               value: 'edit',
               child: Row(
                 children: [
-                  Icon(Icons.edit_rounded,
-                      color: Color(0xFF1565C0), size: 18),
+                  Icon(Icons.edit_rounded, color: Color(0xFF1565C0), size: 18),
                   SizedBox(width: 8),
                   Text("Modifier"),
                 ],
@@ -264,7 +297,7 @@ class _SellerCard extends StatelessWidget {
                   Icon(Icons.delete_outline_rounded,
                       color: Colors.red, size: 18),
                   SizedBox(width: 8),
-                  Text("Supprimer", style: TextStyle(color: Colors.red)),
+                  Text("Désactiver", style: TextStyle(color: Colors.red)),
                 ],
               ),
             ),
@@ -289,7 +322,8 @@ class _SellerFormPage extends StatefulWidget {
 class _SellerFormPageState extends State<_SellerFormPage> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
+  final _latCtrl = TextEditingController();
+  final _lngCtrl = TextEditingController();
 
   // Type prédéfinis + valeur libre
   String _type = 'boutique';
@@ -303,7 +337,6 @@ class _SellerFormPageState extends State<_SellerFormPage> {
 
   bool _isActive = true;
   bool _saving = false;
-  bool _showPass = false;
   bool get _isEditing => widget.docId != null;
 
   @override
@@ -315,6 +348,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
       _phoneCtrl.text = d['phone'] ?? '';
       _type = d['type'] ?? 'boutique';
       _isActive = d['isActive'] ?? true;
+      _latCtrl.text = d['lat']?.toString() ?? '';
+      _lngCtrl.text = d['lng']?.toString() ?? '';
     }
   }
 
@@ -322,61 +357,82 @@ class _SellerFormPageState extends State<_SellerFormPage> {
   void dispose() {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
-    _passCtrl.dispose();
+    _latCtrl.dispose();
+    _lngCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
     final phone = _phoneCtrl.text.trim().replaceAll(' ', '');
-    final pass = _passCtrl.text;
 
     if (name.isEmpty || phone.isEmpty) {
       _snack("Nom et téléphone obligatoires");
       return;
     }
-    if (!_isEditing && pass.length < 6) {
-      _snack("Mot de passe minimum 6 caractères");
+    final locationError =
+        PartnerLocationValidator.validateText(_latCtrl.text, _lngCtrl.text);
+    if (locationError != null) {
+      _snack(locationError);
       return;
     }
 
     setState(() => _saving = true);
 
     try {
-      String uid;
+      final latitude = double.parse(_latCtrl.text.trim());
+      final longitude = double.parse(_lngCtrl.text.trim());
 
       if (_isEditing) {
-        uid = widget.docId!;
-      } else {
-        // Créer compte Firebase Auth
-        final credential = await FirebaseAuth.instance
-            .createUserWithEmailAndPassword(
-          email: "$phone@az-seller.ci",
-          password: pass,
+        // Écriture serveur (permission + journal d'audit) : plus de set() client.
+        await AdminPartnerAccountService.manageSeller(
+          sellerId: widget.docId!,
+          profile: buildSellerProfileData(
+            isCreating: false,
+            name: name,
+            phone: phone,
+            type: _type,
+            isActive: _isActive,
+            latitude: latitude,
+            longitude: longitude,
+          ),
         );
-        uid = credential.user!.uid;
+      } else {
+        // Compte Auth ET profil complet créés côté serveur, de façon
+        // reprenable : plus de seconde écriture Flutter qui pourrait laisser
+        // un vendeur sans `isActive` (connexion refusée, recréation bloquée).
+        final created = await AdminPartnerAccountService.create(
+          kind: 'seller',
+          email: "$phone@az-seller.ci",
+          isActive: _isActive,
+          profile: {
+            'name': name,
+            'phone': phone,
+            'type': _type,
+            'lat': latitude,
+            'lng': longitude,
+          },
+        );
+        // Le mot de passe temporaire n'est lisible qu'ici, une seule fois.
+        if (!mounted) return;
+        await showPartnerTempCredentialsDialog(
+          context,
+          title: 'Compte vendeur créé',
+          identifier: phone,
+          tempPassword: created.tempPassword,
+        );
       }
-
-      await FirebaseFirestore.instance.collection('sellers').doc(uid).set({
-        'name': name,
-        'phone': phone,
-        'type': _type,
-        'isActive': _isActive,
-        'wallet': 0,
-        'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
 
       if (!mounted) return;
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_isEditing
-              ? "Vendeur modifié"
-              : "Compte vendeur créé — ID: $phone / MDP: $pass"),
-          backgroundColor: const Color(0xFF1565C0),
-          duration: const Duration(seconds: 6),
-        ),
-      );
+      if (_isEditing) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Vendeur modifié"),
+            backgroundColor: Color(0xFF1565C0),
+          ),
+        );
+      }
     } on FirebaseAuthException catch (e) {
       _snack(e.code == 'email-already-in-use'
           ? "Ce numéro a déjà un compte"
@@ -389,8 +445,7 @@ class _SellerFormPageState extends State<_SellerFormPage> {
   }
 
   void _snack(String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -415,7 +470,7 @@ class _SellerFormPageState extends State<_SellerFormPage> {
       ),
       body: ListView(
         physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         children: [
           // Infos
           _field(_nameCtrl, "Nom de la boutique / du vendeur *",
@@ -424,37 +479,23 @@ class _SellerFormPageState extends State<_SellerFormPage> {
           _field(_phoneCtrl, "Téléphone (identifiant) *", Icons.phone_rounded,
               type: TextInputType.phone),
           const SizedBox(height: 12),
+          PartnerLocationInput(
+            latitudeController: _latCtrl,
+            longitudeController: _lngCtrl,
+          ),
+          const SizedBox(height: 12),
           if (!_isEditing)
-            TextField(
-              controller: _passCtrl,
-              obscureText: !_showPass,
-              decoration: InputDecoration(
-                labelText: "Mot de passe *",
-                hintText: "Min. 6 caractères",
-                prefixIcon: const Icon(Icons.lock_rounded,
-                    color: Color(0xFF1565C0)),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                      _showPass ? Icons.visibility_off : Icons.visibility,
-                      color: Colors.grey),
-                  onPressed: () =>
-                      setState(() => _showPass = !_showPass),
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+            const Text(
+              "Un mot de passe temporaire sera généré à la création. Le "
+              "vendeur choisira son propre mot de passe à sa première connexion.",
+              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
 
           const SizedBox(height: 20),
 
           // Type de service
           const Text("Type de service",
-              style:
-                  TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -464,17 +505,14 @@ class _SellerFormPageState extends State<_SellerFormPage> {
               return GestureDetector(
                 onTap: () => setState(() => _type = t),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    color: sel
-                        ? const Color(0xFF1565C0)
-                        : Colors.white,
+                    color: sel ? const Color(0xFF1565C0) : Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: sel
-                          ? const Color(0xFF1565C0)
-                          : Colors.grey.shade300,
+                      color:
+                          sel ? const Color(0xFF1565C0) : Colors.grey.shade300,
                     ),
                   ),
                   child: Text(
@@ -500,9 +538,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
             child: SwitchListTile(
               title: const Text("Compte actif",
                   style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(_isActive
-                  ? "Le vendeur peut se connecter"
-                  : "Accès bloqué"),
+              subtitle: Text(
+                  _isActive ? "Le vendeur peut se connecter" : "Accès bloqué"),
               value: _isActive,
               activeThumbColor: const Color(0xFF1565C0),
               onChanged: (v) => setState(() => _isActive = v),
@@ -522,8 +559,7 @@ class _SellerFormPageState extends State<_SellerFormPage> {
               ),
               child: _saving
                   ? const CircularProgressIndicator(color: Colors.white)
-                  : Text(
-                      _isEditing ? "Enregistrer" : "Créer le compte",
+                  : Text(_isEditing ? "Enregistrer" : "Créer le compte",
                       style: const TextStyle(
                           fontSize: 16,
                           color: Colors.white,
@@ -558,8 +594,8 @@ class _SellerFormPageState extends State<_SellerFormPage> {
                   Expanded(
                     child: Text(
                       "Le vendeur se connecte avec son numéro de téléphone et le mot de passe défini ici.",
-                      style: TextStyle(
-                          color: Colors.blue.shade700, fontSize: 12),
+                      style:
+                          TextStyle(color: Colors.blue.shade700, fontSize: 12),
                     ),
                   ),
                 ],
@@ -621,7 +657,9 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
       await action();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Opération réussie'), backgroundColor: Colors.green),
+          const SnackBar(
+              content: Text('Opération réussie'),
+              backgroundColor: Colors.green),
         );
       }
     } catch (e) {
@@ -673,12 +711,16 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
               // ── Abonnement standard ───────────────────────────────
               Row(children: [
                 _StatusChip(
-                  label: subStatus == 'active' ? 'Actif'
-                      : subStatus == 'trial' ? 'Trial'
-                      : 'Suspendu',
-                  color: subStatus == 'active' ? Colors.green
-                      : subStatus == 'trial' ? Colors.blue
-                      : Colors.red,
+                  label: subStatus == 'active'
+                      ? 'Actif'
+                      : subStatus == 'trial'
+                          ? 'Trial'
+                          : 'Suspendu',
+                  color: subStatus == 'active'
+                      ? Colors.green
+                      : subStatus == 'trial'
+                          ? Colors.blue
+                          : Colors.red,
                 ),
                 const SizedBox(width: 8),
                 Text(
@@ -693,20 +735,25 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
                       _AdminBtn(
                         label: 'Activer abo (1 000 F)',
                         color: const Color(0xFF1565C0),
-                        onTap: () => _run(() => SubscriptionService.adminActivateSubscription(
-                            widget.collection, widget.docId, chargeWallet: true)),
+                        onTap: () => _run(() =>
+                            SubscriptionService.adminActivateSubscription(
+                                widget.collection, widget.docId,
+                                chargeWallet: true)),
                       ),
                       _AdminBtn(
                         label: 'Gratuit',
                         color: Colors.green,
-                        onTap: () => _run(() => SubscriptionService.adminActivateSubscription(
-                            widget.collection, widget.docId, chargeWallet: false)),
+                        onTap: () => _run(() =>
+                            SubscriptionService.adminActivateSubscription(
+                                widget.collection, widget.docId,
+                                chargeWallet: false)),
                       ),
                       _AdminBtn(
                         label: 'Suspendre',
                         color: Colors.red,
-                        onTap: () => _run(() => SubscriptionService.adminSuspend(
-                            widget.collection, widget.docId)),
+                        onTap: () => _run(() =>
+                            SubscriptionService.adminSuspend(
+                                widget.collection, widget.docId)),
                       ),
                     ]),
 
@@ -715,13 +762,18 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
               // ── VIP ────────────────────────────────────────────────
               Row(children: [
                 _StatusChip(
-                  label: vipStatus == 'active' ? '👑 VIP Actif'
-                      : vipStatus == 'expired' ? 'VIP Expiré'
-                      : 'Aucun VIP',
-                  color: vipStatus == 'active' ? const Color(0xFFFFD700)
-                      : vipStatus == 'expired' ? Colors.orange
-                      : Colors.grey,
-                  textColor: vipStatus == 'active' ? Colors.black87 : Colors.white,
+                  label: vipStatus == 'active'
+                      ? '👑 VIP Actif'
+                      : vipStatus == 'expired'
+                          ? 'VIP Expiré'
+                          : 'Aucun VIP',
+                  color: vipStatus == 'active'
+                      ? const Color(0xFFFFD700)
+                      : vipStatus == 'expired'
+                          ? Colors.orange
+                          : Colors.grey,
+                  textColor:
+                      vipStatus == 'active' ? Colors.black87 : Colors.white,
                 ),
                 const SizedBox(width: 8),
                 if (vipExpiry != null)
@@ -737,20 +789,23 @@ class _SubscriptionSectionState extends State<_SubscriptionSection> {
                   color: const Color(0xFFFFD700),
                   textColor: Colors.black87,
                   onTap: () => _run(() => SubscriptionService.adminActivateVip(
-                      widget.collection, widget.docId, chargeWallet: true)),
+                      widget.collection, widget.docId,
+                      chargeWallet: true)),
                 ),
                 _AdminBtn(
                   label: 'VIP Gratuit',
                   color: Colors.amber,
                   textColor: Colors.black87,
                   onTap: () => _run(() => SubscriptionService.adminActivateVip(
-                      widget.collection, widget.docId, chargeWallet: false)),
+                      widget.collection, widget.docId,
+                      chargeWallet: false)),
                 ),
                 _AdminBtn(
                   label: 'Retirer VIP',
                   color: Colors.grey.shade600,
-                  onTap: () => _run(() => SubscriptionService.adminDeactivateVip(
-                      widget.collection, widget.docId)),
+                  onTap: () => _run(() =>
+                      SubscriptionService.adminDeactivateVip(
+                          widget.collection, widget.docId)),
                 ),
               ]),
             ],
@@ -765,7 +820,10 @@ class _StatusChip extends StatelessWidget {
   final String label;
   final Color color;
   final Color textColor;
-  const _StatusChip({required this.label, required this.color, this.textColor = Colors.white});
+  const _StatusChip(
+      {required this.label,
+      required this.color,
+      this.textColor = Colors.white});
 
   @override
   Widget build(BuildContext context) {
@@ -776,7 +834,8 @@ class _StatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(label,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textColor)),
+          style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.bold, color: textColor)),
     );
   }
 }
@@ -786,7 +845,11 @@ class _AdminBtn extends StatelessWidget {
   final Color color;
   final Color textColor;
   final VoidCallback onTap;
-  const _AdminBtn({required this.label, required this.color, required this.onTap, this.textColor = Colors.white});
+  const _AdminBtn(
+      {required this.label,
+      required this.color,
+      required this.onTap,
+      this.textColor = Colors.white});
 
   @override
   Widget build(BuildContext context) {
@@ -799,7 +862,8 @@ class _AdminBtn extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Text(label,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textColor)),
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600, color: textColor)),
       ),
     );
   }

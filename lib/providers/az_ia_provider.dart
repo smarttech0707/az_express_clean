@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../screens/ai/az_ia_offline_engine.dart';
+import '../services/az_ia_consent.dart';
 import '../services/az_ia_service.dart';
 
 enum AzIaSender { user, assistant }
@@ -51,9 +54,11 @@ class AzIaProvider extends ChangeNotifier {
 
   static bool isImageTooLarge(int byteLength) => byteLength > maxImageBytes;
   final AzIaService _service;
-  final Stream<String?> _authUidChanges;
+  final Stream<String?>? _authUidChanges;
 
   final List<AzIaMessage> _messages = [];
+  late final UnmodifiableListView<AzIaMessage> _messagesView =
+      UnmodifiableListView(_messages);
   String? _conversationId;
   bool _isSending = false;
   String? _error;
@@ -76,11 +81,52 @@ class AzIaProvider extends ChangeNotifier {
   AzIaPendingAction? get pendingAction => _pendingAction;
   bool get confirming => _confirming;
 
-  AzIaProvider({AzIaService? service, Stream<String?>? authUidChanges})
-      : _service = service ?? AzIaService(),
-        _authUidChanges = authUidChanges ??
-            FirebaseAuth.instance.authStateChanges().map((user) => user?.uid) {
-    _authSub = _authUidChanges.listen(_onAuthChanged);
+  AzIaProvider({
+    AzIaService? service,
+    Stream<String?>? authUidChanges,
+    Future<void>? initializationReady,
+  })  : _service = service ?? AzIaService(),
+        _authUidChanges = authUidChanges {
+    if (initializationReady == null) {
+      _listenToAuth();
+    } else {
+      unawaited(_subscribeToAuth(initializationReady));
+    }
+  }
+
+  Future<void> _subscribeToAuth(Future<void> initializationReady) async {
+    try {
+      await initializationReady;
+      if (_disposed) return;
+      _listenToAuth();
+    } catch (error, stack) {
+      _reportInitializationError(error, stack);
+    }
+  }
+
+  void _listenToAuth() {
+    try {
+      if (_authUidChanges == null &&
+          !Firebase.apps.any((app) => app.name == '[DEFAULT]')) {
+        throw StateError('Firebase initialization is required before AZ IA.');
+      }
+      final stream = _authUidChanges ??
+          FirebaseAuth.instance.authStateChanges().map((user) => user?.uid);
+      _authSub = stream.listen(_onAuthChanged);
+    } catch (error, stack) {
+      _reportInitializationError(error, stack);
+    }
+  }
+
+  void _reportInitializationError(Object error, StackTrace stack) {
+    if (_disposed) return;
+    _error = 'AZ IA indisponible : initialisation impossible.';
+    FlutterError.reportError(FlutterErrorDetails(
+      exception: error,
+      stack: stack,
+      library: 'AZ IA initialization',
+    ));
+    _safeNotify();
   }
 
   @override
@@ -92,7 +138,7 @@ class AzIaProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  List<AzIaMessage> get messages => List.unmodifiable(_messages);
+  List<AzIaMessage> get messages => _messagesView;
   bool get isSending => _isSending;
   String? get error => _error;
 
@@ -249,6 +295,45 @@ class AzIaProvider extends ChangeNotifier {
     return null;
   }
 
+  Future<bool> hasConsent() async {
+    final uid = _activeUid;
+    return uid != null && await AzIaConsent.isGranted(uid);
+  }
+
+  /// Enregistre l'accord côté serveur (source de vérité) puis localement.
+  /// Retourne false si le serveur ne l'a pas enregistré : rien n'est alors
+  /// activé et aucun message ne partira.
+  Future<bool> grantConsent() async {
+    final uid = _activeUid;
+    if (uid == null) return false;
+    try {
+      final ok = await _service.setAiConsent(
+          granted: true, version: AzIaConsent.version);
+      if (!ok) return false;
+      await AzIaConsent.grant(uid);
+      return true;
+    } catch (e) {
+      debugPrint('[AZ_IA_CONSENT] grant impossible : $e');
+      return false;
+    }
+  }
+
+  /// Retrait immédiat côté appareil (plus aucun envoi), puis côté serveur.
+  /// Retourne false si le serveur n'a pas pu être joint : il refusera de
+  /// toute façon de réutiliser un accord périmé tant qu'il n'est pas retiré.
+  Future<bool> revokeConsent() async {
+    final uid = _activeUid;
+    if (uid == null) return false;
+    await AzIaConsent.revoke(uid);
+    try {
+      await _service.setAiConsent(granted: false, version: AzIaConsent.version);
+      return true;
+    } catch (e) {
+      debugPrint('[AZ_IA_CONSENT] revoke serveur impossible : $e');
+      return false;
+    }
+  }
+
   /// Retourne le texte de la réponse d'AZ IA (succès ou message d'erreur) —
   /// utilisé par l'écran pour, entre autres, le lire à voix haute (M7).
   /// [image] est optionnelle (Master Prompt 113, section 13) : ordonnance,
@@ -263,6 +348,9 @@ class AzIaProvider extends ChangeNotifier {
         _disposed) {
       return null;
     }
+    // Dernier garde-fou : sans consentement explicite, rien n'est transmis au
+    // serveur (donc aux fournisseurs d'IA), quel que soit l'appelant.
+    if (!await AzIaConsent.isGranted(uid)) return null;
     // Un message purement image doit quand même porter un texte non vide
     // côté serveur (azIaChat exige `message`) — légende neutre par défaut.
     final effectiveText =
@@ -374,7 +462,15 @@ class AzIaProvider extends ChangeNotifier {
       debugPrint(
           '[AZ_IA_ERROR] sendMessage uid=$_activeUid conversationId=$_conversationId exception=$e');
       debugPrintStack(stackTrace: st);
-      if (e is TimeoutException) {
+      if (e is FirebaseFunctionsException &&
+          e.code == 'failed-precondition' &&
+          (e.message ?? '').contains('CONSENT_REQUIRED')) {
+        // Le serveur ne reconnaît pas l'accord (retiré, ancienne version) :
+        // on oublie l'accord local pour redemander au prochain envoi.
+        await AzIaConsent.revoke(uid);
+        _error =
+            "Votre accord pour AZ IA doit être renouvelé. Renvoyez votre message pour le confirmer.";
+      } else if (e is TimeoutException) {
         _error =
             "AZ IA met plus de temps que prévu à répondre. Réessayez dans un instant.";
       } else if (e is FirebaseFunctionsException &&

@@ -140,23 +140,26 @@ function createEkbineOrder({ db, admin, HttpsError }) {
       const clientRef  = db.collection('clients').doc(uid);
       const clientSnap = await tx.get(clientRef);
       const clientData = clientSnap.exists ? clientSnap.data() : {};
+      if(clientData.deletionRequested===true||clientData.isDeleted===true)throw new HttpsError('failed-precondition','Compte en cours de suppression');
 
+      const orderRef = db.collection('ekbine_orders').doc();
       if (paymentMethod === 'wallet') {
         const balance = clientData.wallet || 0;
         if (balance < totalPaid) {
           throw new HttpsError('failed-precondition', 'Solde wallet insuffisant pour cette commande.');
         }
         tx.update(clientRef, { wallet: balance - totalPaid });
-        const histRef = clientRef.collection('wallet_transactions').doc();
+        const histRef = clientRef.collection('wallet_transactions').doc(`ekorder_${orderRef.id}`);
         tx.set(histRef, {
           type:        'payment',
           amount:      -totalPaid,
+          orderId:     orderRef.id,
+          source:      'ekbine_order',
           description: `${serviceLabel} E-Kbine (AZ IA)`,
           createdAt:   admin.firestore.FieldValue.serverTimestamp(),
         });
       }
 
-      const orderRef = db.collection('ekbine_orders').doc();
       tx.set(orderRef, {
         clientId:          uid,
         clientName:        clientData.name || null,
@@ -172,6 +175,10 @@ function createEkbineOrder({ db, admin, HttpsError }) {
         paymentMethod,
         status:            'pending',
         source:            'ai_chat',
+        // Preuve de débit (même forme que ekCreateOrderCF) lue par la confirmation et l'annulation.
+        walletDebited:     paymentMethod === 'wallet',
+        debitedAmount:     paymentMethod === 'wallet' ? totalPaid : 0,
+        debitLedgerId:     paymentMethod === 'wallet' ? `ekorder_${orderRef.id}` : null,
         createdAt:         admin.firestore.FieldValue.serverTimestamp(),
       });
 

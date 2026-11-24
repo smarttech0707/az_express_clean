@@ -6,7 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../services/google_routes_service.dart';
-import '../services/places_service.dart';
+import '../services/places_search_service.dart';
 import '../theme/app_theme.dart';
 
 class DestinationResult {
@@ -29,29 +29,28 @@ class DestinationPickerScreen extends StatefulWidget {
       _DestinationPickerScreenState();
 }
 
-class _DestinationPickerScreenState
-    extends State<DestinationPickerScreen> {
+class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
   final _searchCtrl = TextEditingController();
-  final _focus      = FocusNode();
+  final _focus = FocusNode();
 
   List<PlaceSuggestion> _suggestions = [];
   bool _searching = false;
   Timer? _debounce;
 
   LatLng? _destination;
-  String  _destinationAddress = '';
+  String _destinationAddress = '';
 
   // Livreur le plus proche
-  LatLng?  _driverPos;
-  String   _driverName = 'Livreur';
+  LatLng? _driverPos;
+  String _driverName = 'Livreur';
 
   // Carte
   GoogleMapController? _mapCtrl;
-  Set<Marker>    _markers   = {};
-  Set<Polyline>  _polylines = {};
-  double         _distanceKm = 0;
-  int            _etaMin     = 0;
-  bool           _loadingRoute = false;
+  Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
+  double _distanceKm = 0;
+  int _etaMin = 0;
+  bool _loadingRoute = false;
 
   @override
   void initState() {
@@ -71,8 +70,10 @@ class _DestinationPickerScreenState
   // ── Charger le livreur en ligne le plus proche ──────────────────────────
   Future<void> _loadNearestDriver() async {
     try {
+      // SEC-01 / S6.3 : seuls `isOnline` (filtre), `lat`, `lng`, `name` sont
+      // consommés par cet écran → projection publique `driver_public`.
       final snap = await FirebaseFirestore.instance
-          .collection('livreurs')
+          .collection('driver_public')
           .where('isOnline', isEqualTo: true)
           .limit(20)
           .get();
@@ -83,7 +84,7 @@ class _DestinationPickerScreenState
       DocumentSnapshot? nearest;
 
       for (final doc in snap.docs) {
-        final d   = doc.data();
+        final d = doc.data();
         final lat = (d['lat'] as num?)?.toDouble() ?? 0;
         final lng = (d['lng'] as num?)?.toDouble() ?? 0;
         if (lat == 0 || lng == 0) continue;
@@ -91,11 +92,12 @@ class _DestinationPickerScreenState
         final dist = Geolocator.distanceBetween(
           widget.clientPosition.latitude,
           widget.clientPosition.longitude,
-          lat, lng,
+          lat,
+          lng,
         );
         if (dist < minDist) {
-          minDist  = dist;
-          nearest  = doc;
+          minDist = dist;
+          nearest = doc;
         }
       }
 
@@ -103,7 +105,7 @@ class _DestinationPickerScreenState
       final d = nearest.data() as Map<String, dynamic>;
       if (!mounted) return;
       setState(() {
-        _driverPos  = LatLng(
+        _driverPos = LatLng(
           (d['lat'] as num).toDouble(),
           (d['lng'] as num).toDouble(),
         );
@@ -122,11 +124,11 @@ class _DestinationPickerScreenState
     _debounce = Timer(const Duration(milliseconds: 400), () async {
       if (!mounted) return;
       setState(() => _searching = true);
-      final results = await PlacesService.autocomplete(value);
+      final results = await PlacesSearchService.autocomplete(value);
       if (!mounted) return;
       setState(() {
         _suggestions = results;
-        _searching   = false;
+        _searching = false;
       });
     });
   }
@@ -136,16 +138,20 @@ class _DestinationPickerScreenState
     _focus.unfocus();
     setState(() {
       _searchCtrl.text = s.description;
-      _suggestions     = [];
-      _loadingRoute    = true;
+      _suggestions = [];
+      _loadingRoute = true;
     });
 
-    final coords = await PlacesService.getCoordinates(s.placeId);
+    final coords = await PlacesSearchService.getCoordinates(
+      s.placeId,
+      suggestion: s,
+    );
     if (coords == null) {
       if (!mounted) return;
       setState(() => _loadingRoute = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Position introuvable. Essaie autrement.')),
+        const SnackBar(
+            content: Text('Position introuvable. Essaie autrement.')),
       );
       return;
     }
@@ -156,9 +162,9 @@ class _DestinationPickerScreenState
   // ── Définir la destination et calculer le trajet ─────────────────────────
   Future<void> _setDestination(LatLng pos, String address) async {
     setState(() {
-      _destination        = pos;
+      _destination = pos;
       _destinationAddress = address;
-      _loadingRoute       = true;
+      _loadingRoute = true;
     });
 
     // Centrer la carte
@@ -202,7 +208,7 @@ class _DestinationPickerScreenState
     if (_driverPos != null) {
       // Segment 1 : livreur → client — GoogleRoutesService (cache 5 min)
       final model1 = await GoogleRoutesService.getRouteModel(
-        origin:      _driverPos!,
+        origin: _driverPos!,
         destination: widget.clientPosition,
       );
       final route1 = model1.points;
@@ -214,15 +220,18 @@ class _DestinationPickerScreenState
           width: 5,
         ));
         totalDist += Geolocator.distanceBetween(
-          _driverPos!.latitude, _driverPos!.longitude,
-          widget.clientPosition.latitude, widget.clientPosition.longitude,
-        ) / 1000;
+              _driverPos!.latitude,
+              _driverPos!.longitude,
+              widget.clientPosition.latitude,
+              widget.clientPosition.longitude,
+            ) /
+            1000;
       }
     }
 
     // Segment 2 : client → destination — GoogleRoutesService (cache 5 min)
     final model2 = await GoogleRoutesService.getRouteModel(
-      origin:      widget.clientPosition,
+      origin: widget.clientPosition,
       destination: pos,
     );
     final route2 = model2.points;
@@ -235,9 +244,12 @@ class _DestinationPickerScreenState
         patterns: [PatternItem.dash(20), PatternItem.gap(10)],
       ));
       totalDist += Geolocator.distanceBetween(
-        widget.clientPosition.latitude, widget.clientPosition.longitude,
-        pos.latitude, pos.longitude,
-      ) / 1000;
+            widget.clientPosition.latitude,
+            widget.clientPosition.longitude,
+            pos.latitude,
+            pos.longitude,
+          ) /
+          1000;
     }
 
     // ETA (30 km/h en ville)
@@ -251,25 +263,24 @@ class _DestinationPickerScreenState
         pos,
       ];
       final bounds = _boundsFromLatLng(allPoints);
-      _mapCtrl?.animateCamera(
-          CameraUpdate.newLatLngBounds(bounds, 60));
+      _mapCtrl?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
     }
 
     if (!mounted) return;
     setState(() {
-      _polylines    = polylines;
-      _distanceKm   = totalDist;
-      _etaMin       = etaMin;
+      _polylines = polylines;
+      _distanceKm = totalDist;
+      _etaMin = etaMin;
       _loadingRoute = false;
     });
   }
 
   LatLngBounds _boundsFromLatLng(List<LatLng> points) {
-    double minLat = points.first.latitude,  maxLat = points.first.latitude;
+    double minLat = points.first.latitude, maxLat = points.first.latitude;
     double minLng = points.first.longitude, maxLng = points.first.longitude;
     for (final p in points) {
-      if (p.latitude  < minLat) minLat = p.latitude;
-      if (p.latitude  > maxLat) maxLat = p.latitude;
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
       if (p.longitude < minLng) minLng = p.longitude;
       if (p.longitude > maxLng) maxLng = p.longitude;
     }
@@ -290,20 +301,20 @@ class _DestinationPickerScreenState
             onMapCreated: (c) {
               _mapCtrl = c;
               if (_destination == null) {
-                c.animateCamera(CameraUpdate.newLatLngZoom(
-                    widget.clientPosition, 14));
+                c.animateCamera(
+                    CameraUpdate.newLatLngZoom(widget.clientPosition, 14));
               }
             },
             initialCameraPosition: CameraPosition(
               target: widget.clientPosition,
-              zoom:   14,
+              zoom: 14,
             ),
-            markers:   _markers,
+            markers: _markers,
             polylines: _polylines,
-            myLocationEnabled:       true,
+            myLocationEnabled: true,
             myLocationButtonEnabled: false,
-            zoomControlsEnabled:     false,
-            mapType:                 MapType.normal,
+            zoomControlsEnabled: false,
+            mapType: MapType.normal,
           ),
 
           // ── BARRE DE RECHERCHE ──────────────────────────────────────────
@@ -320,8 +331,8 @@ class _DestinationPickerScreenState
                         child: Container(
                           padding: const EdgeInsets.all(10),
                           decoration: const BoxDecoration(
-                            color:  Colors.white,
-                            shape:  BoxShape.circle,
+                            color: Colors.white,
+                            shape: BoxShape.circle,
                             boxShadow: AppShadow.md,
                           ),
                           child: const Icon(Icons.arrow_back_rounded, size: 20),
@@ -331,28 +342,28 @@ class _DestinationPickerScreenState
                       Expanded(
                         child: Container(
                           decoration: const BoxDecoration(
-                            color:        Colors.white,
+                            color: Colors.white,
                             borderRadius: AppRadius.lgR,
-                            boxShadow:    AppShadow.md,
+                            boxShadow: AppShadow.md,
                           ),
                           child: TextField(
-                            controller:  _searchCtrl,
-                            focusNode:   _focus,
-                            onChanged:   _onSearchChanged,
-                            autofocus:   true,
+                            controller: _searchCtrl,
+                            focusNode: _focus,
+                            onChanged: _onSearchChanged,
+                            autofocus: true,
                             style: GoogleFonts.urbanist(fontSize: 15),
                             decoration: InputDecoration(
                               hintText: 'Où livrer ? (quartier, rue…)',
                               hintStyle: GoogleFonts.urbanist(
                                   color: AppColors.textLight, fontSize: 14),
-                              prefixIcon: const Icon(
-                                  Icons.search_rounded,
+                              prefixIcon: const Icon(Icons.search_rounded,
                                   color: AppColors.primary),
                               suffixIcon: _searching
                                   ? const Padding(
                                       padding: EdgeInsets.all(12),
                                       child: SizedBox(
-                                        width: 18, height: 18,
+                                        width: 18,
+                                        height: 18,
                                         child: CircularProgressIndicator(
                                             strokeWidth: 2,
                                             color: AppColors.primary),
@@ -366,7 +377,7 @@ class _DestinationPickerScreenState
                                             setState(() => _suggestions = []);
                                           })
                                       : null,
-                              border:        InputBorder.none,
+                              border: InputBorder.none,
                               contentPadding:
                                   const EdgeInsets.symmetric(vertical: 14),
                             ),
@@ -382,9 +393,9 @@ class _DestinationPickerScreenState
                   Container(
                     margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
                     decoration: const BoxDecoration(
-                      color:        Colors.white,
+                      color: Colors.white,
                       borderRadius: AppRadius.lgR,
-                      boxShadow:    AppShadow.md,
+                      boxShadow: AppShadow.md,
                     ),
                     child: ListView.separated(
                       shrinkWrap: true,
@@ -402,8 +413,7 @@ class _DestinationPickerScreenState
                           subtitle: s.secondaryText.isNotEmpty
                               ? Text(s.secondaryText,
                                   style: GoogleFonts.urbanist(
-                                      fontSize: 12,
-                                      color: AppColors.textLight))
+                                      fontSize: 12, color: AppColors.textLight))
                               : null,
                           onTap: () => _selectSuggestion(s),
                           dense: true,
@@ -418,13 +428,14 @@ class _DestinationPickerScreenState
           // ── PANNEAU INFO TRAJET ──────────────────────────────────────────
           if (_destination != null)
             Positioned(
-              bottom: 0, left: 0, right: 0,
+              bottom: 0,
+              left: 0,
+              right: 0,
               child: Container(
                 padding: EdgeInsets.fromLTRB(
-                    20, 20, 20,
-                    MediaQuery.of(context).padding.bottom + 20),
+                    20, 20, 20, MediaQuery.of(context).padding.bottom + 20),
                 decoration: const BoxDecoration(
-                  color:        Colors.white,
+                  color: Colors.white,
                   borderRadius: AppRadius.topXxl,
                 ),
                 child: Column(
@@ -433,10 +444,11 @@ class _DestinationPickerScreenState
                     // Handle
                     Center(
                       child: Container(
-                        width: 36, height: 4,
+                        width: 36,
+                        height: 4,
                         margin: const EdgeInsets.only(bottom: 16),
                         decoration: const BoxDecoration(
-                          color:        AppColors.border,
+                          color: AppColors.border,
                           borderRadius: AppRadius.pillR,
                         ),
                       ),
@@ -448,7 +460,7 @@ class _DestinationPickerScreenState
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: const BoxDecoration(
-                            color:        AppColors.primary10,
+                            color: AppColors.primary10,
                             borderRadius: AppRadius.mdR,
                           ),
                           child: const Icon(Icons.place_rounded,
@@ -459,8 +471,7 @@ class _DestinationPickerScreenState
                           child: Text(
                             _destinationAddress,
                             style: GoogleFonts.urbanist(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600),
+                                fontSize: 14, fontWeight: FontWeight.w600),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -472,26 +483,27 @@ class _DestinationPickerScreenState
 
                     // Stats trajet
                     if (_loadingRoute)
-                      const Center(child: CircularProgressIndicator(
-                          color: AppColors.primary))
+                      const Center(
+                          child: CircularProgressIndicator(
+                              color: AppColors.primary))
                     else
                       Row(
                         children: [
                           _StatPill(
-                            icon:  Icons.straighten_rounded,
+                            icon: Icons.straighten_rounded,
                             label: '${_distanceKm.toStringAsFixed(1)} km',
                             color: AppColors.blue,
                           ),
                           const SizedBox(width: 10),
                           _StatPill(
-                            icon:  Icons.access_time_rounded,
+                            icon: Icons.access_time_rounded,
                             label: '$_etaMin min',
                             color: AppColors.primary,
                           ),
                           if (_driverPos != null) ...[
                             const SizedBox(width: 10),
                             const _StatPill(
-                              icon:  Icons.delivery_dining_rounded,
+                              icon: Icons.delivery_dining_rounded,
                               label: 'Livreur proche',
                               color: AppColors.green,
                             ),
@@ -512,9 +524,9 @@ class _DestinationPickerScreenState
                                 context,
                                 DestinationResult(
                                   position: _destination!,
-                                  address:  _destinationAddress,
+                                  address: _destinationAddress,
                                 )),
-                        icon:  const Icon(Icons.check_rounded),
+                        icon: const Icon(Icons.check_rounded),
                         label: const Text('Confirmer cette destination'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,
@@ -534,7 +546,9 @@ class _DestinationPickerScreenState
           // Loading overlay
           if (_loadingRoute && _destination != null)
             const Positioned(
-              top: 100, left: 0, right: 0,
+              top: 100,
+              left: 0,
+              right: 0,
               child: Center(
                 child: Card(
                   child: Padding(
@@ -543,9 +557,10 @@ class _DestinationPickerScreenState
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: AppColors.primary)),
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: AppColors.primary)),
                         SizedBox(width: 12),
                         Text('Calcul du trajet…'),
                       ],
@@ -562,27 +577,29 @@ class _DestinationPickerScreenState
 
 class _StatPill extends StatelessWidget {
   final IconData icon;
-  final String   label;
-  final Color    color;
+  final String label;
+  final Color color;
 
-  const _StatPill({required this.icon, required this.label, required this.color});
+  const _StatPill(
+      {required this.icon, required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color:        color.withValues(alpha: 0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: AppRadius.pillR,
-        border:       Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: color, size: 16),
           const SizedBox(width: 6),
-          Text(label, style: GoogleFonts.urbanist(
-              color: color, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(label,
+              style: GoogleFonts.urbanist(
+                  color: color, fontSize: 13, fontWeight: FontWeight.w600)),
         ],
       ),
     );

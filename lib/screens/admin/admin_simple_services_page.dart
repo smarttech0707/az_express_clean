@@ -1,14 +1,23 @@
-﻿import 'dart:io';
+import 'dart:io';
 import '../../widgets/scale_button.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../widgets/stream_error_state.dart';
 
 const _serviceTypes = [
-  {"id": "tricycle", "label": "Location de tricycle", "icon": Icons.electric_rickshaw_rounded},
-  {"id": "taxi_nuit", "label": "Taxi de nuit", "icon": Icons.local_taxi_rounded},
+  {
+    "id": "tricycle",
+    "label": "Location de tricycle",
+    "icon": Icons.electric_rickshaw_rounded
+  },
+  {
+    "id": "taxi_nuit",
+    "label": "Taxi de nuit",
+    "icon": Icons.local_taxi_rounded
+  },
 ];
 
 class AdminSimpleServicesPage extends StatefulWidget {
@@ -54,8 +63,8 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold)),
                         Text("Gérer les prestataires",
-                            style: TextStyle(
-                                color: Colors.white70, fontSize: 13)),
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 13)),
                       ],
                     ),
                   ),
@@ -73,8 +82,8 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
               height: 52,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 children: [
                   _Chip(
                     label: "Tous",
@@ -108,6 +117,16 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const SliverFillRemaining(
                   child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              // La variante filtrée par serviceType exige un index composite :
+              // un échec ne doit pas se présenter comme une liste vide.
+              if (snap.hasError) {
+                return const SliverFillRemaining(
+                  child: StreamErrorState(
+                    message: 'Impossible de charger les services.\n'
+                        'Vérifiez votre connexion et réessayez.',
+                  ),
                 );
               }
 
@@ -161,7 +180,9 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
                             await FirebaseFirestore.instance
                                 .collection("simple_services")
                                 .doc(doc.id)
-                                .update({"isAvailable": !(data["isAvailable"] ?? true)});
+                                .update({
+                              "isAvailable": !(data["isAvailable"] ?? true)
+                            });
                           } catch (_) {}
                         },
                       );
@@ -179,8 +200,7 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
         backgroundColor: const Color(0xFF37474F),
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text("Ajouter",
-            style:
-                TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -190,8 +210,7 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text("Supprimer"),
         content: Text("Supprimer \"$name\" ?"),
         actions: [
@@ -208,10 +227,11 @@ class _AdminSimpleServicesPageState extends State<AdminSimpleServicesPage> {
       ),
     );
     if (ok == true) {
-      await FirebaseFirestore.instance
-          .collection("simple_services")
-          .doc(docId)
-          .delete();
+      final db = FirebaseFirestore.instance;
+      final batch = db.batch();
+      batch.delete(db.collection("simple_services").doc(docId));
+      batch.delete(db.collection("simple_service_private").doc(docId));
+      await batch.commit();
     }
   }
 
@@ -250,9 +270,9 @@ class _ProviderTile extends StatelessWidget {
     final type = data["serviceType"] ?? "";
     final isAvailable = data["isAvailable"] ?? true;
     final label = (_serviceTypes.firstWhere(
-      (s) => s["id"] == type,
-      orElse: () => {"label": type},
-    )["label"] as String?) ??
+          (s) => s["id"] == type,
+          orElse: () => {"label": type},
+        )["label"] as String?) ??
         type;
 
     return Container(
@@ -261,8 +281,7 @@ class _ProviderTile extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)
         ],
       ),
       child: Padding(
@@ -279,12 +298,11 @@ class _ProviderTile extends StatelessWidget {
                           fontWeight: FontWeight.bold, fontSize: 15)),
                   const SizedBox(height: 4),
                   Text(phone,
-                      style: const TextStyle(
-                          color: Colors.grey, fontSize: 13)),
+                      style: const TextStyle(color: Colors.grey, fontSize: 13)),
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
                       color: const Color(0xFF37474F).withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(20),
@@ -307,8 +325,8 @@ class _ProviderTile extends StatelessWidget {
                 GestureDetector(
                   onTap: onToggle,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: isAvailable
                           ? Colors.green.shade50
@@ -424,12 +442,38 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
       _serviceType = d["serviceType"] ?? "tricycle";
       _isAvailable = d["isAvailable"] ?? true;
       _existingPhotoUrl = d["photoUrl"];
+      // Compatibilité transitoire tant que la migration 5.3 n'est pas appliquée.
       _existingIdPhotoUrl = d["idPhotoUrl"];
       _idNumberCtrl.text = d["idNumber"] ?? "";
       final lat = (d["lat"] as num?)?.toDouble() ?? 0.0;
       final lng = (d["lng"] as num?)?.toDouble() ?? 0.0;
       if (lat != 0.0) _latCtrl.text = lat.toString();
       if (lng != 0.0) _lngCtrl.text = lng.toString();
+      _loadPrivateIdentity();
+    }
+  }
+
+  Future<void> _loadPrivateIdentity() async {
+    final docId = widget.docId;
+    if (docId == null) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('simple_service_private')
+          .doc(docId)
+          .get();
+      if (!snap.exists || !mounted) return;
+      final data = snap.data()!;
+      setState(() {
+        _idNumberCtrl.text = data['idNumber'] as String? ?? '';
+        _existingIdPhotoUrl = data['idPhotoUrl'] as String?;
+        final lat = (data['lat'] as num?)?.toDouble() ?? 0.0;
+        final lng = (data['lng'] as num?)?.toDouble() ?? 0.0;
+        if (lat != 0.0) _latCtrl.text = lat.toString();
+        if (lng != 0.0) _lngCtrl.text = lng.toString();
+      });
+    } catch (_) {
+      // Conserve le fallback legacy déjà chargé, sans recopier de champ privé
+      // vers le catalogue lors de la prochaine sauvegarde.
     }
   }
 
@@ -448,7 +492,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
     try {
       await Geolocator.requestPermission();
       final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.high));
       setState(() {
         _latCtrl.text = pos.latitude.toStringAsFixed(7);
         _lngCtrl.text = pos.longitude.toStringAsFixed(7);
@@ -461,7 +506,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
   }
 
   Future<void> _pickPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 75);
+    final picked =
+        await ImagePicker().pickImage(source: source, imageQuality: 75);
     if (picked != null) setState(() => _photoFile = File(picked.path));
   }
 
@@ -478,12 +524,19 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFF37474F)),
               title: const Text("Prendre une photo"),
-              onTap: () { Navigator.pop(context); _pickPhoto(ImageSource.camera); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickPhoto(ImageSource.camera);
+              },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF37474F)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF37474F)),
               title: const Text("Choisir depuis la galerie"),
-              onTap: () { Navigator.pop(context); _pickPhoto(ImageSource.gallery); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickPhoto(ImageSource.gallery);
+              },
             ),
             const SizedBox(height: 8),
           ],
@@ -493,7 +546,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
   }
 
   Future<void> _pickIdPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
+    final picked =
+        await ImagePicker().pickImage(source: source, imageQuality: 80);
     if (picked != null) setState(() => _idPhotoFile = File(picked.path));
   }
 
@@ -510,12 +564,19 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
             ListTile(
               leading: const Icon(Icons.camera_alt, color: Color(0xFF37474F)),
               title: const Text("Photographier la pièce d'identité"),
-              onTap: () { Navigator.pop(context); _pickIdPhoto(ImageSource.camera); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickIdPhoto(ImageSource.camera);
+              },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF37474F)),
+              leading:
+                  const Icon(Icons.photo_library, color: Color(0xFF37474F)),
               title: const Text("Importer depuis la galerie"),
-              onTap: () { Navigator.pop(context); _pickIdPhoto(ImageSource.gallery); },
+              onTap: () {
+                Navigator.pop(context);
+                _pickIdPhoto(ImageSource.gallery);
+              },
             ),
             const SizedBox(height: 8),
           ],
@@ -527,7 +588,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
   Future<String?> _uploadPhoto(String docId) async {
     if (_photoFile == null) return _existingPhotoUrl;
     try {
-      final ref = FirebaseStorage.instance.ref("simple_services/$docId/photo.jpg");
+      final ref =
+          FirebaseStorage.instance.ref("simple_services/$docId/photo.jpg");
       await ref.putFile(_photoFile!);
       return await ref.getDownloadURL();
     } catch (_) {}
@@ -537,7 +599,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
   Future<String?> _uploadIdPhoto(String docId) async {
     if (_idPhotoFile == null) return _existingIdPhotoUrl;
     try {
-      final ref = FirebaseStorage.instance.ref("simple_services/$docId/id_photo.jpg");
+      final ref =
+          FirebaseStorage.instance.ref("simple_services/$docId/id_photo.jpg");
       await ref.putFile(_idPhotoFile!);
       return await ref.getDownloadURL();
     } catch (_) {}
@@ -562,32 +625,51 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
     final photoUrl = await _uploadPhoto(docId);
     final idPhotoUrl = await _uploadIdPhoto(docId);
 
-    final payload = {
+    final publicPayload = <String, dynamic>{
       "name": _nameCtrl.text.trim(),
       "phone": _phoneCtrl.text.trim(),
       "serviceType": _serviceType,
       "isAvailable": _isAvailable,
       "photoUrl": photoUrl ?? "",
+      "updatedAt": FieldValue.serverTimestamp(),
+    };
+    final privatePayload = <String, dynamic>{
       "lat": double.tryParse(_latCtrl.text.trim()) ?? 0.0,
       "lng": double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
       "idNumber": _idNumberCtrl.text.trim(),
       "idPhotoUrl": idPhotoUrl ?? "",
+      "updatedAt": FieldValue.serverTimestamp(),
     };
 
     try {
-      if (widget.docId != null) {
-        await FirebaseFirestore.instance
-            .collection("simple_services")
-            .doc(docId)
-            .update(payload);
-        if (mounted) _snack("Mis à jour", Colors.green);
+      final db = FirebaseFirestore.instance;
+      final publicRef = db.collection("simple_services").doc(docId);
+      final privateRef = db.collection("simple_service_private").doc(docId);
+      final batch = db.batch();
+      if (widget.docId == null) {
+        publicPayload["createdAt"] = FieldValue.serverTimestamp();
+        privatePayload["createdAt"] = FieldValue.serverTimestamp();
       } else {
-        payload["createdAt"] = FieldValue.serverTimestamp();
-        await FirebaseFirestore.instance
-            .collection("simple_services")
-            .doc(docId)
-            .set(payload);
-        if (mounted) _snack("Ajouté avec succès", Colors.green);
+        // Une édition nettoie également une fiche legacy avant la migration.
+        publicPayload.addAll({
+          "idNumber": FieldValue.delete(),
+          "idPhotoUrl": FieldValue.delete(),
+          "lat": FieldValue.delete(),
+          "lng": FieldValue.delete(),
+        });
+      }
+      batch.set(
+        publicRef,
+        publicPayload,
+        SetOptions(merge: widget.docId != null),
+      );
+      batch.set(privateRef, privatePayload, SetOptions(merge: true));
+      await batch.commit();
+      if (mounted) {
+        _snack(
+          widget.docId != null ? "Mis à jour" : "Ajouté avec succès",
+          Colors.green,
+        );
       }
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -603,8 +685,7 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
         content: Text(msg),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -614,7 +695,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F2F5),
       appBar: AppBar(
-        title: Text(widget.docId != null ? "Modifier" : "Ajouter un prestataire",
+        title: Text(
+            widget.docId != null ? "Modifier" : "Ajouter un prestataire",
             style: const TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xFF37474F),
         foregroundColor: Colors.white,
@@ -682,9 +764,7 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                                   .join(" "),
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: selected
-                                    ? Colors.white
-                                    : Colors.black87,
+                                color: selected ? Colors.white : Colors.black87,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 11,
                               ),
@@ -710,8 +790,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                       borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                        color: Color(0xFF37474F), width: 2),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF37474F), width: 2),
                   ),
                 ),
               ),
@@ -730,8 +810,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                       borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                        color: Color(0xFF37474F), width: 2),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF37474F), width: 2),
                   ),
                 ),
               ),
@@ -749,7 +829,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                     color: Colors.grey.shade50,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: _photoFile != null || (_existingPhotoUrl?.isNotEmpty ?? false)
+                      color: _photoFile != null ||
+                              (_existingPhotoUrl?.isNotEmpty ?? false)
                           ? Colors.green
                           : const Color(0xFF37474F).withValues(alpha: 0.3),
                       width: 2,
@@ -763,8 +844,10 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                             ? Image.network(_existingPhotoUrl!,
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => _photoHint(
-                                    Icons.person_rounded, "Photo du prestataire"))
-                            : _photoHint(Icons.person_rounded, "Photo du prestataire"),
+                                    Icons.person_rounded,
+                                    "Photo du prestataire"))
+                            : _photoHint(
+                                Icons.person_rounded, "Photo du prestataire"),
                   ),
                 ),
               ),
@@ -780,7 +863,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                   onPressed: _gpsLoading ? null : _getGps,
                   icon: _gpsLoading
                       ? const SizedBox(
-                          width: 18, height: 18,
+                          width: 18,
+                          height: 18,
                           child: CircularProgressIndicator(
                               color: Colors.white, strokeWidth: 2))
                       : const Icon(Icons.my_location, color: Colors.white),
@@ -820,14 +904,14 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                 controller: _idNumberCtrl,
                 decoration: InputDecoration(
                   labelText: "Numéro de la pièce d'identité",
-                  prefixIcon: const Icon(Icons.badge_rounded,
-                      color: Color(0xFF37474F)),
+                  prefixIcon:
+                      const Icon(Icons.badge_rounded, color: Color(0xFF37474F)),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                        color: Color(0xFF37474F), width: 2),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF37474F), width: 2),
                   ),
                 ),
               ),
@@ -840,7 +924,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                     color: Colors.grey.shade50,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: _idPhotoFile != null || (_existingIdPhotoUrl?.isNotEmpty ?? false)
+                      color: _idPhotoFile != null ||
+                              (_existingIdPhotoUrl?.isNotEmpty ?? false)
                           ? Colors.green
                           : const Color(0xFF37474F).withValues(alpha: 0.3),
                       width: 2,
@@ -854,8 +939,10 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
                             ? Image.network(_existingIdPhotoUrl!,
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => _photoHint(
-                                    Icons.credit_card_rounded, "Photo de la pièce d'identité"))
-                            : _photoHint(Icons.credit_card_rounded, "Photo de la pièce d'identité"),
+                                    Icons.credit_card_rounded,
+                                    "Photo de la pièce d'identité"))
+                            : _photoHint(Icons.credit_card_rounded,
+                                "Photo de la pièce d'identité"),
                   ),
                 ),
               ),
@@ -912,9 +999,7 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
     return Text(
       title,
       style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 13,
-          color: Color(0xFF37474F)),
+          fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF37474F)),
     );
   }
 
@@ -922,7 +1007,8 @@ class _SimpleServiceFormState extends State<_SimpleServiceForm> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(icon, size: 32, color: const Color(0xFF37474F).withValues(alpha: 0.4)),
+        Icon(icon,
+            size: 32, color: const Color(0xFF37474F).withValues(alpha: 0.4)),
         const SizedBox(height: 6),
         Text(
           label,

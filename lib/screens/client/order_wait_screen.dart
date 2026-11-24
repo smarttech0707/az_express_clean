@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../models/order_model.dart';
+import '../../services/firestore_service.dart';
 import '../../services/notification_service.dart';
 import 'order_tracking_map.dart';
 import '../../theme/app_theme.dart';
@@ -21,7 +23,6 @@ class OrderWaitScreen extends StatefulWidget {
 
 class _OrderWaitScreenState extends State<OrderWaitScreen>
     with TickerProviderStateMixin {
-
   // Animation radar (recherche)
   late final AnimationController _radarCtrl = AnimationController(
     vsync: this,
@@ -39,18 +40,19 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
   );
 
   StreamSubscription? _orderSub;
-  OrderModel?         _order;
-  bool                _driverFound = false;
-  bool                _navigating  = false;
+  OrderModel? _order;
+  bool _driverFound = false;
+  bool _navigating = false;
+  bool _cancelling = false;
 
   // 0 = recherche initiale · 1 = rayon élargi · 2 = toute la zone
-  int   _searchPhase = 0;
+  int _searchPhase = 0;
   Timer? _phase1Timer;
   Timer? _phase2Timer;
 
-  static const _green     = Color(0xFF2E7D32);
+  static const _green = Color(0xFF2E7D32);
   static const _lightGreen = Color(0xFF4CAF50);
-  static const _orange    = AppColors.primary;
+  static const _orange = AppColors.primary;
 
   @override
   void initState() {
@@ -109,8 +111,8 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
       if (!_driverFound &&
           updated.driverId != null &&
           (updated.status == 'assigned' ||
-           updated.status == 'accepted' ||
-           updated.status == 'picked_up')) {
+              updated.status == 'accepted' ||
+              updated.status == 'picked_up')) {
         _onDriverFound(updated);
       }
 
@@ -190,7 +192,8 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
               Navigator.pop(context); // ferme dialog
               Navigator.pop(context); // retourne au dashboard
             },
-            child: Text('Annuler', style: GoogleFonts.urbanist(fontWeight: FontWeight.w600)),
+            child: Text('Annuler',
+                style: GoogleFonts.urbanist(fontWeight: FontWeight.w600)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -221,7 +224,8 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
                 if (mounted) Navigator.pop(context);
               }
             },
-            child: Text('Réessayer', style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
+            child: Text('Réessayer',
+                style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -237,8 +241,8 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
             style: GoogleFonts.urbanist(fontWeight: FontWeight.w700)),
         content: Text(
           'La recherche sera interrompue et votre commande supprimée.',
-          style: GoogleFonts.urbanist(
-              fontSize: 13, color: Colors.grey.shade600),
+          style:
+              GoogleFonts.urbanist(fontSize: 13, color: Colors.grey.shade600),
         ),
         actions: [
           TextButton(
@@ -259,14 +263,36 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted || _cancelling) return;
+    // L'annulation passe par cancelOrderCF : seul le serveur rembourse (wallet,
+    // commission du livreur) et refuse une commande livrée, déjà annulée ou
+    // récupérée. Une écriture directe `status: cancelled` ne remboursait rien.
+    setState(() => _cancelling = true);
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      await FirebaseFirestore.instance
-          .collection('orders')
-          .doc(widget.order.id)
-          .update({'status': 'cancelled'});
+      await FirestoreService().cancelOrder(widget.order.id);
       if (mounted) Navigator.pop(context);
-    } catch (_) {}
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      setState(() => _cancelling = false);
+      // « failed-precondition » : annulée entre-temps (réponse perdue lors d'un
+      // essai précédent), récupérée ou livrée. Le flux de la commande ci-dessus
+      // reflète l'état réel ; on ne retente pas automatiquement.
+      messenger.showSnackBar(SnackBar(
+        content: Text(e.code == 'failed-precondition'
+            ? (e.message ?? "Cette commande ne peut plus être annulée.")
+            : "Échec de l'annulation. Vérifiez votre connexion puis réessayez."),
+        backgroundColor: Colors.red,
+      ));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _cancelling = false);
+      messenger.showSnackBar(const SnackBar(
+        content:
+            Text("Échec de l'annulation. Vérifiez votre connexion puis réessayez."),
+        backgroundColor: Colors.red,
+      ));
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -286,7 +312,6 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
           child: Padding(
             padding: EdgeInsets.fromLTRB(24, 24, 24, bottomPad + 16),
             child: Column(children: [
-
               // ── En-tête ─────────────────────────────────────────────────
               Row(children: [
                 if (!_driverFound)
@@ -306,19 +331,18 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
                   const SizedBox(width: 36),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Container(
-                      width: 8, height: 8,
+                      width: 8,
+                      height: 8,
                       decoration: BoxDecoration(
-                        color: _driverFound
-                            ? _lightGreen
-                            : Colors.orange,
+                        color: _driverFound ? _lightGreen : Colors.orange,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -341,9 +365,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
                 height: 180,
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 300),
-                  child: _driverFound
-                      ? _buildCheckAnim()
-                      : _buildRadarAnim(),
+                  child: _driverFound ? _buildCheckAnim() : _buildRadarAnim(),
                 ),
               ),
 
@@ -352,9 +374,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
               // ── Texte statut ─────────────────────────────────────────────
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 300),
-                child: _driverFound
-                    ? _buildFoundText()
-                    : _buildSearchText(),
+                child: _driverFound ? _buildFoundText() : _buildSearchText(),
               ),
 
               const SizedBox(height: 28),
@@ -394,12 +414,13 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
       builder: (_, __) {
         final t = _radarCtrl.value;
         return Stack(alignment: Alignment.center, children: [
-          _ring(t,          offset: 0.00, maxR: 160),
-          _ring(t,          offset: 0.35, maxR: 160),
-          _ring(t,          offset: 0.70, maxR: 160),
+          _ring(t, offset: 0.00, maxR: 160),
+          _ring(t, offset: 0.35, maxR: 160),
+          _ring(t, offset: 0.70, maxR: 160),
           // Icône centrale
           Container(
-            width: 80, height: 80,
+            width: 80,
+            height: 80,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
               color: _green,
@@ -415,12 +436,13 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
   Widget _ring(double t, {required double offset, required double maxR}) {
     final progress = ((t - offset) / (1 - offset)).clamp(0.0, 1.0);
     if (progress <= 0) return const SizedBox.shrink();
-    final opacity  = (1 - progress) * 0.45;
+    final opacity = (1 - progress) * 0.45;
     final diameter = 80.0 + progress * (maxR - 80);
     return Opacity(
       opacity: opacity,
       child: Container(
-        width: diameter, height: diameter,
+        width: diameter,
+        height: diameter,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(color: _lightGreen, width: 1.5),
@@ -436,7 +458,8 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
       key: const ValueKey('check'),
       scale: _checkScale,
       child: Container(
-        width: 100, height: 100,
+        width: 100,
+        height: 100,
         decoration: const BoxDecoration(
           shape: BoxShape.circle,
           color: _lightGreen,
@@ -475,9 +498,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
             subtitles[_searchPhase],
             textAlign: TextAlign.center,
             style: GoogleFonts.urbanist(
-                fontSize: 13,
-                color: Colors.white60,
-                height: 1.55),
+                fontSize: 13, color: Colors.white60, height: 1.55),
           ),
         ],
       ),
@@ -513,8 +534,7 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-            color: Colors.white.withValues(alpha: 0.15)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -524,7 +544,8 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
             const Icon(Icons.shopping_basket_rounded,
                 color: Colors.white54, size: 15),
             const SizedBox(width: 8),
-            Expanded(child: Text(
+            Expanded(
+                child: Text(
               o.description.split('\n').first,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -539,15 +560,14 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
 
           // Adresse
           Row(children: [
-            const Icon(Icons.place_rounded,
-                color: Colors.white38, size: 14),
+            const Icon(Icons.place_rounded, color: Colors.white38, size: 14),
             const SizedBox(width: 6),
-            Expanded(child: Text(
+            Expanded(
+                child: Text(
               o.deliveryAddress ?? '—',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.urbanist(
-                  fontSize: 12, color: Colors.white54),
+              style: GoogleFonts.urbanist(fontSize: 12, color: Colors.white54),
             )),
           ]),
 
@@ -560,13 +580,11 @@ class _OrderWaitScreenState extends State<OrderWaitScreen>
           // Mode + montant
           Row(children: [
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: modeColor.withValues(alpha: 0.20),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: modeColor.withValues(alpha: 0.45)),
+                border: Border.all(color: modeColor.withValues(alpha: 0.45)),
               ),
               child: Text(modeLabel,
                   style: GoogleFonts.urbanist(

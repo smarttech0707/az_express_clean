@@ -1,0 +1,1977 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() {
+      return request.auth != null;
+    }
+    function uid() {
+      return request.auth.uid;
+    }
+    function adminDoc() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+    function isActiveAdmin() {
+      return isRealUser()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && adminDoc().isActive == true
+        && adminDoc().role in ['super', 'sub']
+        && (adminDoc().role == 'super' || adminDoc().permissions is list);
+    }
+    // Les anciens appels génériques restent réservés au super-admin.
+    // Un sous-admin doit toujours passer par hasAdminPermission().
+    function isAdmin() {
+      return isActiveAdmin() && adminDoc().role == 'super';
+    }
+    function hasAdminPermission(permission) {
+      return isActiveAdmin()
+        && (adminDoc().role == 'super' || permission in adminDoc().permissions);
+    }
+    function isOwner(userId) {
+      return isAuth() && uid() == userId;
+    }
+    function isSuperAdmin() {
+      return isAdmin();
+    }
+    function isRealUser() {
+      return isAuth() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+    // Master Prompt "Corrections finales avant publication" — Bug Critique #1 :
+    // l'accès par crochet ([field]) lève une erreur d'évaluation (donc refuse
+    // silencieusement l'écriture) si le champ est absent d'un des deux côtés,
+    // même quand le champ modifié n'a rien à voir avec celui-ci. .get(field, null)
+    // ne lève jamais d'erreur — un champ absent des deux côtés reste "unchanged"
+    // (null == null), un champ présent d'un seul côté est correctement détecté
+    // comme changé. Comportement strictement identique quand le champ existe
+    // déjà des deux côtés (cas normal) — élargissement de sécurité, pas un
+    // relâchement : aucune écriture auparavant refusée à raison n'est permise
+    // par ce changement.
+    function unchanged(field) {
+      return request.resource.data.get(field, null) == resource.data.get(field, null);
+    }
+    function vehicleUsersBlocked(firstUid, secondUid) {
+      return exists(/databases/$(database)/documents/vehicle_user_blocks/$(firstUid)/blocked/$(secondUid))
+        || exists(/databases/$(database)/documents/vehicle_user_blocks/$(secondUid)/blocked/$(firstUid));
+    }
+    function notPresent(field) {
+      return !(field in request.resource.data);
+    }
+    function walletDebitMatchesPaidOrder() {
+      let client = /databases/$(database)/documents/clients/$(uid());
+      let amount = request.resource.data.get('sellerType', '') == 'boulangerie'
+        ? request.resource.data.get('totalAmount', -1)
+        : request.resource.data.budget + request.resource.data.get('shoppingBudget', 0);
+      return exists(client)
+        && get(client).data.wallet is int
+        && getAfter(client).data.wallet is int
+        && request.resource.data.get('shoppingBudget', 0) is int
+        && amount is int
+        && getAfter(client).data.wallet == get(client).data.wallet
+          - amount;
+    }
+
+    // Vérifie que la session courante correspond à la pharmacie propriétaire de la commande.
+    // currentUid est lié par pharmacieLogin après validation du mot de passe.
+    function isPharmacieOwnerOfOrder() {
+      return isAuth()
+        && 'pharmacieId' in resource.data
+        && exists(/databases/$(database)/documents/pharmacies/$(resource.data.pharmacieId))
+        && get(/databases/$(database)/documents/pharmacies/$(resource.data.pharmacieId)).data.currentUid == uid();
+    }
+
+    match /admins/{adminId} {
+      allow read:  if isOwner(adminId) || isAdmin();
+      // Super admin peut tout modifier (permissions, rôle, isActive…)
+      // Tout admin peut mettre à jour uniquement ses propres champs OTP (2FA
+      // login) et sa propre photo de profil (Master Prompt "photos manquantes").
+      allow write: if isSuperAdmin()
+        || (isOwner(adminId) && isActiveAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['otpHash', 'otpCode', 'otpExpiry', 'otpAttempts', 'fcmToken', 'photoUrl']));
+    }
+
+    match /clients/{clientId} {
+      allow read:   if isOwner(clientId) || isAdmin();
+      // Le profil client est créé directement après Firebase Auth. Le wallet
+      // doit impérativement démarrer à zéro : une création sans ce contrôle
+      // permettrait à un client de s'attribuer un solde arbitraire avant que
+      // les protections d'update ne s'appliquent.
+      allow create: if isOwner(clientId)
+        && request.resource.data.keys().hasOnly([
+          'name', 'phone', 'email', 'wallet', 'cashOnDeliveryEnabled',
+          'fakeOrderCount', 'createdAt'
+        ])
+        && request.resource.data.wallet is int
+        && request.resource.data.wallet == 0
+        && request.resource.data.cashOnDeliveryEnabled is bool
+        && request.resource.data.cashOnDeliveryEnabled == true
+        && request.resource.data.fakeOrderCount is int
+        && request.resource.data.fakeOrderCount == 0;
+      allow update: if isAdmin() ||
+        (isOwner(clientId) && unchanged('wallet') && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled')) ||
+        // Débit wallet autorisé (paiement Ekbine côté client) — solde ne peut que diminuer
+        (isOwner(clientId)
+          && request.resource.data.wallet is int
+          && request.resource.data.wallet >= 0
+          && request.resource.data.wallet < resource.data.wallet
+          && unchanged('fakeOrderCount') && unchanged('cashOnDeliveryEnabled'));
+      allow delete: if isAdmin();
+      match /wallet_transactions/{txId} {
+        allow read:   if isOwner(clientId) || isAdmin();
+        allow create: if isAdmin()
+          || (isOwner(clientId)
+            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt','provider','txId'])
+            && request.resource.data.amount is int);
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+      // Historique local des notifications push reçues sur le device — écrit
+      // par NotificationService._saveNotification() (lib/services/
+      // notification_service.dart) à chaque réception FCM, jamais par une
+      // Cloud Function. Bug critique confirmé le 2026-07-20 (audit module
+      // Notifications) : cette sous-collection n'avait jamais eu de règle
+      // dédiée — tout écrivait/lisait en permission-denied depuis le début,
+      // avalé silencieusement par les `catch (_) {}` déjà en place côté
+      // Dart. Le centre de notifications (notification_center.dart) n'a
+      // donc jamais fonctionné pour aucun client, sur aucun device.
+      match /notifications/{notifId} {
+        allow read:   if isOwner(clientId) || isAdmin();
+        allow create: if isOwner(clientId);
+        allow update: if isOwner(clientId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+        allow delete: if isOwner(clientId) || isAdmin();
+      }
+    }
+
+    match /livreurs/{livreurId} {
+      // Lecture par tous les authentifiés (anonymes inclus pour la carte client)
+      allow read:   if isAuth();
+      allow create: if isAdmin();
+      // Le livreur peut mettre à jour son propre doc :
+      // - sans toucher au wallet (GPS, isOnline, token…)
+      // - OU en diminuant son wallet (déduction commission à l'acceptation)
+      allow update: if isAdmin()
+        || (isOwner(livreurId)
+          && !request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(['isSuspended'])
+          && (unchanged('wallet')
+            || (request.resource.data.wallet is int
+              && request.resource.data.wallet >= 0
+              && request.resource.data.wallet < resource.data.wallet)));
+      allow delete: if isAdmin();
+      match /wallet_transactions/{txId} {
+        allow read:   if isOwner(livreurId) || isAdmin();
+        allow create: if isAdmin()
+          || (isOwner(livreurId)
+            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt','provider','txId'])
+            && request.resource.data.amount is int);
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /driver_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /sellers/{sellerId} {
+      allow read:   if isOwner(sellerId) || hasAdminPermission('demandes_vendeurs');
+      allow create: if hasAdminPermission('demandes_vendeurs');
+      allow update: if hasAdminPermission('demandes_vendeurs') || (isOwner(sellerId)
+        && unchanged('wallet')
+        && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
+        && unchanged('vipStatus') && unchanged('vipExpiresAt')
+        && unchanged('vipStartedAt') && unchanged('plan')
+        && unchanged('priorityLevel') && unchanged('paymentStatus'));
+      allow delete: if isAdmin();
+      match /wallet_transactions/{txId} {
+        allow read:   if isOwner(sellerId) || isAdmin();
+        allow create: if isAdmin()
+          || (isOwner(sellerId)
+            && request.resource.data.keys().hasOnly(['type','amount','description','orderId','createdAt'])
+            && request.resource.data.amount is int);
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /seller_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /restaurants/{restaurantId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+
+      // Master Prompt "photos manquantes" : le propriétaire (restaurant_owners
+      // ownerId -> restaurantId, même lookup que la sous-collection menu
+      // ci-dessous) peut modifier son logo et son statut ouvert/fermé — jamais
+      // le wallet ni aucun autre champ. `isOpen` était déjà écrit directement
+      // par le client (restaurant_owner_dashboard.dart:_toggleOpen) sans
+      // qu'aucune règle owner ne l'autorise jusqu'ici — corrigé au passage,
+      // même portée de risque que l'ajout de logoUrl.
+      allow update: if isRealUser()
+        && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+            .data.get('restaurantId', '') == restaurantId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['logoUrl', 'coverImageUrl', 'isOpen']);
+      // Le propriétaire Firebase Auth ne peut écrire que le token du
+      // restaurant auquel restaurant_owners/{uid} le rattache.
+      allow update: if isRealUser()
+        && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+            .data.get('restaurantId', '') == restaurantId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['fcmToken'])
+        && request.resource.data.fcmToken is string
+        && request.resource.data.fcmToken.size() > 10
+        && request.resource.data.fcmToken.size() <= 4096;
+
+      // Sous-collection utilisée par restaurant_owner_dashboard.dart
+      match /menu/{menuId} {
+        allow read: if isAuth();
+        allow write: if isAdmin()
+          || (isRealUser()
+            && get(/databases/$(database)/documents/restaurant_owners/$(request.auth.uid))
+                .data.get('restaurantId', '') == restaurantId);
+      }
+
+      // Ancienne sous-collection (conservée pour compatibilité)
+      match /menus/{menuId} {
+        allow read:  if isAuth();
+        allow write: if isAdmin();
+      }
+    }
+
+    match /restaurant_owners/{ownerId} {
+      allow read:  if isOwner(ownerId) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /restaurant_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /boulangeries/{boulangerieId} {
+      allow read:   if isAuth();
+      allow create: if isAdmin();
+      // Le propriétaire peut mettre à jour son profil, mais pas les champs financiers
+      allow update: if isAdmin() ||
+        (isOwner(boulangerieId)
+          && unchanged('wallet')
+          && unchanged('subscriptionStatus')
+          && unchanged('subscriptionExpiresAt')
+          && unchanged('vipStatus')
+          && unchanged('vipExpiresAt')
+          && unchanged('vipStartedAt')
+          && unchanged('plan') && unchanged('priorityLevel')
+          && unchanged('paymentStatus'));
+      allow delete: if isAdmin();
+      match /menu_items/{itemId} {
+        allow read:  if isAuth();
+        allow write: if isAdmin() || isOwner(boulangerieId);
+      }
+    }
+
+    match /boulangerie_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      // Même exception propriétaire que driver_requests/seller_requests/
+      // restaurant_requests (uid() prouvé par un vrai compte Firebase Auth,
+      // pas une simple affirmation côté client) — sans elle, boulangerie_login.dart
+      // ne pouvait jamais lire le statut de sa propre demande en attente
+      // (permission-denied systématique), contrairement aux 3 rôles analogues.
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /pharmacies/{pharmacieId} {
+      // Le listing pharmacie (nom/adresse/horaires/garde) reste public aux
+      // utilisateurs authentifiés (y compris anonymes) pour ne pas casser le
+      // parcours client — ce n'est plus un risque puisque le mot de passe ne
+      // vit plus ici : voir pharmacie_credentials ci-dessous, alimenté
+      // uniquement par les Cloud Functions pharmacieLogin()/setPharmaciePassword().
+      allow read:  if isAuth();
+      // password/accessCode ne doivent plus jamais être écrits directement,
+      // même par un admin — uniquement via setPharmaciePassword() (Admin SDK).
+      allow write: if isAdmin()
+        && !request.resource.data.keys().hasAny(['password', 'accessCode']);
+      // currentUid est lié exclusivement par pharmacieLogin après validation
+      // du mot de passe côté serveur (Admin SDK). Une session ne peut donc pas
+      // s'attribuer elle-même une pharmacie depuis le client.
+      // Le détenteur de cette liaison peut uniquement actualiser son token FCM.
+      allow update: if isAuth()
+        && resource.data.currentUid == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['fcmToken'])
+        && request.resource.data.fcmToken is string
+        && request.resource.data.fcmToken.size() > 10
+        && request.resource.data.fcmToken.size() <= 4096;
+
+      // Master Prompt "photos manquantes" : une fois la session déjà liée
+      // (currentUid déjà écrit ci-dessus au login), la même session peut
+      // modifier son logo et son statut de garde — jamais currentUid lui-même
+      // dans cette branche (déjà couvert ci-dessus), jamais le wallet/password.
+      // `isOnDuty` était déjà écrit directement par le client
+      // (pharmacie_dashboard.dart:_toggle) sans qu'aucune règle ne l'autorise
+      // jusqu'ici — corrigé au passage, même portée de risque que logoUrl.
+      allow update: if isAuth()
+        && resource.data.currentUid == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['logoUrl', 'isOnDuty']);
+    }
+
+    // Identifiants pharmacie hachés — écriture/lecture exclusivement via
+    // pharmacieLogin()/setPharmaciePassword() (Cloud Functions, Admin SDK).
+    match /pharmacie_credentials/{pharmacieId} {
+      allow read, write: if false;
+    }
+
+    // Tours de garde publics, distincts des comptes pharmacies partenaires.
+    // Le client ne voit que les entrées actives et vérifiées. Les écritures
+    // restent exclusivement administratives ; les synchronisations serveur
+    // utilisent l'Admin SDK et ne dépendent pas de ces règles.
+    match /pharmacy_guards/{guardId} {
+      allow read: if isAdmin() || (isAuth()
+        && resource.data.isActive == true
+        && resource.data.isVerified == true);
+      allow create, update: if isAdmin()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.city is string
+        && request.resource.data.city.size() > 0
+        && request.resource.data.guardStartAt is timestamp
+        && request.resource.data.guardEndAt is timestamp
+        && request.resource.data.guardEndAt > request.resource.data.guardStartAt
+        && request.resource.data.sourceType in ['manual', 'external', 'partner']
+        && request.resource.data.isVerified is bool
+        && request.resource.data.isActive is bool;
+      allow delete: if hasAdminPermission('demandes_vendeurs');
+    }
+
+    // Contrairement à driver_requests/seller_requests/restaurant_requests
+    // (qui créent un vrai compte Firebase Auth email/mot de passe AVANT
+    // d'écrire la demande, donc uid() == leur propre uid trivialement),
+    // pharmacie_register.dart n'authentifie personne — la session est encore
+    // anonyme par défaut côté mobile à ce stade (les pharmacies utilisent une
+    // authentification Firestore custom, jamais Firebase Auth, voir
+    // pharmacie_credentials). L'ancienne règle exigeait isRealUser() +
+    // uid == caller alors que le code n'écrivait même pas de champ uid —
+    // la création échouait donc à 100% des tentatives (permission-denied
+    // systématique, corrigé 2026-07-09). Traité comme un formulaire de lead
+    // pré-compte, même pattern que driver_applications/partner_applications :
+    // écriture publique avec validation stricte de la forme des champs,
+    // lecture réservée à l'admin (pas de lien à un compte propre possible).
+    match /pharmacie_requests/{requestId} {
+      allow create: if request.resource.data.keys().hasAll(['ownerName', 'pharmacieName', 'phone', 'address', 'status'])
+        && request.resource.data.ownerName is string && request.resource.data.ownerName.size() > 0 && request.resource.data.ownerName.size() <= 200
+        && request.resource.data.pharmacieName is string && request.resource.data.pharmacieName.size() > 0 && request.resource.data.pharmacieName.size() <= 200
+        && request.resource.data.phone is string && request.resource.data.phone.size() > 0 && request.resource.data.phone.size() <= 30
+        && request.resource.data.status == 'pending';
+      allow read:   if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /fleet_owners/{fleetId} {
+      allow read:   if isOwner(fleetId) || isAdmin();
+      allow create: if isRealUser() && uid() == fleetId;
+      // Le propriétaire peut mettre à jour son profil, mais pas les champs financiers
+      allow update: if isAdmin() ||
+        (isOwner(fleetId)
+          && unchanged('wallet')
+          && unchanged('subscriptionStatus')
+          && unchanged('subscriptionExpiresAt')
+          && unchanged('vipStatus')
+          && unchanged('vipExpiresAt')
+          && unchanged('vipStartedAt') && unchanged('plan')
+          && unchanged('priorityLevel') && unchanged('paymentStatus'));
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuth() && (
+        resource.data.clientId  == uid() ||
+        resource.data.driverId  == uid() ||
+        resource.data.sellerId  == uid() ||
+        isPharmacieOwnerOfOrder()         ||
+        isAdmin()
+      );
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.budget is int
+        && request.resource.data.budget >= 500
+        && notPresent('driverId')
+        // isPaid ne peut être vrai à la création que pour un paiement wallet
+        // (débit du client dans la même transaction Flutter que la création
+        // de la commande — livraison_screen.dart/courses_screen.dart/
+        // restaurant_menu.dart/boulangerie_order_page.dart) — jamais pour
+        // cash. Bug confirmé en production le 2026-07-19 (audit modules) :
+        // l'ancienne exigence isPaid==false inconditionnelle bloquait ces 4
+        // écrans à 100% pour tout paiement wallet (permission-denied),
+        // déjà suspecté sans preuve au Master Prompt 80. Ne réintroduit pas
+        // la faille corrigée au Master Prompt 80 (crédit partenaire sans
+        // paiement réel) : deliverOrderCF continue d'exiger indépendamment
+        // order.isPaid==true avant tout crédit, quelle que soit la façon
+        // dont isPaid est devenu true.
+        && (request.resource.data.isPaid == false
+            || (request.resource.data.isPaid == true
+                && request.resource.data.get('paymentMethod', '') == 'wallet'
+                && walletDebitMatchesPaidOrder()))
+        && request.resource.data.status == 'pending';
+      // LOT 7.4: guard every alternative, including overlapping client/seller roles.
+      function assignedDriverFinancialFieldsSafe() {
+        return isAdmin() || (isAuth()
+          && (resource.data.get('driverId', '') != uid()
+            || !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['shoppingBudget', 'sellerId', 'sellerType', 'pharmacieId'])));
+      }
+      allow update: if assignedDriverFinancialFieldsSafe() && (
+        isAdmin() ||
+        (isAuth() && resource.data.driverId == uid()
+          && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
+          && unchanged('paymentMethod') && unchanged('driverId')
+          && (
+            (resource.data.status == 'assigned'    && request.resource.data.status == 'accepted')
+            || (resource.data.status == 'accepted' && request.resource.data.status == 'picked_up')
+            // isPaid ne peut plus être flippé directement ici (faille confirmée
+            // et corrigée, Master Prompt 80, 2026-07-09) : le passage à "payé"
+            // (cash ou wallet) doit obligatoirement transiter par deliverOrderCF/
+            // payOrderFromWalletCF (Admin SDK, validation serveur), jamais par
+            // une écriture Firestore directe du livreur.
+            || (resource.data.status == 'picked_up' && request.resource.data.status == 'delivered')
+            || (resource.data.status == request.resource.data.status)
+          )
+        ) ||
+        // Une boulangerie ne pilote que la préparation : elle ne peut jamais
+        // réécrire le prix, les articles, le client, l'adresse ou les
+        // coordonnées d'une commande déjà créée. Le tableau de bord ne fait
+        // que ces deux transitions sellerStatus (voir
+        // boulangerie_dashboard.dart:_updateSellerStatus).
+        (isAuth() && resource.data.sellerId == uid()
+          && resource.data.get('sellerType', '') == 'boulangerie'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['sellerStatus'])
+          && (
+            ((resource.data.get('sellerStatus', null) == null
+                || resource.data.get('sellerStatus', '') == '')
+              && request.resource.data.sellerStatus == 'preparing')
+            || (resource.data.get('sellerStatus', '') == 'preparing'
+              && request.resource.data.sellerStatus == 'ready')
+          )) ||
+        // Les autres partenaires conservent leur flux existant ; le
+        // resserrement ci-dessus est volontairement limité au module
+        // Boulangerie audité.
+        (isAuth() && resource.data.sellerId == uid()
+          && resource.data.get('sellerType', '') != 'boulangerie'
+          && unchanged('budget') && unchanged('clientId') && unchanged('isPaid')
+          && unchanged('paymentMethod') && unchanged('driverId') && unchanged('status')) ||
+        // Client annule sa commande en attente
+        (isOwner(resource.data.clientId)
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'cancelled'
+          && unchanged('budget') && unchanged('driverId') && unchanged('isPaid')) ||
+        // Client peut noter le livreur ou le vendeur après livraison
+        (isOwner(resource.data.clientId)
+          && resource.data.status == 'delivered'
+          && unchanged('status') && unchanged('budget') && unchanged('driverId')
+          && unchanged('isPaid') && unchanged('paymentMethod')
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['rating', 'sellerRating'])));
+      allow delete: if isAdmin();
+    }
+
+    // ── Commissions AZ Express — lecture admin uniquement ────────────────────
+    match /commissions/{commissionId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    match /wallet_transactions/{txId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || resource.data.uid == uid() || isAdmin());
+      // Log E-Kbine uniquement (uid doit correspondre)
+      allow create: if isAuth() && request.resource.data.uid == uid();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /withdrawal_requests/{reqId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.amount is int
+        && request.resource.data.amount >= 500
+        && request.resource.data.amount <= 500000;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /recharge_requests/{reqId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.amount is int
+        && request.resource.data.amount >= 100;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /ekbine_orders/{orderId} {
+      allow read: if isAuth() && (
+        resource.data.clientId == uid() || resource.data.agentId == uid() || isAdmin()
+      );
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && notPresent('agentId')
+        && request.resource.data.amount is int
+        && request.resource.data.amount >= 100;
+      allow update: if isAdmin() ||
+        (isAuth() && (
+          // Assignment is server-only: it snapshots the agent's number for
+          // the requested operator and rejects suspended/unsubscribed agents.
+          (resource.data.status == 'pending'
+            && request.resource.data.status == 'server_assigned_only'
+            && request.resource.data.agentId == uid()
+            && unchanged('clientId') && unchanged('amount') && unchanged('fee')
+            && unchanged('totalPaid') && unchanged('paymentMethod')) ||
+          (resource.data.status == 'assigned' && resource.data.agentId == uid()
+            && request.resource.data.status == 'in_progress'
+            && unchanged('clientId') && unchanged('agentId')) ||
+          // Deposit confirmation is Cloud Function only; an agent cannot
+          // directly promote awaiting_deposit to in_progress.
+          (resource.data.status == 'deposit_confirmed' && resource.data.agentId == uid()
+            && request.resource.data.status == 'in_progress'
+            && unchanged('clientId') && unchanged('agentId') && unchanged('amount')
+            && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
+            && unchanged('agentDepositAccountId')
+            && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.isVerified == true
+            && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.isSuspended != true
+            && get(/databases/$(database)/documents/ekbine_agents/$(uid())).data.subscriptionStatus in ['trial', 'active']) ||
+          (resource.data.status == 'in_progress' && resource.data.agentId == uid()
+            && request.resource.data.status == 'proof_sent'
+            && unchanged('clientId') && unchanged('agentId') && unchanged('amount')
+            && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
+            && unchanged('agentDepositAccountId'))
+        )) ||
+        (isAuth() && resource.data.clientId == uid() && (
+          // completed : interdit en direct — passe obligatoirement par ekClientConfirmOrder (CF)
+          // pour créditer le wallet agent atomiquement
+          // agentDepositNumber/Operator/AccountId : figés dès l'acceptation
+          // (snapshot immuable écrit par ekbineAcceptOrder) — le client ne
+          // doit jamais pouvoir les modifier, y compris en profitant d'une
+          // transition par ailleurs légitime (annulation, litige).
+          ((resource.data.status == 'pending' || resource.data.status == 'awaiting_deposit')
+            && request.resource.data.status == 'cancelled'
+            && unchanged('agentId') && unchanged('amount')
+            && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
+            && unchanged('agentDepositAccountId')) ||
+          // Deposit proof is written only by ekbineSubmitDepositProof.
+          (resource.data.status == 'awaiting_deposit'
+            && request.resource.data.status == 'server_deposit_proof_only'
+            && unchanged('agentId') && unchanged('amount') && unchanged('agentEarning')) ||
+          (resource.data.status == 'proof_sent'
+            && request.resource.data.status == 'disputed'
+            && unchanged('agentId') && unchanged('amount')
+            && unchanged('agentDepositNumber') && unchanged('agentDepositOperator')
+            && unchanged('agentDepositAccountId'))
+        ));
+      allow delete: if isAdmin();
+    }
+
+    match /ekbine_agents/{agentId} {
+      allow read: if isAuth();
+      allow create: if isRealUser() && uid() == agentId
+        && request.resource.data.isVerified  == false
+        && request.resource.data.isSuspended == false
+        && request.resource.data.walletBalance  == 0
+        && request.resource.data.totalCompleted == 0
+        && !request.resource.data.keys().hasAny([
+          'subscriptionStatus', 'subscriptionExpiresAt',
+          'vipStatus', 'vipExpiresAt', 'vipStartedAt',
+          'plan', 'priorityLevel', 'paymentStatus'
+        ]);
+      allow update: if isAdmin() ||
+        (isOwner(agentId) && unchanged('walletBalance') && unchanged('isVerified')
+          && unchanged('isSuspended') && unchanged('rating') && unchanged('ratingCount')
+          && unchanged('totalCompleted')
+          && unchanged('subscriptionStatus') && unchanged('subscriptionExpiresAt')
+          && unchanged('vipStatus') && unchanged('vipExpiresAt')
+          && unchanged('vipStartedAt') && unchanged('plan')
+          && unchanged('priorityLevel') && unchanged('paymentStatus')) ||
+        // Wallet crédité uniquement via Cloud Function ekClientConfirmOrder
+        // Écriture directe depuis le client interdite pour éviter l'injection de montants arbitraires
+        // Client note l'agent après service — lié à une commande completed de cet agent
+        (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['rating', 'ratingCount'])
+          && request.resource.data.ratingCount == resource.data.ratingCount + 1
+          && 'lastOrderId' in resource.data
+          && exists(/databases/$(database)/documents/ekbine_orders/$(resource.data.lastOrderId))
+          && get(/databases/$(database)/documents/ekbine_orders/$(resource.data.lastOrderId)).data.clientId == uid()
+          && get(/databases/$(database)/documents/ekbine_orders/$(resource.data.lastOrderId)).data.agentId == agentId
+          && get(/databases/$(database)/documents/ekbine_orders/$(resource.data.lastOrderId)).data.status == 'completed');
+      allow delete: if isAdmin();
+    }
+
+    match /ekbine_chats/{orderId} {
+      function ekOrderParticipant() {
+        let order = get(/databases/$(database)/documents/ekbine_orders/$(orderId)).data;
+        return uid() == order.clientId || uid() == order.agentId;
+      }
+      allow read, write: if isAdmin() || (isAuth() && ekOrderParticipant());
+      match /messages/{msgId} {
+        allow read:   if isAdmin() || (isAuth() && ekOrderParticipant());
+        allow create: if isAuth() && ekOrderParticipant()
+          && request.resource.data.senderId == uid()
+          && request.resource.data.keys().hasAll(['senderId','senderRole','type'])
+          && request.resource.data.type in ['text','audio'];
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // ── Zones de livraison géographiques ─────────────────────────────────────
+    match /zones_livraison/{zoneId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /marketplace_products/{productId} {
+      // Les produits 'hidden' ne sont visibles que par leur vendeur et les admins
+      allow read: if isAdmin()
+        || (isRealUser() && resource.data.sellerId == uid())
+        || (isAuth() && resource.data.get('status', 'active') == 'active');
+      // Création exclusivement via publishMarketplaceProduct : les règles ne
+      // peuvent pas compter atomiquement les annonces actives d'un vendeur.
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+        // Propriétaire modifie son annonce (sans toucher views/favoritesCount)
+        || (isRealUser() && resource.data.sellerId == uid()
+          && unchanged('sellerId') && unchanged('views') && unchanged('favoritesCount')
+          && unchanged('expiresAt') && unchanged('sellerVerified')
+          && unchanged('sellerVipStatus') && unchanged('priorityLevel')
+          && (unchanged('status')
+            || (resource.data.status == 'active'
+              && request.resource.data.status in ['hidden', 'sold'])))
+        // N'importe quel utilisateur peut incrémenter les vues uniquement
+        || (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views']))
+        // N'importe quel utilisateur peut modifier favoritesCount uniquement
+        || (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['favoritesCount']));
+      allow delete: if isAdmin() || (isRealUser() && resource.data.sellerId == uid());
+    }
+
+    match /marketplace_favorites/{userId} {
+      allow read, write: if isOwner(userId);
+      match /items/{itemId} { allow read, write: if isOwner(userId); }
+    }
+
+    match /marketplace_chats/{chatId} {
+      // Master Prompt "Corrections finales avant publication" — Bug Majeur #3 :
+      // chatId = 'mp_<productId>_<buyerUid>' — l'ancien pattern [^_]+ supposait
+      // un productId sans underscore, ce qui échouait dès qu'un ID de produit en
+      // contenait un (ex: un ID personnalisé). `.*` (glouton) retrouve toujours
+      // la bonne coupure juste avant le suffixe _<uid> exact, quel que soit le
+      // contenu du segment productId — même niveau de sécurité (le suffixe uid
+      // doit toujours correspondre exactement à l'appelant), juste indépendant
+      // du format de l'ID.
+      allow read, write: if isAdmin() || (isAuth() && (
+        chatId.matches('mp_.*_' + uid())
+        || (resource != null && resource.data.sellerId == uid())
+        || (request.resource != null && request.resource.data.sellerId == uid())
+      ));
+      match /messages/{msgId} {
+        allow read: if isAuth() && (isAdmin()
+          || chatId.matches('mp_.*_' + uid())
+          || get(/databases/$(database)/documents/marketplace_chats/$(chatId)).data.sellerId == uid());
+        // Corrigé (Master Prompt "Corrections finales avant publication",
+        // test réel "premier message") : le client (mp_chat_page.dart:_addMessage)
+        // écrit le champ `senderUid`, jamais `senderId` — cette règle vérifiait
+        // un nom de champ qui n'a jamais existé dans le document réel, donc
+        // `request.resource.data.senderId` était toujours absent et l'accès par
+        // point levait une erreur d'évaluation (refus systématique de TOUT
+        // message, depuis toujours, indépendamment du bug de regex ci-dessus).
+        // Même exigence de sécurité (l'expéditeur doit être l'appelant), juste
+        // sur le bon nom de champ.
+        allow create: if isAuth()
+          && request.resource.data.senderUid == uid()
+          && request.resource.data.keys().hasAll(['senderUid','type'])
+          && request.resource.data.type in ['text','audio'];
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /marketplace_reports/{reportId} {
+      allow create: if isRealUser()
+        && request.resource.data.reportedBy == uid()
+        && request.resource.data.keys().hasAll(['productId','reportedBy','reason']);
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ── Immobilier (M6) — calqué sur sellers/seller_requests/marketplace_products ──
+    match /real_estate_agents/{agentId} {
+      allow read:   if isOwner(agentId) || isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isOwner(agentId) && unchanged('isVerified') && unchanged('isActive'));
+      allow delete: if isAdmin();
+    }
+
+    match /real_estate_agent_requests/{requestId} {
+      allow create: if isRealUser() && request.resource.data.uid == uid();
+      allow read:   if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Types de biens administrables (pas de liste codée en dur, cf. dette Marketplace).
+    match /real_estate_categories/{categoryId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // GPS privé/confidentialité réelle V2 — les champs de localisation
+    // sensibles (coordonnées exactes/publiques calculées, drapeau de
+    // confidentialité) ne sont plus jamais écrits directement par le
+    // client : uniquement via la Cloud Function upsertRealEstateLocation
+    // (functions/realEstateLocation.js), qui dérive elle-même le geohash et
+    // l'approximation côté serveur. La liste ci-dessous couvre aussi les
+    // anciens noms de champs hérités (lat/lng/latitude/longitude) — plus
+    // aucun n'est autorisé en écriture directe, qu'ils soient exacts ou non.
+    function locationFieldsUnchanged() {
+      return unchanged('publicLatitude') && unchanged('publicLongitude')
+        && unchanged('publicGeohash') && unchanged('hasExactLocation')
+        && unchanged('locationUpdatedAt') && unchanged('locationPrivacy')
+        && unchanged('lat') && unchanged('lng')
+        && unchanged('latitude') && unchanged('longitude');
+    }
+    function noDirectLocationFieldsOnCreate() {
+      return notPresent('publicLatitude') && notPresent('publicLongitude')
+        && notPresent('publicGeohash') && notPresent('hasExactLocation')
+        && notPresent('locationUpdatedAt') && notPresent('locationPrivacy')
+        && notPresent('lat') && notPresent('lng')
+        && notPresent('latitude') && notPresent('longitude');
+    }
+
+    match /real_estate_listings/{listingId} {
+      allow read: if isAdmin()
+        || (isRealUser() && resource.data.agentId == uid())
+        || (isAuth() && resource.data.get('status', 'active') == 'active');
+      allow create: if isRealUser()
+        && request.resource.data.agentId == uid()
+        && exists(/databases/$(database)/documents/real_estate_agents/$(uid()))
+        && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isVerified == true
+        && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isActive == true
+        && request.resource.data.status in ['active', 'hidden']
+        && request.resource.data.price is int && request.resource.data.price > 0
+        && noDirectLocationFieldsOnCreate();
+      allow update: if isAdmin()
+        // Master Prompt "Immobilier V6.2" — Mission 11 : `createdAt` n'était
+        // jusqu'ici protégé par aucune règle — seuls `agentId`/`views`
+        // l'étaient — un `.update()` normal du propriétaire aurait donc pu
+        // réécrire silencieusement la date de création. Durci ici, seul
+        // ajout de cette mission (le reste de la règle était déjà correct :
+        // agentId immuable, GPS jamais modifiable en écriture directe).
+        || (isRealUser() && resource.data.agentId == uid()
+          && exists(/databases/$(database)/documents/real_estate_agents/$(uid()))
+          && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isVerified == true
+          && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isActive == true
+          && unchanged('agentId') && unchanged('views') && unchanged('createdAt')
+          && locationFieldsUnchanged())
+        || (isAuth()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views'])
+          && request.resource.data.views == resource.data.views + 1);
+      allow delete: if isAdmin() || (isRealUser() && resource.data.agentId == uid()
+        && exists(/databases/$(database)/documents/real_estate_agents/$(uid()))
+        && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isVerified == true
+        && get(/databases/$(database)/documents/real_estate_agents/$(uid())).data.isActive == true);
+    }
+
+    // Demandes de visite — écriture exclusivement via requestPropertyVisit()/
+    // respondToVisitRequest() (Cloud Functions), jamais depuis le client.
+    match /real_estate_visit_requests/{requestId} {
+      allow read: if isAdmin()
+        || (isAuth() && (resource.data.clientId == uid() || resource.data.agentId == uid()));
+      allow write: if false;
+    }
+
+    // Coordonnées EXACTES d'une annonce — jamais lues par un utilisateur
+    // anonyme, un client sans visite confirmée, ou un autre agent. Écriture
+    // exclusivement via upsertRealEstateLocation (Admin SDK, contourne ces
+    // règles), jamais depuis le client.
+    match /real_estate_private_locations/{listingId} {
+      allow read: if isAdmin()
+        || (isRealUser() && resource.data.agentId == uid())
+        || (isAuth()
+          && exists(/databases/$(database)/documents/real_estate_location_access/$(listingId + '_' + uid()))
+          && get(/databases/$(database)/documents/real_estate_location_access/$(listingId + '_' + uid())).data.isActive == true);
+      allow write: if false;
+    }
+
+    // Autorisation d'accès à la localisation exacte, accordée uniquement par
+    // respondToVisitRequest() lors d'une confirmation réelle de visite
+    // (jamais sur un refus/une annulation — voir functions/realestate.js).
+    // Clé de document : {listingId}_{clientId}, pour un get() direct et
+    // fiable depuis les Rules ci-dessus (une query n'y est pas possible).
+    match /real_estate_location_access/{accessId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.clientId == uid());
+      allow write: if false;
+    }
+
+    match /sos_alerts/{alertId} {
+      allow read:   if isAdmin();
+      // Le livreur envoie driverId (pas clientId)
+      allow create: if isAuth()
+        && request.resource.data.status == 'active'
+        && (request.resource.data.keys().hasAll(['clientId','lat','lng','timestamp','status'])
+          || request.resource.data.keys().hasAll(['driverId','lat','lng','timestamp','status']));
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /delivery_reports/{reportId} {
+      allow read:   if isAdmin();
+      allow create: if isAuth()
+        && request.resource.data.driverId == uid()
+        && request.resource.data.keys().hasAll(['orderId','driverId','difficulty','createdAt']);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /reviews/{reviewId} {
+      allow read:   if isAuth();
+      // Note obligatoirement entre 1 et 5
+      allow create: if isRealUser()
+        && request.resource.data.keys().hasAll(['sellerId','rating','createdAt'])
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /chats/{chatId} {
+      allow create: if isAuth();
+      allow read, write: if isAuth() && (uid() in resource.data.participants || isAdmin());
+      match /messages/{messageId} {
+        allow read: if isAuth() && (
+          uid() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants || isAdmin()
+        );
+        allow create: if isAuth()
+          && uid() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants
+          && request.resource.data.senderId == uid();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /boutique_orders/{orderId} {
+      allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(['clientId', 'status'])
+        && ('totalAmount' in request.resource.data
+          ? request.resource.data.totalAmount is int && request.resource.data.totalAmount > 0
+          : true);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /boutique_products/{productId} {
+      allow read: if isAuth();
+      allow create: if isAdmin()
+        || (isRealUser() && request.resource.data.sellerId == uid());
+      allow update: if isAdmin()
+        || (isRealUser()
+          && resource.data.sellerId == uid()
+          && unchanged('sellerId'));
+      allow delete: if isAdmin()
+        || (isRealUser() && resource.data.sellerId == uid());
+    }
+
+    match /services/{serviceId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /service_providers/{providerId} {
+      // LIMITATION ARCHITECTURALE : le login artisan utilise signInAnonymously() explicitement.
+      // isRealUser() casserait le login. Mitigation : Phase 5 — migrer vers Cloud Function artisanLogin().
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+      allow update: if isRealUser() && !('artisanUid' in resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['artisanUid'])
+        && request.resource.data.artisanUid == uid();
+      allow update: if isRealUser() && 'artisanUid' in resource.data
+        && resource.data.artisanUid == uid()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photos']);
+    }
+
+    match /locations/{locationId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /residences/{residenceId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    match /blanchisserie_orders/{orderId} {
+      allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(['clientId', 'status'])
+        && ('totalAmount' in request.resource.data
+          ? request.resource.data.totalAmount is int && request.resource.data.totalAmount > 0
+          : true);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /eau_boissons_orders/{orderId} {
+      allow read: if isAuth() && (resource.data.clientId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(['clientId', 'status'])
+        && ('totalAmount' in request.resource.data
+          ? request.resource.data.totalAmount is int && request.resource.data.totalAmount > 0
+          : true);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /clients/{clientId}/favorite_providers/{providerId} {
+      allow read, write: if isOwner(clientId);
+    }
+
+    // ── Base de lieux locale AZ Express ───────────────────────────────────────
+    match /places/{placeId} {
+      allow read:   if isAuth();
+      allow create: if isAdmin() || (isAuth()
+        && request.resource.data.keys().hasAll(
+          ['name','latitude','longitude','source'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.latitude is number
+        && request.resource.data.longitude is number
+        && request.resource.data.source is string
+        && request.resource.data.source.size() > 0
+        && request.resource.data.get('verified', false) == false
+        && (!('cityId' in request.resource.data)
+          || request.resource.data.cityId is string)
+        && (!('normalizedName' in request.resource.data)
+          || request.resource.data.normalizedName is string)
+        && (!('aliases' in request.resource.data)
+          || request.resource.data.aliases is list)
+        && !('coordinateSource' in request.resource.data));
+      allow update: if isAdmin()
+        || (isAuth() && request.resource.data.diff(resource.data)
+              .affectedKeys().hasOnly(['searchCount', 'updatedAt']));
+      allow delete: if isAdmin();
+    }
+
+    match /service_reviews/{reviewId} {
+      allow read: if isAuth();
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && request.resource.data.keys().hasAll(['providerId','clientId','rating','createdAt']);
+      allow update, delete: if isAdmin();
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
+      allow create: if isAdmin();
+      allow update: if isAuth() && resource.data.userId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read','readAt']);
+      allow delete: if isAdmin() || (isAuth() && resource.data.userId == uid());
+    }
+
+    match /support_tickets/{ticketId} {
+      allow read: if isAuth() && (resource.data.userId == uid() || isAdmin());
+      allow create: if isRealUser()
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'open';
+      allow update: if isAdmin() ||
+        (isOwner(resource.data.userId) && unchanged('status')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['messages']));
+      allow delete: if isAdmin();
+    }
+
+    // ── Formulaires publics du site web marketing (Master Prompt 57) ─────────
+    // Ces 3 formulaires (lib/web/pages/{contact,drivers,merchants}_page.dart)
+    // sont remplis par des visiteurs anonymes du site vitrine — la connexion
+    // anonyme automatique reste volontairement "mobile only" (lib/main.dart),
+    // donc isAuth() y est presque toujours false. Écriture publique avec
+    // validation stricte de la forme des champs, plutôt qu'un mur de connexion
+    // qui n'aurait de toute façon aucune valeur anti-abus réelle (signInAnonymously()
+    // est gratuit et instantané pour un attaquant).
+    match /contact_messages/{msgId} {
+      allow create: if request.resource.data.keys().hasAll(['email', 'message'])
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 2000
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 200;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Leads "devenir livreur" — lib/web/pages/drivers_page.dart. Distinct de
+    // driver_requests (inscription réelle in-app, avec compte Firebase Auth) —
+    // ceci est un formulaire de contact pré-compte, suivi manuellement par
+    // l'équipe (WhatsApp/appel), jamais relié à la création d'un compte livreur.
+    match /driver_applications/{appId} {
+      allow create: if request.resource.data.keys().hasAll(['name', 'phone', 'city', 'status'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 200
+        && request.resource.data.phone is string && request.resource.data.phone.size() > 0 && request.resource.data.phone.size() <= 30
+        && request.resource.data.status == 'pending';
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Leads "devenir partenaire" — lib/web/pages/merchants_page.dart. Même
+    // distinction que ci-dessus vis-à-vis de seller_requests/restaurant_requests/etc.
+    match /partner_applications/{appId} {
+      allow create: if request.resource.data.keys().hasAll(['contactName', 'businessName', 'phone', 'city', 'status'])
+        && request.resource.data.contactName is string && request.resource.data.contactName.size() > 0 && request.resource.data.contactName.size() <= 200
+        && request.resource.data.phone is string && request.resource.data.phone.size() > 0 && request.resource.data.phone.size() <= 30
+        && request.resource.data.status == 'pending';
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Demandes de suppression de compte — lib/services/account_deletion_service.dart
+    // (depuis l'app, authentifié) et /delete-account (site public, non authentifié,
+    // conformité Google Play "account deletion"). Écriture publique volontaire
+    // (même raisonnement que driver_applications/partner_applications ci-dessus,
+    // le point d'entrée web n'a jamais de session Firebase) — traité manuellement
+    // par un admin, jamais une suppression automatique instantanée de données financières.
+    match /account_deletion_requests/{reqId} {
+      allow create: if request.resource.data.keys().hasAll(['role', 'contactPhone', 'status', 'requestedVia'])
+        && request.resource.data.role in ['client', 'livreur', 'seller', 'restaurant', 'pharmacie', 'boulangerie', 'ekbine_agent', 'real_estate_agent', 'fleet_owner']
+        && request.resource.data.contactPhone is string && request.resource.data.contactPhone.size() > 0 && request.resource.data.contactPhone.size() <= 30
+        && request.resource.data.status == 'pending'
+        && request.resource.data.requestedVia in ['app', 'web'];
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ── Config app (publique : couleurs, textes UI — pas de données financières) ─
+    match /config/{configId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ── Config business (commissions, seuils) — réservée aux admins ─────────
+    match /app_config/{configId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /driver_rankings/{driverId} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Audit logs — écriture réservée aux Cloud Functions ────────────────────
+    // Lecture restreinte au super-admin (2026-07-01) : un journal d'audit
+    // complet ne doit pas être visible par tout sous-admin.
+    match /audit_logs/{logId} {
+      allow read:   if isSuperAdmin();
+      allow write:  if false;
+    }
+
+    // ── Événements sécurité — écriture réservée aux Cloud Functions ───────────
+    match /security_events/{eventId} {
+      allow read:   if isAdmin();
+      allow update: if isAdmin();
+      allow write:  if false;
+    }
+
+    // ── Rate limits — géré par Cloud Functions uniquement ────────────────────
+    match /rate_limits/{key} {
+      allow read, write: if false;
+    }
+
+    // ── Journal d'observabilité par requête (Prompt 25, 2026-07-02) ─────────
+    // Distinct d'audit_logs : diagnostic technique haut-volume (requestId,
+    // durée, statut), pas une piste d'audit métier — voir functions/observability.js.
+    // Utilisé uniquement par les nouvelles Cloud Functions, pas rétrofité.
+    match /request_logs/{logId} {
+      allow read:  if isSuperAdmin();
+      allow write: if false;
+    }
+
+    // ── Tokens FCM invalides — nettoyage asynchrone Cloud Functions ──────────
+    match /invalid_fcm_tokens/{docId} {
+      allow read, write: if false;
+    }
+
+    // ── Conciliation wallet (Prompt 28, 2026-07-02) ──────────────────────────
+    // Écarts détectés entre le champ `wallet` et wallet_transactions —
+    // données financières sensibles, super-admin uniquement.
+    match /wallet_reconciliation_findings/{findingId} {
+      allow read:  if isSuperAdmin();
+      allow write: if false;
+    }
+
+    // ── Métriques dispatching — écriture réservée aux Cloud Functions ─────────
+    match /dispatch_metrics/{metricId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ── AZ IA — historique de conversation, écriture réservée aux Cloud Functions ──
+    match /ai_conversations/{ownerId} {
+      allow read: if isOwner(ownerId) || isAdmin();
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if isOwner(ownerId) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // ── AZ IA — actions en attente de confirmation, gérées par Cloud Functions ──
+    match /ai_pending_actions/{actionId} {
+      allow read: if isAuth() && (resource.data.uid == uid() || isAdmin());
+      allow write: if false;
+    }
+
+    // ── Master Prompt 108 — AIProviderService (multi-fournisseurs IA) ───────
+    // Aucune clé API n'est jamais stockée ici — uniquement des préférences
+    // (fournisseur actif, fallback, quotas) — mais reste admin-only en
+    // écriture par principe de moindre privilège, même pour un contenu non
+    // sensible en soi (évite qu'un utilisateur ne modifie le comportement
+    // global d'AZ IA pour tous).
+    match /settings/ai {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Écriture exclusivement via AIProviderService (Admin SDK) — jamais
+    // depuis Flutter. Lecture admin uniquement (coûts/usage = donnée
+    // financière/opérationnelle sensible, pas un contenu utilisateur).
+    match /ai_usage/{entryId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    match /ai_daily_stats/{statId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    match /ai_logs/{logId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // Cache interne pur (réponses IA pour questions identiques) — aucun
+    // intérêt pour un client ou un admin de le lire/écrire directement.
+    match /ai_cache/{cacheKey} {
+      allow read, write: if false;
+    }
+
+    // L'utilisateur peut lire son propre compteur de quota restant (utile
+    // pour un futur affichage "X requêtes IA restantes aujourd'hui") ;
+    // jamais d'écriture cliente (uniquement AIProviderService, Admin SDK).
+    match /ai_quotas/{quotaId} {
+      allow read:  if isAdmin() || (isAuth() && resource.data.uid == uid());
+      allow write: if false;
+    }
+
+    // ── Master Prompt 113 — mémoire utilisateur AZ IA (jalon M8, version
+    // scopée : pas d'écran de gestion dédié dans cette passe, mais une vraie
+    // collection opt-in, pas un stub). Écrite exclusivement par l'outil AZ IA
+    // remember_user_info (Admin SDK) quand l'utilisateur communique une
+    // information dans la conversation — jamais par Flutter directement.
+    // Lecture par le propriétaire : il doit pouvoir voir ce qu'AZ IA sait de
+    // lui, cohérent avec le principe déjà acté pour ai_conversations
+    // (contrôle utilisateur sur sa propre mémoire).
+    match /ai_user_memory/{uid} {
+      allow read:  if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    // Rappels AZ IA (Master Prompt 118) — même schéma que ai_pending_actions
+    // (uid en champ, pas en ID de document) : écriture exclusivement via
+    // create_reminder (handler)/le scheduler sendDueReminders, jamais depuis
+    // le client.
+    match /ai_reminders/{reminderId} {
+      allow read:  if isAuth() && (resource.data.uid == uid() || isAdmin());
+      allow write: if false;
+    }
+
+    // ── Événementiel : boutiques, catalogue et réservations multi-prestations
+    match /event_providers/{providerId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.ownerId == uid())
+        || (isAuth() && resource.data.status == 'approved'
+          && resource.data.get('isSuspended', false) == false);
+      allow create: if isRealUser()
+        && providerId == uid()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.get('isSuspended', false) == false
+        && request.resource.data.requestedPlan in ['standard', 'premium', 'vvip']
+        && request.resource.data.get('planStatus', 'pending') == 'pending'
+        && !('plan' in request.resource.data)
+        && !('priorityLevel' in request.resource.data)
+        && !('planStartedAt' in request.resource.data)
+        && !('trialStartedAt' in request.resource.data)
+        && !('trialEndsAt' in request.resource.data)
+        && !('planEndsAt' in request.resource.data)
+        && !('monthlyPrice' in request.resource.data)
+        && !('isLaunchPrice' in request.resource.data)
+        && !('paymentStatus' in request.resource.data)
+        && !('documents' in request.resource.data);
+      allow update: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && unchanged('status') && unchanged('isSuspended')
+          && unchanged('rating') && unchanged('reviewCount')
+          && unchanged('plan') && unchanged('priorityLevel')
+          && unchanged('planStatus') && unchanged('planStartedAt')
+          && unchanged('trialStartedAt') && unchanged('trialEndsAt')
+          && unchanged('planEndsAt') && unchanged('monthlyPrice')
+          && unchanged('isLaunchPrice') && unchanged('paymentStatus'));
+      allow delete: if isAdmin();
+
+      match /history/{historyId} {
+        allow read: if isAdmin()
+          || (isAuth()
+            && get(/databases/$(database)/documents/event_providers/$(providerId)).data.ownerId == uid());
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    match /event_provider_documents/{providerId} {
+      allow read: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid());
+      allow create: if isRealUser()
+        && providerId == uid()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.providerId == providerId;
+      allow update: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.providerId == resource.data.providerId);
+      allow delete: if isAdmin();
+    }
+
+    match /event_offers/{offerId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.ownerId == uid())
+        || (isAuth() && resource.data.get('isActive', false) == true);
+      allow create: if isRealUser()
+        && request.resource.data.ownerId == uid()
+        && existsAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId))
+        && getAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.ownerId == uid()
+        && (
+          (getAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.status == 'approved'
+            && getAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.get('isSuspended', false) == false)
+          || (getAfter(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.status == 'pending'
+            && request.resource.data.get('isActive', false) == false)
+        )
+        && request.resource.data.unitPrice is int
+        && request.resource.data.unitPrice >= 0
+        && request.resource.data.availableQuantity is int
+        && request.resource.data.availableQuantity > 0
+        // Correction ciblée "Protection à la création des event_offers" :
+        // aucun champ administratif/tarifaire/priorité ne peut être injecté
+        // par le client à la création (symétrique à event_providers ci-dessus).
+        && !('plan' in request.resource.data)
+        && !('planStatus' in request.resource.data)
+        && !('priorityLevel' in request.resource.data)
+        && !('featuredUntil' in request.resource.data)
+        && !('paymentStatus' in request.resource.data)
+        && !('monthlyPrice' in request.resource.data)
+        && !('isLaunchPrice' in request.resource.data)
+        && !('planStartedAt' in request.resource.data)
+        && !('trialStartedAt' in request.resource.data)
+        && !('trialEndsAt' in request.resource.data)
+        && !('planEndsAt' in request.resource.data);
+      allow update: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.providerId == resource.data.providerId
+          && unchanged('priorityLevel') && unchanged('plan')
+          && unchanged('planStatus') && unchanged('featuredUntil')
+          && request.resource.data.unitPrice is int
+          && request.resource.data.unitPrice >= 0
+          && request.resource.data.availableQuantity is int
+          && request.resource.data.availableQuantity > 0);
+      allow delete: if isAdmin()
+        || (isRealUser() && resource.data.ownerId == uid());
+    }
+
+    match /event_reservations/{reservationId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.clientId == uid())
+        || (isAuth() && uid() in resource.data.providerIds);
+      allow create: if isAuth()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.items.size() <= 50
+        && request.resource.data.totalAmount is int
+        && request.resource.data.totalAmount >= 0
+        && request.resource.data.paymentMethod in ['wallet', 'cash', 'future']
+        && (
+          (request.resource.data.paymentMethod == 'wallet'
+            && request.resource.data.isPaid == true
+            && exists(/databases/$(database)/documents/clients/$(uid()))
+            && getAfter(/databases/$(database)/documents/clients/$(uid())).data.wallet
+              == get(/databases/$(database)/documents/clients/$(uid())).data.wallet
+                - request.resource.data.totalAmount)
+          || (request.resource.data.paymentMethod != 'wallet'
+            && request.resource.data.isPaid == false)
+        );
+      allow update: if isAdmin()
+        || (isAuth() && resource.data.clientId == uid()
+          && resource.data.status in ['pending', 'confirmed']
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status == 'cancelled')
+        || (isRealUser() && uid() in resource.data.providerIds
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in ['confirmed', 'completed', 'cancelled']);
+      allow delete: if isAdmin();
+    }
+
+    match /event_reviews/{reviewId} {
+      allow read: if isAuth();
+      allow create: if isRealUser()
+        && request.resource.data.clientId == uid()
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && exists(/databases/$(database)/documents/event_reservations/$(request.resource.data.reservationId))
+        && get(/databases/$(database)/documents/event_reservations/$(request.resource.data.reservationId)).data.clientId == uid()
+        && get(/databases/$(database)/documents/event_reservations/$(request.resource.data.reservationId)).data.status == 'completed';
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /event_reports/{reportId} {
+      allow read: if isAdmin()
+        || (isAuth() && resource.data.reporterId == uid());
+      allow create: if isAuth()
+        && request.resource.data.reporterId == uid()
+        && request.resource.data.status == 'open';
+      allow update, delete: if isAdmin();
+    }
+
+    // Auto & Moto — Lot 2 : identité publique du vendeur. Aucune coordonnée
+    // exacte n'est autorisée dans ce document.
+    match /vehicle_seller_profiles/{profileId} {
+      function validOptionalProfileString(data, field, maxLength) {
+        return !(field in data)
+          || (data[field] is string
+            && data[field].size() > 0
+            && data[field].size() <= maxLength);
+      }
+
+      function validVehicleSellerProfile(data) {
+        return data.keys().hasAll([
+            'ownerId', 'sellerType', 'displayName', 'phone', 'cityId',
+            'verificationStatus', 'createdAt', 'updatedAt'
+          ])
+          && data.keys().hasOnly([
+            'ownerId', 'sellerType', 'displayName', 'phone', 'cityId',
+            'zoneId', 'profilePhotoUrl', 'shopName', 'businessType',
+            'professionalPhone', 'address', 'locationVisibility', 'logoUrl',
+            'logoStoragePath',
+            'description', 'openingHours', 'verificationStatus', 'createdAt',
+            'updatedAt', 'fcmToken', 'suspended', 'suspensionReason',
+            'suspendedAt'
+          ])
+          && data.ownerId is string && data.ownerId.size() > 0
+          && data.sellerType in ['individual', 'professional']
+          && data.displayName is string
+          && data.displayName.size() >= 2 && data.displayName.size() <= 100
+          && data.phone is string
+          && data.phone.size() >= 8 && data.phone.size() <= 25
+          && data.cityId is string
+          && data.cityId.matches('^[a-z0-9]+(-[a-z0-9]+)*$')
+          && validOptionalProfileString(data, 'zoneId', 100)
+          && (!('zoneId' in data)
+            || data.zoneId.matches('^[a-z0-9]+(-[a-z0-9]+)*$'))
+          && validOptionalProfileString(data, 'profilePhotoUrl', 2000)
+          && validOptionalProfileString(data, 'logoUrl', 2000)
+          && validOptionalProfileString(data, 'logoStoragePath', 500)
+          && (!('logoStoragePath' in data)
+            || data.logoStoragePath.matches(
+              '^vehicle_seller_profiles/' + data.ownerId
+              + '/logo/[^/]+\\.(jpg|png)$'))
+          && validOptionalProfileString(data, 'description', 1000)
+          && validOptionalProfileString(data, 'openingHours', 500)
+          && validOptionalProfileString(data, 'fcmToken', 4096)
+          && (!('fcmToken' in data) || data.fcmToken.size() > 10)
+          && data.verificationStatus
+            in ['unverified', 'pending', 'verified', 'rejected']
+          && data.get('suspended', false) is bool
+          && data.createdAt is timestamp && data.updatedAt is timestamp
+          && (
+            (data.sellerType == 'individual'
+              && !('shopName' in data)
+              && !('businessType' in data)
+              && !('professionalPhone' in data)
+              && !('address' in data)
+              && !('locationVisibility' in data)
+              && !('logoUrl' in data)
+              && !('logoStoragePath' in data)
+              && !('description' in data)
+              && !('openingHours' in data))
+            || (data.sellerType == 'professional'
+              && data.keys().hasAll([
+                'shopName', 'businessType', 'professionalPhone', 'address',
+                'locationVisibility'
+              ])
+              && data.shopName is string
+              && data.shopName.size() >= 2 && data.shopName.size() <= 120
+              && data.businessType in [
+                'dealership', 'garage', 'motorcycle_shop', 'vehicle_rental',
+                'other'
+              ]
+              && data.professionalPhone is string
+              && data.professionalPhone.size() >= 8
+              && data.professionalPhone.size() <= 25
+              && data.address is string
+              && data.address.size() >= 2 && data.address.size() <= 300
+              && data.locationVisibility in ['exact', 'approximate', 'hidden'])
+          );
+      }
+
+      allow read: if isAuth();
+      allow create: if isRealUser()
+        && profileId == uid()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.verificationStatus == 'unverified'
+        && request.resource.data.get('suspended', false) == false
+        && !('suspensionReason' in request.resource.data)
+        && !('suspendedAt' in request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && validVehicleSellerProfile(request.resource.data);
+      allow update: if validVehicleSellerProfile(request.resource.data)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && (
+          isAdmin()
+          || (isRealUser()
+            && profileId == uid()
+            && resource.data.ownerId == uid()
+            && request.resource.data.sellerType == resource.data.sellerType
+            && (request.resource.data.verificationStatus
+                == resource.data.verificationStatus
+              || (resource.data.sellerType == 'professional'
+                && resource.data.verificationStatus in ['unverified', 'rejected']
+                && request.resource.data.verificationStatus == 'pending'))
+            && request.resource.data.get('suspended', false)
+              == resource.data.get('suspended', false)
+            && request.resource.data.get('suspensionReason', null)
+              == resource.data.get('suspensionReason', null)
+            && request.resource.data.get('suspendedAt', null)
+              == resource.data.get('suspendedAt', null))
+        );
+      // Token de notification Auto & Moto : le propriétaire ne peut modifier
+      // que son propre token. Le refresh réutilise NotificationService.
+      allow update: if isRealUser()
+        && profileId == uid()
+        && resource.data.ownerId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['fcmToken'])
+        && request.resource.data.fcmToken is string
+        && request.resource.data.fcmToken.size() > 10
+        && request.resource.data.fcmToken.size() <= 4096;
+      allow delete: if isAdmin();
+    }
+
+    // Coordonnées exactes du magasin : document séparé, jamais public.
+    match /vehicle_seller_private_locations/{locationId} {
+      function validVehicleSellerPrivateLocation(data) {
+        return data.keys().hasAll([
+            'ownerId', 'latitude', 'longitude', 'cityId', 'updatedAt'
+          ])
+          && data.keys().hasOnly([
+            'ownerId', 'latitude', 'longitude', 'addressLabel', 'cityId',
+            'zoneId', 'updatedAt'
+          ])
+          && data.ownerId is string && data.ownerId.size() > 0
+          && data.latitude is number
+          && data.latitude >= -90 && data.latitude <= 90
+          && data.longitude is number
+          && data.longitude >= -180 && data.longitude <= 180
+          && data.cityId is string
+          && data.cityId.matches('^[a-z0-9]+(-[a-z0-9]+)*$')
+          && validOptionalLocationString(data, 'zoneId', 100)
+          && (!('zoneId' in data)
+            || data.zoneId.matches('^[a-z0-9]+(-[a-z0-9]+)*$'))
+          && validOptionalLocationString(data, 'addressLabel', 300)
+          && data.updatedAt is timestamp;
+      }
+
+      function validOptionalLocationString(data, field, maxLength) {
+        return !(field in data)
+          || (data[field] is string
+            && data[field].size() > 0
+            && data[field].size() <= maxLength);
+      }
+
+      function isProfessionalLocationOwner() {
+        return isRealUser()
+          && locationId == uid()
+          && exists(/databases/$(database)/documents/vehicle_seller_profiles/$(uid()))
+          && get(/databases/$(database)/documents/vehicle_seller_profiles/$(uid())).data.ownerId == uid()
+          && get(/databases/$(database)/documents/vehicle_seller_profiles/$(uid())).data.sellerType == 'professional';
+      }
+
+      allow read: if isAdmin()
+        || (isRealUser()
+          && locationId == uid()
+          && resource.data.ownerId == uid());
+      allow create: if isProfessionalLocationOwner()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.updatedAt == request.time
+        && validVehicleSellerPrivateLocation(request.resource.data);
+      allow update: if isProfessionalLocationOwner()
+        && resource.data.ownerId == uid()
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.updatedAt == request.time
+        && validVehicleSellerPrivateLocation(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Auto & Moto — conversations privées liées à une annonce.
+    match /vehicle_conversations/{conversationId} {
+      function vehicleConversationParticipant(data) {
+        return isRealUser()
+          && data.participantIds is list
+          && uid() in data.participantIds
+          && (uid() == data.buyerId || uid() == data.sellerId);
+      }
+
+      function vehicleConversationIdentityUnchanged() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            'lastMessagePreview', 'lastSenderId', 'lastMessageAt', 'updatedAt',
+            'buyerUnreadCount', 'sellerUnreadCount'
+          ]);
+      }
+
+      function validVehicleConversationCreate(data) {
+        let listing = get(/databases/$(database)/documents/vehicle_listings/$(data.listingId)).data;
+        let profile = get(/databases/$(database)/documents/vehicle_seller_profiles/$(data.sellerId)).data;
+        return data.keys().hasOnly([
+            'listingId', 'buyerId', 'sellerId', 'participantIds',
+            'listingTitle', 'listingPrice', 'currency', 'listingImageUrl',
+            'sellerDisplayName', 'sellerType', 'sellerVerificationStatus',
+            'lastMessagePreview', 'lastSenderId', 'buyerUnreadCount',
+            'sellerUnreadCount', 'status', 'createdAt', 'updatedAt',
+            'lastMessageAt'
+          ])
+          && data.keys().hasAll([
+            'listingId', 'buyerId', 'sellerId', 'participantIds',
+            'listingTitle', 'listingPrice', 'currency', 'sellerDisplayName',
+            'sellerType', 'sellerVerificationStatus', 'lastMessagePreview',
+            'lastSenderId', 'buyerUnreadCount', 'sellerUnreadCount', 'status',
+            'createdAt', 'updatedAt', 'lastMessageAt'
+          ])
+          && conversationId == 'vc_' + data.listingId + '_' + data.buyerId
+          && data.buyerId == uid()
+          && data.buyerId != data.sellerId
+          && data.sellerId == listing.sellerId
+          && listing.status == 'active'
+          && profile.get('suspended', false) == false
+          && !vehicleUsersBlocked(data.buyerId, data.sellerId)
+          && data.participantIds is list
+          && data.participantIds.size() == 2
+          && data.buyerId in data.participantIds
+          && data.sellerId in data.participantIds
+          && data.listingTitle == listing.title
+          && data.listingPrice == listing.price
+          && data.currency == listing.currency
+          && data.sellerType == listing.sellerType
+          && data.sellerType == profile.sellerType
+          && data.sellerVerificationStatus == profile.verificationStatus
+          && data.sellerDisplayName == (
+            data.sellerType == 'professional'
+              ? profile.shopName
+              : profile.displayName)
+          && (!('listingImageUrl' in data)
+            || (data.listingImageUrl is string
+              && data.listingImageUrl.size() > 0
+              && data.listingImageUrl.size() <= 2000))
+          && data.lastMessagePreview == ''
+          && data.lastSenderId == null
+          && data.buyerUnreadCount == 0
+          && data.sellerUnreadCount == 0
+          && data.status == 'active'
+          && data.createdAt == request.time
+          && data.updatedAt == request.time
+          && data.lastMessageAt == request.time;
+      }
+
+      function validVehicleMessageMetadataUpdate() {
+        return vehicleConversationIdentityUnchanged()
+          && request.resource.data.lastSenderId == uid()
+          && request.resource.data.lastMessagePreview is string
+          && request.resource.data.lastMessagePreview.size() > 0
+          && request.resource.data.lastMessagePreview.size() <= 161
+          && request.resource.data.lastMessageAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && (
+            (uid() == resource.data.buyerId
+              && request.resource.data.buyerUnreadCount
+                == resource.data.buyerUnreadCount
+              && request.resource.data.sellerUnreadCount
+                == resource.data.sellerUnreadCount + 1)
+            || (uid() == resource.data.sellerId
+              && request.resource.data.sellerUnreadCount
+                == resource.data.sellerUnreadCount
+              && request.resource.data.buyerUnreadCount
+                == resource.data.buyerUnreadCount + 1)
+          );
+      }
+
+      function validVehicleReadReset() {
+        return request.resource.data.updatedAt == request.time
+          && (
+            (uid() == resource.data.buyerId
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['buyerUnreadCount', 'updatedAt'])
+              && request.resource.data.buyerUnreadCount == 0)
+            || (uid() == resource.data.sellerId
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['sellerUnreadCount', 'updatedAt'])
+              && request.resource.data.sellerUnreadCount == 0)
+          );
+      }
+
+      allow read: if vehicleConversationParticipant(resource.data);
+      allow create: if validVehicleConversationCreate(request.resource.data);
+      allow update: if vehicleConversationParticipant(resource.data)
+        && !vehicleUsersBlocked(resource.data.buyerId, resource.data.sellerId)
+        && (validVehicleMessageMetadataUpdate() || validVehicleReadReset());
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if vehicleConversationParticipant(
+          get(/databases/$(database)/documents/vehicle_conversations/$(conversationId)).data
+        );
+        allow create: if isRealUser()
+          && vehicleConversationParticipant(
+            get(/databases/$(database)/documents/vehicle_conversations/$(conversationId)).data
+          )
+          && !vehicleUsersBlocked(
+            get(/databases/$(database)/documents/vehicle_conversations/$(conversationId)).data.buyerId,
+            get(/databases/$(database)/documents/vehicle_conversations/$(conversationId)).data.sellerId)
+          && request.resource.data.keys()
+            .hasOnly(['senderId', 'text', 'type', 'createdAt'])
+          && request.resource.data.keys()
+            .hasAll(['senderId', 'text', 'type', 'createdAt'])
+          && request.resource.data.senderId == uid()
+          && request.resource.data.type == 'text'
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.text.matches('.*\\S.*')
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    // Auto & Moto — Lot 1 : annonces dédiées, sans médias,
+    // géolocalisation précise ni sous-collections.
+    match /vehicle_listings/{listingId} {
+      function validVehicleListing(data) {
+        return data.keys().hasAll([
+            'sellerId', 'sellerType', 'vehicleType', 'offerType', 'title',
+            'description', 'brand', 'model', 'price', 'currency', 'cityId',
+            'cityName', 'condition', 'color', 'rentalWithDriver',
+            'rentalWithoutDriver', 'status', 'createdAt', 'updatedAt'
+          ])
+          && data.keys().hasOnly([
+            'sellerId', 'sellerType', 'vehicleType', 'offerType', 'title',
+            'description', 'brand', 'model', 'year', 'price', 'currency',
+            'cityId', 'cityName', 'condition', 'color', 'mileageKm',
+            'transmission', 'fuelType', 'engineCapacityCc', 'seats',
+            'salePrice', 'rentalPricePerDay', 'rentalPricePerWeek',
+            'depositAmount', 'rentalWithDriver', 'rentalWithoutDriver',
+            'media', 'coverMediaId', 'searchKeywords', 'status', 'createdAt',
+            'updatedAt', 'suspensionReason', 'suspendedAt'
+          ])
+          && data.sellerId is string && data.sellerId.size() > 0
+          && data.sellerType in ['individual', 'professional']
+          && data.vehicleType in ['car', 'motorcycle', 'tricycle']
+          && data.offerType in ['sale', 'rental']
+          && data.title is string
+          && data.title.size() >= 3 && data.title.size() <= 120
+          && data.description is string
+          && data.description.size() >= 10 && data.description.size() <= 3000
+          && data.brand is string
+          && data.brand.size() > 0 && data.brand.size() <= 80
+          && data.model is string
+          && data.model.size() > 0 && data.model.size() <= 80
+          && (!('year' in data) || (data.year is int
+            && data.year >= 1886 && data.year <= 2100))
+          && data.condition in ['new', 'used']
+          && data.color is string
+          && data.color.size() > 0 && data.color.size() <= 60
+          && (!('mileageKm' in data)
+            || (data.mileageKm is int && data.mileageKm >= 0))
+          && (data.condition != 'used'
+            || ('mileageKm' in data && data.mileageKm is int
+              && data.mileageKm >= 0))
+          && (!('transmission' in data)
+            || data.transmission in ['manual', 'automatic'])
+          && (!('fuelType' in data)
+            || data.fuelType in ['petrol', 'diesel', 'electric', 'hybrid', 'other'])
+          && (!('engineCapacityCc' in data)
+            || (data.engineCapacityCc is int && data.engineCapacityCc > 0))
+          && (!('seats' in data) || (data.seats is int && data.seats > 0))
+          && data.rentalWithDriver is bool
+          && data.rentalWithoutDriver is bool
+          && (!('media' in data) || (data.media is list && data.media.size() <= 9))
+          && (!('coverMediaId' in data) || (data.coverMediaId is string
+            && data.coverMediaId.size() > 0 && 'media' in data
+            && data.media.size() > 0))
+          && (!('searchKeywords' in data)
+            || (data.searchKeywords is list
+              && data.searchKeywords.size() > 0
+              && data.searchKeywords.size() <= 100))
+          && data.price is int && data.price > 0
+          && ((data.offerType == 'sale'
+              && 'salePrice' in data && data.salePrice is int
+              && data.salePrice > 0 && data.price == data.salePrice
+              && !('rentalPricePerDay' in data)
+              && !('rentalPricePerWeek' in data)
+              && !('depositAmount' in data)
+              && data.rentalWithDriver == false
+              && data.rentalWithoutDriver == false)
+            || (data.offerType == 'rental'
+              && !('salePrice' in data)
+              && 'rentalPricePerDay' in data
+              && data.rentalPricePerDay is int
+              && data.rentalPricePerDay > 0
+              && data.price == data.rentalPricePerDay
+              && (!('rentalPricePerWeek' in data)
+                || (data.rentalPricePerWeek is int
+                  && data.rentalPricePerWeek > 0))
+              && (!('depositAmount' in data)
+                || (data.depositAmount is int && data.depositAmount >= 0))
+              && (data.rentalWithDriver == true
+                || data.rentalWithoutDriver == true)))
+          && ((data.vehicleType == 'car'
+              && 'transmission' in data && 'fuelType' in data
+              && 'seats' in data && !('engineCapacityCc' in data))
+            || (data.vehicleType == 'motorcycle'
+              && 'engineCapacityCc' in data
+              && !('transmission' in data) && !('fuelType' in data)
+              && !('seats' in data))
+            || (data.vehicleType == 'tricycle'
+              && 'engineCapacityCc' in data
+              && !('transmission' in data) && !('fuelType' in data)))
+          && data.currency == 'XOF'
+          && data.cityId is string
+          && data.cityId.matches('^[a-z0-9]+(-[a-z0-9]+)*$')
+          && data.cityName is string
+          && data.cityName.size() >= 2 && data.cityName.size() <= 100
+          && data.status
+            in ['draft', 'active', 'sold', 'rented', 'archived', 'suspended']
+          && (!('suspensionReason' in data)
+            || (data.suspensionReason is string
+              && data.suspensionReason.size() > 0
+              && data.suspensionReason.size() <= 300))
+          && (!('suspendedAt' in data) || data.suspendedAt is timestamp)
+          && (data.status != 'sold' || data.offerType == 'sale')
+          && (data.status != 'rented' || data.offerType == 'rental')
+          && data.createdAt is timestamp
+          && data.updatedAt is timestamp;
+      }
+
+      function ownerStatusTransitionAllowed() {
+        return request.resource.data.status == resource.data.status
+          || (resource.data.status == 'draft'
+            && request.resource.data.status in ['active', 'archived'])
+          || (resource.data.status == 'active'
+            && request.resource.data.status in ['sold', 'rented', 'archived']);
+      }
+
+      allow read: if isAuth() && (
+        resource.data.status == 'active'
+        || resource.data.sellerId == uid()
+        || isAdmin()
+      );
+      allow create: if validVehicleListing(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && (
+          (isRealUser()
+            && request.resource.data.sellerId == uid()
+            && request.resource.data.status in ['draft', 'active'])
+            && !exists(/databases/$(database)/documents/vehicle_seller_suspensions/$(uid()))
+          || isAdmin()
+        );
+      allow update: if validVehicleListing(request.resource.data)
+        && request.resource.data.sellerId == resource.data.sellerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && (
+          isAdmin()
+          || (isRealUser()
+            && resource.data.sellerId == uid()
+            && resource.data.status != 'suspended'
+            && !exists(/databases/$(database)/documents/vehicle_seller_suspensions/$(uid()))
+            && unchanged('suspensionReason')
+            && unchanged('suspendedAt')
+            && ownerStatusTransitionAllowed())
+        );
+      // La suppression client est volontairement remplacée par l'archivage.
+      allow delete: if isAdmin();
+    }
+
+    // Marqueur écrit uniquement par la Function de modération. Il évite une
+    // lecture/validation coûteuse du profil sur chaque écriture d'annonce.
+    match /vehicle_seller_suspensions/{sellerId} {
+      allow read, write: if false;
+    }
+
+    // Signalements Auto & Moto : identifiant déterministe pour dédupliquer
+    // cible + auteur. Seul l'admin peut les lire et les modérer.
+    match /vehicle_reports/{reportId} {
+      function validVehicleReport(data) {
+        let listingPath = /databases/$(database)/documents/vehicle_listings/$(data.targetId);
+        let sellerPath = /databases/$(database)/documents/vehicle_seller_profiles/$(data.targetId);
+        return data.keys().hasAll([
+            'targetType', 'targetId', 'sellerId', 'reporterUid', 'reason',
+            'status', 'createdAt'
+          ])
+          && data.keys().hasOnly([
+            'targetType', 'targetId', 'sellerId', 'reporterUid', 'reason',
+            'details', 'status', 'createdAt'
+          ])
+          && data.targetType in ['listing', 'seller']
+          && data.targetId is string && data.targetId.size() > 0
+          && data.sellerId is string && data.sellerId.size() > 0
+          && data.reporterUid == uid()
+          && data.reporterUid != data.sellerId
+          && data.reason is string
+          && data.reason.size() > 0 && data.reason.size() <= 80
+          && (!('details' in data)
+            || (data.details is string
+              && data.details.size() > 0 && data.details.size() <= 300))
+          && data.status == 'pending'
+          && data.createdAt == request.time
+          && reportId == data.targetType + '_' + data.targetId + '_' + uid()
+          && ((data.targetType == 'listing'
+              && exists(listingPath)
+              && get(listingPath).data.sellerId == data.sellerId)
+            || (data.targetType == 'seller'
+              && data.targetId == data.sellerId
+              && exists(sellerPath)
+              && get(sellerPath).data.ownerId == data.sellerId));
+      }
+
+      allow create: if isRealUser() && validVehicleReport(request.resource.data);
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // Blocages privés : aucun document parent lisible, un document par UID.
+    match /vehicle_user_blocks/{ownerUid} {
+      allow read, write: if false;
+      match /blocked/{blockedUid} {
+        allow read: if isRealUser() && ownerUid == uid();
+        allow create: if isRealUser()
+          && ownerUid == uid()
+          && blockedUid != uid()
+          && request.resource.data.keys()
+            .hasOnly(['ownerUid', 'blockedUid', 'createdAt'])
+          && request.resource.data.ownerUid == uid()
+          && request.resource.data.blockedUid == blockedUid
+          && request.resource.data.createdAt == request.time;
+        allow update: if false;
+        allow delete: if isRealUser() && ownerUid == uid();
+      }
+    }
+
+    // Favoris Auto & Moto privés et scalables : un document par annonce,
+    // sous le seul UID propriétaire. Le snapshot évite les lectures N+1.
+    match /vehicle_favorites/{userId} {
+      allow read, write: if false;
+
+      match /items/{listingId} {
+        allow read: if isRealUser() && userId == uid();
+        allow create: if isRealUser()
+          && userId == uid()
+          && listingId == request.resource.data.listingId
+          && request.resource.data.userId == uid()
+          && request.resource.data.keys().hasOnly([
+            'userId', 'listingId', 'listingSnapshot', 'createdAt'
+          ])
+          && request.resource.data.listingSnapshot is map
+          && request.resource.data.createdAt == request.time
+          && exists(/databases/$(database)/documents/vehicle_listings/$(listingId))
+          && get(/databases/$(database)/documents/vehicle_listings/$(listingId)).data.status
+            == 'active';
+        allow update: if false;
+        allow delete: if isRealUser() && userId == uid();
+      }
+    }
+
+    match /event_chats/{chatId} {
+      allow read: if isAdmin()
+        || (isAuth() && uid() in resource.data.participantIds);
+        allow create: if isAuth()
+          && uid() in request.resource.data.participantIds
+          && request.resource.data.participantIds.size() == 2
+          && request.resource.data.clientId == uid()
+          && exists(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId))
+          && get(/databases/$(database)/documents/event_providers/$(request.resource.data.providerId)).data.ownerId
+              in request.resource.data.participantIds;
+      allow update: if isAuth() && uid() in resource.data.participantIds
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['lastMessage', 'lastSenderId', 'updatedAt'])
+          && (
+            request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['updatedAt'])
+            || (
+              request.resource.data.lastSenderId == uid()
+              && request.resource.data.lastMessage is string
+              && request.resource.data.lastMessage.size() <= 2000
+            )
+          );
+      allow delete: if isAdmin();
+      match /messages/{messageId} {
+        allow read: if isAdmin()
+          || (isAuth()
+            && uid() in get(/databases/$(database)/documents/event_chats/$(chatId)).data.participantIds);
+        allow create: if isAuth()
+          && request.resource.data.senderId == uid()
+          && request.resource.data.keys()
+              .hasOnly(['senderId', 'text', 'createdAt'])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000
+          && uid() in get(/databases/$(database)/documents/event_chats/$(chatId)).data.participantIds;
+        allow update, delete: if false;
+      }
+    }
+  }
+}

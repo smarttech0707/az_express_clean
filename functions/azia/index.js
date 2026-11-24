@@ -1,14 +1,22 @@
 'use strict';
 
 const crypto = require('crypto');
-const { getClient, MODEL, MAX_TOKENS, SYSTEM_PROMPT_BLOCKS } = require('./claudeClient');
+const { SYSTEM_PROMPT } = require('./systemPrompt');
+const { textBlock, toolResultBlock } = require('./canonicalHistory');
+const { createToolExecutionLedger } = require('./toolExecutionLedger');
+const { createPersistentToolLedger, isPersistentTool } = require('./persistentToolLedger');
+const MAX_TOKENS = 1024;
 const { getRecentMessages, appendMessage, clearHistory } = require('./conversationStore');
 const { buildRegistry } = require('./toolRegistry');
 const { buildConfirmAction, buildCleanupScheduler } = require('./pendingActions');
+const { pilotLightOptions } = require('../pilotCap');
 const { createAIProviderService } = require('./AIProviderService');
+const { createPolicyEngine } = require('./policyEngine');
+const { createAiGateway } = require('./aiGateway');
 const { buildUserContext } = require('./contextBuilder');
 const { buildTurnResponse } = require('./responseBuilder');
 const { buildReminderScheduler } = require('./reminderScheduler');
+const { CONSENT_VERSION, getConsent, isConsentValid, setConsent, consentedRouterProviders } = require('./consent');
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_TOOL_TURNS     = 6; // plafond d'aller-retours outils par message utilisateur
@@ -23,44 +31,31 @@ const ALLOWED_IMAGE_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'ima
 module.exports = function createAzIa({
   db, admin, onCall, onSchedule, checkRateLimit, logAudit, HttpsError,
   axios, feexpayOperatorCode, FEEXPAY_TOKEN, FEEXPAY_API_URL, WEBHOOK_URL,
-  sendToToken,
+  azIaChatSecrets = [], aiConfirmActionSecrets = [],
+  sendToToken, providers,
 }) {
 
-  // Master Prompt 108 — orchestrateur multi-fournisseurs IA. La boucle
-  // d'appel d'outils Claude ci-dessous n'est PAS routée à travers ce service
-  // (voir en-tête d'AIProviderService.js pour pourquoi) ; seul son
-  // recordUsage() est réutilisé pour journaliser l'appel Claude déjà
-  // effectué dans ai_usage/ai_logs/ai_daily_stats, en plus (pas à la place)
-  // de logAiObservability() déjà existant.
-  const aiProviderService = createAIProviderService({ db, admin });
+  const aiProviderService = createAIProviderService({ db, admin, providers });
 
   const tools = buildRegistry({
     db, admin, logAudit, checkRateLimit, HttpsError,
     axios, feexpayOperatorCode, FEEXPAY_TOKEN, FEEXPAY_API_URL, WEBHOOK_URL,
   });
+  const policyEngine = createPolicyEngine({ tools });
+  const aiGateway = createAiGateway({ providerService: aiProviderService, policyEngine });
   const toolsByName = new Map(tools.map(t => [t.name, t]));
-  const toolSchemas = tools.map(t => ({
-    name:         t.name,
-    description:  t.description,
-    input_schema: t.input_schema,
-  }));
-  // Point de cache (prompt caching Anthropic) sur la dernière définition
-  // d'outil — les schémas d'outils sont identiques à chaque appel, donc mis
-  // en cache au même titre que SYSTEM_PROMPT_BLOCKS (voir claudeClient.js).
-  if (toolSchemas.length > 0) {
-    toolSchemas[toolSchemas.length - 1].cache_control = { type: 'ephemeral' };
-  }
-
-  // Exécute un outil et transforme toute erreur en résultat "is_error" pour
-  // Claude plutôt que de faire échouer toute la requête — une commande
-  // introuvable ou un solde inaccessible doit rester une réponse conversationnelle.
-  async function executeTool(uid, name, input, conversationId) {
+  const toolSchemas = policyEngine.getToolSchemas();
+  async function executeTool(uid, name, input, conversationId, location = null) {
+    const config = await aiProviderService.getConfig();
+    if (!policyEngine.canExecute(name, config)) {
+      return { error: `Outil non autorise : ${name}` };
+    }
     const tool = toolsByName.get(name);
     if (!tool) {
       return { error: `Outil inconnu : ${name}` };
     }
     try {
-      return await tool.handler(uid, input || {}, { conversationId });
+      return await tool.handler(uid, input || {}, { conversationId, location });
     } catch (err) {
       return { error: err.message || 'Erreur inconnue' };
     }
@@ -86,12 +81,49 @@ module.exports = function createAzIa({
     region:         'europe-west1',
     timeoutSeconds: 120,
     memory:         '512MiB',
+    // Explicites : un redéploiement remet à zéro les options non déclarées, et un
+    // maxInstances par défaut ferait exploser le quota CPU Cloud Run (valeurs = prod).
+    cpu:            1,
+    maxInstances:   3,
+    secrets:        azIaChatSecrets,
   }, async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Vous devez être connecté');
     }
     const uid = request.auth.uid;
     const startTime = Date.now();
+
+    // Consentement au partage avec Anthropic / Google (App Store 5.1.1(i)).
+    // Actions dédiées : aucune donnée n'est envoyée à un modèle ici.
+    const consentAction = request.data?.consentAction;
+    if (consentAction !== undefined) {
+      if (!['status', 'grant', 'revoke'].includes(consentAction)) {
+        throw new HttpsError('invalid-argument', 'Action de consentement inconnue');
+      }
+      await checkRateLimit(uid, 'ai_consent', 20, 3600);
+      if (consentAction === 'status') {
+        const c = await getConsent(db, uid);
+        return { success: true, consent: { granted: isConsentValid(c), version: CONSENT_VERSION } };
+      }
+      const outcome = await setConsent({
+        db, admin, logAudit, uid, granted: consentAction === 'grant',
+        version: Number(request.data?.consentVersion),
+      });
+      if (!outcome.ok) {
+        throw new HttpsError('failed-precondition', 'APP_UPDATE_REQUIRED');
+      }
+      return { success: true, consent: { granted: consentAction === 'grant', version: CONSENT_VERSION } };
+    }
+
+    // Garde serveur : sans consentement valide (absent, refusé, retiré, version
+    // périmée, ancienne app), ni historique, ni contexte, ni fournisseur n'est
+    // touché. Seule AZ IA est bloquée.
+    const consent = await getConsent(db, uid);
+    if (!isConsentValid(consent)) {
+      throw new HttpsError('failed-precondition', 'CONSENT_REQUIRED');
+    }
+    // Fournisseurs auxquels ce consentement permet de transmettre des données (départ ET repli sont contrôlés).
+    const consentedProviders = consentedRouterProviders(consent);
 
     const message = String(request.data?.message || '').trim();
     if (!message) {
@@ -101,13 +133,7 @@ module.exports = function createAzIa({
       throw new HttpsError('invalid-argument', `Message trop long (${MAX_MESSAGE_LENGTH} caractères max)`);
     }
 
-    // Vision (Master Prompt 113, section 13) — image jointe au message
-    // (ordonnance, colis, produit, reçu...), attachée nativement au premier
-    // bloc du message utilisateur envoyé à Claude. Pas un outil séparé ni un
-    // appel routé via AIProviderService.generateVision() : la frontière déjà
-    // actée (Prompt 108) est que la boucle d'outils Claude reste spécifique à
-    // Claude — l'image fait donc partie du même appel messages.create(), pas
-    // d'un chemin parallèle.
+    // Images stay in the same canonical history as text and tool results.
     let imageBlock = null;
     const imageBase64 = request.data?.imageBase64;
     if (imageBase64) {
@@ -118,7 +144,7 @@ module.exports = function createAzIa({
       if (String(imageBase64).length > MAX_IMAGE_BASE64_LENGTH) {
         throw new HttpsError('invalid-argument', 'Image trop volumineuse.');
       }
-      imageBlock = { type: 'image', source: { type: 'base64', media_type: mediaType, data: String(imageBase64) } };
+      imageBlock = { type: 'image', mediaType, data: String(imageBase64) };
     }
 
     // Localisation GPS (Master Prompt 113, section 3) — transmise par le
@@ -142,21 +168,15 @@ module.exports = function createAzIa({
     // cette invocation) — suffisant pour le contexte conversationnel futur,
     // sans avoir à rejouer la mécanique d'outils entre deux appels.
     const history = await getRecentMessages(db, uid, conversationId);
-    const userContent = imageBlock ? [imageBlock, { type: 'text', text: message }] : message;
-    const messages = [...history, { role: 'user', content: userContent }];
+    const userContent = imageBlock ? [imageBlock, textBlock(message)] : [textBlock(message)];
+    const messages = [...history.map(m => ({ role: m.role, content: [textBlock(m.content)] })),
+      { role: 'user', content: userContent }];
+    const ledger = createToolExecutionLedger();
+    // Idempotence persistante inter-invocations (LOT GEMINI 3).
+    const persistentLedger = createPersistentToolLedger({ db, admin });
 
-    // ContextManager (Master Prompt 113) — bloc système dynamique, non
-    // mis en cache (contrairement à SYSTEM_PROMPT_BLOCKS ci-dessous, qui lui
-    // est strictement identique à chaque appel) puisqu'il varie par
-    // utilisateur/session. Coût Firestore : 1-2 lectures ciblées, avant tout
-    // appel Claude — remplace ce qui aurait sinon nécessité un aller-retour
-    // d'outil dédié pour la même information (section 18 du prompt).
     const userContextText = await buildUserContext(db, uid, safeLocation);
-    const system = userContextText
-      ? [...SYSTEM_PROMPT_BLOCKS, { type: 'text', text: userContextText }]
-      : SYSTEM_PROMPT_BLOCKS;
-
-    const anthropic = getClient();
+    const system = [textBlock(SYSTEM_PROMPT), ...(userContextText ? [textBlock(userContextText)] : [])];
 
     const toolsUsed = [];
     // Réponses structurées (Master Prompt 117) — trace de chaque appel
@@ -167,21 +187,26 @@ module.exports = function createAzIa({
     let turnsTaken       = 0;
     let inputTokens       = 0;
     let outputTokens      = 0;
+    let providerUsed      = null;
+    let modelUsed         = null;
 
-    async function callClaude(withTools) {
+    async function callModel(withTools) {
       try {
-        const response = await anthropic.messages.create({
-          model:      MODEL,
-          max_tokens: MAX_TOKENS,
-          system,
+        const turn = await aiGateway.generateTurn({
+          systemPrompt: system,
           messages,
-          ...(withTools ? { tools: toolSchemas } : {}),
-        });
-        inputTokens  += response.usage?.input_tokens  || 0;
-        outputTokens += response.usage?.output_tokens || 0;
-        return response;
+          tools: withTools ? toolSchemas : [],
+          maxTokens: MAX_TOKENS,
+          canonicalHistory: true,
+          turnIndex: turnsTaken,
+        }, { uid, conversationId, consentedProviders });
+        inputTokens += turn.usage.inputTokens;
+        outputTokens += turn.usage.outputTokens;
+        providerUsed = turn.provider || providerUsed;
+        modelUsed = turn.model || modelUsed;
+        return turn;
       } catch (err) {
-        console.error('azIaChat Claude error:', err.message);
+        console.error('azIaChat gateway error:', err.message);
         throw new HttpsError('internal', "AZ IA rencontre un problème. Réessayez dans un instant.");
       }
     }
@@ -192,30 +217,46 @@ module.exports = function createAzIa({
     try {
       for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
         turnsTaken = turn + 1;
-        const response = await callClaude(true);
-        messages.push({ role: 'assistant', content: response.content });
+        const response = await callModel(true);
+        for (const call of response.toolCalls) {
+          call.canonicalCallId = ledger.identify(call);
+          const block = response.assistantMessage?.find(b => b.type === 'tool_call' && b.id === call.id);
+          if (block) block.canonicalCallId = call.canonicalCallId;
+        }
+        messages.push({ role: 'assistant', content: response.assistantMessage });
 
-        const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+        const toolUseBlocks = response.toolCalls;
         if (toolUseBlocks.length === 0) {
-          finalText = response.content
-            .filter(b => b.type === 'text')
-            .map(b => b.text)
-            .join('\n')
-            .trim();
+          finalText = response.text;
           break;
         }
 
         const toolResults = [];
         for (const block of toolUseBlocks) {
-          toolsUsed.push(block.name);
-          const result = await executeTool(uid, block.name, block.input, conversationId);
+          // Deux couches complémentaires :
+          //   1. `ledger` (mémoire) déduplique à l'intérieur de CETTE invocation ;
+          //   2. `persistentLedger` (Firestore) déduplique ENTRE invocations —
+          //      retry client, double clic, reconnexion, redémarrage de
+          //      fonction, instances concurrentes.
+          // Seuls les outils à effet durable passent par la couche persistante :
+          // une simple lecture n'a rien à réserver.
+          const { result } = await ledger.execute(block,
+            () => {
+              toolsUsed.push(block.name);
+              const tool = toolsByName.get(block.name);
+              if (!isPersistentTool(tool)) {
+                return executeTool(uid, block.name, block.input, conversationId, safeLocation);
+              }
+              return persistentLedger.execute(
+                { uid, conversationId, name: block.name, input: block.input },
+                () => executeTool(uid, block.name, block.input, conversationId, safeLocation),
+              ).then((outcome) => outcome.result);
+            });
           toolCalls.push({ name: block.name, input: block.input, result });
-          toolResults.push({
-            type:        'tool_result',
-            tool_use_id: block.id,
-            content:     JSON.stringify(result),
-            is_error:    !!(result && result.error),
-          });
+          toolResults.push(toolResultBlock({
+            toolCallId: block.id, canonicalCallId: block.canonicalCallId, name: block.name, content: result,
+            isError: !!(result && result.error),
+          }));
         }
         messages.push({ role: 'user', content: toolResults });
 
@@ -227,8 +268,8 @@ module.exports = function createAzIa({
       if (finalText === null) {
         // Plafond d'outils atteint sans réponse texte — un dernier appel sans
         // outils force une clôture en langage naturel plutôt qu'une boucle infinie.
-        const closing = await callClaude(false);
-        finalText = closing.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+        const closing = await callModel(false);
+        finalText = closing.text;
       }
       finalText = finalText || "Désolé, je n'ai pas pu générer de réponse.";
 
@@ -240,9 +281,9 @@ module.exports = function createAzIa({
         toolsUsed, turnCount: turnsTaken, inputTokens, outputTokens, hitTurnCap,
       });
       aiProviderService.recordUsage({
-        uid, provider: 'claude', model: MODEL,
+        uid, provider: providerUsed, model: modelUsed,
         inputTokens, outputTokens, responseTimeMs: Date.now() - startTime,
-        success: true,
+        success: true, conversationId, toolUsed: toolsUsed,
       });
 
       // Réponse structurée (Master Prompt 117) — `amount` n'est pas toujours
@@ -273,15 +314,19 @@ module.exports = function createAzIa({
         errorCode: err.code || 'internal', errorMessage: err.message || null,
       });
       aiProviderService.recordUsage({
-        uid, provider: 'claude', model: MODEL,
+        uid, provider: providerUsed, model: modelUsed,
         inputTokens, outputTokens, responseTimeMs: Date.now() - startTime,
-        success: false, errorMessage: err.message || null,
+        success: false, errorMessage: err.message || null, conversationId, toolUsed: toolsUsed,
       });
       throw err;
     }
   });
 
-  const aiConfirmAction = buildConfirmAction({ db, admin, onCall, logAudit, HttpsError, toolsByName });
+  const aiConfirmAction = buildConfirmAction({
+    db, admin, onCall, logAudit, HttpsError, toolsByName,
+    secrets: aiConfirmActionSecrets,
+    options: pilotLightOptions(),
+  });
   const aiCleanupExpiredPendingActions = buildCleanupScheduler({ db, admin, onSchedule });
   // Rappels (Master Prompt 118) — même famille que le scheduler ci-dessus.
   const aiSendDueReminders = buildReminderScheduler({ db, admin, onSchedule, sendToToken });

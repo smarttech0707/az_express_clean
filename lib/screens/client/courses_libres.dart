@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/order_model.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../../services/permission_primer.dart';
 
 class CoursesLibres extends StatefulWidget {
   const CoursesLibres({super.key});
@@ -42,14 +43,16 @@ class _CoursesLibresState extends State<CoursesLibres> {
     final budget = int.tryParse(budgetText);
     if (budget == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Budget invalide"), backgroundColor: Colors.red),
+        const SnackBar(
+            content: Text("Budget invalide"), backgroundColor: Colors.red),
       );
       return;
     }
     if (budget < 500) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Budget minimum : 500 FCFA (frais de livraison inclus)"),
+          content:
+              Text("Budget minimum : 500 FCFA (frais de livraison inclus)"),
           backgroundColor: Colors.orange,
         ),
       );
@@ -59,7 +62,7 @@ class _CoursesLibresState extends State<CoursesLibres> {
     setState(() => _sending = true);
 
     try {
-      final perm = await Geolocator.requestPermission();
+      final perm = await PermissionPrimer.requestLocation(context: context);
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
         if (mounted) {
@@ -72,20 +75,21 @@ class _CoursesLibresState extends State<CoursesLibres> {
       }
 
       final position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.high));
 
       final user = FirebaseAuth.instance.currentUser;
 
       final order = OrderModel(
-        id:          const Uuid().v4(),
+        id: const Uuid().v4(),
         description: desc,
-        budget:      budget,
-        status:      "pending",
-        latitude:    position.latitude,
-        longitude:   position.longitude,
-        type:        "shopping",
-        clientId:    user?.uid,
-        isPaid:      false,
+        budget: budget,
+        status: "pending",
+        latitude: position.latitude,
+        longitude: position.longitude,
+        type: "shopping",
+        clientId: user?.uid,
+        isPaid: false,
       );
 
       await FirestoreService().createOrder(order);
@@ -133,7 +137,7 @@ class _CoursesLibresState extends State<CoursesLibres> {
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: Theme.of(context).colorScheme.surface,
                 prefixIcon: const Icon(Icons.shopping_basket),
               ),
             ),
@@ -143,10 +147,11 @@ class _CoursesLibresState extends State<CoursesLibres> {
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
                 labelText: "Budget total (minimum 500 FCFA)",
-                hintText:  "Ex: 1000 (livraison + achats)",
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                filled:     true,
-                fillColor:  Colors.white,
+                hintText: "Ex: 1000 (livraison + achats)",
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                filled: true,
+                fillColor: Theme.of(context).colorScheme.surface,
                 prefixIcon: const Icon(Icons.account_balance_wallet),
                 suffixText: "FCFA",
               ),

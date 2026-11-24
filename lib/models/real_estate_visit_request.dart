@@ -25,7 +25,8 @@ class RealEstateVisitRequest {
     this.createdAt,
   });
 
-  factory RealEstateVisitRequest.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory RealEstateVisitRequest.fromDoc(
+      DocumentSnapshot<Map<String, dynamic>> doc) {
     final d = doc.data() ?? {};
     return RealEstateVisitRequest(
       id: doc.id,

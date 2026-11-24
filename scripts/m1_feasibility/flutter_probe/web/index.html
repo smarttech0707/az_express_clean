@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="/">
+  <meta charset="UTF-8">
+  <title>m1 probe</title>
+</head>
+<body>
+  <!-- Le SDK JS 12.15.0 (version supportée par firebase_core_web 3.9.0) est servi LOCALEMENT depuis node_modules/firebase
+       du dépôt : même mécanisme que firebase_core_web (window.firebase_<service> = module importé), sans gstatic.
+       Flutter n'est démarré qu'une fois les modules en place. -->
+  <script type="module">
+    const log = (m) => fetch('/log?m=' + encodeURIComponent(m)).catch(() => {});
+    try {
+      const [core, auth, firestore, functions] = await Promise.all([
+        import('/_fb/firebase-app.js'), import('/_fb/firebase-auth.js'),
+        import('/_fb/firebase-firestore.js'), import('/_fb/firebase-functions.js'),
+      ]);
+      window.firebase_core = core;
+      window.firebase_auth = auth;
+      window.firebase_firestore = firestore;
+      window.firebase_functions = functions;
+      // L'émulateur Auth doit être branché AVANT la restauration de session (sinon le SDK valide la session persistée
+      // auprès des vrais serveurs Google avant que Flutter n'appelle useAuthEmulator). Mêmes options que firebase_auth_web.
+      const app = core.initializeApp({ apiKey: 'fake-api-key', appId: '1:1:web:m1probe', messagingSenderId: '1', projectId: 'demo-m1-feasibility' });
+      const a = auth.initializeAuth(app, {
+        errorMap: auth.debugErrorMap,
+        persistence: [auth.indexedDBLocalPersistence, auth.browserLocalPersistence, auth.browserSessionPersistence],
+        popupRedirectResolver: auth.browserPopupRedirectResolver,
+      });
+      auth.connectAuthEmulator(a, 'http://127.0.0.1:29199', { disableWarnings: true });
+      await log('modules JS locaux chargés, Auth branché sur l\'émulateur avant Flutter');
+      const s = document.createElement('script');
+      s.src = 'flutter_bootstrap.js';
+      s.async = true;
+      document.body.appendChild(s);
+    } catch (e) {
+      await log('ERREUR chargement modules: ' + e);
+    }
+  </script>
+</body>
+</html>

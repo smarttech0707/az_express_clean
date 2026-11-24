@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../theme/az_ia_theme.dart';
 import 'az_ia_message_parser.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -19,7 +20,8 @@ List<InlineSpan> _inlineSpans(String text, TextStyle base) {
   var lastEnd = 0;
   for (final match in pattern.allMatches(text)) {
     if (match.start > lastEnd) {
-      spans.add(TextSpan(text: text.substring(lastEnd, match.start), style: base));
+      spans.add(
+          TextSpan(text: text.substring(lastEnd, match.start), style: base));
     }
     spans.add(TextSpan(
       text: match.group(1),
@@ -36,7 +38,10 @@ List<InlineSpan> _inlineSpans(String text, TextStyle base) {
 class AzIaRichBlocks extends StatelessWidget {
   final List<AzIaBlock> blocks;
   final Color textColor;
-  const AzIaRichBlocks({super.key, required this.blocks, this.textColor = Colors.black87});
+  const AzIaRichBlocks(
+      {super.key,
+      required this.blocks,
+      this.textColor = AzIaTheme.textPrimary});
 
   @override
   Widget build(BuildContext context) {
@@ -55,18 +60,30 @@ class AzIaRichBlocks extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.only(bottom: 6, top: 2),
           child: Text.rich(
-            TextSpan(children: _inlineSpans(block.text, TextStyle(
-              color: textColor, fontSize: 16, fontWeight: FontWeight.w800, height: 1.3,
-            ))),
+            TextSpan(
+                children: _inlineSpans(
+                    block.text,
+                    TextStyle(
+                      color: textColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      height: 1.3,
+                    ))),
           ),
         );
       case AzIaBlockType.subheading:
         return Padding(
           padding: const EdgeInsets.only(bottom: 4, top: 4),
           child: Text.rich(
-            TextSpan(children: _inlineSpans(block.text, TextStyle(
-              color: textColor, fontSize: 14, fontWeight: FontWeight.w700, height: 1.3,
-            ))),
+            TextSpan(
+                children: _inlineSpans(
+                    block.text,
+                    TextStyle(
+                      color: textColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ))),
           ),
         );
       case AzIaBlockType.divider:
@@ -83,15 +100,23 @@ class AzIaRichBlocks extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 6, right: 8),
                 child: Container(
-                  width: 5, height: 5,
-                  decoration: BoxDecoration(color: textColor.withValues(alpha: 0.6), shape: BoxShape.circle),
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(
+                      color: textColor.withValues(alpha: 0.6),
+                      shape: BoxShape.circle),
                 ),
               ),
               Expanded(
                 child: Text.rich(
-                  TextSpan(children: _inlineSpans(block.text, TextStyle(
-                    color: textColor, fontSize: 13.5, height: 1.4,
-                  ))),
+                  TextSpan(
+                      children: _inlineSpans(
+                          block.text,
+                          TextStyle(
+                            color: textColor,
+                            fontSize: 13.5,
+                            height: 1.4,
+                          ))),
                 ),
               ),
             ],
@@ -101,12 +126,16 @@ class AzIaRichBlocks extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.only(bottom: 4),
           child: Text.rich(
-            TextSpan(children: _inlineSpans(block.text, TextStyle(
-              color: textColor, fontSize: 14, height: 1.45,
-            ))),
+            TextSpan(
+                children: _inlineSpans(
+                    block.text,
+                    TextStyle(
+                      color: textColor,
+                      fontSize: 14,
+                      height: 1.45,
+                    ))),
           ),
         );
     }
   }
 }
-

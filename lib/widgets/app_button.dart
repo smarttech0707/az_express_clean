@@ -50,6 +50,13 @@ class _AppButtonState extends State<AppButton>
   late final AnimationController _ctrl;
   late final Animation<double> _scale;
 
+  // LOT 2 Premium V1 — état "pressé" perceptible (au-delà du seul
+  // scale-down déjà existant) : le fond s'assombrit visiblement pendant la
+  // pression, comme un vrai bouton physique, sans dépendre d'un `InkWell`
+  // (ce widget reste construit sur `Listener`/`GestureDetector`, pas de
+  // ripple Material ici).
+  bool _pressed = false;
+
   bool get _enabled => widget.onPressed != null && !widget.loading;
 
   @override
@@ -70,22 +77,37 @@ class _AppButtonState extends State<AppButton>
   _ButtonColors _colorsFor(AppButtonVariant v, bool isDark) {
     switch (v) {
       case AppButtonVariant.primary:
+        // Léger dégradé orange (subtil, 2 tons très proches) — brief LOT 2 :
+        // "léger gradient orange possible seulement si subtil".
+        // Les deux tons restent ≥ 4,6:1 avec le texte blanc (WCAG AA) : le
+        // orange vif de marque (2,9:1) ne peut pas porter ce texte.
         return const _ButtonColors(
-          background: AppColors.primary,
+          background: AppColors.primaryAction,
           foreground: Colors.white,
           border: null,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [AppColors.primaryActionLight, AppColors.primaryAction],
+          ),
         );
       case AppButtonVariant.secondary:
-        return const _ButtonColors(
-          background: AppColors.blue,
+        // Bleu AZ Premium (LOT 1), dépendant de la luminosité — remplace
+        // l'ancien bleu statique `AppColors.blue`.
+        // En sombre, `bluePremiumDark` (3,7:1 en blanc) est remplacé par un
+        // bleu plein à 5,2:1 : il reste le même bleu AZ, lisible avec du blanc.
+        return _ButtonColors(
+          background: isDark
+              ? AppColors.blueAction
+              : AppColors.bluePremium(Brightness.light),
           foreground: Colors.white,
           border: null,
         );
       case AppButtonVariant.outlined:
-        return const _ButtonColors(
+        return _ButtonColors(
           background: Colors.transparent,
-          foreground: AppColors.primary,
-          border: AppColors.primary,
+          foreground: isDark ? AppColors.primary : AppColors.primaryAction,
+          border: isDark ? AppColors.primary : AppColors.primaryAction,
         );
       case AppButtonVariant.ghost:
         return _ButtonColors(
@@ -95,51 +117,93 @@ class _AppButtonState extends State<AppButton>
         );
       case AppButtonVariant.danger:
         return const _ButtonColors(
-          background: AppColors.red,
+          background: AppColors.errorStrong,
           foreground: Colors.white,
           border: null,
         );
       case AppButtonVariant.success:
         return const _ButtonColors(
-          background: AppColors.success,
+          background: AppColors.successStrong,
           foreground: Colors.white,
           border: null,
         );
     }
   }
 
+  bool get _isFilled =>
+      widget.variant != AppButtonVariant.outlined &&
+      widget.variant != AppButtonVariant.ghost;
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final c = _colorsFor(widget.variant, isDark);
-    final bg = _enabled ? c.background : c.background.withValues(alpha: 0.45);
+    final pressed = _pressed && _enabled;
+
+    // Fond : dégradé subtil au repos pour le primaire (assombri en flat au
+    // clic — "pressed state perceptible"), flat + léger assombrissement au
+    // clic pour les autres variantes pleines, léger lavis pour
+    // outlined/ghost (pas d'InkWell Material ici, donc pas de ripple natif).
+    Color? bg;
+    Gradient? bgGradient;
+    if (!_enabled) {
+      bg = c.background.withValues(alpha: 0.45);
+    } else if (_isFilled) {
+      if (pressed) {
+        bg = Color.lerp(c.background, Colors.black, 0.16);
+      } else if (c.gradient != null) {
+        bgGradient = c.gradient;
+      } else {
+        bg = c.background;
+      }
+    } else {
+      bg = pressed ? c.foreground.withValues(alpha: 0.10) : c.background;
+    }
     final fg = _enabled ? c.foreground : c.foreground.withValues(alpha: 0.6);
 
     final content = Listener(
       onPointerDown: (_) {
         if (!_enabled) return;
         _ctrl.forward();
+        setState(() => _pressed = true);
         AppHaptics.tap();
       },
-      onPointerUp: (_) => _ctrl.reverse(),
-      onPointerCancel: (_) => _ctrl.reverse(),
+      onPointerUp: (_) {
+        _ctrl.reverse();
+        if (_pressed) setState(() => _pressed = false);
+      },
+      onPointerCancel: (_) {
+        _ctrl.reverse();
+        if (_pressed) setState(() => _pressed = false);
+      },
       child: AnimatedBuilder(
         animation: _scale,
-        builder: (_, child) => Transform.scale(scale: _scale.value, child: child),
+        builder: (_, child) =>
+            Transform.scale(scale: _scale.value, child: child),
         child: GestureDetector(
           onTap: _enabled ? widget.onPressed : null,
           behavior: HitTestBehavior.opaque,
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 90),
             width: widget.fullWidth ? double.infinity : null,
             height: 54,
             padding: const EdgeInsets.symmetric(horizontal: 24),
             decoration: BoxDecoration(
               color: bg,
-              borderRadius: AppRadius.official18R,
+              gradient: bgGradient,
+              borderRadius: AppRadius.premiumLgR,
               border: c.border != null
                   ? Border.all(
-                      color: _enabled ? c.border! : c.border!.withValues(alpha: 0.45),
+                      color: _enabled
+                          ? c.border!
+                          : c.border!.withValues(alpha: 0.45),
                       width: 1.5)
+                  : null,
+              // Ombre douce colorée — uniquement les variantes pleines,
+              // jamais outlined/ghost (fond transparent). Désactivée
+              // pendant la pression (le bouton "s'enfonce" visuellement).
+              boxShadow: (_isFilled && _enabled && !pressed)
+                  ? AppShadow.colored(c.background, opacity: 0.22)
                   : null,
             ),
             alignment: Alignment.center,
@@ -147,7 +211,8 @@ class _AppButtonState extends State<AppButton>
                 ? SizedBox(
                     width: 22,
                     height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.5, color: fg),
+                    child:
+                        CircularProgressIndicator(strokeWidth: 2.5, color: fg),
                   )
                 : Row(
                     mainAxisSize: MainAxisSize.min,
@@ -185,9 +250,11 @@ class _ButtonColors {
   final Color background;
   final Color foreground;
   final Color? border;
+  final Gradient? gradient;
   const _ButtonColors({
     required this.background,
     required this.foreground,
     required this.border,
+    this.gradient,
   });
 }

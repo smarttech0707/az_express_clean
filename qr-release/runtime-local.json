@@ -1,0 +1,175 @@
+{
+  "node": "v22.23.3",
+  "admin": "D:\\az_express_clean\\qr-release\\functions\\node_modules\\firebase-admin\\lib\\index.js",
+  "functions": "D:\\az_express_clean\\qr-release\\functions\\node_modules\\firebase-functions\\lib\\v2\\index.js",
+  "endpoints": {
+    "getPartnerQr": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 2,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "europe-west1"
+      ],
+      "labels": {},
+      "callableTrigger": {}
+    },
+    "resolvePartnerQr": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 2,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "europe-west1"
+      ],
+      "labels": {},
+      "callableTrigger": {}
+    },
+    "listPartnerQrEstablishments": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 2,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "europe-west1"
+      ],
+      "labels": {},
+      "callableTrigger": {}
+    },
+    "setPartnerQrManager": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 1,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "europe-west1"
+      ],
+      "labels": {},
+      "callableTrigger": {}
+    },
+    "syncPartnerQr_restaurant": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 1,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "europe-west1"
+      ],
+      "labels": {},
+      "eventTrigger": {
+        "eventType": "google.cloud.firestore.document.v1.written",
+        "eventFilters": {
+          "database": "(default)",
+          "namespace": "(default)"
+        },
+        "eventFilterPathPatterns": {
+          "document": "restaurants/{id}"
+        },
+        "retry": true
+      }
+    },
+    "syncPartnerQr_seller": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 1,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "europe-west1"
+      ],
+      "labels": {},
+      "eventTrigger": {
+        "eventType": "google.cloud.firestore.document.v1.written",
+        "eventFilters": {
+          "database": "(default)",
+          "namespace": "(default)"
+        },
+        "eventFilterPathPatterns": {
+          "document": "sellers/{id}"
+        },
+        "retry": true
+      }
+    },
+    "syncPartnerQr_pharmacie": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 1,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "europe-west1"
+      ],
+      "labels": {},
+      "eventTrigger": {
+        "eventType": "google.cloud.firestore.document.v1.written",
+        "eventFilters": {
+          "database": "(default)",
+          "namespace": "(default)"
+        },
+        "eventFilterPathPatterns": {
+          "document": "pharmacies/{id}"
+        },
+        "retry": true
+      }
+    },
+    "syncPartnerQr_boulangerie": {
+      "availableMemoryMb": null,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": 1,
+      "ingressSettings": null,
+      "concurrency": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "platform": "gcfv2",
+      "region": [
+        "europe-west1"
+      ],
+      "labels": {},
+      "eventTrigger": {
+        "eventType": "google.cloud.firestore.document.v1.written",
+        "eventFilters": {
+          "database": "(default)",
+          "namespace": "(default)"
+        },
+        "eventFilterPathPatterns": {
+          "document": "boulangeries/{id}"
+        },
+        "retry": true
+      }
+    }
+  }
+}

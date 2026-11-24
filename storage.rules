@@ -7,7 +7,8 @@ service firebase.storage {
     }
 
     function isAuth() {
-      return request.auth != null;
+      return request.auth != null
+        && !firestore.exists(/databases/(default)/documents/account_tombstones/$(request.auth.uid));
     }
 
     function isRealUser() {
@@ -23,13 +24,114 @@ service firebase.storage {
       return request.resource.contentType.matches('audio/.*');
     }
 
-    function isOwnerPath(uid) {
-      return request.auth.uid == uid;
+    function isVideo() {
+      return request.resource.contentType.matches('video/.*');
     }
 
+    function isOwnerPath(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    // ── ACTIVATION DES PARTENAIRES (étape B4) ──────────────────────────────
+    // Un partenaire créé par l'administration (restaurant, vendeur,
+    // boulangerie) ne peut téléverser, remplacer ni supprimer aucun fichier
+    // professionnel tant que son mot de passe temporaire n'a pas été remplacé.
+    //
+    // CONTRAINTE : les règles Cloud Storage n'autorisent que DEUX documents
+    // Firestore distincts par évaluation (documentation Firebase), et
+    // isAuth() en consomme déjà un (account_tombstones). L'ÉMULATEUR N'APPLIQUE
+    // PAS cette limite : un test d'émulateur ne détecterait jamais un
+    // dépassement, qui n'apparaîtrait qu'en production. D'où deux variantes :
+    //
+    //  - partnerActivated() : journal serveur partner_provisioning/{uid} fait
+    //    AUTORITÉ s'il existe (couvre un jeton ANCIEN sans revendication, ne
+    //    pénalise pas une revendication périmée), sinon revendication du jeton.
+    //    Coûte UN document (le journal) : à n'utiliser que là où le reste de la
+    //    règle ne consomme que isAuth() (donc 2 documents au total).
+    //  - partnerTokenActivated() : revendication du jeton seule, AUCUN document.
+    //    Pour les règles qui lisent déjà un autre document de propriété
+    //    (restaurant_owners, marketplace_products, marketplace_chats) : leur
+    //    budget est déjà à 2. Limite connue : un jeton émis avant une
+    //    réinitialisation admin (donc sans revendication) reste accepté
+    //    jusqu'à son expiration (≤ 1 h) sur ces chemins.
+    // Journal et revendication ne sont écrits que par le serveur (Admin SDK).
+    function partnerActivated() {
+      let journal = /databases/(default)/documents/partner_provisioning/$(request.auth.uid);
+      return firestore.exists(journal)
+        ? firestore.get(journal).data.get('mustChangePassword', false) != true
+        : request.auth.token.get('partnerMustChangePassword', false) != true;
+    }
+
+    function partnerTokenActivated() {
+      return request.auth.token.get('partnerMustChangePassword', false) != true;
+    }
+
+    // ── BUDGET DE DOCUMENTS (étape B5) ─────────────────────────────────────
+    // Limite de production : 2 documents Firestore distincts par évaluation.
+    // La documentation ne précise ni l'évaluation paresseuse, ni si un document
+    // INEXISTANT compte : chaque règle est donc conçue pour tenir en 2 documents
+    // dans le PIRE cas. isAuth() en consomme un (account_tombstones) ; il reste
+    // UN seul document par règle, et propriétaire / administrateur sont séparés
+    // en règles distinctes dont le discriminateur ne lit AUCUN document.
+    //
+    // Discriminateur sans document : le restaurateur se connecte toujours avec
+    // '<téléphone>@az-restaurant.ci' (création administrative, inscription
+    // autonome et écran de connexion). Il sert uniquement à ne PAS lire un
+    // document inutile (restaurant_owners pour un administrateur, admins pour un
+    // restaurateur) ; il n'accorde jamais d'accès à lui seul.
+    function isRestaurantOwnerEmail() {
+      return request.auth.token.get('email', '').matches('.*@az-restaurant[.]ci');
+    }
+
+    // Preuve de propriété ET d'activation du restaurateur : UN seul document,
+    // restaurant_owners/{uid}. Son champ mustChangePassword est une PROJECTION
+    // en lecture seule de l'autorité (partner_provisioning/{uid}), écrite par le
+    // serveur dans le même lot atomique que le journal. S'il est présent il fait
+    // autorité (jeton ancien refusé, revendication périmée tolérée) ; sinon
+    // (compte historique, ou serveur pas encore à jour) la revendication du jeton
+    // décide.
+    function restaurantOwnerActivated(restaurantId) {
+      let owner = firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid));
+      return owner.data.get('restaurantId', '') == restaurantId
+        && ('mustChangePassword' in owner.data
+          ? owner.data.get('mustChangePassword', false) != true
+          : partnerTokenActivated());
+    }
+
+    function isActiveAdmin() {
+      let doc = firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data;
+      return isRealUser()
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid))
+        && doc.isActive == true
+        && doc.role in ['super', 'sub']
+        && (doc.role == 'super' || doc.permissions is list);
+    }
+
+    // Variante à UN seul document (admins/{uid}) de isAdmin(), sans la lecture
+    // du tombstone que isRealUser() ajoute. Réservée aux LECTURES de pièces
+    // audio, dont le budget de 2 documents est déjà pris par le contrôle du
+    // participant (commande/conversation + tombstone). Mêmes conditions que
+    // isAdmin() (utilisateur non anonyme, admin actif, rôle super) ; la seule
+    // différence est qu'un compte admin déjà tombstoné garde la lecture : le
+    // flux de suppression de compte ne concerne pas les administrateurs.
+    function isSuperAdminReader() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data.isActive == true
+        && firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data.role == 'super';
+    }
+
+    // Toute règle Storage non encore associée à une permission explicite est
+    // réservée au super-admin (refus par défaut pour les sous-admins).
     function isAdmin() {
-      return isAuth()
-        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+      let doc = firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data;
+      return isActiveAdmin() && doc.role == 'super';
+    }
+
+    function hasAdminPermission(permission) {
+      let doc = firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data;
+      return isActiveAdmin() && (doc.role == 'super' || permission in doc.permissions);
     }
 
     // Vérifie que l'utilisateur est client ou livreur d'une commande orders/
@@ -56,6 +158,15 @@ service firebase.storage {
     function isMpChatParticipant(chatId) {
       return chatId.matches('mp_[^_]+_' + request.auth.uid)
         || firestore.get(/databases/(default)/documents/marketplace_chats/$(chatId)).data.sellerId == request.auth.uid;
+    }
+
+    // Écritures dans une conversation Marketplace : le côté VENDEUR (qui exige la
+    // lecture du document de conversation) est soumis à l'activation ; le côté
+    // acheteur (suffixe d'identifiant, aucun document) est strictement inchangé.
+    function isMpChatWriter(chatId) {
+      return chatId.matches('mp_[^_]+_' + request.auth.uid)
+        || (partnerTokenActivated()
+          && firestore.get(/databases/(default)/documents/marketplace_chats/$(chatId)).data.sellerId == request.auth.uid);
     }
 
     // Vérifie que l'utilisateur est client ou agent d'une commande Ekbine
@@ -91,8 +202,8 @@ service firebase.storage {
     // ── PHOTOS DE PROFIL VENDEUR MARKETPLACE ───────────────────────────────
     match /seller_photos/{sellerId}/{file} {
       allow read:  if isAuth();
-      allow create, update: if isRealUser() && isOwnerPath(sellerId) && isImage() && maxSize(5);
-      allow delete: if isRealUser() && isOwnerPath(sellerId);
+      allow create, update: if isRealUser() && isOwnerPath(sellerId) && partnerActivated() && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(sellerId) && partnerActivated();
     }
 
     // ── LOGO RESTAURANT ─────────────────────────────────────────────────────
@@ -101,12 +212,27 @@ service firebase.storage {
     // nom du dossier est l'ID du restaurant, pas l'UID du propriétaire.
     match /restaurant_logos/{restaurantId}/{file} {
       allow read:  if isAuth();
-      allow create, update: if isRealUser() && isImage() && maxSize(5)
-        && firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid))
-            .data.get('restaurantId', '') == restaurantId;
-      allow delete: if isRealUser()
-        && firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid))
-            .data.get('restaurantId', '') == restaurantId;
+      allow create, update: if isRealUser() && isRestaurantOwnerEmail() && isImage() && maxSize(5)
+        && restaurantOwnerActivated(restaurantId);
+      allow delete: if isRealUser() && isRestaurantOwnerEmail()
+        && restaurantOwnerActivated(restaurantId);
+    }
+
+    // ── PHOTOS DES PLATS DU MENU RESTAURANT (propriétaire) ─────────────────
+    // Même preuve de propriété que restaurant_logos ci-dessus (lookup
+    // restaurant_owners), mais un dossier séparé par plat plutôt qu'un seul
+    // fichier par restaurant — plusieurs plats, chacun sa propre photo.
+    match /restaurant_menu_items/{restaurantId}/{file} {
+      allow read:  if isAuth();
+      // L'admin gère déjà les restaurants et peut les supprimer en cascade
+      // depuis admin_restaurants_page.dart (photos de menu comprises).
+      allow create, update: if isRealUser() && isRestaurantOwnerEmail() && isImage() && maxSize(5)
+        && restaurantOwnerActivated(restaurantId);
+      allow create, update: if isRealUser() && !isRestaurantOwnerEmail() && isImage() && maxSize(5)
+        && isAdmin();
+      allow delete: if isRealUser() && isRestaurantOwnerEmail()
+        && restaurantOwnerActivated(restaurantId);
+      allow delete: if isRealUser() && !isRestaurantOwnerEmail() && isAdmin();
     }
 
     // ── LOGO PHARMACIE ──────────────────────────────────────────────────────
@@ -159,6 +285,25 @@ service firebase.storage {
       allow delete: if isRealUser() && isOwnerPath(uid);
     }
 
+    // ── PHOTO DE PROFIL PATRON DE FLOTTE ────────────────────────────────────
+    // Photo de profil affichée sur le dashboard flotte (distincte du selfie
+    // KYC ci-dessous) — même modèle que driver_photos (lecture publique,
+    // écriture/suppression réservées au propriétaire).
+    match /fleet_photos/{fleetId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(fleetId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(fleetId);
+    }
+
+    // ── PHOTO DE PROFIL ADMIN ───────────────────────────────────────────────
+    // adminId = UID Firebase Auth du document admins/{adminId} lui-même —
+    // isOwnerPath() suffit, pas de lookup supplémentaire nécessaire.
+    match /admin_photos/{adminId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(adminId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(adminId);
+    }
+
     // ── SELFIES INSCRIPTION FLOTTE ─────────────────────────────────────────
     // Même restriction que driver_selfies (document KYC, pas une photo de
     // profil affichée à d'autres utilisateurs).
@@ -191,17 +336,28 @@ service firebase.storage {
     // peut écrire que SON PROPRE selfie ; acceptOrder() (Cloud
     // Function/transaction Firestore) revalide de toute façon
     // indépendamment l'éligibilité réelle du livreur avant d'accepter.
+    //
+    // Mission 7E-11-S : LECTURE (et liste) réservée au livreur propriétaire du fichier (il lit son URL juste après l'envoi) et au
+    // super-administrateur. Les clients, restaurateurs et administrateurs affichent l'image par l'URL de téléchargement stockée dans
+    // la commande (jeton intégré, sans règle). Aucune lecture Firestore ajoutée sur ce chemin critique d'acceptation (budget de 2
+    // documents) : les deux clauses de lecture sont distinctes pour que le lecteur administrateur ne s'ajoute pas au tombstone.
     match /acceptance_selfies/{orderId}/{file} {
-      allow read:  if isAuth();
+      allow read:  if isRealUser() && file == request.auth.uid + '.jpg';
+      allow read:  if isSuperAdminReader();
       allow create, update: if isRealUser() && isImage() && maxSize(5)
         && file == request.auth.uid + '.jpg';
       allow delete: if isRealUser() && file == request.auth.uid + '.jpg';
     }
 
     // ── PHOTOS PREUVES LIVRAISON ───────────────────────────────────────────
+    // Mission 7E-11-S : lecture et liste réservées au livreur propriétaire et au super-administrateur (l'identifiant d'un livreur est
+    // lisible par tout utilisateur connecté : l'ancienne règle « isAuth() » permettait d'énumérer et de lire toutes ses preuves) ;
+    // nom de fichier imposé « <identifiant de commande>.jpg » (caractères sûrs, 128 maximum) comme le fait l'application.
     match /delivery_photos/{driverId}/{file} {
-      allow read:  if isAuth();
-      allow create, update: if isRealUser() && isOwnerPath(driverId) && isImage() && maxSize(10);
+      allow read:  if isRealUser() && isOwnerPath(driverId);
+      allow read:  if isSuperAdminReader();
+      allow create, update: if isRealUser() && isOwnerPath(driverId) && file.matches('[A-Za-z0-9_-]{1,128}[.]jpg')
+        && isImage() && maxSize(10);
       allow delete: if isRealUser() && isOwnerPath(driverId);
     }
 
@@ -209,7 +365,12 @@ service firebase.storage {
     // Lecture : participant à la commande ou admin
     // Écriture : participant à la commande uniquement
     match /voice_messages/{orderId}/{file} {
-      allow read:  if isAuth() && (isAdmin() || isOrderParticipant(orderId));
+      // Budget Firestore de la lecture : 2 documents au pire (limite Storage).
+      // Participant : orders + tombstone (la commande est lue AVANT le
+      // tombstone, donc un non-participant ne consomme que la commande) ;
+      // admin : admins/{uid}. Deux règles distinctes, jamais 3 documents.
+      allow read:  if request.auth != null && isOrderParticipant(orderId) && isAuth();
+      allow read:  if isSuperAdminReader();
       // create_order.dart envoie la note vocale AVANT que la commande
       // n'existe (orderId généré côté client) — voir
       // isOrderParticipantOrNew() ci-dessus. Bug confirmé et corrigé le
@@ -221,7 +382,9 @@ service firebase.storage {
 
     // ── AUDIO CHAT LIVRAISON ───────────────────────────────────────────────
     match /chat_audio/{orderId}/{file} {
-      allow read:  if isAuth() && (isAdmin() || isOrderParticipant(orderId));
+      // Même budget que voice_messages ci-dessus.
+      allow read:  if request.auth != null && isOrderParticipant(orderId) && isAuth();
+      allow read:  if isSuperAdminReader();
       allow create, update: if isRealUser() && isAudio() && maxSize(10)
         && isOrderParticipant(orderId);
       allow delete: if isRealUser() && isOrderParticipant(orderId);
@@ -238,10 +401,10 @@ service firebase.storage {
       // 2026-07-20 : autorisé si le produit n'existe pas encore, sinon
       // vérification de propriété stricte inchangée (modification/re-upload
       // sur une annonce existante).
-      allow create, update: if isRealUser() && isImage() && maxSize(10)
+      allow create, update: if isRealUser() && partnerTokenActivated() && isImage() && maxSize(10)
         && (!firestore.exists(/databases/(default)/documents/marketplace_products/$(productId))
             || firestore.get(/databases/(default)/documents/marketplace_products/$(productId)).data.sellerId == request.auth.uid);
-      allow delete: if isRealUser()
+      allow delete: if isRealUser() && partnerTokenActivated()
         && firestore.get(/databases/(default)/documents/marketplace_products/$(productId)).data.sellerId == request.auth.uid;
     }
 
@@ -259,12 +422,30 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/real_estate_listings/$(listingId)).data.agentId == request.auth.uid;
     }
 
+    // ── PHOTO DE PROFIL AGENT IMMOBILIER ───────────────────────────────────
+    // Distincte des photos d'annonces (real_estate/{listingId}) ci-dessus —
+    // même modèle que driver_photos/fleet_photos (lecture publique, écriture
+    // réservée au propriétaire, prouvé par l'UID dans le chemin).
+    match /real_estate_agent_photos/{agentId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(agentId) && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(agentId);
+    }
+
     // ── MARKETPLACE : AUDIO CHAT ───────────────────────────────────────────
     match /mp_chat_audio/{chatId}/{file} {
-      allow read:  if isAuth() && (isAdmin() || isMpChatParticipant(chatId));
+      // Acheteur : suffixe d'identifiant + tombstone (aucun autre document) ;
+      // vendeur : conversation + tombstone ; admin : admins/{uid}. Le test sur
+      // l'identifiant écarte la lecture de la conversation pour l'acheteur.
+      allow read:  if request.auth != null
+        && chatId.matches('mp_[^_]+_' + request.auth.uid) && isAuth();
+      allow read:  if request.auth != null
+        && firestore.get(/databases/(default)/documents/marketplace_chats/$(chatId)).data.sellerId == request.auth.uid
+        && isAuth();
+      allow read:  if isSuperAdminReader();
       allow create, update: if isRealUser() && isAudio() && maxSize(10)
-        && isMpChatParticipant(chatId);
-      allow delete: if isRealUser() && isMpChatParticipant(chatId);
+        && isMpChatWriter(chatId);
+      allow delete: if isRealUser() && isMpChatWriter(chatId);
     }
 
     // ── E-KBINE : PREUVES PAIEMENT ─────────────────────────────────────────
@@ -290,12 +471,23 @@ service firebase.storage {
     // ── LOGOS RESTAURANTS / BOULANGERIES ───────────────────────────────────
     match /restaurant_logos/{restaurantId}/{file} {
       allow read:  if isAuth();
-      allow create, update: if isRealUser() && isImage() && maxSize(5)
-        && (isAdmin()
-          || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid)).data.get('restaurantId', '') == restaurantId);
-      allow delete: if isRealUser()
-        && (isAdmin()
-          || firestore.get(/databases/(default)/documents/restaurant_owners/$(request.auth.uid)).data.get('restaurantId', '') == restaurantId);
+      allow create, update: if isRealUser() && !isRestaurantOwnerEmail() && isImage() && maxSize(5)
+        && isAdmin();
+      allow delete: if isRealUser() && !isRestaurantOwnerEmail() && isAdmin();
+    }
+
+    // ── COUVERTURE RESTAURANT ──────────────────────────────────────────────
+    // Même preuve de propriété que le logo, mais fichier distinct : la
+    // couverture ne peut jamais remplacer l'identité `logoUrl` existante.
+    match /restaurant_covers/{restaurantId}/cover.jpg {
+      allow read: if isAuth();
+      allow create, update: if isRealUser() && isRestaurantOwnerEmail() && isImage() && maxSize(5)
+        && restaurantOwnerActivated(restaurantId);
+      allow create, update: if isRealUser() && !isRestaurantOwnerEmail() && isImage() && maxSize(5)
+        && isAdmin();
+      allow delete: if isRealUser() && isRestaurantOwnerEmail()
+        && restaurantOwnerActivated(restaurantId);
+      allow delete: if isRealUser() && !isRestaurantOwnerEmail() && isAdmin();
     }
 
     // Corrigé (Master Prompt "photos manquantes") : le doc boulangeries/{id}
@@ -306,9 +498,14 @@ service firebase.storage {
     // directe de l'ID de chemin à request.auth.uid, comme isOwnerPath().
     match /boulangerie_logos/{boulangerieId}/{file} {
       allow read:  if isAuth();
-      allow create, update: if isRealUser() && isImage() && maxSize(5)
-        && (isOwnerPath(boulangerieId) || isAdmin());
-      allow delete: if isRealUser() && (isOwnerPath(boulangerieId) || isAdmin());
+      // Propriétaire : le discriminateur (UID du chemin) ne lit aucun document ;
+      // l'administrateur n'est évalué que s'il n'est pas le propriétaire.
+      allow create, update: if isRealUser() && isOwnerPath(boulangerieId) && isImage() && maxSize(5)
+        && partnerActivated();
+      allow create, update: if isRealUser() && !isOwnerPath(boulangerieId) && isImage() && maxSize(5)
+        && isAdmin();
+      allow delete: if isRealUser() && isOwnerPath(boulangerieId) && partnerActivated();
+      allow delete: if isRealUser() && !isOwnerPath(boulangerieId) && isAdmin();
     }
 
     // ── PHOTOS RÉSIDENCES / LOCATIONS (admin uniquement) ──────────────────
@@ -365,6 +562,14 @@ service firebase.storage {
       allow delete: if isRealUser() && isAdmin();
     }
 
+    // ── BOULANGERIES — photos des articles du menu (admin uniquement,
+    // pas de tableau de bord propriétaire pour ce catalogue aujourd'hui) ───
+    match /bakery/{boulangerieId}/{file} {
+      allow read:  if isAuth();
+      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
+      allow delete: if isRealUser() && isAdmin();
+    }
+
     // ── LOCATIONS (admin) ─────────────────────────────────────────────────
     match /locations/{docId}/{file} {
       allow read:  if isAuth();
@@ -381,9 +586,13 @@ service firebase.storage {
 
     // ── SERVICES SIMPLES (admin) ──────────────────────────────────────────
     match /simple_services/{docId}/{file} {
-      allow read:  if isAuth();
-      allow create, update: if isRealUser() && isImage() && maxSize(10) && isAdmin();
-      allow delete: if isRealUser() && isAdmin();
+      // La photo de catalogue est cliente; le justificatif id_photo.jpg reste
+      // strictement réservé aux administrateurs habilités Tricycle.
+      allow read: if (isAuth() && file == 'photo.jpg')
+        || hasAdminPermission('tricycle');
+      allow create, update: if isRealUser() && isImage() && maxSize(10)
+        && hasAdminPermission('tricycle');
+      allow delete: if isRealUser() && hasAdminPermission('tricycle');
     }
 
     // ── CAPTURES D'ÉCRAN SUPPORT ─────────────────────────────────────────
@@ -399,6 +608,56 @@ service firebase.storage {
       allow read:  if isAuth() && isOwnerPath(uid);
       allow create, update: if isAuth() && isOwnerPath(uid) && isImage() && maxSize(5);
       allow delete: if isAuth() && isOwnerPath(uid);
+    }
+
+    // Événementiel — médias détenus par le compte prestataire. Les images
+    // sont limitées à 10 Mo et les vidéos à 50 Mo.
+    match /event_offers/{uid}/{offerId}/{file} {
+      allow read: if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(uid)
+        && ((isImage() && maxSize(10)) || (isVideo() && maxSize(50)));
+      allow delete: if isRealUser() && (isOwnerPath(uid) || isAdmin());
+    }
+
+    match /event_providers/{uid}/{providerId}/{kind}/{file} {
+      allow read: if isAuth() && kind != 'documents';
+      allow create, update: if isRealUser() && isOwnerPath(uid)
+        && kind != 'documents'
+        && ((isImage() && maxSize(10)) || (isVideo() && maxSize(50)));
+      allow delete: if isRealUser() && (isOwnerPath(uid) || isAdmin());
+    }
+
+    match /event_providers/{uid}/{providerId}/documents/{file} {
+      allow read: if isRealUser() && (isOwnerPath(uid) || isAdmin());
+      allow create, update: if isRealUser() && isOwnerPath(uid)
+        && isImage() && maxSize(10);
+      allow delete: if isRealUser() && (isOwnerPath(uid) || isAdmin());
+    }
+
+    // Auto & Moto — médias détenus par le vendeur authentifié. Le document
+    // Firestore est créé seulement après la réussite des uploads, donc la
+    // propriété est prouvée par le segment sellerUid du chemin déterministe.
+    match /vehicle_listings/{sellerUid}/{listingId}/images/{file} {
+      allow read: if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(sellerUid) && partnerActivated()
+        && isImage() && maxSize(5);
+      allow delete: if isRealUser() && isOwnerPath(sellerUid) && partnerActivated();
+    }
+
+    match /vehicle_listings/{sellerUid}/{listingId}/videos/{file} {
+      allow read: if isAuth();
+      allow create, update: if isRealUser() && isOwnerPath(sellerUid) && partnerActivated()
+        && isVideo() && maxSize(20);
+      allow delete: if isRealUser() && isOwnerPath(sellerUid) && partnerActivated();
+    }
+
+    match /vehicle_seller_profiles/{sellerUid}/logo/{file} {
+      allow read: if true;
+      allow create, update: if isRealUser()
+        && request.auth.uid == sellerUid && partnerActivated()
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png)');
+      allow delete: if isRealUser() && request.auth.uid == sellerUid && partnerActivated();
     }
 
     // ── TOUT LE RESTE : REFUSÉ ─────────────────────────────────────────────

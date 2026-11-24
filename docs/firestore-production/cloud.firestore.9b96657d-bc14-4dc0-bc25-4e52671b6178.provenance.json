@@ -1,0 +1,18 @@
+{
+  "projectId": "az-express-b0469",
+  "releaseName": "projects/az-express-b0469/releases/cloud.firestore",
+  "rulesetName": "projects/az-express-b0469/rulesets/9b96657d-bc14-4dc0-bc25-4e52671b6178",
+  "releaseUpdateTime": "2026-09-06T13:59:42.677067Z",
+  "rulesetCreateTime": "2026-09-06T13:59:40.707247Z",
+  "retrievedAt": "2026-09-18T14:34:39.308Z",
+  "method": "Firebase Rules REST API v1 HTTPS GET",
+  "releaseEndpoint": "https://firebaserules.googleapis.com/v1/projects/az-express-b0469/releases/cloud.firestore",
+  "rulesetEndpoint": "https://firebaserules.googleapis.com/v1/projects/az-express-b0469/rulesets/9b96657d-bc14-4dc0-bc25-4e52671b6178",
+  "sourceFileCount": 1,
+  "sourceFileName": "firestore.rules",
+  "localFile": "cloud.firestore.9b96657d-bc14-4dc0-bc25-4e52671b6178.rules",
+  "encoding": "UTF-8, no transformation of source content",
+  "bytes": 98152,
+  "sha256": "30f9e39e175d82c63becd0ed148a6930e1582ba0db0412a7b3f359467a02ae6a",
+  "releaseRechecked": true
+}

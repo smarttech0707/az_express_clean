@@ -27,11 +27,15 @@ class FadeSlideIn extends StatefulWidget {
   State<FadeSlideIn> createState() => _FadeSlideInState();
 }
 
-class _FadeSlideInState extends State<FadeSlideIn> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(vsync: this, duration: widget.duration);
-  late final Animation<double> _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-  late final Animation<Offset> _slide = Tween(begin: const Offset(0, 0.08), end: Offset.zero)
-      .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+class _FadeSlideInState extends State<FadeSlideIn>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl =
+      AnimationController(vsync: this, duration: widget.duration);
+  late final Animation<double> _fade =
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+  late final Animation<Offset> _slide =
+      Tween(begin: const Offset(0, 0.08), end: Offset.zero)
+          .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
 
   @override
   void initState() {

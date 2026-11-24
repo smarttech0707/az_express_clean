@@ -27,8 +27,8 @@ class TarifResult {
 }
 
 class TarifService {
-  static const double centerLat     = 6.7273;
-  static const double centerLng     = -3.4961;
+  static const double centerLat = 6.7273;
+  static const double centerLng = -3.4961;
   static const double _cityRadiusKm = 8.0;
 
   // Tarif nuit : 20h00–05h59
@@ -74,7 +74,7 @@ class TarifService {
     double? routeDistanceKm,
     DateTime? time,
   }) {
-    final night     = isNightTime(time);
+    final night = isNightTime(time);
     final lateNight = isLateNight(time);
     final distFromCenter =
         haversineKm(centerLat, centerLng, clientLat, clientLng);
@@ -88,10 +88,10 @@ class TarifService {
         // Jour = 1000 FCFA
         // Nuit = 1500 FCFA
         // Ne pas modifier sans décision métier.
-        expressPrice:  night ? 1500 : 1000,
-        isNight:   night,
+        expressPrice: night ? 1500 : 1000,
+        isNight: night,
         isOutside: false,
-        canOrder:  true,
+        canOrder: true,
       );
     }
 
@@ -100,26 +100,26 @@ class TarifService {
 
     if (lateNight && dist > 10) {
       return const TarifResult(
-        standardPrice:    0,
-        expressPrice:     0,
-        isNight:          true,
-        isOutside:        true,
-        canOrder:         false,
+        standardPrice: 0,
+        expressPrice: 0,
+        isNight: true,
+        isOutside: true,
+        canOrder: false,
         rejectionMessage: 'Livraison non disponible après 21h00 '
             'pour les zones à plus de 10 km d\'Abengourou.',
       );
     }
 
     final stdRaw = 500.0 + dist * 150;
-    final std    = _round50(stdRaw);
-    final exp    = _round50(std * 1.4);
+    final std = _round50(stdRaw);
+    final exp = _round50(std * 1.4);
 
     return TarifResult(
       standardPrice: std,
-      expressPrice:  exp,
-      isNight:   night,
+      expressPrice: exp,
+      isNight: night,
       isOutside: true,
-      canOrder:  true,
+      canOrder: true,
     );
   }
 }

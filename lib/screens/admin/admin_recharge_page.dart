@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../services/firestore_service.dart';
+import 'driver_recharge_flow.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/az_tab_bar.dart';
 
 class AdminRechargePage extends StatefulWidget {
   const AdminRechargePage({super.key});
@@ -35,8 +37,8 @@ class _AdminRechargePageState extends State<AdminRechargePage>
       body: NestedScrollView(
         headerSliverBuilder: (context, _) => [
           SliverAppBar(
-            expandedHeight: (MediaQuery.of(context).size.height * 0.18)
-                .clamp(130.0, 190.0),
+            expandedHeight:
+                (MediaQuery.of(context).size.height * 0.18).clamp(130.0, 190.0),
             floating: false,
             pinned: true,
             backgroundColor: const Color(0xFF2E7D32),
@@ -67,8 +69,7 @@ class _AdminRechargePageState extends State<AdminRechargePage>
                         SizedBox(height: 4),
                         Text(
                           "Traiter les retraits en attente",
-                          style: TextStyle(
-                              color: Colors.white70, fontSize: 13),
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                       ],
                     ),
@@ -79,28 +80,21 @@ class _AdminRechargePageState extends State<AdminRechargePage>
             title: const Text("Wallets",
                 style: TextStyle(color: Colors.white, fontSize: 18)),
             centerTitle: true,
-            bottom: TabBar(
-              controller: _tabs,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white60,
-              isScrollable: true,
-              tabAlignment: TabAlignment.center,
-              tabs: const [
-                Tab(text: "Recharge livreur"),
-                Tab(text: "Retraits en attente"),
-                Tab(text: "Traités"),
-                Tab(text: "Échoués / Rejetés"),
-              ],
-            ),
+            bottom: AzTabBar(
+          labels: const ["Recharge livreur", "Retraits en attente", "Traités", "Échoués / Rejetés"],
+          controller: _tabs,
+          backgroundColor: const Color(0xFF2E7D32),
+        ),
           ),
         ],
         body: TabBarView(
           controller: _tabs,
           children: const [
             _RechargeDriverTab(),
-            _RequestList(collection: 'withdrawal_requests', status: 'pending_manual'),
-            _RequestList(collection: 'withdrawal_requests', status: 'processed'),
+            _RequestList(
+                collection: 'withdrawal_requests', status: 'pending_manual'),
+            _RequestList(
+                collection: 'withdrawal_requests', status: 'processed'),
             _RequestList(collection: 'withdrawal_requests', status: 'failed'),
           ],
         ),
@@ -154,8 +148,8 @@ class _RechargeDriverTabState extends State<_RechargeDriverTab> {
                   : null,
               filled: true,
               fillColor: Colors.white.withValues(alpha: 0.15),
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none),
@@ -179,8 +173,10 @@ class _RechargeDriverTabState extends State<_RechargeDriverTab> {
                   ? allDocs
                   : allDocs.where((d) {
                       final data = d.data() as Map<String, dynamic>;
-                      final name  = (data['name']  as String? ?? '').toLowerCase();
-                      final phone = (data['phone'] as String? ?? '').toLowerCase();
+                      final name =
+                          (data['name'] as String? ?? '').toLowerCase();
+                      final phone =
+                          (data['phone'] as String? ?? '').toLowerCase();
                       return name.contains(_query) || phone.contains(_query);
                     }).toList();
 
@@ -244,9 +240,9 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
   }
 
   void _showRechargeDialog() {
-    final name       = widget.data['name'] as String? ?? 'Livreur';
+    final name = widget.data['name'] as String? ?? 'Livreur';
     final amountCtrl = TextEditingController();
-    final noteCtrl   = TextEditingController();
+    final noteCtrl = TextEditingController();
 
     showDialog(
       context: context,
@@ -256,8 +252,8 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
           const Icon(Icons.add_card_rounded, color: Color(0xFF2E7D32)),
           const SizedBox(width: 10),
           Expanded(
-            child: Text('Recharger $name',
-                style: const TextStyle(fontSize: 16)),
+            child:
+                Text('Recharger $name', style: const TextStyle(fontSize: 16)),
           ),
         ]),
         content: Column(
@@ -273,12 +269,12 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
                 prefixIcon: const Icon(Icons.attach_money_rounded,
                     color: Color(0xFF2E7D32)),
                 suffixText: 'FCFA',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                        color: Color(0xFF2E7D32), width: 2)),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF2E7D32), width: 2)),
               ),
             ),
             const SizedBox(height: 12),
@@ -292,8 +288,7 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
                   backgroundColor: const Color(0xFFE8F5E9),
                   side: const BorderSide(color: Color(0xFF2E7D32)),
                   labelStyle: const TextStyle(
-                      color: Color(0xFF2E7D32),
-                      fontWeight: FontWeight.bold),
+                      color: Color(0xFF2E7D32), fontWeight: FontWeight.bold),
                 );
               }).toList(),
             ),
@@ -303,10 +298,9 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
               decoration: InputDecoration(
                 labelText: 'Note (optionnel)',
                 hintText: 'Motif du crédit…',
-                prefixIcon: const Icon(Icons.note_outlined,
-                    color: Colors.grey),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                prefixIcon: const Icon(Icons.note_outlined, color: Colors.grey),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
               maxLines: 1,
             ),
@@ -315,37 +309,24 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler',
-                style: TextStyle(color: Colors.grey)),
+            child: const Text('Annuler', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton.icon(
             onPressed: () async {
               final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
               if (amount <= 0) return;
               Navigator.pop(context);
+              if (!mounted || _loading) return;
               setState(() => _loading = true);
               try {
-                final note = noteCtrl.text.trim().isNotEmpty
-                    ? noteCtrl.text.trim()
-                    : "Rechargé par l'admin";
-                await FirestoreService()
-                    .rechargeDriverWallet(widget.docId, amount, adminNote: note);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(
-                        '${_fmt(amount)} ajoutés au wallet de $name ✓'),
-                    backgroundColor: const Color(0xFF2E7D32),
-                  ));
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('Erreur : $e'),
-                    backgroundColor: Colors.red,
-                  ));
-                }
+                await confirmAndRechargeDriver(context,
+                    driverId: widget.docId,
+                    driverName: name,
+                    amount: amount,
+                    note: noteCtrl.text.trim());
+              } finally {
+                if (mounted) setState(() => _loading = false);
               }
-              if (mounted) setState(() => _loading = false);
             },
             icon: const Icon(Icons.check_circle_rounded,
                 color: Colors.white, size: 16),
@@ -365,12 +346,12 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
 
   @override
   Widget build(BuildContext context) {
-    final name     = widget.data['name'] as String? ?? '—';
-    final phone    = widget.data['phone'] as String? ?? '—';
-    final wallet   = (widget.data['wallet'] as num? ?? 0).toInt();
+    final name = widget.data['name'] as String? ?? '—';
+    final phone = widget.data['phone'] as String? ?? '—';
+    final wallet = (widget.data['wallet'] as num? ?? 0).toInt();
     final isOnline = widget.data['isOnline'] == true;
-    final ownerId  = widget.data['ownerId'] as String?;
-    final idNum    = widget.data['identifiant'] as String? ?? '—';
+    final ownerId = widget.data['ownerId'] as String?;
+    final idNum = widget.data['identifiant'] as String? ?? '—';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -391,16 +372,17 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
         Stack(children: [
           CircleAvatar(
             radius: 22,
-            backgroundColor: isOnline
-                ? Colors.green.shade100
-                : Colors.grey.shade100,
+            backgroundColor:
+                isOnline ? Colors.green.shade100 : Colors.grey.shade100,
             child: Icon(Icons.delivery_dining_rounded,
                 color: isOnline ? Colors.green : Colors.grey, size: 22),
           ),
           Positioned(
-            bottom: 0, right: 0,
+            bottom: 0,
+            right: 0,
             child: Container(
-              width: 11, height: 11,
+              width: 11,
+              height: 11,
               decoration: BoxDecoration(
                 color: isOnline ? Colors.green : Colors.grey,
                 shape: BoxShape.circle,
@@ -412,21 +394,22 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
         const SizedBox(width: 12),
         // Infos livreur
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(name,
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 14)),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             Text(phone,
                 style: const TextStyle(color: Colors.grey, fontSize: 12)),
             Row(children: [
               Text('ID $idNum',
-                  style: TextStyle(
-                      color: Colors.purple.shade300, fontSize: 11)),
+                  style:
+                      TextStyle(color: Colors.purple.shade300, fontSize: 11)),
               if (ownerId != null && ownerId.isNotEmpty) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 1),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                   decoration: BoxDecoration(
                     color: Colors.purple.shade50,
                     borderRadius: BorderRadius.circular(6),
@@ -454,20 +437,21 @@ class _DriverRechargeCardState extends State<_DriverRechargeCard> {
           const SizedBox(height: 6),
           _loading
               ? const SizedBox(
-                  width: 20, height: 20,
+                  width: 20,
+                  height: 20,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Color(0xFF2E7D32)))
+                      strokeWidth: 2, color: Color(0xFF2E7D32)))
               : GestureDetector(
                   onTap: _showRechargeDialog,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: const Color(0xFFE8F5E9),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                          color: const Color(0xFF2E7D32).withValues(alpha: 0.4)),
+                          color:
+                              const Color(0xFF2E7D32).withValues(alpha: 0.4)),
                     ),
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.add_card_rounded,
@@ -495,7 +479,7 @@ class _RequestList extends StatelessWidget {
   const _RequestList({required this.collection, required this.status});
 
   bool get _isWithdraw => collection == 'withdrawal_requests';
-  bool get _isPending  => status == 'pending_manual';
+  bool get _isPending => status == 'pending_manual';
 
   @override
   Widget build(BuildContext context) {
@@ -589,8 +573,8 @@ class _RequestCardState extends State<_RequestCard> {
 
   // ── Approuver ───────────────────────────────────────────────────
   Future<void> _approve() async {
-    final userId = widget.data['userId'] as String? ??
-        widget.data['clientId'] as String?;
+    final userId =
+        widget.data['userId'] as String? ?? widget.data['clientId'] as String?;
     final userType = widget.data['userType'] as String? ?? 'client';
     final amount = (widget.data['amount'] as num? ?? 0).toInt();
     final method = widget.data['method'] ?? 'wave';
@@ -602,8 +586,10 @@ class _RequestCardState extends State<_RequestCard> {
         await _fs.approveWithdrawal(widget.docId, userId, userType, amount);
         if (mounted) _snack("Retrait marqué comme traité ✓", Colors.green);
       } else {
-        await _fs.approveRecharge(widget.docId, userId, userType, amount, method);
-        if (mounted) _snack("Wallet crédité de ${_fmt(amount)} FCFA ✓", Colors.green);
+        await _fs.approveRecharge(
+            widget.docId, userId, userType, amount, method);
+        if (mounted)
+          _snack("Wallet crédité de ${_fmt(amount)} FCFA ✓", Colors.green);
       }
     } catch (e) {
       if (mounted) _snack("Erreur : $e", Colors.red);
@@ -655,7 +641,8 @@ class _RequestCardState extends State<_RequestCard> {
   }
 
   String _fmt(int v) {
-    if (v >= 1000) return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
+    if (v >= 1000)
+      return "${v ~/ 1000} ${(v % 1000).toString().padLeft(3, '0')}";
     return v.toString();
   }
 
@@ -747,8 +734,8 @@ class _RequestCardState extends State<_RequestCard> {
                 ),
                 const Spacer(),
                 // Badge méthode
-                _badge(methodLabel,
-                    isWave ? Icons.bolt : Icons.phone_android, methodColor),
+                _badge(methodLabel, isWave ? Icons.bolt : Icons.phone_android,
+                    methodColor),
                 const SizedBox(width: 6),
                 // Badge type utilisateur
                 _badge(typeLabel, Icons.person, typeColor),
@@ -760,13 +747,18 @@ class _RequestCardState extends State<_RequestCard> {
             const SizedBox(height: 12),
 
             // ── Infos ─────────────────────────────────────────
-            _row(Icons.person_outline, "Nom",
-                userName.length > 28 ? "${userName.substring(0, 28)}…" : userName),
+            _row(
+                Icons.person_outline,
+                "Nom",
+                userName.length > 28
+                    ? "${userName.substring(0, 28)}…"
+                    : userName),
             const SizedBox(height: 5),
             _row(Icons.fingerprint, "ID",
                 userId.length > 24 ? "${userId.substring(0, 24)}…" : userId),
             const SizedBox(height: 5),
-            _row(Icons.phone_outlined,
+            _row(
+                Icons.phone_outlined,
                 widget.isWithdraw ? "Numéro de retrait" : "Numéro ayant payé",
                 phone),
             if (txRef != null && txRef.isNotEmpty) ...[
@@ -794,8 +786,7 @@ class _RequestCardState extends State<_RequestCard> {
                               side: const BorderSide(color: Colors.red),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
@@ -818,8 +809,7 @@ class _RequestCardState extends State<_RequestCard> {
                               backgroundColor: accentColor,
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
@@ -862,8 +852,7 @@ class _RequestCardState extends State<_RequestCard> {
             style: const TextStyle(color: Colors.grey, fontSize: 12)),
         Expanded(
           child: Text(value,
-              style:
-                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
               overflow: TextOverflow.ellipsis),
         ),
       ],
